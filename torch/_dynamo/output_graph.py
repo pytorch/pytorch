@@ -48,6 +48,7 @@ from .source import (
     ConstantSource,
     DefaultDeviceSource,
     DeterministicAlgorithmsSource,
+    GradModeSource,
     is_constant_source,
     LocalSource,
     ParamBufferSource,
@@ -89,6 +90,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
+    global_state: Optional[Dict[str, bool]]
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
@@ -248,6 +250,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             )
         )
 
+        self.guards.add(GradModeSource().make_guard(GuardBuilder.GRAD_MODE))
+
         self.guards.add(DefaultDeviceSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
         # tracked_fakes says where any tensor that was wrapped to fake came
@@ -285,6 +289,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
 
+        # We save the global torch state here to be restored in case of graph
+        # breaks. The relevant issue is seen here
+        # https://github.com/pytorch/pytorch/pull/100570#issuecomment-1543427086
+        # where inlining of a function changes the global state (because of the
+        # presence of torch.no_grad) and there is a graph break.
+        self.save_global_state()
+
     @property
     def root_tracer(self):
         return self.tracers[0]
@@ -292,6 +303,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     @property
     def current_tracer(self):
         return self.tracers[-1]
+
+    def is_root_tracer(self):
+        # Helper to tell if we are inside the higher order operator tracing.
+        return len(self.tracers) == 1
 
     @property
     def graph(self):
@@ -354,6 +369,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def nn_modules(self) -> Dict[str, torch.nn.Module]:
         return self.tracing_context.module_context.nn_modules
 
+    def save_global_state(self):
+        global_state = self.tracing_context.global_context.global_state
+        global_state["is_grad_enabled"] = torch.is_grad_enabled()
+
     def push_tx(self, tx):
         self._current_tx.append(tx)
 
@@ -369,11 +388,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert self.param_name_to_source is not None
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         module_state = self.tracing_context.module_context.copy_graphstate()
+        global_state = self.tracing_context.global_context.copy_graphstate()
         state = OutputGraphState(
             dict(self.input_source_to_var),
             list(self.tracked_fakes),
             guards_graph_state,
             module_state,
+            global_state,
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
@@ -389,6 +410,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             module_state,
+            global_state,
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
@@ -396,6 +418,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         self.tracing_context.module_context.restore_graphstate(module_state)
+        self.tracing_context.global_context.restore_graphstate(global_state)
 
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         removed_nodes = 0
@@ -495,10 +518,21 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):
-            if len(self.tracers) > 1:
-                unimplemented(
-                    "accessing attribute of nn.Module inside HigherOrderOperator"
-                )
+            tracer = self.current_tracer
+            if not self.is_root_tracer():
+                # For higher order ops, we don't want to insert the get_attr in
+                # innermost graph. Instead, we want to raise the params/buffers
+                # as inputs to the higher-order graph, and register them as
+                # get_attrs in the root tracer.
+
+                # Note that Dynamo will still call lift_tracked_freevar_to_input
+                # when these inputs are encountered for the inner graph. The
+                # only difference is what happens at the root tracer for
+                # nn.Parameters vs free inputs. The free inputs are registered
+                # as placeholders in the root graph, whereas the nn.Parameters
+                # are registered as get_attr nodes in the root graph.
+                tracer = self.root_tracer
+
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
@@ -507,7 +541,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 self.param_name_to_source[module_key] = source
                 return wrap_fx_proxy(
                     self.root_tx,
-                    self.create_proxy("get_attr", module_key, tuple(), {}),
+                    tracer.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
                     **options,
                 )
@@ -809,15 +843,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
+        graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
+        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
+
         assert_no_fake_params_or_buffers(gm)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
-
-        graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
-        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)
@@ -987,11 +1021,13 @@ class SubgraphTracer(fx.Tracer):
         # list to determine that, when tracing the body function of a HigherOrderOperator,
         # if a new proxy is actually a free variable.
         self.seen_proxies = set({})
-        # A list of previously free variables that we lifted to being inputs
-        # of the graph. If we are tracing a HigherOrderOperator's body_fn,
-        # then we need to keep track of this so we can rewrite the
-        # HigherOrderOperator call using the traced body_fn.
-        self.lifted_freevars = set({})
+        # A list of previously free variables that we lifted to being inputs of
+        # the graph. If we are tracing a HigherOrderOperator's body_fn, then we
+        # need to keep track of this so we can rewrite the HigherOrderOperator
+        # call using the traced body_fn. This is a OrderedDict (instead of set)
+        # so that we can maintain the order of args for the HigherOrderOperator
+        # call. The values are None.
+        self.lifted_freevars = collections.OrderedDict()
 
     def create_proxy(
         self,
@@ -1048,6 +1084,9 @@ class SubgraphTracer(fx.Tracer):
                     continue
                 if arg.node.name in self.input_name_to_proxy:
                     continue
+                if "saved_tensor_marked" in arg.node.meta:
+                    continue
+
                 self.lift_tracked_freevar_to_input(arg)
 
         rv = super().create_proxy(
@@ -1094,6 +1133,18 @@ class SubgraphTracer(fx.Tracer):
     # Note: we did not override erase_node since
     # we call self.graph.erase_node elsewhere
     def remove_node(self, node):
+        if len(node.users) > 0:
+            user_graph_nodes: List[torch.fx.Node] = []
+            for user in node.users.keys():
+                # For the case where user.graph == self.graph, that is a real bug and will raise
+                # properly.
+                if user.graph != self.graph:
+                    # This is a nested graph, which needs to be deleted.
+                    # If we do not do this, we will raise on attempting to remove this.
+                    # As we only get here during restoration cleanup, this is sound.
+                    user_graph_nodes.extend(reversed(list(user.graph.nodes)))
+            for other_graph_node in user_graph_nodes:
+                other_graph_node.graph.erase_node(other_graph_node)
         self.graph.erase_node(node)
         self.input_name_to_proxy.pop(node.name, None)
 
@@ -1147,7 +1198,7 @@ class SubgraphTracer(fx.Tracer):
             self.parent is not None
         ), "lift_tracked_freevar_to_input on root SubgraphTracer"
         self.create_graph_input(proxy.node.name)
-        self.lifted_freevars.add(proxy)
+        self.lifted_freevars[proxy] = None
         if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
             self.parent.lift_tracked_freevar_to_input(proxy)
 
