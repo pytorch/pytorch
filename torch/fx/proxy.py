@@ -353,7 +353,7 @@ class Proxy:
     """
 
     @compatibility(is_backward_compatible=True)
-    def __init__(self, node: Node, tracer: Optional['Optional[TracerBase]'] = None):
+    def __init__(self, node: Node, tracer: Optional['TracerBase'] = None):
         if tracer is None:
             # This allows you to create a Proxy object around a raw Node
             tracer = GraphAppendingTracer(node.graph)

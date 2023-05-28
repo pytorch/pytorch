@@ -24,7 +24,7 @@ def generate_code(
     subset: Optional[str] = None,
     disable_autograd: bool = False,
     force_schema_registration: bool = False,
-    operator_selector: Any = None,
+    operator_selector: Optional[Any] = None,
 ) -> None:
     from torchgen.selective_build.selector import SelectiveBuilder
 
