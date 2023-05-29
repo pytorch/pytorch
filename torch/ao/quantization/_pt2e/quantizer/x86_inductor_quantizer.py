@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import copy
 import functools
+import itertools
 from .quantizer import (
     OperatorConfig,
     OperatorPatternType,
@@ -26,6 +27,7 @@ from torch.ao.quantization.observer import (
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from typing import Callable, List, Dict, Optional, Set, Any
 from torch.fx import Node
+from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
 __all__ = [
     "X86InductorQuantizer",
@@ -171,38 +173,51 @@ class X86InductorQuantizer(Quantizer):
         # and fusion operator patterns (conv - relu) can get matched before single operator pattern (conv)
         # and we will mark the matched node with "_annoated" so fusion operator pattern
         # can take precedence over single operator pattern in this way
+        self._annotate_conv2d(model, config)
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
             # supported op type.
-            self._annotate_conv2d(node, config)
+            pass
 
         return model
 
-    def _annotate_conv2d(self, node: Node, quantization_config: QuantizationConfig) -> None:
-        conv_node = node
-        if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
-            return
-        # skip annotation if it is already annotated
-        if _is_annotated([conv_node]):
-            return
-        input_qspec_map = {}
-        input_node = conv_node.args[0]
-        assert isinstance(input_node, Node)
-        input_qspec_map[input_node] = get_act_qspec(quantization_config)
-
-        weight_node = conv_node.args[1]
-        assert isinstance(weight_node, Node)
-        input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
-
-        bias_node = conv_node.args[2]
-        if isinstance(bias_node, Node):
-            input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
-
-        conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map,
-            output_qspec=get_act_qspec(quantization_config),
-            _annotated=True
+    def _annotate_conv2d(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        conv_partitions = get_source_partitions(
+            gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d]
         )
+        conv_partitions = list(itertools.chain(*conv_partitions.values()))
+        for conv_partition in conv_partitions:
+            if len(conv_partition.output_nodes) > 1:
+                raise ValueError("conv partition has more than one output node")
+            conv_node = conv_partition.output_nodes[0]
+            if (
+                conv_node.op != "call_function"
+                or conv_node.target != torch.ops.aten.convolution.default
+            ):
+                raise ValueError(f"{conv_node} is not an aten conv2d operator")
+            # skip annotation if it is already annotated
+            if _is_annotated([conv_node]):
+                return
+            input_qspec_map = {}
+            input_node = conv_node.args[0]
+            assert isinstance(input_node, Node)
+            input_qspec_map[input_node] = get_act_qspec(quantization_config)
+
+            weight_node = conv_node.args[1]
+            assert isinstance(weight_node, Node)
+            input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
+
+            bias_node = conv_node.args[2]
+            if isinstance(bias_node, Node):
+                input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
+
+            conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map=input_qspec_map,
+                output_qspec=get_act_qspec(quantization_config),
+                _annotated=True
+            )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass

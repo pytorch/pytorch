@@ -4,10 +4,13 @@ import unittest
 from unittest.mock import patch
 import torch
 from torch._C import FileCheck
+# for some reason importing functional collectives after dynamo breaks collectives handling!
+import torch.distributed._functional_collectives as _functional_collectives
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.utils import same
 from torch._dynamo.testing import CompileCounter
+from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_distributed import (
     DynamoDistributedSingleProcTestCase,
@@ -20,10 +23,6 @@ from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch._inductor.utils import has_triton, run_and_get_triton_code
 import torch._dynamo.logging
-
-# LOL if you don't remember to import this, then the op isn't registered and it hits
-# the no-op C++ kernel that i am forced to implement despite not using it
-import torch.distributed._functional_collectives as _functional_collectives
 
 @requires_nccl()
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
@@ -358,6 +357,64 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # should test more precisely, but the 2 is supposed to be (all_gather, wait)
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
+
+    def test_dynamo_trace_all_gather_tensor_pg(self):
+
+        def func(inp, *, pg):
+            ar = _functional_collectives.all_gather_tensor(inp, 0, pg)
+            return ar
+
+        inputs = torch.ones(4, 4, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        out = compiled(inputs, pg=GroupMember.WORLD)
+        correct = func(inputs, pg=GroupMember.WORLD)
+        self.assertEqual(counter.frame_count, 1)
+
+        # should test more precisely, but the 2 is supposed to be (all_gather, wait)
+        self.assertEqual(counter.op_count, 2)
+        self.assertTrue(same(out, correct))
+
+    def test_dynamo_graphbreaks_unsupported_async_op(self):
+
+        def func(inp, out, *, pg):
+            work = torch.distributed.reduce_scatter_tensor(
+                out,
+                inp,
+                group=pg,
+                async_op=True
+            )
+            work.wait()
+        local_size = [4, 4]
+        # single-proc test
+        global_size = local_size
+
+        inputs = torch.ones(local_size, device=self.device)
+        outputs = torch.empty(global_size, device=self.device)
+        correct_outputs = torch.empty(global_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter)
+        compiled(inputs, outputs, pg=GroupMember.WORLD)
+        func(inputs, correct_outputs, pg=GroupMember.WORLD)
+        assert counter.frame_count == 0
+        assert counter.op_count == 0
+        assert same(outputs, correct_outputs)
+
+    def test_dynamo_pg_var(self):
+        def func(inp, *, pg):
+            x = pg.rank() + 1 % pg.size()
+            return inp + x
+
+        local_size = [4, 4]
+        inputs = torch.ones(local_size, device=self.device)
+        correct_outputs = torch.empty(local_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        outputs = compiled(inputs, pg=GroupMember.WORLD)
+        correct_outputs = func(inputs, pg=GroupMember.WORLD)
+        assert counter.frame_count == 1
+        assert counter.op_count == 1
+        assert same(outputs, correct_outputs)
 
     def test_dynamo_trace_reduce_scatter_tensor(self):
 
