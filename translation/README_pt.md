@@ -73,7 +73,7 @@ Elaborating Further:
 
 If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
-![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
+![Tensor illustration](../docs/source/_static/img/tensor_illustration.png)
 
 PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
 computation by a huge amount.
@@ -224,7 +224,7 @@ conda install pkg-config libuv
 ```bash
 conda install mkl mkl-include
 # Adicione esses pacotes se torch.distributed é preciso.
-# Distributed package support on Windows is a prototype feature and is subject to changes.
+# O suporte a pacotes distribuídos no Windows é um recurso de protótipo e está sujeito a alterações.
 conda install -c conda-forge libuv=1.39
 ```
 
