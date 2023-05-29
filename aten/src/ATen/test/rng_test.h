@@ -187,7 +187,7 @@ void test_random(const at::Device& device) {
 
     uint64_t range;
     if constexpr (::std::is_floating_point<T>::value) {
-      range = static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1);
+      range = static_cast<uint64_t>((1ULL << ::std::numeric_limits<T>::digits) + 1);
     } else if constexpr (::std::is_same<T, bool>::value) {
       range = 2;
     } else {
