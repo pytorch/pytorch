@@ -6169,6 +6169,14 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    def test_erfinv(self):
+        def fn(x):
+            return torch.erfinv(x)
+
+        # domain for erfinv is (-1, 1)
+        x = torch.empty(8, 8).uniform_(-1, 1)
+        self.common(fn, (x,))
+
     def test_uint(self):
         def fn(z):
             x = torch.tensor(5, device=z.device, dtype=torch.uint8)
