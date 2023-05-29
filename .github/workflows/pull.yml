@@ -2,6 +2,8 @@ name: pull
 
 on:
   pull_request:
+    branches-ignore:
+      - nightly
   push:
     branches:
       - main
@@ -262,6 +264,7 @@ jobs:
     with:
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
+      sync-tag: win-cpu-build
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },

@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._guards import Checkpointable, TracingContext
+from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
     allowed_functions,
@@ -888,9 +888,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             log.warning(
                 "can't resolve package from __spec__ or __package__, "
                 "falling back on __name__ and __path__",
-                ImportWarning,
                 stacklevel=3,
-            )  # type: ignore[call-arg]
+            )
             package = self.f_globals["__name__"]
             if "__path__" not in self.f_globals:
                 package = package.rpartition(".")[0]
@@ -1831,6 +1830,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 return key
         return None
 
+    @contextlib.contextmanager
+    def strict_translation_mode(self):
+        self.strict_checks_enabled = True
+        try:
+            yield
+        finally:
+            self.strict_checks_enabled = False
+
     def __init__(
         self,
         output: OutputGraph,
@@ -1887,6 +1894,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.checkpoint = None
         self.random_calls = []
 
+        self.strict_checks_enabled = False
+
         if sys.version_info >= (3, 10):
             from .resume_execution import (
                 CO_ASYNC_GENERATOR,
@@ -1942,65 +1951,69 @@ class InstructionTranslator(InstructionTranslatorBase):
             f_code=f_code,
             export=export,
         )
-        self.one_graph: bool = one_graph
-        self.export = export
-        self.mutated_closure_cell_contents = mutated_closure_cell_contents
-        if self.export:
-            assert (
-                self.one_graph
-            ), "Export without one graph - something has gone wrong."
 
-        vars = list(code_options["co_varnames"])
-        vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+        # as soon as we create the tracing context we should keep it active, so any calls
+        # into dynamo apis can rely on finding it
+        with tracing(self.output.tracing_context):
+            self.one_graph: bool = one_graph
+            self.export = export
+            self.mutated_closure_cell_contents = mutated_closure_cell_contents
+            if self.export:
+                assert (
+                    self.one_graph
+                ), "Export without one graph - something has gone wrong."
 
-        self.symbolic_locals = collections.OrderedDict(
-            (
-                k,
-                VariableBuilder(self, LocalSource(k))(f_locals[k]),
+            vars = list(code_options["co_varnames"])
+            vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+
+            self.symbolic_locals = collections.OrderedDict(
+                (
+                    k,
+                    VariableBuilder(self, LocalSource(k))(f_locals[k]),
+                )
+                for k in vars
+                if k in f_locals
             )
-            for k in vars
-            if k in f_locals
-        )
 
-        # symbolic_locals contains the mapping from original f_locals to the
-        # Variable objects. During the Variable building phase, each object also
-        # has its associated guards. At the end, we will accumulate these
-        # guards.
-        #
-        # One way of handling these guards is to just accumulate all of them
-        # right now. However, many f_locals might not be used in the frame and
-        # thus can unnecessarily increase guard execution overhead.  Therefore,
-        # we selectively update output.guards as we run the Python Bytecode
-        # instruction by instruction.
-        #
-        # An exception here is list/dict variables. Guards related to these
-        # variables have indexed access, like Tensor_match on args[0], and if
-        # args is not used in this frame, we will miss a LIST_LENGTH check like
-        # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
-        # next invocation when args is not a list, and args[0] is a runtime
-        # error. Therefore, we recursively add guards for list/dict variable here.
-        for val in self.symbolic_locals.values():
-            if isinstance(
-                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
-            ):
-                local_guards = VariableTracker.propagate(val)["guards"]
-                index_guards = [
-                    guard
-                    for guard in local_guards
-                    if guard.create_fn
-                    in (
-                        GuardBuilder.LIST_LENGTH,
-                        GuardBuilder.DICT_KEYS,
-                        GuardBuilder.ODICT_KEYS,
-                        GuardBuilder.TUPLE_ITERATOR_LEN,
-                    )
-                ]
-                self.output.guards.update(index_guards)
+            # symbolic_locals contains the mapping from original f_locals to the
+            # Variable objects. During the Variable building phase, each object also
+            # has its associated guards. At the end, we will accumulate these
+            # guards.
+            #
+            # One way of handling these guards is to just accumulate all of them
+            # right now. However, many f_locals might not be used in the frame and
+            # thus can unnecessarily increase guard execution overhead.  Therefore,
+            # we selectively update output.guards as we run the Python Bytecode
+            # instruction by instruction.
+            #
+            # An exception here is list/dict variables. Guards related to these
+            # variables have indexed access, like Tensor_match on args[0], and if
+            # args is not used in this frame, we will miss a LIST_LENGTH check like
+            # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
+            # next invocation when args is not a list, and args[0] is a runtime
+            # error. Therefore, we recursively add guards for list/dict variable here.
+            for val in self.symbolic_locals.values():
+                if isinstance(
+                    val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
+                ):
+                    local_guards = VariableTracker.propagate(val)["guards"]
+                    index_guards = [
+                        guard
+                        for guard in local_guards
+                        if guard.create_fn
+                        in (
+                            GuardBuilder.LIST_LENGTH,
+                            GuardBuilder.DICT_KEYS,
+                            GuardBuilder.ODICT_KEYS,
+                            GuardBuilder.TUPLE_ITERATOR_LEN,
+                        )
+                    ]
+                    self.output.guards.update(index_guards)
 
-        self._freevars_ids = dict()
-        for name in self.code_options["co_freevars"]:
-            if name in f_locals:
-                self._freevars_ids[name] = id(f_locals[name])
+            self._freevars_ids = dict()
+            for name in self.code_options["co_freevars"]:
+                if name in f_locals:
+                    self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
         super().run()
@@ -2127,6 +2140,21 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if skipfiles.check(
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
+            from torch._dynamo.variables.misc import (
+                produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
+                produce_trampoline_autograd_fwd,
+            )
+
+            # _origin marks this as coming from an internal dynamo known function that is safe to
+            # trace through.
+            if hasattr(func.fn, "_origin") and func.fn._origin in [
+                produce_trampoline_autograd_fwd,
+                produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
+            ]:
+                # Known sound
+                return
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
@@ -2185,8 +2213,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
+        strict_ctx: Any = contextlib.nullcontext()
+        if parent.strict_checks_enabled:
+            strict_ctx = tracer.strict_translation_mode()
         try:
-            tracer.run()
+            with strict_ctx:
+                tracer.run()
         except exc.SkipFrame as e:
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)

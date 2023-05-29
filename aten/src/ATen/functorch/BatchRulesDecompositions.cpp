@@ -290,12 +290,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(orgqr);
   m.impl("unflatten.int", native::unflatten_symint);
   m.impl("_convolution_double_backward", native::_convolution_double_backward);
-  OP_DECOMPOSE(conv_transpose1d);
-  OP_DECOMPOSE2(conv_transpose2d, input);
-  OP_DECOMPOSE2(conv_transpose3d, input);
-  OP_DECOMPOSE(conv1d);
-  OP_DECOMPOSE(conv2d);
-  OP_DECOMPOSE(conv3d);
+  m.impl("conv_transpose1d", native::conv_transpose1d_symint);
+  m.impl("conv_transpose2d.input", native::conv_transpose2d_symint);
+  m.impl("conv_transpose3d.input", native::conv_transpose3d_symint);
+  m.impl("conv1d", native::conv1d_symint);
+  m.impl("conv2d", native::conv2d_symint);
+  m.impl("conv3d", native::conv3d_symint);
   OP_DECOMPOSE2(conv1d, padding);
   OP_DECOMPOSE2(conv2d, padding);
   OP_DECOMPOSE2(conv3d, padding);

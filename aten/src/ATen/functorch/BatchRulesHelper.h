@@ -44,16 +44,16 @@ Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, i
 void check_randomness(RandomnessType randomness);
 void check_randomness(RandomnessType randomness, bool any_tensor_bdim);
 
-inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch_size) {
+inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, c10::SymInt batch_size) {
   if (has_bdim) {
     return tensor;
   }
-  const auto sizes = tensor.sizes();
-  DimVector expanded_shape;
+  const auto sizes = tensor.sym_sizes();
+  SymDimVector expanded_shape;
   expanded_shape.reserve(sizes.size());
-  expanded_shape.emplace_back(batch_size);
+  expanded_shape.emplace_back(std::move(batch_size));
   expanded_shape.insert(expanded_shape.end(), sizes.begin(), sizes.end());
-  return tensor.expand(expanded_shape);
+  return tensor.expand_symint(expanded_shape);
 }
 
 #define VMAP_SUPPORT(op, batch_rule) \

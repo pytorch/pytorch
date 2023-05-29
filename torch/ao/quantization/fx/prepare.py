@@ -15,10 +15,12 @@ from ..quantize import (
 )
 from ..observer import (
     ObserverBase,
-    _is_activation_post_process
+    _is_activation_post_process,
+    _PartialWrapper,
 )
 from ..qconfig import (
     _is_reuse_input_qconfig,
+    _obs_or_fq_ctr_equals,
     QConfigAny,
 )
 from ..qconfig_mapping import (
@@ -99,11 +101,12 @@ from .custom_config import (
     PrepareCustomConfig,
     StandaloneModuleConfigEntry,
 )
+from torch.ao.quantization._pt2e.quantizer import QuantizationSpec
 
 from torch._subclasses import FakeTensor
 
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union, Callable
-
+from dataclasses import asdict
 
 __all__ = [
     "insert_observers_for_model",
@@ -130,6 +133,40 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
     "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
 }
 
+# TODO: add support for torch dtype in quant code base
+# this includes observers and prepare/convert code
+_TORCH_DTYPE_TO_QDTYPE = {
+    torch.int8: torch.qint8,
+    torch.uint8: torch.quint8,
+    torch.int32: torch.qint32,
+    torch.float16: torch.float16,
+    torch.float32: torch.float32,
+}
+
+def _get_observer_kwargs(quant_spec: QuantizationSpec):
+    kwargs_dict = asdict(quant_spec)
+    kwargs_dict["dtype"] = _TORCH_DTYPE_TO_QDTYPE[quant_spec.dtype]
+    return copy.deepcopy(kwargs_dict)
+
+def _create_obs_or_fq_ctr_from_qspec(quantization_spec: QuantizationSpec, **extra_kwargs):
+    """ Create observer or fake quantize constructors based on quantization spec
+    """
+    if quantization_spec is None:
+        return None
+    observer_or_fake_quant_ctr = quantization_spec.observer_or_fake_quant_ctr
+    kwargs = _get_observer_kwargs(quantization_spec)
+    kwargs.pop("observer_or_fake_quant_ctr")
+    # we will remove is_dynamic from QuantizationSpec because
+    # it seems that dynamic range quantization
+    if not _obs_or_fq_ctr_equals(observer_or_fake_quant_ctr, PlaceholderObserver):
+        kwargs.pop("is_dynamic")
+    obs_or_fq_class = observer_or_fake_quant_ctr
+    if isinstance(observer_or_fake_quant_ctr, _PartialWrapper):
+        obs_or_fq_class = observer_or_fake_quant_ctr.p.func  # type: ignore[union-attr, assignment]
+    if "PerChannel" not in obs_or_fq_class.__name__:  # type: ignore[operator, union-attr]
+        kwargs.pop("ch_axis")
+    return observer_or_fake_quant_ctr.with_args(**kwargs, **extra_kwargs)
+
 def _needs_obs_or_fq(
         prev_output_dtype: Any,
         prev_output_is_dynamic: bool,
@@ -144,10 +181,9 @@ def _needs_obs_or_fq(
 
     is_zeroth_arg: we only dynamically quantize the first arg of the node right now
       this should be removed when we enable configuring dynamic quantization
-      for a specific argument
+      for a specific argument, this can be removed if we deprecate fx graph mode
+      quantization
 
-    Note: we want to refactor the annotation specification api soon to use
-    a map from user_node to obs_or_fq_ctr
     """
 
     # need to insert placeholder observer for dynamic quantization so that it can
@@ -512,120 +548,93 @@ def _get_target_activation_dtype_for_node(
         }
     return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
+def _get_output_act_obs_or_fq_ctr(
+    arg: Node,
+    named_modules: Dict[str, torch.nn.Module],
+) -> Any:
+    """ Get the constructor for observer or fake quant object for
+    the argument in the original graph as the output of previous node,
+    skipping inserted observers
+
+    We are assuming that the observers are inserted correctly, and the dtype for
+    argument in quantized graph will match what is specified by the qconfig
+    """
+    assert isinstance(arg, Node)
+    if "quantization_annotation" in arg.meta:
+        return _create_obs_or_fq_ctr_from_qspec(arg.meta["quantization_annotation"].output_qspec)
+
+    # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
+    # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
+    # Since we modified the graph in this case, we must trace back from the args through
+    # the specific nodes we added in order to reach the original LSTM node. Otherwise, we would
+    # not be able to accurately detect whether this node is a consumer of custom module LSTM.
+    custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, named_modules)
+    output_act_obs_or_fq_ctr = None
+    if custom_module_lstm_node is not None:
+        output_act_obs_or_fq_ctr = custom_module_lstm_node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+    elif _is_activation_post_process_node(arg, named_modules):
+        observed_arg = arg.args[0]
+        assert isinstance(observed_arg, Node), "Currently we only support observing Node"
+        if "quantization_annotation" in observed_arg.meta:
+            output_act_obs_or_fq_ctr = _create_obs_or_fq_ctr_from_qspec(observed_arg.meta["quantization_annotation"].output_qspec)
+        else:
+            assert "target_dtype_info" in observed_arg.meta
+            output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+    else:
+        if "target_dtype_info" in arg.meta:
+            output_act_obs_or_fq_ctr = \
+                arg.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
+        else:
+            output_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
+
+    return output_act_obs_or_fq_ctr
+
 def _get_arg_target_dtype_as_output(
     arg: Node,
     named_modules: Dict[str, torch.nn.Module],
-) -> Optional[Union[torch.dtype, type]]:
-    """ Get the target output activation dtype for
-    the argument in the original graph, skipping inserted observers
-    We are assuming that the observers are inserted correctly, and the dtype for
-    argument in quantized graph will match what is specified by the qconfig
-    """
-    assert isinstance(arg, Node)
-    # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
-    # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
-    # Since we modified the graph in this case, we must trace back from the args through
-    # the specific nodes we added in order to reach the original LSTM node. Otherwise, we would
-    # not be able to accurately detect whether this node is a consumer of custom module LSTM.
-    custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, named_modules)
-    output_act_obs_or_fq_ctr = None
-    if custom_module_lstm_node is not None:
-        output_act_obs_or_fq_ctr = custom_module_lstm_node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
-    elif _is_activation_post_process_node(arg, named_modules):
-        observed_arg = arg.args[0]
-        assert isinstance(observed_arg, Node), "Currently we only support observing Node"
-        output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
-    else:
-        if "target_dtype_info" in arg.meta:
-            output_act_obs_or_fq_ctr = \
-                arg.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
-        else:
-            output_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
-    output_act_dtype, _ = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
-    # TODO: should support is_dynamic here as well
-    return output_act_dtype
+) -> Optional[torch.dtype]:
+    arg_as_output_act_obs_or_fq_ctr = _get_output_act_obs_or_fq_ctr(arg, named_modules)
+    arg_as_output_target_dtype, _ = _get_dtype_and_is_dynamic(arg_as_output_act_obs_or_fq_ctr)
+    return arg_as_output_target_dtype
 
-
-# TODO: merge with _get_arg_target_dtype_as_output
-def _get_arg_target_is_dynamic_as_output(
-    arg: Node,
-    named_modules: Dict[str, torch.nn.Module],
-) -> bool:
-    """ Get the target output activation dtype for
-    the argument in the original graph, skipping inserted observers
-    We are assuming that the observers are inserted correctly, and the dtype for
-    argument in quantized graph will match what is specified by the qconfig
-    """
-    assert isinstance(arg, Node)
-    # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
-    # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
-    # Since we modified the graph in this case, we must trace back from the args through
-    # the specific nodes we added in order to reach the original LSTM node. Otherwise, we would
-    # not be able to accurately detect whether this node is a consumer of custom module LSTM.
-    custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, named_modules)
-    output_act_obs_or_fq_ctr = None
-    if custom_module_lstm_node is not None:
-        output_act_obs_or_fq_ctr = custom_module_lstm_node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
-    elif _is_activation_post_process_node(arg, named_modules):
-        observed_arg = arg.args[0]
-        assert isinstance(observed_arg, Node), "Currently we only support observing Node"
-        output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
-    else:
-        if "target_dtype_info" in arg.meta:
-            output_act_obs_or_fq_ctr = \
-                arg.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
-        else:
-            output_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
-    _, output_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
-    # return output_is_dynamic
-    return False
-
-def _get_arg_target_dtype_as_input_to_node(
+def _get_arg_as_input_act_obs_or_fq_ctr(
     arg: Node,
     node: Node,
     named_modules: Dict[str, torch.nn.Module],
-) -> Optional[Union[torch.dtype, type]]:
-    """ Get the target argument dtype for the argument `arg`, as input
-    to node `node`
+) -> Any:
+    """ Get the observer or fake quant constructor for the Argument `arg`, as input
+    to Node `node`
     """
     assert isinstance(arg, Node)
+    # "input_qspec_map" is the more general design we'll use for pt2e path
+    # it is a map from input argument node to observer or fake quant constructor, for example
+    # for the following graph:
+    # x -> conv -> output
+    #
+    # we may annotate conv node like the following:
+    # conv.meta[...] = QuantizationAnnotation("input_qspec_map": {x: MinMaxObserver.with_args(dtype=torch.qint8)}, ...)
+    #
+    if "quantization_annotation" in node.meta:
+        input_qspec_map = node.meta["quantization_annotation"].input_qspec_map
+        input_act_obs_or_fq_ctr = _DEFAULT_FP32_OBS_OR_FQ_CTR
+        if arg in input_qspec_map:
+            input_act_obs_or_fq_ctr = _create_obs_or_fq_ctr_from_qspec(input_qspec_map[arg])
+        return input_act_obs_or_fq_ctr
+
+    # we can remove the following path in the future if fx graph mode quantization is
+    # no longer used
     is_weight = node_arg_is_weight(node, arg)
     is_bias = node_arg_is_bias(node, arg)
     is_activation = not is_weight and not is_bias
+    obs_or_fq_ctr = None
     if is_activation:
-        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
-        qconfig_dtype, _ = _get_dtype_and_is_dynamic(input_act_obs_or_fq_ctr)
-        return qconfig_dtype
+        obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
     elif is_weight:
-        if node.target in NON_QUANTIZABLE_WEIGHT_OPS:
-            return None
-        else:
-            weight_obs_or_fq_ctr = node.meta["target_dtype_info"].get("weight_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
-            qconfig_weight_dtype, _ = _get_dtype_and_is_dynamic(weight_obs_or_fq_ctr)
-            return qconfig_weight_dtype
+        if node.target not in NON_QUANTIZABLE_WEIGHT_OPS:
+            obs_or_fq_ctr = node.meta["target_dtype_info"].get("weight_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
     else:
-        bias_obs_or_fq_ctr = node.meta["target_dtype_info"].get("bias_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
-        qconfig_bias_dtype, _ = _get_dtype_and_is_dynamic(bias_obs_or_fq_ctr)
-        return qconfig_bias_dtype
-
-def _get_arg_target_is_dynamic_as_input_to_node(
-    arg: Node,
-    node: Node,
-    named_modules: Dict[str, torch.nn.Module],
-) -> bool:
-    """ Get the target argument dtype for the argument `arg`, as input
-    to node `node`
-    """
-    assert isinstance(arg, Node)
-    is_weight = node_arg_is_weight(node, arg)
-    is_bias = node_arg_is_bias(node, arg)
-    is_activation = not is_weight and not is_bias
-    if is_activation and "input_act_obs_or_fq_ctr" in node.meta["target_dtype_info"]:
-        input_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("input_act_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
-        _, qconfig_is_dynamic = _get_dtype_and_is_dynamic(input_act_obs_or_fq_ctr)
-        return qconfig_is_dynamic
-    else:
-        return False
+        obs_or_fq_ctr = node.meta["target_dtype_info"].get("bias_obs_or_fq_ctr", _DEFAULT_FP32_OBS_OR_FQ_CTR)
+    return obs_or_fq_ctr
 
 def _maybe_insert_input_observer_for_arg_or_kwarg(
     node: Union[Node, Any],
@@ -668,24 +677,25 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # Note: qconfig can be None in this branch this we are getting act/fq from
         # node.meta now
         # regular flow for most nodes, except standalone modules
-        is_weight = node_arg_is_weight(node, arg)
 
-        # TODO: we are assuming "target_dtype_info" exists here, maybe
-        # a default value also need to be provided here
-        target_dtype_info = node.meta["target_dtype_info"]
-        # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
-        # we'll default to False, this makes configuring this field optional for users
-        reuse_input_obs_or_fq = target_dtype_info.get("reuse_input_obs_or_fq", False)
+        if "quantization_annotation" in node.meta:
+            reuse_input_obs_or_fq = node.meta["quantization_annotation"]._reuse_input_obs_or_fq
+        else:
+            assert "target_dtype_info" in node.meta
+            # TODO: we are assuming "target_dtype_info" exists here, maybe
+            # a default value also need to be provided here
+            target_dtype_info = node.meta["target_dtype_info"]
+            # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
+            # we'll default to False, this makes configuring this field optional for users
+            reuse_input_obs_or_fq = target_dtype_info.get("reuse_input_obs_or_fq", False)
+        arg_as_input_act_obs_or_fq_ctr = _get_arg_as_input_act_obs_or_fq_ctr(arg, node, named_modules)
+        act_post_process_ctr = arg_as_input_act_obs_or_fq_ctr
 
-        # TODO: check bias as well?
-        obs_or_fq_ctr_key = "weight_obs_or_fq_ctr" if is_weight else "input_act_obs_or_fq_ctr"
-        act_post_process_ctr = target_dtype_info.get(obs_or_fq_ctr_key, _DEFAULT_FP32_OBS_OR_FQ_CTR)
+        arg_as_output_act_obs_or_fq_ctr = _get_output_act_obs_or_fq_ctr(arg, named_modules)
+        arg_as_output_target_dtype, arg_as_output_target_is_dynamic = _get_dtype_and_is_dynamic(arg_as_output_act_obs_or_fq_ctr)
+        arg_as_input_target_dtype, arg_as_input_target_is_dynamic = _get_dtype_and_is_dynamic(arg_as_input_act_obs_or_fq_ctr)
 
-        arg_as_output_target_dtype = _get_arg_target_dtype_as_output(arg, named_modules)
-        arg_as_output_target_is_dynamic = _get_arg_target_is_dynamic_as_output(arg, named_modules)
-        arg_as_input_target_dtype = _get_arg_target_dtype_as_input_to_node(arg, node, named_modules)
-        arg_as_input_target_is_dynamic = \
-            _get_arg_target_is_dynamic_as_input_to_node(arg, node, named_modules)  # type: ignore[arg-type]
+
         needs_obs_or_fq = _needs_obs_or_fq(
             arg_as_output_target_dtype,
             arg_as_output_target_is_dynamic,
@@ -860,12 +870,20 @@ def _maybe_insert_output_observer_for_node(
     and returns it.
 
     If `node` does not need an output observer, returns None.
+
+    Note: inserting dynamic quantization ops for output is not supported in fx graph mode
+    quantization code path right now
     """
     assert node.op != 'output', 'observer insertion for outputs is handled elsewhere'
 
-    is_standalone_module = node.meta["target_dtype_info"].get("_is_standalone_module", False)
+    is_standalone_module = False
+    if "quantization_annotation" in node.meta:
+        output_act_obs_or_fq_ctr = _create_obs_or_fq_ctr_from_qspec(node.meta["quantization_annotation"].output_qspec)
+    else:
+        assert "target_dtype_info" in node.meta
+        is_standalone_module = node.meta["target_dtype_info"].get("_is_standalone_module", False)
 
-    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
+        output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
     target_dtype, target_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
     # uncomment after we support reuse_input_obs_or_fq properly by having separate
     # implemntations for this key instead of reusing the input_output_share_observers
@@ -1315,7 +1333,7 @@ def insert_observers_for_model(
     # if not, we'll reset the target_dtye_info to use the default (float Tensor)
 
     # reset the counters and set of processed_nodes
-    processed_nodes = set()
+    processed_nodes: Set[Node] = set()
     for node_name, match_res_with_qconfig in node_name_to_match_result_with_qconfig.items():
         last_node, matched_node_pattern, pattern, qhandler, qconfig = match_res_with_qconfig
         is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(
