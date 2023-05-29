@@ -168,13 +168,13 @@ public:
     // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
     return _mm512_cmpeq_epi16_mask(values, _mm512_set1_epi16(0));
   }
-  static Vectorized<T> loadu(const void* ptr) {
-    return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
-  }
-  static Vectorized<T> loadu(const void* ptr, int16_t count) {
+  static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
+    if (count == size())
+      return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
+
     __at_align__ int16_t tmp_values[size()];
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
-    return loadu(tmp_values);
+    return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(tmp_values));
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {

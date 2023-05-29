@@ -54,6 +54,48 @@ def _add_op_to_registry(registry, op, fn):
             registry[op_overload] = fn
 
 
+def _convert_out_params(f):
+    sig = inspect.signature(f)
+    out_annotation = f.__annotations__.get("out")
+    # Hack to detect when out is a Tuple. There seems to be no pretty way of doing this
+    fn = f
+    if out_annotation and getattr(out_annotation, "__origin__", None) is tuple:
+        out_names = sig.return_annotation._fields
+        # If out is a tuple, we need to register a function that unpacks all the out
+        # elements as this is what native_functions.yaml expects
+
+        @wraps(f)
+        def _fn(*args, **kwargs):
+            out_kwargs = tuple(kwargs.pop(o, None) for o in out_names)
+            # Either all of the out kwargs are set or none of them
+            is_none = out_kwargs[0] is None
+            assert all((o is None) == is_none for o in out_kwargs)
+            return f(*args, **kwargs, out=None if is_none else out_kwargs)
+
+        out_params = [
+            inspect.Parameter(
+                o,
+                kind=inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=t,
+            )
+            for o, t in zip(out_names, out_annotation.__args__)
+        ]
+        # Drop the out parameter and concatenate the new kwargs in the signature
+        params = chain((v for k, v in sig.parameters.items() if k != "out"), out_params)
+        _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+            parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
+        )
+        # Drop the out parameter and concatenate the new kwargs in the annotations
+        _fn.__annotations__ = {k: v for k, v in f.__annotations__.items() if k != "out"}
+        for o in out_params:
+            _fn.__annotations__[o.name] = o.annotation
+
+        fn = _fn
+
+    return fn
+
+
 def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
     """
     A decorator to register a function as a decomposition to the Python
@@ -77,48 +119,8 @@ def register_decomposition(aten_op, registry=None, *, type="post_autograd"):
 
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
-    def decomposition_decorator(f: Callable) -> Callable:
-        sig = inspect.signature(f)
-        out_annotation = f.__annotations__.get("out")
-        # Hack to detect when out is a Tuple. There seems to be no pretty way of doing this
-        fn = f
-        if out_annotation and getattr(out_annotation, "__origin__", None) is tuple:
-            out_names = sig.return_annotation._fields
-            # If out is a tuple, we need to register a function that unpacks all the out
-            # elements as this is what native_functions.yaml expects
-
-            @wraps(f)
-            def _fn(*args, **kwargs):
-                out_kwargs = tuple(kwargs.pop(o, None) for o in out_names)
-                # Either all of the out kwargs are set or none of them
-                is_none = out_kwargs[0] is None
-                assert all((o is None) == is_none for o in out_kwargs)
-                return f(*args, **kwargs, out=None if is_none else out_kwargs)
-
-            out_params = [
-                inspect.Parameter(
-                    o,
-                    kind=inspect.Parameter.KEYWORD_ONLY,
-                    default=None,
-                    annotation=t,
-                )
-                for o, t in zip(out_names, out_annotation.__args__)
-            ]
-            # Drop the out parameter and concatenate the new kwargs in the signature
-            params = chain(
-                (v for k, v in sig.parameters.items() if k != "out"), out_params
-            )
-            _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-                parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
-            )
-            # Drop the out parameter and concatenate the new kwargs in the annotations
-            _fn.__annotations__ = {
-                k: v for k, v in f.__annotations__.items() if k != "out"
-            }
-            for o in out_params:
-                _fn.__annotations__[o.name] = o.annotation
-
-            fn = _fn
+    def decomposition_decorator(fn: Callable) -> Callable:
+        fn = _convert_out_params(fn)
 
         nonlocal registry
         if registry is None:
