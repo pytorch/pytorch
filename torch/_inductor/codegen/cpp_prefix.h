@@ -21,6 +21,96 @@
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
 
+template <typename T>
+struct Welford {
+  T mean = T(0);
+  T m2 = T(0);
+  T weight = T(0);
+};
+
+
+template <typename T>
+struct IsVecType: std::false_type {};
+
+template <typename T>
+struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
+
+
+template <typename T>
+Welford<T> welford_combine(Welford<T> a, Welford<T> b) {
+  if constexpr (!IsVecType<T>::value) {
+    if (a.weight == 0) {
+      return b;
+    }
+    if (b.weight == 0) {
+      return a;
+    }
+  }
+  auto delta = b.mean - a.mean;
+  auto new_weight = a.weight + b.weight;
+  auto wb_over_w = b.weight / new_weight;
+  auto result = Welford<T>{
+    a.mean + delta * wb_over_w,
+    a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
+    new_weight
+  };
+  return result;
+}
+
+template <typename T>
+Welford<T> welford_combine(Welford<T> acc, T data) {
+  // Add a single data point
+  auto delta = data - acc.mean;
+  auto new_weight = acc.weight + T(1);
+  auto new_mean = acc.mean + delta / new_weight;
+  auto new_delta = data - new_mean;
+  auto result = Welford<T>{
+    new_mean,
+    acc.m2 + delta * new_delta,
+    new_weight
+  };
+  return result;
+}
+
+
+template <typename scalar_t>
+inline at::vec::Vectorized<scalar_t> vec_shuffle_down(at::vec::Vectorized<scalar_t> x, size_t n) {
+  using Vec = at::vec::Vectorized<scalar_t>;
+  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  x.store(array);
+  for (size_t i = 0; i + n < Vec::size(); ++i) {
+    array[i] = array[i + n];
+  }
+  return Vec::loadu(array);
+}
+
+template <typename scalar_t>
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
+  using Vec = at::vec::Vectorized<scalar_t>;
+  for (size_t n = 1; n < Vec::size(); n *= 2) {
+    auto shuffled = Welford<Vec>{
+      vec_shuffle_down(acc.mean, n),
+      vec_shuffle_down(acc.m2, n),
+      vec_shuffle_down(acc.weight, n)
+    };
+    acc = welford_combine(acc, shuffled);
+  }
+
+  Welford<scalar_t> result;
+  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  acc.mean.store(array);
+  result.mean = array[0];
+
+  acc.m2.store(array);
+  result.m2 = array[0];
+
+  acc.weight.store(array);
+  result.weight = array[0];
+
+  return result;
+}
+
+
 template <typename T> inline T mod(T a, T b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }

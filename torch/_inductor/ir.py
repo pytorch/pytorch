@@ -528,6 +528,21 @@ def get_reduction_combine_fn(reduction_type, dtype):
                 ops.where(mask, a_index, b_index),
             )
 
+    elif reduction_type == "var":
+
+        def combine_fn(a, b):
+            a_mean, a_m2, a_weight = a
+            b_mean, b_m2, b_weight = b
+
+            delta = b_mean - a_mean
+            new_weight = a_weight + b_weight
+            w2_over_w = b_weight / new_weight
+            return (
+                a_mean + delta * w2_over_w,
+                a_m2 + b_m2 + delta * delta * a_weight * w2_over_w,
+                new_weight,
+            )
+
     else:
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
 
@@ -805,6 +820,19 @@ class Reduction(Loops):
                 )
 
             return lambda index: fn(index)[1]
+        elif reduction_type == "var":
+
+            def value_fn(index, rindex):
+                mean = inner_fn(index, rindex)
+                m2 = ops.constant(0, src_dtype)
+                weight = ops.constant(1, src_dtype)
+                return (mean, m2, weight)
+
+            def project_fn(index):
+                mean, m2, weight = fn(index)
+                return m2 / weight
+
+            return project_fn
         else:
             value_fn = inner_fn
             return fn
@@ -974,6 +1002,7 @@ class Reduction(Loops):
             "prod": 1,
             "xor_sum": 0,
             "any": 0,
+            "var": 0,
         }[reduction_type]
 
     @classmethod

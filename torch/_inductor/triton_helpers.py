@@ -150,6 +150,24 @@ else:
         return max_values, max_index
 
 
+if TRITON_HAS_REDUCE:
+
+    @triton.jit
+    def _welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
+        delta = mean_2 - mean_1
+        new_weight = weight_1 + weight_2
+        w2_over_w = weight_2 / new_weight
+        return (
+            mean_1 + delta * w2_over_w,
+            m2_1 + m2_2 + delta * delta * weight_1 * w2_over_w,
+            new_weight,
+        )
+
+    @triton.jit
+    def welford(mean, m2, weight, dim):
+        return tl.reduce((mean, m2, weight), dim, _welford_combine)
+
+
 @triton.jit
 def device_assert_then(cond, msg, r):
     tl.device_assert(cond, msg)

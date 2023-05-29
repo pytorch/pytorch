@@ -3608,7 +3608,7 @@ def mean(x, axis=None, keepdim=False, *, dtype=None):
     return to_dtype(div(sum_result, denom), output_dtype)
 
 
-def var_mean_(x, axis, correction, keepdim, return_mean):
+def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     if correction is None:
         correction = 1
 
@@ -3636,15 +3636,49 @@ def var_mean_(x, axis, correction, keepdim, return_mean):
 
 @register_lowering([aten.var, prims.var])
 def var_(x, axis=None, *, correction=None, keepdim=False):
-    return var_mean_(
-        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
-    )
+    if correction is None:
+        correction = 1
+    print(correction)
+
+    if torch.version.hip is not None:
+        return var_mean_sum_(
+            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=False
+        )
+
+    axis = _validate_reduction_axis(x, axis)
+    uncorrected_var = make_reduction("var")(x, axis=axis, keepdims=keepdim)
+    if correction == 0:
+        return uncorrected_var
+
+    dtype = uncorrected_var.get_dtype()
+    size = x.get_size()
+    rnumel = sympy_product(size[i] for i in axis)
+
+    def get_constant_or_index_expr(x, dtype):
+        if isinstance(x, sympy.Expr) and not x.is_constant():
+            return ops.to_dtype(ops.index_expr(x, torch.int64), dtype)
+        return ops.constant(x, dtype)
+
+    def scale_fn(data):
+        _1 = ops.constant(1, dtype)
+        c = get_constant_or_index_expr(correction, dtype)
+        N = get_constant_or_index_expr(rnumel, dtype)
+        scale = _1 / (_1 - c / N)
+        return data * scale
+
+    return make_pointwise(scale_fn)(uncorrected_var)
 
 
 @register_lowering(aten.var_mean)
 def var_mean(x, axis=None, *, correction=None, keepdim=False):
-    return var_mean_(
-        x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
+    if torch.version.hip is not None:
+        return var_mean_sum_(
+            x, axis=axis, correction=correction, keepdim=keepdim, return_mean=True
+        )
+
+    return (
+        var_(x, axis=axis, correction=correction, keepdim=keepdim),
+        mean(x, axis=axis, keepdim=keepdim),
     )
 
 

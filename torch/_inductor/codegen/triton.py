@@ -1278,7 +1278,16 @@ class TritonKernel(Kernel):
                 """
             )
 
+        def final_variance(buffer, result_var, mean, m2, weight):
+            buffer.splice(
+                f"""\
+            _, {result_var}_m2, {result_var}_weight = triton_helpers.welford({mean}, {m2}, {weight}, {dim})
+            {result_var} = ({result_var}_m2 / {result_var}_weight)[:, None]
+            """
+            )
+
         dim = len(self.range_trees) - 1
+        acc_type = triton_acc_type(src_dtype)
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
         cond = " & ".join(masks)
@@ -1297,6 +1306,12 @@ class TritonKernel(Kernel):
                 final_argreduce(
                     self.compute, result_var, masked_value, accumulator_index
                 )
+            elif reduction_type == "var":
+                m2 = self.cse.generate(
+                    self.compute, f"tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
+                weight = self.cse.generate(self.compute, f"({cond}).to({acc_type})")
+                final_variance(self.compute, result_var, masked_value, m2, weight)
             else:
                 result_var = self.cse.generate(
                     self.compute, final_reduction(masked_value)
@@ -1305,7 +1320,7 @@ class TritonKernel(Kernel):
             self.cse.reduction_cache[(src_dtype, reduction_type, value)] = result_var
             accumulator = f"_{result_var}"
             self.body.writeline(
-                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {triton_acc_type(src_dtype)})"
+                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
             )
 
             if reduction_type in {"argmax", "argmin"}:
@@ -1326,6 +1341,35 @@ class TritonKernel(Kernel):
                 """
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
+            elif reduction_type == "var":
+                accumulator_m2 = f"_{result_var}_m2"
+                accumulator_weight = f"_{result_var}_weight"
+                self.body.writeline(
+                    f"{accumulator_m2} = tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
+                self.body.writeline(
+                    f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
+                )
+
+                self.compute.splice(
+                    f"""\
+                {value}_delta = {value} - {accumulator}
+                {accumulator_weight}_next = {accumulator_weight} + cond.to({acc_type})
+                {accumulator}_next = {accumulator} + {value}_delta / {accumulator_weight}_next
+                {accumulator_m2}_next = {accumulator_m2} + {value}_delta * ({value} - {accumulator_next})
+
+                {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
+                {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})
+                {accumulator_weight} = tl.where({cond}, {accumulator_weight}_next, {accumulator_weight})
+                """
+                )
+                final_variance(
+                    self.suffix,
+                    result_var,
+                    accumulator,
+                    accumulator_m2,
+                    accumulator_weight,
+                )
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
                 updated = combine_fn(accumulator, value)
