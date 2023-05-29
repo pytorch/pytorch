@@ -1264,11 +1264,17 @@ class BenchmarkRunner:
                 except NotImplementedError:
                     continue  # bad benchmark implementation
 
+    def deepcopy_model(self, model):
+        try:
+            return copy.deepcopy(model)
+        except TypeError:
+            return model
+
     def validate_model(self, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
-        model = copy.deepcopy(model)
+        model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1283,7 +1289,7 @@ class BenchmarkRunner:
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = copy.deepcopy(model)
+        model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1387,7 +1393,7 @@ class BenchmarkRunner:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         def deepcopy_and_maybe_ddp(model):
-            model = copy.deepcopy(model)
+            model = self.deepcopy_model(model)
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
@@ -1437,6 +1443,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
+                log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Rerun native pytorch

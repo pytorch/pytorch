@@ -674,6 +674,22 @@ class SkipFilesVariable(VariableTracker):
                 items, mutable_local=MutableLocal(), **options
             )
         elif (
+            self.value is itertools.combinations
+            and not kwargs
+            and len(args) == 2
+            and args[0].has_unpack_var_sequence(tx)
+            and args[1].is_python_constant()
+        ):
+            iterable = args[0].unpack_var_sequence(tx)
+            r = args[1].as_python_constant()
+
+            items = []
+            for item in itertools.combinations(iterable, r):
+                items.append(variables.TupleVariable(list(item), **options))
+            return variables.ListIteratorVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
+        elif (
             self.value is functools.wraps
             and not kwargs
             and len(args) == 1

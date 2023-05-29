@@ -2108,12 +2108,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
-    def test_threshold_bfloat16(self):
+    def test_threshold_bfloat16_half(self):
         x = torch.randn(100)
-        for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
-            expected = F.threshold(x, threshold, 0).bfloat16().float()
-            res_bf16 = F.threshold(x.bfloat16(), threshold, 0).float()
-            self.assertEqual(res_bf16, expected)
+        for dtype in [torch.bfloat16, torch.half]:
+            for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
+                expected = F.threshold(x, threshold, 0).to(dtype=dtype).float()
+                res_bf16 = F.threshold(x.to(dtype=dtype), threshold, 0).float()
+                self.assertEqual(res_bf16, expected)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
@@ -6548,27 +6549,47 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
         def helper(size, scale_factor, mode, device, memory_format=torch.contiguous_format):
-            inputf = torch.randn(size, device=device, dtype=torch.float, requires_grad=True)
-            input = inputf.to(dtype).to(memory_format=memory_format).detach().requires_grad_(True)
+            input = torch.randn(size, device=device, dtype=dtype).to(memory_format=memory_format).detach().requires_grad_(True)
+            inputf = input.to(torch.float32).to(memory_format=torch.contiguous_format).detach().requires_grad_(True)
             m = nn.Upsample(scale_factor=scale_factor, mode=mode)
 
             outf = m(inputf)
             out = m(input)
-            self.assertEqual(out, outf.to(dtype), atol=0.1, rtol=0.0)
+            self.assertEqual(out.to(torch.float32), outf, atol=0.05, rtol=0)
 
-            out.sum().backward()
-            outf.sum().backward()
-            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
+            ginput = torch.randn(out.shape, device=device, dtype=dtype).to(memory_format=memory_format)
+            ginputf = ginput.to(torch.float32).to(memory_format=torch.contiguous_format)
+            out.backward(ginput)
+            outf.backward(ginputf)
+            self.assertEqual(input.grad.to(torch.float32), inputf.grad, atol=0.01, rtol=0.01)
 
         for device in ['cpu']:
-            helper([3, 20, 30], 2, 'nearest', device)
             helper([3, 20, 11, 7], 2, 'nearest', device)
             helper([3, 20, 11, 7], 2, 'nearest', device, torch.channels_last)
             helper([3, 20, 11, 7, 3], 2, 'nearest', device)
             helper([3, 20, 30], 2, 'linear', device)
             helper([3, 20, 11, 7], 2, 'bilinear', device)
             helper([3, 20, 11, 7], 2, 'bilinear', device, torch.channels_last)
+            helper([1, 3, 11, 7], 2, 'bicubic', device)
+            helper([1, 3, 11, 7], 2, 'bicubic', device, torch.channels_last)
             helper([3, 20, 11, 7, 3], 2, 'trilinear', device)
+
+            helper([3, 5, 5], 257., 'nearest', device)
+            helper([3, 20, 11, 7], 20, 'nearest', device)
+            helper([3, 20, 11, 7, 3], 20, 'nearest', device)
+            helper([1, 2, 11, 7], 257, 'nearest', device, torch.channels_last)
+            helper([1, 2, 2000, 2000], 1 / 377., 'nearest', device)
+            helper([1, 2, 2000, 2000], 1 / 257., 'nearest', device, torch.channels_last)
+            helper([3, 2, 11, 7, 3], 20, 'nearest', device, torch.channels_last_3d)
+            helper([3, 5, 5], 10, 'linear', device)
+            helper([3, 5, 5], 257, 'linear', device)
+            helper([1, 2, 11, 7], 257, 'bilinear', device)
+            helper([1, 2, 11, 7], 257, 'bilinear', device, torch.channels_last)
+            helper([1, 3, 11, 7], 10, 'bicubic', device)
+            helper([1, 3, 11, 7], 10, 'bicubic', device, torch.channels_last)
+            helper([1, 1, 11, 7], 257, 'bicubic', device)
+            helper([3, 2, 11, 7, 3], 20, 'trilinear', device)
+            helper([3, 2, 11, 7, 3], 20, 'trilinear', device, torch.channels_last_3d)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_interpolate_illegal_memory_access(self):
@@ -11236,36 +11257,46 @@ class TestNNDeviceType(NNTestCase):
                                                                   torch.zeros(3, device=device)))
 
     @onlyCPU
-    def test_activations_bfloat16_cpu(self, device):
-        def test_bfloat16(fn, device, inp_dims, prec):
-            # bfloat16 compute
-            input = torch.randn(inp_dims, dtype=torch.bfloat16, device=device, requires_grad=True)
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_activations_bfloat16_half_cpu(self, device, dtype):
+        def test_helper(fn, device, inp_dims, prec=None):
+            torch.manual_seed(37)
+            # bfloat16/half compute
+            fn = fn.to(dtype=dtype)
+            input = torch.randn(inp_dims, dtype=dtype, device=device, requires_grad=True)
             out = fn(input)
-            grad_input = torch.randn_like(out, dtype=torch.bfloat16, device=device)
+            grad_input = torch.randn_like(out, dtype=dtype, device=device)
             out.backward(grad_input)
 
             # fp32 compute
             input2 = input.detach().clone().float().requires_grad_(True)
-            out2 = fn(input2)
+            out2 = fn.float()(input2)
             grad_input2 = grad_input.detach().clone().float()
             out2.backward(grad_input2)
 
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(input.grad.dtype, torch.bfloat16)
-            self.assertEqual(out, out2, atol=prec, rtol=0, exact_dtype=False)
-            self.assertEqual(input.grad.data, input2.grad.data, atol=prec, rtol=0, exact_dtype=False)
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype), atol=prec, rtol=prec)
+            self.assertEqual(input.grad.data, input2.grad.data.to(dtype=dtype), atol=prec, rtol=prec)
 
         shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 256, 256]]
         for shape in shapes:
-            test_bfloat16(torch.nn.LogSigmoid(), device, shape, prec=2e-2)
-            test_bfloat16(torch.nn.Hardsigmoid(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Hardshrink(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Softshrink(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Hardswish(), device, shape, prec=2e-2)
-            test_bfloat16(torch.nn.Softplus(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.SiLU(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Hardtanh(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Mish(), device, shape, prec=1e-2)
+            test_helper(torch.nn.LogSigmoid(), device, shape)
+            test_helper(torch.nn.Hardsigmoid(), device, shape)
+            test_helper(torch.nn.Hardshrink(), device, shape)
+            test_helper(torch.nn.Softshrink(), device, shape)
+            test_helper(torch.nn.Hardswish(), device, shape)
+            test_helper(torch.nn.Softplus(), device, shape)
+            test_helper(torch.nn.SiLU(), device, shape)
+            test_helper(torch.nn.Hardtanh(), device, shape)
+            test_helper(torch.nn.Mish(), device, shape)
+            test_helper(torch.nn.ELU(), device, shape)
+            test_helper(torch.nn.PReLU(), device, shape)
+            test_helper(torch.nn.GLU(), device, shape, prec=1e-2)
+            test_helper(torch.nn.Threshold(0.1, 20), device, shape)
+            test_helper(torch.nn.GELU(), device, shape)
+            test_helper(torch.nn.Hardtanh(), device, shape)
+            test_helper(torch.nn.LeakyReLU(), device, shape)
 
     @onlyCUDA
     def test_activations_bfloat16(self, device):

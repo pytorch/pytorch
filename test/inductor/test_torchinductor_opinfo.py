@@ -379,6 +379,7 @@ inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "asin": {f16},
+    "atanh": {f16, f32},
     "cumprod": {f16},
     "linalg.vector_norm": {f64, f64},
     "kron": {f16},
