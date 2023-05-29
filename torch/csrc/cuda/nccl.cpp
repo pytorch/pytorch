@@ -392,7 +392,7 @@ void check_inputs(
 
     check_tensor(
         input,
-        i == static_cast<decltype(i)>(root) ? at::optional<at::Tensor>{output}
+        i == static_cast<std::remove_cv<decltype(i)>::type>(root) ? at::optional<at::Tensor>{output}
                                             : at::nullopt,
         input_multiplier,
         output_multiplier,
