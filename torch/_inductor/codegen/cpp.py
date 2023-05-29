@@ -208,7 +208,7 @@ def reduction_combine_vec(reduction_type, var, next_value):
 
 def reduction_project(reduction_type, acc):
     if reduction_type == "var":
-        return f"{acc}.m2 / {acc}.weight)"
+        return f"({acc}.m2 / {acc}.weight)"
     elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc

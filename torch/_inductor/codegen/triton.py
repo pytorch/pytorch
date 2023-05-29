@@ -1354,9 +1354,9 @@ class TritonKernel(Kernel):
                 self.compute.splice(
                     f"""\
                 {value}_delta = {value} - {accumulator}
-                {accumulator_weight}_next = {accumulator_weight} + cond.to({acc_type})
+                {accumulator_weight}_next = {accumulator_weight} + ({cond}).to({acc_type})
                 {accumulator}_next = {accumulator} + {value}_delta / {accumulator_weight}_next
-                {accumulator_m2}_next = {accumulator_m2} + {value}_delta * ({value} - {accumulator_next})
+                {accumulator_m2}_next = {accumulator_m2} + {value}_delta * ({value} - {accumulator}_next)
 
                 {accumulator} = tl.where({cond}, {accumulator}_next, {accumulator})
                 {accumulator_m2} = tl.where({cond}, {accumulator_m2}_next, {accumulator_m2})

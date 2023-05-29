@@ -3638,7 +3638,6 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 def var_(x, axis=None, *, correction=None, keepdim=False):
     if correction is None:
         correction = 1
-    print(correction)
 
     if torch.version.hip is not None:
         return var_mean_sum_(
