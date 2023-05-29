@@ -1,11 +1,11 @@
 ![PyTorch Logo](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/pytorch-logo-dark.png)
 
 --------------------------------------------------------------------------------
-- [English](README.md)
-- [Português](translation/README_pt.md)
-- [عربي](translation/README_ar.md)
-- [Türkçe](translation/README_tr.md)
-- [Deutsch](translation/README_de.md)
+- [English](README_en.md)
+- [Português](README_pt.md)
+- [عربي](README_ar.md)
+- [Türkçe](README_tr.md)
+- [Deutsch](README_de.md)
 
 PyTorch é um pacote Python que fornece dois recursos de alto nível:
 - Computação de tensor (como NumPy) com forte aceleração de GPU
