@@ -8624,12 +8624,18 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
+                                     'TestForeach', 'test_unary_op', device_type='cuda'),)
     ),
     ForeachFuncInfo(
         'asin',
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         supports_autograd=True,
         supports_forward_ad=True,
+        decorators=(
+                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
+                                     'TestForeach', 'test_unary_op', device_type='cuda'),)
     ),
     ForeachFuncInfo(
         'atan',
@@ -8673,6 +8679,9 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         backward_requires_result=True,
+        decorators=(
+                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
+                                     'TestForeach', 'test_unary_op', device_type='cuda'),)
     ),
     ForeachFuncInfo(
         'tanh',
@@ -8680,6 +8689,9 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         backward_requires_result=True,
+        decorators=(
+                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=5e-03, rtol=1e-04)}),
+                                     'TestForeach', 'test_unary_op', device_type='cuda'),)
     ),
     ForeachFuncInfo(
         'sin',
@@ -8693,7 +8705,6 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
     ),
-
     ForeachFuncInfo(
         'neg',
         dtypes=all_types_and_complex(),
@@ -9406,7 +9417,11 @@ op_db: List[OpInfo] = [
                    domain=(1, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),
+                               DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
+                                            'TestUnaryUfuncs',
+                                            'test_reference_numerics_extremal',
+                                            device_type='cuda'),),
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -21579,31 +21594,6 @@ def skipOps(test_case_name, base_test_name, to_skip):
                                          device_type=device_type, dtypes=dtypes)
                 decorators.append(decorator)
             op.decorators = tuple(decorators)
-
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn):
-        return fn
-    return wrapped
-
-# TODO: Share the implementation with functorch/common_utils.py
-def tol2(op_name, variant_name, override_dct, *, device_type=None):
-    return (op_name, variant_name, override_dct, device_type)
-
-def tol1(op_name, override_dct, *, device_type=None):
-    return tol2(op_name, '', override_dct, device_type=device_type)
-
-def opsToleranceOverride(ops, test_case_name, base_test_name, overrides):
-    for override in overrides:
-        op_name, variant_name, override, device_type = override
-        matching_opinfos = [o for o in ops
-                            if o.name == op_name and o.variant_test_name == variant_name]
-        assert len(matching_opinfos) == 1, f"Couldn't find OpInfo for {override}"
-        opinfo = matching_opinfos[0]
-        decorators = list(opinfo.decorators)
-        decorators.append(DecorateInfo(
-            toleranceOverride(override),
-            test_case_name, base_test_name, device_type=device_type))
-        opinfo.decorators = tuple(decorators)
 
     # This decorator doesn't modify fn in any way
     def wrapped(fn):
