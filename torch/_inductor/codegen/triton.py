@@ -281,6 +281,10 @@ class TritonOverrides(OpOverrides):
         return f"tl.math.erfc({x})"
 
     @staticmethod
+    def erfinv(x):
+        return f"tl.math.erfinv({x})"
+
+    @staticmethod
     def hypot(x, y):
         return f"tl.math.hypot({x}, {y})"
 
