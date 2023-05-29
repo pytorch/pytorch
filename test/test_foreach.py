@@ -17,8 +17,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes,)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
-    foreach_reduce_op_db, foreach_lerp_op_db,  opsToleranceOverride,
-    tol1)
+    foreach_reduce_op_db, foreach_lerp_op_db)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, integral_types, complex_types,
     floating_types_and, floating_types, integral_types_and,
