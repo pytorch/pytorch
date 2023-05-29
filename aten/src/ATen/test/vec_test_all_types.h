@@ -250,7 +250,7 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
     stream << "Domain: ";
     if (dmn.ArgsDomain.size() > 0) {
         for (const DomainRange<T>& x : dmn.ArgsDomain) {
-            if (std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value) {
+            if constexpr (std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value) {
                 stream << "\n{ " << static_cast<int>(x.start) << ", " << static_cast<int>(x.end) << " }";
             }
             else {
@@ -458,7 +458,7 @@ std::enable_if_t<is_complex<Complex<T>>::value, void> filter_zero(Complex<T>& va
 
 template <typename T>
 void filter_int_minimum(T& val) {
-    if (!std::is_integral<T>::value) return;
+    if constexpr (!std::is_integral<T>::value) return;
     if (val == std::numeric_limits<T>::min()) {
         val = 0;
     }
@@ -478,7 +478,7 @@ std::enable_if_t<is_complex<T>::value, void> filter_sub_overflow(T& a, T& b)
 
 template <typename T>
 std::enable_if_t < !is_complex<T>::value, void> filter_add_overflow(T& a, T& b) {
-    if (std::is_integral<T>::value == false) return;
+    if constexpr (std::is_integral<T>::value == false) return;
     T max = std::numeric_limits<T>::max();
     T min = std::numeric_limits<T>::min();
     // min <= (a +b) <= max;
@@ -497,7 +497,7 @@ std::enable_if_t < !is_complex<T>::value, void> filter_add_overflow(T& a, T& b) 
 
 template <typename T>
 std::enable_if_t < !is_complex<T>::value, void> filter_sub_overflow(T& a, T& b) {
-    if (std::is_integral<T>::value == false) return;
+    if constexpr (std::is_integral<T>::value == false) return;
     T max = std::numeric_limits<T>::max();
     T min = std::numeric_limits<T>::min();
     // min <= (a-b) <= max;
@@ -534,7 +534,7 @@ filter_div_ub(T& val1, T& val2) {
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, void>
 filter_mult_overflow(T& val1, T& val2) {
-    if (std::is_integral<T>::value == false) return;
+    if constexpr (std::is_integral<T>::value == false) return;
     if (!is_zero(val2)) {
         T c = (std::numeric_limits<T>::max() - 1) / val2;
         if (std::abs(val1) >= c) {
@@ -888,13 +888,13 @@ public:
         else
         {
             for (const auto i : c10::irange(sizeX)) {
-                if (std::is_same<UVT, float>::value)
+                if constexpr (std::is_same<UVT, float>::value)
                 {
                     if (!check_both_nan(expArr[i], actArr[i])) {
                         EXPECT_FLOAT_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
                     }
                 }
-                else if (std::is_same<UVT, double>::value)
+                else if constexpr (std::is_same<UVT, double>::value)
                 {
                     if (!check_both_nan(expArr[i], actArr[i]))
                     {
