@@ -3996,6 +3996,49 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"indices": {0: "a", 1: "b"}, "src": {0: "c", 1: "d"}},
         )
 
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_scatter_reduce(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x, index, input):
+                y_max = input.scatter_reduce(0, index, x, reduce="amax")
+                y_sum = input.scatter_reduce(0, index, x, reduce="sum")
+                y_min = input.scatter_reduce(0, index, x, reduce="amin")
+                y_mul = input.scatter_reduce(0, index, x, reduce="prod")
+                return y_max, y_sum, y_min, y_mul
+
+        model = Model()
+        model.eval()
+
+        src = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        index = torch.tensor([0, 1, 0, 1, 2, 1])
+        input = torch.tensor([1.0, 2.0, 3.0, 8.0])
+
+        self.run_test(model, (src, index, input))
+
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_scatter_reduce_self_rank_zero(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x, index, input):
+                y_max = input.scatter_reduce(0, index, x, reduce="amax")
+                y_sum = input.scatter_reduce(0, index, x, reduce="sum")
+                y_min = input.scatter_reduce(0, index, x, reduce="amin")
+                y_mul = input.scatter_reduce(0, index, x, reduce="prod")
+                return y_max, y_sum, y_min, y_mul
+
+        model = Model()
+        model.eval()
+
+        empty_tensor = torch.tensor([])
+        empty_idx = torch.tensor([], dtype=torch.int64)
+
+        self.run_test(model, (empty_tensor, empty_idx, empty_tensor))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_bucketize(self):
         class BucketModel(torch.nn.Module):

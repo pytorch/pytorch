@@ -627,14 +627,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
-                        for leaf_name, _ in target.named_parameters(
-                            remove_duplicate=False
-                        ):
+                        for leaf_name, _ in target.named_parameters():
                             register_leaf_name(leaf_name)
                     if hasattr(target, "_buffers"):
-                        for leaf_name, _ in target.named_buffers(
-                            remove_duplicate=False
-                        ):
+                        for leaf_name, _ in target.named_buffers():
                             register_leaf_name(leaf_name)
 
                 return wrap_name(name)

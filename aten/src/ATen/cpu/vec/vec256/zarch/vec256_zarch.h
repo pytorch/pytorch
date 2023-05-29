@@ -13,6 +13,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/complex.h>
 
+#define SLEEF_MEMORY_WORKAROUND
+
 namespace at {
 namespace vec {
 
@@ -1039,20 +1041,32 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   }
 
   Vectorized<T> sin() const {
+#ifndef SLEEF_MEMORY_WORKAROUND
     return mapSleef(Sleef_sinf4_u10, Sleef_sind2_u10);
+#else
+    return mapOrdinary(std::sin);
+#endif
   }
   Vectorized<T> sinh() const {
     return mapSleef(Sleef_sinhf4_u10, Sleef_sinhd2_u10);
   }
   Vectorized<T> cos() const {
+#ifndef SLEEF_MEMORY_WORKAROUND
     return mapSleef(Sleef_cosf4_u10, Sleef_cosd2_u10);
+#else
+    return mapOrdinary(std::cos);
+#endif
   }
   Vectorized<T> cosh() const {
     return mapSleef(Sleef_coshf4_u10, Sleef_coshd2_u10);
   }
 
   Vectorized<T> tan() const {
+#ifndef SLEEF_MEMORY_WORKAROUND
     return mapSleef(Sleef_tanf4_u10, Sleef_tand2_u10);
+#else
+    return mapOrdinary(std::tan);
+#endif
   }
   Vectorized<T> tanh() const {
     return mapSleef(Sleef_tanhf4_u10, Sleef_tanhd2_u10);
