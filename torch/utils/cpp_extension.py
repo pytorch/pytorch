@@ -524,8 +524,8 @@ class BuildExtension(build_ext):
             if 'nvcc_dlink' in extension.extra_compile_args:
                 assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
 
-        # Register .cu, .cuh and .hip as valid source extensions.
-        self.compiler.src_extensions += ['.cu', '.cuh', '.hip']
+        # Register .cu, .cuh, .hip, and .mm as valid source extensions.
+        self.compiler.src_extensions += ['.cu', '.cuh', '.hip', '.mm']
         # Save the original _compile method for later.
         if self.compiler.compiler_type == 'msvc':
             self.compiler._cpp_extensions += ['.cu', '.cuh']
