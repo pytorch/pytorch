@@ -10,13 +10,19 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/native/BinaryOps.h>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#define INDUCTOR_USE_VECTOR_TYPES() 1
+#else
+#define INDUCTOR_USE_VECTOR_TYPES() 0
+#endif
+
+#if INDUCTOR_USE_VECTOR_TYPES()
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
 
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
@@ -32,9 +38,10 @@ struct Welford {
 template <typename T>
 struct IsVecType: std::false_type {};
 
+#if INDUCTOR_USE_VECTOR_TYPES()
 template <typename T>
 struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
-
+#endif
 
 template <typename T>
 Welford<T> welford_combine(Welford<T> a, Welford<T> b) {
@@ -73,6 +80,7 @@ Welford<T> welford_combine(Welford<T> acc, T data) {
 }
 
 
+#if INDUCTOR_USE_VECTOR_TYPES()
 template <typename scalar_t>
 inline at::vec::Vectorized<scalar_t> vec_shuffle_down(at::vec::Vectorized<scalar_t> x, size_t n) {
   using Vec = at::vec::Vectorized<scalar_t>;
@@ -109,6 +117,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
 
   return result;
 }
+#endif
 
 
 template <typename T> inline T mod(T a, T b) { return a % b; }
