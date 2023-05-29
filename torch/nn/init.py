@@ -3,7 +3,7 @@ import warnings
 
 from torch import Tensor
 import torch
-from typing import Optional, Optional as _Optional
+from typing import Optional as _Optional
 
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
@@ -160,7 +160,7 @@ def trunc_normal_(
     std: float = 1.,
     a: float = -2.,
     b: float = 2.,
-    generator: Optional[_Optional[torch.Generator]] = None
+    generator: _Optional[torch.Generator] = None
 ) -> Tensor:
     r"""Fills the input Tensor with values drawn from a truncated
     normal distribution. The values are effectively drawn from the
