@@ -240,7 +240,7 @@ def _single_tensor_sgd(params: List[Tensor],
                        dampening: float,
                        nesterov: bool,
                        maximize: bool,
-                       has_sparse_grad: bool):
+                       has_sparse_grad: Optional[bool]):
 
     for i, param in enumerate(params):
         d_p = d_p_list[i] if not maximize else -d_p_list[i]
@@ -275,7 +275,7 @@ def _multi_tensor_sgd(params: List[Tensor],
                       dampening: float,
                       nesterov: bool,
                       maximize: bool,
-                      has_sparse_grad: bool):
+                      has_sparse_grad: Optional[bool]):
 
     if len(params) == 0:
         return
