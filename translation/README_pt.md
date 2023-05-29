@@ -356,31 +356,27 @@ ccmake build  # or cmake-gui build
 
 #### Usando imagens pré-prontas
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+Você pode também baixar uma imagem Docker pré-pronta do Docker Hub e executar com docker v19.03+
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 ```
 
-Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
-for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
-should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
+Repare que PyTorch usa memória compartilhada para compartilhar dados entre processos, então se torch multiprocessing for usado (por exemplo, para carregar dados multithreads), o tamanho padrão do segmento de memória compartilhada não é suficiente, e você deve aumentar o tamanho da memória com as opções `--ipc=host` ou `--shm-size` do `nvidia-docker run`.
 
 #### Criando a própria imagem
 
-**NOTE:** Must be built with a docker version > 18.06
+**OBSERVAÇÃO:** Deve ser criada com uma versão docker > 18.06
 
-The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
-You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
-unset to use the default.
+O `Dockerfile` é fornecido para criar imagens com suporte CUDA 11.1 e cuDNN v8.
+Você pode passar a variável `PYTHON_VERSION=x.y` para especificar qual versão do Python será usada pelo Miniconda, ou deixá-la indefinida para usar o padrão.
 
 ```bash
 make -f docker.Makefile
-# images are tagged as docker.io/${your_docker_username}/pytorch
+# imagens are rotuladas como docker.io/${your_docker_username}/pytorch
 ```
 
-You can also pass the `CMAKE_VARS="..."` environment variable to specify additional CMake variables to be passed to CMake during the build.
-See [setup.py](./setup.py) for the list of available variables.
+Você também pode passar a variável de ambiente `CMAKE_VARS="..."` para especificar variáveis CMake adicionais a serem passadas ao CMake durante a build. Veja [setup.py](./setup.py) para a lista de variáveis disponíveis.
 
 ```bash
 CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
@@ -388,83 +384,70 @@ CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
 
 ### Montando Documentação
 
-To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
-readthedocs theme.
+Para montar documentação em vários formatos, você vai precisar do [Sphinx](http://www.sphinx-doc.org) e do tema readthedocs.
 
 ```bash
 cd docs/
 pip install -r requirements.txt
 ```
+Você pode então montar a documentação executando `make <format>` na pasta `docs/`. Execute `make` para receber uma lista de todos os formatos de saída disponíveis.
 
-You can then build the documentation by running `make <format>` from the
-`docs/` folder. Run `make` to get a list of all available output formats.
+Se você receber um erro katex, execute `npm install katex`.  Se o erro persistir, execute `npm install -g katex`
 
-If you get a katex error run `npm install katex`. If it persists, try
-`npm install -g katex`
-
-> Note: if you installed `nodejs` with a different package manager (e.g.,
-> `conda`) then `npm` will probably install a version of `katex` that is not
-> compatible with your version of `nodejs` and doc builds will fail.
-> A combination of versions that is known to work is `node@6.13.1` and
-> `katex@0.13.18`. To install the latter with `npm` you can run
-> `npm install -g katex@0.13.18`
+> Observação: se você instalou `nodejs` com outro gerenciador de pacotes (por exemplo, `conda`) então `npm` provavelmente irá instalar uma versão de `katex` que não é compatível com a sua versão de `nodejs` e a criação do doc vai falhar. Uma combinação de versões sabidamente funcional é `node@6.13.1` e `katex@0.13.18`. Para instalar esta última com `npm` você pode rodar ```npm install -g katex@0.13.18```
 
 ### Versões Anteriores
 
-Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](https://pytorch.org/previous-versions).
+Instruções de instalação e binaries de versões anteriores do PyTorch podem ser encontradas no [nosso site](https://pytorch.org/previous-versions).
 
 ## Começando
 
-Three-pointers to get you started:
-
-- [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
-- [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
-- [The API Reference](https://pytorch.org/docs/)
-- [Glossary](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
+Três dicas para começar:
+- [Tutoriais: para você começar a entender e usar o PyTorch](https://pytorch.org/tutorials/)
+- [Exemplos: códigos PyTorch fáceis de entender em todos os domínios](https://github.com/pytorch/examples)
+- [Referência da API](https://pytorch.org/docs/)
+- [Glossário](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
 
 ## Recursos
 
-- [PyTorch.org](https://pytorch.org/)
-- [PyTorch Tutorials](https://pytorch.org/tutorials/)
-- [PyTorch Examples](https://github.com/pytorch/examples)
-- [PyTorch Models](https://pytorch.org/hub/)
-- [Intro to Deep Learning with PyTorch from Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
-- [Intro to Machine Learning with PyTorch from Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
-- [Deep Neural Networks with PyTorch from Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
-- [PyTorch Twitter](https://twitter.com/PyTorch)
-- [PyTorch Blog](https://pytorch.org/blog/)
-- [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
+* [PyTorch.org](https://pytorch.org/)
+* [PyTorch Tutoriais](https://pytorch.org/tutorials/)
+* [PyTorch Exemplos](https://github.com/pytorch/examples)
+* [PyTorch Modelos](https://pytorch.org/hub/)
+* [Introdução a Deep Learning com PyTorch pela Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
+* [Introdução a Machine Learning com PyTorch pela Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
+* [Deep Neural Networks com PyTorch pela Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
+* [PyTorch Twitter](https://twitter.com/PyTorch)
+* [PyTorch Blog](https://pytorch.org/blog/)
+* [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
 ## Comunicação
-
-- Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
-- GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
-- Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-- Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
-- Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
-- For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
+* Fóruns: Discuta implementações, pesquisas, etc. https://discuss.pytorch.org
+* GitHub Issues: Reports de bugs, requisições de features, problemas de instalação, RFCs, pensamentos, etc.
+* Slack: O [PyTorch Slack](https://pytorch.slack.com/) recebe um público principal de usuários e desenvolvedores intermediários a experientes do PyTorch para bate-papo geral, discussões, colaboração, etc. Se você é um iniciante buscando por ajuda, o meio principal são os [Fóruns PyTorch](https://discuss.pytorch.org). Se você precisa de um convide para o Slack, preencha esse formulário: https://goo.gl/forms/PP1AGvNHpSaJP8to1
+* Notícias: Um email de notícias com anúncios importantes sobre PyTorch (sem SPAM). Você pode se inscrever aqui: https://eepurl.com/cbG0rv
+* Página do Facebook: Anúncios importantes sobre PyTorch. https://www.facebook.com/pytorch
+* Para obter as diretrizes da marca, visite nosso site em [pytorch.org](https://pytorch.org/)
 
 ## Lançamentos e Contribuição
 
-Typically, PyTorch has three major releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+PyTorch possui tipicamente três lançamentos principais por ano. Caso encontre um bug, por favor nos avise [criando uma issue](https://github.com/pytorch/pytorch/issues).
 
-We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
+Nós apreciamos todas as contribuições. Se você planeja contribuir através de correções de bugs, por favor o faça sem discussões.
 
-If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
-Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
+Se você planeja contribuir com novas features, funções utilitárias ou extensões de núcleo, por favor abra primeiro uma issue e discuta a feature conosco. Enviar um pull request sem discussão pode terminar em um PR rejeitado, porque podemos estar levando o núcleo em uma direção diferente da que você pode imaginar.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
+Para saber mais sobre como contribuir com PyTorch, por favor veja nossa [página de Contribuições](CONTRIBUTING.md). Para mais informações sobre lançamentos do PyTorch, veja a [página de Lançamentos](RELEASE.md).
 
 ## O Time
 
-PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
+PyTorch é um projeto voltado para a comunidade com vários engenheiros e pesquisadores habilidosos contribuindo para ele.
 
-PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
-A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
+PyTorch é atualmente administrado por [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), e [Nikita Shulga](https://github.com/malfet) com grandes contribuições vindas de centenas de indivíduos talentosos em várias formas e meios.
+Menções honrosas devem ser feitas para: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
 
-Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
+Observação: este projeto não está relacionado a [hughperkins/pytorch](https://github.com/hughperkins/pytorch) com o mesmo nome. Hugh é um colaborador valioso para a comunidade do Torch e ajudou em muitas coisas do Torch e do PyTorch.
 
 ## Licença
 
-PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
+PyTorch tem uma licença BSD, conforme descrito no arquivo [LICENSE](LICENSE).
