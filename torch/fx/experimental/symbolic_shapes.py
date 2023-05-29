@@ -2105,16 +2105,17 @@ class ShapeEnv:
 
         if _translation_validator_enabled():
             self.validator = TranslationValidator()
-            self.source_to_symbol: Dict[Source, sympy.Symbol] = {}
+            self.source_to_symbol: Dict[str, sympy.Symbol] = {}
 
     def freeze(self):
         self.frozen = True
 
-    def _create_symbol_for_source(self, source: Source) -> Optional[sympy.Symbol]:
+    def _create_symbol_for_source(self, source: Source, positive: bool =True) -> Optional[sympy.Symbol]:
         if _translation_validator_enabled():
+            srcname = source.name()
             if source not in self.source_to_symbol:
-                self.source_to_symbol[source] = sympy.Symbol(source.name(), positive=True, integer=True)
-            return self.source_to_symbol[source]
+                self.source_to_symbol[srcname] = sympy.Symbol(srcname, positive=positive, integer=True)
+            return self.source_to_symbol[srcname]
 
     def _add_input_guard(self, expr) -> None:
         if _translation_validator_enabled():
@@ -2166,15 +2167,9 @@ Failed inputs:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
         for i, val in enumerate(ex.size()):
-            source = TensorPropertySource(source, TensorProperty.SIZE, i)
-            expr = self.create_symbol(val, source, dynamic_dims[i], constraint_dims[i])
-            size.append(expr)
-
-            # Explicitly create one symbol for each source, and check its equality
-            # against the one returned by 'create_symbol'. This validates unification
-            # of duck symbols.
-            symbol = self._create_symbol_for_source(source)
-            self._add_input_guard(sympy.Eq(symbol, expr))
+            size.append(self.create_symbol(
+                val, TensorPropertySource(source, TensorProperty.SIZE, i), dynamic_dims[i], constraint_dims[i]
+            ))
         return size
 
     def create_symbolic_sizes_strides_storage_offset(
@@ -2232,6 +2227,15 @@ Failed inputs:
                 if stride[i] is None and ex.stride()[i] in candidates:
                     stride[i] = candidates[ex.stride()[i]]
                     candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
+
+                    # Add the expression corresponding to this stride as an input guard
+                    # for the validator if it is not static. Otherwise, it's already
+                    # checked in guards.cpp.
+                    if len(stride[i].free_symbols) > 0:
+                        source_ = TensorPropertySource(source, TensorProperty.STRIDE, i)
+                        symbol_ = self._create_symbol_for_source(source_)
+                        self._add_input_guard(sympy.Eq(symbol_, stride[i]))
+
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
                 val, i = min(
@@ -2266,21 +2270,6 @@ Failed inputs:
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(stride_expr, hint=ex.stride(i)))
         sym_storage_offset = self.create_symintnode(storage_offset, hint=ex.storage_offset())
-
-        # Adds guards for catching unification problems for each tensor property.
-        # First, we explicitly create a Symbol for each size, stride and storage offset. Then
-        # check for equality between that symbol and the one returned by "create_symbol" (which
-        # may not actually create one due to unification).
-        def add_guard_for(prop, expr, i=None):
-            source_ = TensorPropertySource(source, prop, i)
-            symbol_ = self._create_symbol_for_source(source_)
-            self._add_input_guard(sympy.Eq(symbol_, expr))
-
-        for i in range(len(size)):
-            add_guard_for(TensorProperty.SIZE, size[i], i)
-        for i in range(len(stride)):
-            add_guard_for(TensorProperty.STRIDE, stride[i], i)
-        add_guard_for(TensorProperty.STORAGE_OFFSET, storage_offset)
 
         return sym_sizes, sym_stride, sym_storage_offset
 
@@ -2387,6 +2376,15 @@ Failed inputs:
 
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
+
+        # Every time a 'create_symbol' is called for a given 'source', we:
+        #   1. Explicitly create a symbol, specifically for that 'source'
+        symbol_ = self._create_symbol_for_source(source, positive=False)
+        #   2. Add an equality between that and the possibly ducked 'r'.
+        #      Ignore static values: 0-1 specialization.
+        if len(r.free_symbols) > 0:
+            self._add_input_guard(sympy.Eq(symbol_, r))
+
         return r
 
     # Generates a list of guards strings which, when evaluated in a context that
@@ -2599,6 +2597,11 @@ Failed inputs:
 
         if not _simplified:
             for source, expr in input_guards:
+                # Ignore sources that were not turned into SymInts.
+                srcname = source.name()
+                if srcname in self.source_to_symbol:
+                    self._add_output_guard(sympy.Eq(self.source_to_symbol[srcname], expr))
+
                 # Small optimization
                 if (
                     isinstance(expr, sympy.Symbol) and
@@ -2606,10 +2609,6 @@ Failed inputs:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-
-                # Even if we end up skipping this, we add it as "output" since it will still
-                # be checked, as noted below.
-                self._add_output_guard(sympy.Eq(self.source_to_symbol[source], expr))
 
                 # This logic excludes static values found on tensors from guarding, because
                 # dynamo's check_tensor_fn does that (see guards.cpp).
