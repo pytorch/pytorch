@@ -48,6 +48,10 @@ def broadcast_tensors(*tensors):
 
     Args:
         *tensors: any number of tensors of the same type
+        
+    Returns:
+        the given tensors after broadcast
+        
 
     .. warning::
 
