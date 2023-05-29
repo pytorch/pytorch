@@ -316,7 +316,7 @@ set LIB={Your directory}\mkl\lib;%LIB%
 :: Certifique-se de ter CMake >= 3.12 antes de fazer isso ao usar o gerador do Visual Studio.
 set CMAKE_GENERATOR_TOOLSET_VERSION=14.27
 set DISTUTILS_USE_SDK=1
-for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,17^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
+for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,17^] -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
 
 :: [Opcional] Se você deseja substituir o compilador de host CUDA
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
@@ -369,7 +369,7 @@ make -f docker.Makefile
 # imagens are rotuladas como docker.io/${your_docker_username}/pytorch
 ```
 
-Você também pode passar a variável de ambiente `CMAKE_VARS="..."` para especificar variáveis CMake adicionais a serem passadas ao CMake durante a build. Veja [setup.py](./setup.py) para a lista de variáveis disponíveis.
+Você também pode passar a variável de ambiente `CMAKE_VARS="..."` para especificar variáveis CMake adicionais a serem passadas ao CMake durante a build. Veja [setup.py](../setup.py) para a lista de variáveis disponíveis.
 
 ```bash
 CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
@@ -430,7 +430,7 @@ Nós apreciamos todas as contribuições. Se você planeja contribuir através d
 
 Se você planeja contribuir com novas features, funções utilitárias ou extensões de núcleo, por favor abra primeiro uma issue e discuta a feature conosco. Enviar um pull request sem discussão pode terminar em um PR rejeitado, porque podemos estar levando o núcleo em uma direção diferente da que você pode imaginar.
 
-Para saber mais sobre como contribuir com PyTorch, por favor veja nossa [página de Contribuições](CONTRIBUTING.md). Para mais informações sobre lançamentos do PyTorch, veja a [página de Lançamentos](RELEASE.md).
+Para saber mais sobre como contribuir com PyTorch, por favor veja nossa [página de Contribuições](../CONTRIBUTING.md). Para mais informações sobre lançamentos do PyTorch, veja a [página de Lançamentos](../RELEASE.md).
 
 ## O Time
 
@@ -443,4 +443,4 @@ Observação: este projeto não está relacionado a [hughperkins/pytorch](https:
 
 ## Licença
 
-PyTorch tem uma licença BSD, conforme descrito no arquivo [LICENSE](LICENSE).
+PyTorch tem uma licença BSD, conforme descrito no arquivo [LICENSE](../LICENSE).

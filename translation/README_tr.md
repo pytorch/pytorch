@@ -319,7 +319,7 @@ set LIB={Your directory}\mkl\lib;%LIB%
 :: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
 set CMAKE_GENERATOR_TOOLSET_VERSION=14.27
 set DISTUTILS_USE_SDK=1
-for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,17^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
+for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,17^] -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
 
 :: [Optional] If you want to override the CUDA host compiler
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
@@ -376,7 +376,7 @@ make -f docker.Makefile
 ```
 
 You can also pass the `CMAKE_VARS="..."` environment variable to specify additional CMake variables to be passed to CMake during the build.
-See [setup.py](./setup.py) for the list of available variables.
+See [setup.py](../setup.py) for the list of available variables.
 
 ```bash
 CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
@@ -448,7 +448,7 @@ We appreciate all contributions. If you are planning to contribute back bug-fixe
 If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](RELEASE.md).
+To learn more about making a contribution to Pytorch, please see our [Contribution page](../CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](../RELEASE.md).
 
 ## The Team
 
@@ -461,4 +461,4 @@ Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hugh
 
 ## License
 
-PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
+PyTorch has a BSD-style license, as found in the [LICENSE](../LICENSE) file.
