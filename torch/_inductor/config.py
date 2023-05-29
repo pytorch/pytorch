@@ -229,6 +229,9 @@ class cpp:
     # similar to config.triton.descriptive_names
     descriptive_names = "original_aten"
 
+    # how many nodes to allow into a single horizontal fusion
+    max_horizontal_fusion_size = 16
+
 
 # config specific to codegen/triton.py
 class triton:
