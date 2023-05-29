@@ -90,7 +90,6 @@ def isGreen(commit: str, results: List[Dict[str, Any]]) -> Tuple[bool, str]:
         "trunk": False,
         "lint": False,
         "linux-binary": False,
-        "windows-binary": False,
     }
 
     for check in workflow_checks:

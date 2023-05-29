@@ -217,7 +217,23 @@ void recursive_store(
     if (is_symint) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymInt>();
-      *(int64_t*)data = val.guard_int(__FILE__, __LINE__);
+      const auto int_val = val.guard_int(__FILE__, __LINE__);
+      switch (elementSize) {
+        case 8:
+          *reinterpret_cast<int64_t*>(data) = int_val;
+          break;
+        case 4:
+          *reinterpret_cast<int32_t*>(data) = static_cast<int32_t>(int_val);
+          break;
+        case 2:
+          *reinterpret_cast<int16_t*>(data) = static_cast<int16_t>(int_val);
+          break;
+        case 1:
+          *reinterpret_cast<int8_t*>(data) = static_cast<int8_t>(int_val);
+          break;
+        default:
+          TORCH_CHECK(false, "Unexpected elementSize ", elementSize);
+      }
       return;
     }
     torch::utils::store_scalar(data, scalarType, obj);
@@ -369,10 +385,12 @@ Tensor internal_new_from_data(
       at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
       if (isStorage(data)) {
-        ScalarType storage_scalar_type{ScalarType::Undefined};
         bool is_typed_storage = false;
-        Storage storage =
-            createStorageGetType(data, storage_scalar_type, is_typed_storage);
+        ScalarType storage_scalar_type{ScalarType::Undefined};
+        Storage storage;
+        std::tie(storage, storage_scalar_type, is_typed_storage) =
+            createStorageGetType(data);
+
         TORCH_CHECK(
             !is_typed_storage || storage_scalar_type == scalar_type,
             "Expected a Storage of type ",

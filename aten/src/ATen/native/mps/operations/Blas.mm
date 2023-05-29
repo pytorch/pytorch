@@ -17,11 +17,46 @@
 
 namespace at::native {
 
+namespace mps {
+
+inline void dot_check(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(self.dim() == 1 && other.dim() == 1,
+              "1D tensors expected, but got ",
+              self.dim(),
+              "D and ",
+              other.dim(),
+              "D tensors");
+  TORCH_CHECK(self.scalar_type() == other.scalar_type(),
+              "dot : expected both vectors to have same dtype, but found ",
+              self.scalar_type(),
+              " and ",
+              other.scalar_type());
+  TORCH_CHECK(self.numel() == other.numel(),
+              "inconsistent tensor size, expected tensor [",
+              self.numel(),
+              "] and src [",
+              other.numel(),
+              "] to have the same number of elements, but got ",
+              self.numel(),
+              " and ",
+              other.numel(),
+              " elements respectively");
+  TORCH_CHECK(self.device() == other.device(),
+              "expected all tensors to be on the same device. Found: ",
+              self.device(),
+              ", ",
+              other.device());
+}
+} // namespace mps
+
 Tensor dot_mps(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS: dot op doesn't support int64 input")
 
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
+
+  dot_check(self, other);
+
   auto output = at::empty({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
