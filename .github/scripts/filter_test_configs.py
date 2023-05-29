@@ -449,10 +449,12 @@ def perform_misc_tasks(
         # Basically, when a build job is unstable, all the subsequent test jobs are
         # also unstable. And when all test jobs are unstable, we will also treat the
         # build job as unstable. It's simpler this way
-        set_output(
-            "is-unstable",
-            all(IssueType.UNSTABLE.value in r for r in test_matrix["include"]),
-        )
+        is_unstable = all(IssueType.UNSTABLE.value in r for r in test_matrix["include"])
+
+    set_output(
+        "is-unstable",
+        is_unstable,
+    )
 
 
 def main() -> None:
