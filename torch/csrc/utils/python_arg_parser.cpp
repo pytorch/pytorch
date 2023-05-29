@@ -288,7 +288,7 @@ auto handle_torch_function_no_python_arg_parser(
   }
   py::tuple py_types = py::cast(overloaded_types);
   py::object ret;
-  PyObject* mode_obj = nullptr;
+  py::object mode_obj;
 
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
@@ -302,15 +302,19 @@ auto handle_torch_function_no_python_arg_parser(
     // experience if you try to, e.g., print your tensors.
     at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
     at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
+    // NB: We only really need keep the mode_obj live if the function call
+    // fails for error reporting, but whatever, Python refcounts are cheap
     if (is_torch_function) {
       tf_g.emplace();
-      mode_obj = tf_g->get_cur_mode()->ptr(getPyInterpreter());
+      mode_obj = py::reinterpret_borrow<py::object>(
+          tf_g->get_cur_mode()->ptr(getPyInterpreter()));
     } else {
       td_g.emplace();
-      mode_obj = td_g->get_cur_mode()->ptr(getPyInterpreter());
+      mode_obj = py::reinterpret_borrow<py::object>(
+          td_g->get_cur_mode()->ptr(getPyInterpreter()));
     }
     py::object torch_function =
-        PyObject_FastGetAttrString(mode_obj, torch_function_name_str);
+        PyObject_FastGetAttrString(mode_obj.ptr(), torch_function_name_str);
     if (!torch_function) {
       TORCH_INTERNAL_ASSERT(0);
     }
@@ -319,7 +323,7 @@ auto handle_torch_function_no_python_arg_parser(
 
     TORCH_CHECK(
         PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
-            .is(py::reinterpret_borrow<py::object>(mode_obj)),
+            .is(mode_obj),
         "Defining your mode's `",
         torch_function_name_str,
         "` as a classmethod is not supported, please make it a plain method");
@@ -328,7 +332,7 @@ auto handle_torch_function_no_python_arg_parser(
     // because the nullptr terminates the argument list ick ick ick.
     if (kwargs == nullptr) {
       ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-          mode_obj,
+          mode_obj.ptr(),
           torch_function_name_str,
           "OOO",
           torch_api_function,
@@ -336,7 +340,7 @@ auto handle_torch_function_no_python_arg_parser(
           args));
     } else {
       ret = py::reinterpret_steal<py::object>(PyObject_CallMethod(
-          mode_obj,
+          mode_obj.ptr(),
           torch_function_name_str,
           "OOOO",
           torch_api_function,
@@ -390,7 +394,7 @@ auto handle_torch_function_no_python_arg_parser(
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
-    ss << "no implementation found for '";
+    ss << "Multiple dispatch failed for '";
     if (module_name && func_name) {
       ss << module_name << "." << func_name;
     } else {
@@ -398,14 +402,16 @@ auto handle_torch_function_no_python_arg_parser(
       ss << py::str(fn.attr("__module__")) << "."
          << py::str(fn.attr("__name__"));
     }
-    ss << "' on types that implement " << torch_function_name_str << ": [";
-    for (auto& arg : overloaded_args) {
-      ss << py::repr(get_type_of_overloaded_arg(arg.ptr()));
-      if (!arg.is(overloaded_args.back())) {
-        ss << ", ";
-      }
+    ss << "'; all " << torch_function_name_str
+       << " handlers returned NotImplemented:\n\n";
+    if (mode_obj) {
+      ss << "  - mode object " << py::repr(mode_obj) << "\n";
     }
-    ss << "]";
+    for (auto& arg : overloaded_args) {
+      ss << "  - tensor subclass "
+         << py::repr(get_type_of_overloaded_arg(arg.ptr())) << "\n";
+    }
+    ss << "\nFor more information, try re-running with TORCH_LOGS=not_implemented";
     const std::string& tmp = ss.str();
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
     throw python_error();

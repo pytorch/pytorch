@@ -1821,6 +1821,17 @@ def forward(self, tangents_1):
         out = af(inp)
         self.assertEqual(out, f(inp))
 
+    def test_inference_mode(self):
+        m = torch.nn.Linear(4, 4)
+        inp = torch.randn(4, 4)
+
+        aot_mod = aot_module(m, fw_compiler=nop)
+
+        with torch.inference_mode():
+            out_ref = m(inp)
+            out_test = aot_mod(inp)
+        self.assertEqual(out_ref, out_test)
+
     def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
         """
         In this test, the important thing is that primals_1 is **only** needed in the backward
@@ -2092,6 +2103,33 @@ class <lambda>(torch.nn.Module):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
+    def test_aot_export_forward_mutation_no_buffer_mut_banned(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 4))
+
+            def forward(self, x):
+                x.add_(4)
+                return (x.cos().sum() + self.buffer1.sum(),)
+
+        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[0\\] are mutated"):
+            aot_export_module(M(), [torch.ones(6, 4)], trace_joint=False)
+
+    def test_aot_export_forward_mutation_multiple_mut_banned(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer1", torch.ones(6, 4))
+
+            def forward(self, x, y):
+                y.add_(4)
+                self.buffer1.add_(5)
+                return (x.cos().sum() + y.sin().sum(), self.buffer1.sum(),)
+
+        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[1\\] are mutated"):
+            aot_export_module(M(), [torch.ones(6, 4), torch.zeros(6, 4)], trace_joint=False)
+
     def test_aot_export_input_mutation_on_parameter_banned(self):
         def fn(p, x):
             p.mul_(2)
@@ -2149,7 +2187,7 @@ class <lambda>(torch.nn.Module):
             return (x + x,)
         inp = torch.randn(2)
         with self.assertRaisesRegex(
-            RuntimeError, "aot_export_joint_simple does not support input mutations"
+            RuntimeError, "Found following user inputs located at \\[0\\] are mutated"
         ):
             aot_export_joint_simple(fn, [inp], trace_joint=False)
             aot_export_joint_simple(fn, [inp], trace_joint=True)
@@ -2649,7 +2687,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                 return (x + fake_z, )
 
         with self.assertRaisesRegex(
-            AssertionError, "Unexpected fake buffer"
+            TypeError, "FakeTensor"
         ):
             aot_module_simplified(MockModule(), (fake_x,), nop)
 
@@ -2739,8 +2777,6 @@ symbolic_aot_autograd_failures = {
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.det', ''),  # aten._linalg_det.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.det', 'singular'),  # aten._linalg_det.default - couldn't find symbolic meta function/deco...
     xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition
     skip('linalg.householder_product'),  # flaky
     xfail('linalg.lstsq', ''),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
@@ -2748,10 +2784,7 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lu_factor', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function...
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
-    xfail('linalg.matrix_power', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.pinv', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/dec...
-    xfail('linalg.pinv', 'hermitian'),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta fu...
     xfail('linalg.slogdet', ''),  # aten._linalg_slogdet.default - couldn't find symbolic meta function/decom...
     xfail('linalg.solve', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomp...
     xfail('linalg.solve_ex', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/dec...
@@ -2806,10 +2839,8 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
-    xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
-    xfail('pinverse', ''),  # aten.linalg_pinv.atol_rtol_tensor - couldn't find symbolic meta function/decomp...
     xfail('polygamma', 'polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('polygamma', 'polygamma_n_1'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('polygamma', 'polygamma_n_2'),  # aten.polygamma.default - couldn't find symbolic meta function/de...

@@ -245,7 +245,7 @@ Tensor conv2d_depthwise(
       groups);
 }
 
-static std::vector<int64_t> _pair_int(ArgValue v) {
+std::vector<int64_t> _pair_int(ArgValue v) {
   if (auto t = c10::get_if<IntList>(&v)) {
     return {(*t)[0], (*t)[1]};
   }
@@ -253,7 +253,7 @@ static std::vector<int64_t> _pair_int(ArgValue v) {
   return {i, i};
 }
 
-static std::vector<int64_t> _single_int_list(ArgValue v) {
+std::vector<int64_t> _single_int_list(ArgValue v) {
   if (auto t = c10::get_if<IntList>(&v)) {
     return {(*t)[0]};
   }

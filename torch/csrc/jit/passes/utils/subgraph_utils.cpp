@@ -227,7 +227,7 @@ void unmergeSubgraph(Node* subgraphNode) {
   subgraphNode->destroy();
 }
 
-static void collectNestedUses(
+void collectNestedUses(
     std::unordered_set<Value*>& closed_over_values,
     std::unordered_set<Value*>& new_values,
     std::unordered_map<Value*, Value*>& externalValuesMap,
@@ -271,7 +271,7 @@ static void collectNestedUses(
   }
 }
 
-static std::unordered_set<Value*> closedOverValues(
+std::unordered_set<Value*> closedOverValues(
     Node* toMerge,
     std::unordered_map<Value*, Value*>& externalValuesMap) {
   std::unordered_set<Value*> closed_over_values;
@@ -602,7 +602,7 @@ void unmergeNode(Node* n, Node* subgraphNode) {
   n->destroy();
 }
 
-static std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
+std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
   if (s.size() <= maxlen) {
     return s;
   }
