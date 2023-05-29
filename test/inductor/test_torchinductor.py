@@ -449,6 +449,35 @@ def check_model_cuda(
         )
 
 
+def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
+    result, source_codes = run_and_get_code(func, *args, **kwargs)
+
+    for code in source_codes:
+        for line in code.split("\n"):
+            stmt = None
+            # Find indexing expressions
+            if ".load(" in line:
+                stmt = line.split(".load")[-1]
+            elif "tl.store" in line:
+                stmt = line.split(".store")[-1]
+                stmt = ",".join(stmt.split(",")[:-2])  # Remove store value and mask
+            elif ".store" in line:
+                stmt = line.split(".store")[-1]
+            elif "[" in line:
+                stmt = line.split("[")[-1].split("]")[0]
+
+            if stmt is None:
+                continue
+
+            # indirect indexing involves a `tmp` variable
+            test_case.assertTrue(
+                "tmp" not in stmt,
+                msg=f"Found indirect indexing in statement '{stmt}' from code:\n{code}",
+            )
+
+    return result
+
+
 class SweepInputs2:
     input_gen_types1 = [
         "dense",
@@ -673,6 +702,30 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count,
             1 if self.device == "cuda" else 3,
         )
+
+    def test_index_propagation(self):
+        def flip(x):
+            i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
+            return x[i]
+
+        x = torch.randn(8, device=self.device)
+        flip_opt = torch._dynamo.optimize("inductor")(flip)
+
+        expect = flip(x)
+        actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
+        self.assertEqual(expect, actual)
+
+    def test_computed_buffer_inlining(self):
+        def flip(x):
+            idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
+            return x[idx], idx
+
+        flip_opt = torch._dynamo.optimize("inductor")(flip)
+        x = torch.randn(8, device=self.device)
+
+        expect = flip(x)
+        actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
+        self.assertEqual(expect, actual)
 
     def test_sum1(self):
         def fn(a, b):
@@ -5185,7 +5238,7 @@ class CommonTemplate:
             self.assertEqual(bw_code.count("tl.rand"), 0)
             expected_kernel = 4
         else:
-            expected_kernel = 5
+            expected_kernel = 6
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
@@ -6442,27 +6495,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # load should be masked
             self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
-
-        def test_index_propagation(self):
-            def flip(x):
-                i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
-                return x[i]
-
-            x = torch.randn(8, device="cuda")
-            flip_opt = torch._dynamo.optimize("inductor")(flip)
-            code = run_and_get_triton_code(flip_opt, x)
-
-            # this should be collapsed to direct indexing, so the index
-            # calculation shouldn't contain a `tmp` variable
-            load_line = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertEqual(len(load_line), 1)
-            load_stmt = load_line[0].split("=")[-1]
-            self.assertTrue(
-                "tmp" not in load_stmt,
-                msg=f"Found indirect indexing in code:\n{code}",
-            )
-
-            self.assertEqual(flip_opt(x), flip(x))
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
