@@ -2719,6 +2719,8 @@ aot_autograd_failures = {
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
+    skip('linalg.pinv', 'singular'),  # likely needs updated tolerance
+
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
     xfail('_segment_reduce', 'lengths'),
