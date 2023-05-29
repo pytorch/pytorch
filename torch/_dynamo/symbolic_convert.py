@@ -323,7 +323,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             )
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
-            if truth_fn(value):
+            mod = self.output.get_submodule(value.module_key)
+            if truth_fn(mod):
                 push and self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
