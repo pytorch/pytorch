@@ -1208,23 +1208,30 @@ class Scheduler:
         Any buffers that are both created and have a last use in the
         same kernel can be removed.
         """
-        for name in V.kernel.store_buffer_names & self.buffer_names_no_longer_needed:
-            if (
-                name not in V.kernel.must_keep_buffers
-                and name not in V.kernel.args.input_buffers
-                and name not in self.mutation_renames
-                and name not in self.mutation_real_name
-            ):
-                # For inplace buffers subject to remove, we don't actually
-                # remove them but put them in a dedicated set. This simplifies
-                # the life cycle management of inplace buffers.
-                # This set is used to
-                # 1) avoid unnecessary store in DeferredLine.
-                # 2) avoid alias var definitions in kernel.
-                if name in V.kernel.args.inplace_buffers:
-                    V.graph.inplaced_to_remove.add(name)
-                else:
-                    self.remove_buffer(name)
+
+        names_to_remove = (
+            V.kernel.store_buffer_names & self.buffer_names_no_longer_needed
+        )
+
+        def remove_filter(n):
+            return (
+                n not in V.kernel.must_keep_buffers
+                and n not in V.kernel.args.input_buffers
+                and n not in self.mutation_renames
+                and n not in self.mutation_real_name
+            )
+
+        names_to_remove = list(filter(remove_filter, names_to_remove))
+
+        for name in names_to_remove:
+            if name in V.kernel.args.inplace_buffers:
+                buf = V.kernel.args.inplace_buffers[name]
+                remove = all(n in names_to_remove for n in buf.other_names)
+                if remove:
+                    self.remove_inplace_buffer(name)
+                V.graph.inplaced_to_remove.add(name)
+            else:
+                self.remove_buffer(name)
 
     def remove_buffer(self, name):
         # Assign a special value instead of deleting the entry
@@ -1232,6 +1239,11 @@ class Scheduler:
         # generate unique arg name.
         log.debug("remove_buffer(%r)", name)
         V.kernel.args.output_buffers[name] = "REMOVED"
+        V.graph.removed_buffers.add(name)
+
+    def remove_inplace_buffer(self, name):
+        log.debug("removing_inplace_buffer(%r)", name)
+        V.kernel.args.inplace_buffers[name] = "REMOVED"
         V.graph.removed_buffers.add(name)
 
     def flush(self):
