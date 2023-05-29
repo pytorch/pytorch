@@ -3240,6 +3240,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
 
+    def test_dataclass_factory(self):
+        from dataclasses import dataclass, field
+        from typing import Any
+
+        @dataclass
+        class DClass:
+            sharding_contexts: Any = field(default_factory=list)
+            a: int = 1
+
+        def fn(x):
+            return DClass().a * x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
