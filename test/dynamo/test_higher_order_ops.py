@@ -941,7 +941,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     def test_tags_dropout(self):
-        # Ensures that tags are passed on through decompositions as well
+        # Figure out a way to test the number of inductor_random calls
         class MockModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -954,13 +954,12 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         mod = MockModule().cuda()
 
         def fn(x):
-            return torch.utils.checkpoint.checkpoint(mod, torch.sin(x))
+            return torch.utils.checkpoint.checkpoint(mod, x)
 
         x = torch.randn(10, 10, device="cuda", requires_grad=True)
         backend = "inductor"
+        # rand decomps do not have have numerical results as eager
         self._validate(fn, backend, x, skip_check=True)
-
-    # Test fallbacks
 
 
 if __name__ == "__main__":
