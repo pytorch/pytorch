@@ -102,7 +102,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7)
+  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc9)
     CUDA_VERSION=11.8.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
