@@ -508,7 +508,7 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
       tensors[0].sizes().begin(), tensors[0].sizes().end());
 
   dim = at::maybe_wrap_dim(dim, tensors);
-  size_t extended_dim_shape = 0;
+  int64_t extended_dim_shape = 0;
   for (auto& tensor : tensors) {
     extended_dim_shape += tensor.sizes()[dim];
   }
