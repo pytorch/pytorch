@@ -773,11 +773,13 @@ def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
         other_args = []
         if DISABLED_TESTS_FILE:
-            other_args.append('--import-disabled-tests')
+            other_args.append("--import-disabled-tests")
         if SLOW_TESTS_FILE:
-            other_args.append('--import-slow-tests')
+            other_args.append("--import-slow-tests")
         if USE_PYTEST:
             other_args.append("--use-pytest")
+        if RERUN_DISABLED_TESTS:
+            other_args.append("--rerun-disabled-tests")
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1796,6 +1798,7 @@ def check_if_enable(test: unittest.TestCase):
                         "rocm": TEST_WITH_ROCM,
                         "asan": TEST_WITH_ASAN,
                         "dynamo": TEST_WITH_TORCHDYNAMO,
+                        "inductor": TEST_WITH_TORCHINDUCTOR,
                     }
 
                     invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
@@ -2134,6 +2137,16 @@ class TestCase(expecttest.TestCase):
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
 
+    def assertLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertLogs(logger, level)
+
+    def assertNoLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertNoLogs(logger, level)
+
     def wrap_with_cuda_policy(self, method_name, policy):
         test_method = getattr(self, method_name)
         # the import below may initialize CUDA context, so we do it only if
@@ -2228,10 +2241,9 @@ class TestCase(expecttest.TestCase):
             skipped_before = 0 if result is None else len(result.skipped)
 
         super_run = super().run
-        # TODO remove version check once dynamo supports 3.11
-        if TEST_WITH_TORCHINDUCTOR and sys.version_info < (3, 11):
+        if TEST_WITH_TORCHINDUCTOR:
             super_run = torch._dynamo.optimize("inductor")(super_run)
-        elif TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
+        elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)
 

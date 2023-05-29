@@ -1099,8 +1099,9 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
         auto tens = sub_value.toTensor();
         if (tens.is_sparse()) {
           // sparse tensors have 2 storages! one for indices one for values
-          weakStorageImpls.emplace_back(tens.coalesce().indices().storage().getWeakStorageImpl());
-          weakStorageImpls.emplace_back(tens.coalesce().values().storage().getWeakStorageImpl());
+          auto coalesced = tens.coalesce();
+          weakStorageImpls.emplace_back(coalesced.indices().storage().getWeakStorageImpl());
+          weakStorageImpls.emplace_back(coalesced.values().storage().getWeakStorageImpl());
         } else {
           weakStorageImpls.emplace_back(tens.storage().getWeakStorageImpl());
         }

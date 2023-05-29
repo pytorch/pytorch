@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
+import io
 import platform
 import sys
 import math
@@ -77,6 +78,7 @@ def mps_ops_grad_modifier(ops):
         'cdist': [torch.float32],
         'masked.scatter': [torch.float16, torch.float32],
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
+        'aminmax': [torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -89,6 +91,10 @@ def mps_ops_grad_modifier(ops):
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
+        # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
+        'histogramdd': [torch.float16, torch.float32],
+        # derivative for aten::histogram is not implemented
+        'histogram': [torch.float16, torch.float32],
         # 'bool' object is not iterable
         'allclose': [torch.float16, torch.float32],
         'equal': [torch.float16, torch.float32],
@@ -390,7 +396,6 @@ def mps_ops_modifier(ops):
         'rounddecimals_3': None,
         'rounddecimals_0': None,
         '__rsub__': None,
-        'aminmax': None,
         'angle': None,
         'bucketize': None,
         'cauchy_': None,
@@ -409,9 +414,6 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        'histc': None,
-        'histogram': None,
-        'histogramdd': None,
         'i0': None,
         'igamma': None,
         'igammac': None,
@@ -671,6 +673,7 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout': [torch.float32],
         'nn.functional.dropout2d': [torch.float32],
         'nn.functional.dropout3d': [torch.float32],
+        'nn.functional.multi_head_attention_forward': [torch.float32],
 
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
@@ -709,6 +712,7 @@ def mps_ops_modifier(ops):
         'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
                               torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # CPU: empty is returning all 0's and there is a mismatch with MPS
         # allocation (MacOS 13). According to
         # https://pytorch.org/docs/2.0/generated/torch.empty.html
@@ -6717,6 +6721,7 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(a_CPU.grad, a_MPS.grad)
 
         helper(3, 5, 7, [0, 1, 2])
+        helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
         helper(3, 5, 7, 2)  # test scalar index
 
     # Test pytorch gather
@@ -7342,6 +7347,15 @@ class TestNLLLoss(TestCaseMPS):
         x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
         x = net1(x)
         torch.mps.profiler.stop()
+
+    def test_jit_save_load(self):
+        m = torch.nn.Module()
+        m.x = torch.rand(3, 3, device='mps')
+        buffer = io.BytesIO()
+        torch.jit.save(torch.jit.script(m), buffer)
+        buffer.seek(0)
+        n = torch.jit.load(buffer)
+        self.assertEqual(n.x, m.x)
 
     # Test random_, random_.to and random_.from
     def test_random(self):
@@ -10243,11 +10257,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.histc`
+        # This can be changed once we actually implement `torch.lgamma`
         # Should return fn, args, kwargs, string_version
-        return (torch.histc,
+        return (torch.lgamma,
                 torch.tensor([100], device='mps'), {},
-                "torch.histc(torch.tensor([4], device='mps', dtype=torch.float))")
+                "torch.lgamma(torch.tensor([4], device='mps', dtype=torch.float))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
@@ -10485,52 +10499,47 @@ class TestConsistency(TestCaseMPS):
             # Forward check
             #
             forward_failed = False
-            try:
-                mps_sample = cpu_sample.transform(
-                    lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+            mps_sample = cpu_sample.transform(
+                lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
-                cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-                cpu_kwargs = cpu_sample.kwargs
-                mps_args = [mps_sample.input] + list(mps_sample.args)
-                mps_kwargs = mps_sample.kwargs
+            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            cpu_kwargs = cpu_sample.kwargs
+            mps_args = [mps_sample.input] + list(mps_sample.args)
+            mps_kwargs = mps_sample.kwargs
 
-                # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-                if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
-                    mps_args[1] = cpu_args[1]
+            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+                mps_args[1] = cpu_args[1]
 
-                cpu_out = op(*cpu_args, **cpu_kwargs)
-                mps_out = op(*mps_args, **mps_kwargs)
+            cpu_out = op(*cpu_args, **cpu_kwargs)
+            mps_out = op(*mps_args, **mps_kwargs)
 
-                if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
-                    atol = 1e-4
-                    rtol = 3e-5
-                elif op.name == "nn.functional.conv2d" or op.name == "linalg.multi_dot" and dtype == torch.float32:
-                    atol = 1e-4
-                    rtol = 3e-5
-                elif (op.name in self.FP16_LOW_PRECISION_LIST) and dtype == torch.float16:
-                    atol = 1e-2
-                    rtol = 1e-2
-                elif (op.name == "masked.mean"):
-                    atol = 7e-4
-                    rtol = 2e-3
-                elif (op.name == "native_layer_norm"):
-                    atol = 1e-4
-                    rtol = 1.3e-5
-                elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
-                    atol = 7e-4
-                    rtol = 1.5e-3
-                elif op.name == "unique" and cpu_kwargs["sorted"] is False:
-                    continue
-                else:
-                    atol = None
-                    rtol = None
+            if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
+                atol = 1e-4
+                rtol = 3e-5
+            elif op.name == "nn.functional.conv2d" or op.name == "linalg.multi_dot" and dtype == torch.float32:
+                atol = 1e-4
+                rtol = 3e-5
+            elif (op.name in self.FP16_LOW_PRECISION_LIST) and dtype == torch.float16:
+                atol = 1e-2
+                rtol = 1e-2
+            elif (op.name == "masked.mean"):
+                atol = 7e-4
+                rtol = 2e-3
+            elif (op.name == "native_layer_norm"):
+                atol = 1e-4
+                rtol = 1.3e-5
+            elif (op.name == "norm" or op.name == "linalg.norm") and dtype == torch.float16:
+                atol = 7e-4
+                rtol = 1.5e-3
+            elif op.name == "unique" and cpu_kwargs["sorted"] is False:
+                continue
+            else:
+                atol = None
+                rtol = None
 
-                self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
-            except Exception as e:
-                raise e
-                forward_failed = True
-                all_forward_pass = False
 
             #
             # Backward check
@@ -10564,6 +10573,10 @@ class TestConsistency(TestCaseMPS):
             # allow_unused is needed in those cases.
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
+
+            if op.name in ["nn.functional.gelu", "nn.functional.glu"] and dtype == torch.float16:
+                atol = 1e-3
+                rtol = 1e-3
 
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
