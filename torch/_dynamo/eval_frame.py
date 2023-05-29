@@ -1059,7 +1059,7 @@ def export(
     if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
         # Inline constraints added by users correspond to unbacked symbols in shape_env,
         new_graph.meta["inline_constraints"] = {
-            k: v
+            k: (v.lower, v.upper)
             for k, v in shape_env.var_to_range.items()
             if re.match(r"^[if]\d+$", str(k))
         }
