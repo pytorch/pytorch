@@ -529,7 +529,7 @@ def main() -> None:
 
     perform_misc_tasks(
         labels=labels,
-        test_matrix=test_matrix,
+        test_matrix=filtered_test_matrix,
         job_name=args.job_name,
     )
 
