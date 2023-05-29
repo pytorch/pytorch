@@ -121,26 +121,21 @@ Esperamos que você nunca gaste horas depurando seu código por causa de rastrea
 
 O PyTorch tem sobrecarga mínima de estrutura. Integramos bibliotecas de aceleração
 como [Intel MKL](https://software.intel.com/mkl) e NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) para maximizar a velocidade.
-No núcleo, sua CPU e GPU Tensor e back-ends de rede neural
-são maduros e foram testados por anos.
+No núcleo, sua CPU e GPU Tensor e back-ends de rede neural são maduros e foram testados por anos.
 
 Portanto, o PyTorch é bastante rápido - independentemente de você executar redes neurais pequenas ou grandes.
 
 O uso de memória no PyTorch é extremamente eficiente em comparação com o Torch ou algumas das alternativas.
-Escrevemos alocadores de memória personalizados para a GPU para garantir que
-seus modelos de aprendizado profundo são extremamente eficientes em termos de memória.
-Isso permite que você treine modelos de aprendizado profundo maiores do que antes.
+Escrevemos alocadores de memória personalizados para a GPU para garantir que seus modelos de aprendizado profundo são extremamente eficientes em termos de memória. Isso permite que você treine modelos de aprendizado profundo maiores do que antes.
 
 ### Extensões sem Dor
 
-Escrever novos módulos de rede neural ou fazer interface com a API Tensor do PyTorch foi projetado para ser direto
-e com abstrações mínimas.
+Escrever novos módulos de rede neural ou fazer interface com a API Tensor do PyTorch foi projetado para ser direto e com abstrações mínimas.
 
-Você pode escrever novas camadas de rede neural em Python usando a API da torch.
-[or your favorite NumPy-based libraries such as SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
+Você pode escrever novas camadas de rede neural em Python usando a API da torch [ou suas bibliotecas favoritas baseadas em NumPy, como SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
 Se você deseja escrever suas camadas em C/C++, fornecemos uma API de extensão conveniente que é eficiente e com o mínimo de clichê.
-Nenhum código wrapper precisa ser escrito. Você pode ver [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
+Nenhum código wrapper precisa ser escrito. Você pode ver um tutorial [aqui](https://pytorch.org/tutorials/advanced/cpp_extension.html) e um exemplo [aqui](https://github.com/pytorch/extension-cpp).
 
 ## Instalação
 
@@ -150,9 +145,9 @@ Os comandos para instalar binários via Conda ou pip wheels estão em nosso site
 
 #### Plataformas NVIDIA Jetson
 
-Python wheels para NVIDIA's Jetson Nano, Jetson TX1/TX2, Jetson Xavier NX/AGX, e Jetson AGX Orin são fornecidos [here](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) e o contêiner L4T é publicado [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
+Python wheels para NVIDIA's Jetson Nano, Jetson TX1/TX2, Jetson Xavier NX/AGX, e Jetson AGX Orin são fornecidos [aqui](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) e o contêiner L4T é publicado [aqui](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
 
-Eles exigem o JetPack 4.2 e superior e[@dusty-nv](https://github.com/dusty-nv) e [@ptrblck](https://github.com/ptrblck) e estão mantendo.
+Eles exigem o JetPack 4.2 e superior, e [@dusty-nv](https://github.com/dusty-nv) e [@ptrblck](https://github.com/ptrblck) estão mantendo elas.
 
 ### Da Fonte
 
@@ -165,7 +160,7 @@ Se você estiver instalando a partir da fonte, precisará de:
 
 Recomendamos a instalação de um [Anaconda](https://www.anaconda.com/distribution/#download-section) ambiente. Você obterá uma BLAS library (MKL) de alta qualidade e obterá versões de dependência controladas, independentemente da sua distro Linux.
 
-Se você deseja compilar com suporte CUDA, instale o seguinte (observe que CUDA não é compatível com macOS)
+Se você deseja compilar com suporte CUDA, instale o seguinte (observe que CUDA não é compatível com macOS):
 
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 11.0 ou mais atual
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 ou mais atual
@@ -176,7 +171,7 @@ Nota: Você pode consultar o [cuDNN Support Matrix](https://docs.nvidia.com/deep
 Se você deseja desabilitar o suporte CUDA, exporte a variável de ambiente `USE_CUDA=0`.
 Outras variáveis de ambiente potencialmente úteis podem ser encontradas em `setup.py`.
 
-Se você está criando para as plataformas Jetson da NVIDIA (Jetson Nano, TX1, TX2, AGX Xavier), Instruções para instalar o PyTorch para Jetson Nano são [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
+Se você está criando para as plataformas Jetson da NVIDIA (Jetson Nano, TX1, TX2, AGX Xavier), instruções para instalar o PyTorch para Jetson Nano estão [disponívei aqui](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
 Se você deseja compilar com suporte a ROCm, instale:
 
@@ -254,7 +249,7 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py develop
 ```
 
-> _Aside:_ Se você estiver usando [Anaconda](https://www.anaconda.com/distribution/#download-section), você pode ter um erro causado pelo vinculador(linker):
+> _Obs:_ Se você estiver usando [Anaconda](https://www.anaconda.com/distribution/#download-section), você pode ter um erro causado pelo vinculador(linker):
 >
 > ```plaintext
 > build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
@@ -272,14 +267,13 @@ python3 setup.py develop
 
 **No Windows**
 
-Escolha Correto a versão do Visual Studio.
+Escolha corretamente a versão do Visual Studio.
 
 PyTorch CI usa Visual C++ BuildTools, que vêm com Visual Studio Enterprise,
 Professional, ou Community Editions. Você também pode instalar as ferramentas de compilação de
-https://visualstudio.microsoft.com/visual-cpp-build-tools/. As ferramentas de construção _do not_
-venha com Visual Studio Code by default.
+https://visualstudio.microsoft.com/visual-cpp-build-tools/. As ferramentas de construção _não vêm_ com Visual Studio Code por padrão.
 
-Se você quer construir legacy python code, por favor consulte [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
+Se você quer construir legacy python code, por favor consulte [Construindo legacy code e CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
 **Builds somente de CPU**
 
@@ -290,7 +284,7 @@ conda activate
 python setup.py develop
 ```
 
-Nota sobre o OpenMP: A implementação OpenMP desejada é Intel OpenMP (iomp). Para vincular ao iomp, você precisará baixar manualmente a biblioteca e configurar o ambiente de construção ajustando `CMAKE_INCLUDE_PATH` e `LIB`. A instrução [here](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) é um exemplo para configurar MKL e Intel OpenMP. Sem essas configurações para CMake, Microsoft Visual C OpenMP runtime (vcomp) será usado.
+Nota sobre o OpenMP: A implementação OpenMP desejada é Intel OpenMP (iomp). Para vincular ao iomp, você precisará baixar manualmente a biblioteca e configurar o ambiente de construção ajustando `CMAKE_INCLUDE_PATH` e `LIB`. A instrução [aqui](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) é um exemplo para configurar MKL e Intel OpenMP. Sem essas configurações para CMake, Microsoft Visual C OpenMP runtime (vcomp) será usado.
 
 **Build baseada em CUDA**
 
@@ -303,7 +297,7 @@ Certifique-se de que CUDA com Nsight Compute é instalado depois do Visual Studi
 Atualmente, VS 2017 / 2019, e Ninja são suportados como o gerador de CMake. Se `ninja.exe` é detectado em `PATH`, então Ninja será usado como gerador padrão, caso contrário, ele usará VS 2017 / 2019.
 <br/> Se Ninja for selecionado como o gerador, o MSVC mais recente será selecionado como a cadeia de ferramentas subjacente(toolchain).
 
-Bibliotecas adicionais, como[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) muitas vezes são necessários. Por favor, consulte o [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) para instalá-los.
+Bibliotecas adicionais, como [Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), e [Sccache](https://github.com/mozilla/sccache) muitas vezes são necessárias. Por favor, consulte o [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) para instalá-los.
 
 Você pode consultar o [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script para algumas outras configurações de variáveis de ambiente.
 
@@ -364,7 +358,7 @@ Repare que PyTorch usa memória compartilhada para compartilhar dados entre proc
 
 #### Criando a própria imagem
 
-**OBSERVAÇÃO:** Deve ser criada com uma versão docker > 18.06
+**NOTA:** Deve ser criada com uma versão docker > 18.06
 
 O `Dockerfile` é fornecido para criar imagens com suporte CUDA 11.1 e cuDNN v8.
 Você pode passar a variável `PYTHON_VERSION=x.y` para especificar qual versão do Python será usada pelo Miniconda, ou deixá-la indefinida para usar o padrão.
@@ -414,7 +408,7 @@ Três dicas para começar:
 * [PyTorch Modelos](https://pytorch.org/hub/)
 * [Introdução a Deep Learning com PyTorch pela Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
 * [Introdução a Machine Learning com PyTorch pela Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
-* [Deep Neural Networks com PyTorch pela Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
+* [Redes Neurais Profundas com PyTorch pela Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
 * [PyTorch Twitter](https://twitter.com/PyTorch)
 * [PyTorch Blog](https://pytorch.org/blog/)
 * [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
