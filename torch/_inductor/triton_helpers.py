@@ -58,11 +58,7 @@ else:
         min_values = tl.min(a, dim)
         if is_floating(a):
             has_nan = tl.sum(a != a, dim)
-            if min_values.type.is_block():
-                nan = tl.full([1], float("nan"), tl.float32).to(a.dtype)
-            else:
-                nan = float("nan")
-                nan = nan.to(a.dtype)
+            nan = tl.full([1], float("nan"), tl.float32).to(a.dtype)
             min_values = tl.where(has_nan, nan, min_values)
         return min_values
 
@@ -71,11 +67,7 @@ else:
         max_values = tl.max(a, dim)
         if is_floating(a):
             has_nan = tl.sum(a != a, dim)
-            if max_values.type.is_block():
-                nan = tl.full([1], float("nan"), tl.float32).to(a.dtype)
-            else:
-                nan = float("nan")
-                nan = nan.to(a.dtype)
+            nan = tl.full([1], float("nan"), tl.float32).to(a.dtype)
             max_values = tl.where(has_nan, nan, max_values)
         return max_values
 
