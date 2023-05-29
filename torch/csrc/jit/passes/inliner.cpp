@@ -30,7 +30,7 @@ GraphFunction* tryToGraphFunction(Node* n) {
   return nullptr;
 }
 
-static void inlineCalls(Block* block) {
+void inlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
