@@ -109,4 +109,11 @@ runs:
     - name: Print the filtered test matrix
       shell: bash
       run: |
+        echo "Filtered matrix:"
         echo "${{ steps.filter.outputs.test-matrix }}"
+
+        echo
+        echo "Is the current job unstable? ${{ steps.filter.outputs.is-unstable }}"
+
+        echo
+        echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"
