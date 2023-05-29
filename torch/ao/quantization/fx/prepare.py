@@ -38,7 +38,10 @@ from .quantize_handler import (
     QuantizeHandler,
 )
 
-from torch.ao.quantization import ObserverBase
+from torch.ao.quantization import (
+    ObserverBase,
+    _DerivedObserverOrFakeQuantize,
+)
 
 from torch.ao.quantization.utils import (
     Pattern,
@@ -103,11 +106,12 @@ from .custom_config import (
     StandaloneModuleConfigEntry,
 )
 from torch.ao.quantization._pt2e.quantizer import (
+    EdgeOrNode,
     QuantizationSpec,
     SharedQuantizationSpec,
-    EdgeOrNode,
+    DerivedQuantizationSpec,
 )
-from torch.ao.quantization import ObserverOrFakeQuantizer
+from torch.ao.quantization import ObserverOrFakeQuantize
 
 from torch._subclasses import FakeTensor
 
@@ -156,7 +160,7 @@ def _get_observer_kwargs(quant_spec: QuantizationSpec):
 
 def _create_obs_or_fq_from_qspec(
     quantization_spec: QuantizationSpec,
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer]
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize]
 ):
     """ Create observer or fake quantize objects based on quantization spec
 
@@ -173,6 +177,19 @@ def _create_obs_or_fq_from_qspec(
             "please make sure only refer to edge or node that has " \
             "observer/fake_quant inserted {} not in {}".format(edge_or_node, obs_or_fq_map)
         return obs_or_fq_map[edge_or_node]
+    elif isinstance(quantization_spec, DerivedQuantizationSpec):
+        # can't use asdict, so not calling get_observer_kwargs here
+        kwargs = {
+            "dtype": _TORCH_DTYPE_TO_QDTYPE[quantization_spec.dtype],
+            "derive_qparams_fn": quantization_spec.derive_qparams_fn,
+            "quant_min": quantization_spec.quant_min,
+            "quant_max": quantization_spec.quant_max,
+            "qscheme": quantization_spec.qscheme,
+        }
+        edge_or_nodes = quantization_spec.derived_from
+        obs_or_fqs = [obs_or_fq_map[k] for k in edge_or_nodes]
+        kwargs["obs_or_fqs"] = obs_or_fqs
+        return _DerivedObserverOrFakeQuantize.with_args(**kwargs)()
 
     observer_or_fake_quant_ctr = quantization_spec.observer_or_fake_quant_ctr
     kwargs = _get_observer_kwargs(quantization_spec)
@@ -227,7 +244,7 @@ def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         _is_activation_post_process(named_modules[str(node.target)])
 
-def _get_dtype_and_is_dynamic(obs_or_fq: Optional[ObserverOrFakeQuantizer]) -> Tuple[Optional[torch.dtype], bool]:
+def _get_dtype_and_is_dynamic(obs_or_fq: Optional[ObserverOrFakeQuantize]) -> Tuple[Optional[torch.dtype], bool]:
     """ Given a constructor for observer or fake quant module, returns
     a Tuple of dtype and is_dynamic
     """
@@ -316,7 +333,7 @@ def _is_output_dtype_supported_by_backend(
 def _is_observer_in_same_graph(
     node: Node,
     named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer]
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize]
 ):
     """ Check if observer in same graph
     when the node output is not fp32 and input is 'placeholder'
@@ -402,7 +419,7 @@ def _add_matched_node_name_to_set(matched_node_pattern: NodePattern, s: Set[str]
 
 def _insert_obs_or_fq(
     node: Node,
-    obs_or_fq: ObserverOrFakeQuantizer,
+    obs_or_fq: ObserverOrFakeQuantize,
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
     graph: Graph,
@@ -581,8 +598,8 @@ def _get_target_activation_dtype_for_node(
 def _get_output_act_obs_or_fq(
     arg: Node,
     named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
-) -> ObserverOrFakeQuantizer:
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+) -> ObserverOrFakeQuantize:
     """ Get the constructor for observer or fake quant object for
     the argument in the original graph as the output of previous node,
     skipping inserted observers
@@ -628,7 +645,7 @@ def _get_output_act_obs_or_fq(
 def _get_arg_target_dtype_as_output(
     arg: Node,
     named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
 ) -> Optional[torch.dtype]:
     arg_as_output_act_obs_or_fq = _get_output_act_obs_or_fq(arg, named_modules, obs_or_fq_map)
     arg_as_output_target_dtype, _ = _get_dtype_and_is_dynamic(arg_as_output_act_obs_or_fq)
@@ -638,8 +655,8 @@ def _get_arg_as_input_act_obs_or_fq(
     arg: Node,
     node: Node,
     named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
-) -> Optional[ObserverOrFakeQuantizer]:
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+) -> Optional[ObserverOrFakeQuantize]:
     """ Get the observer or fake quant constructor for the Argument `arg`, as input
     to Node `node`
     """
@@ -686,7 +703,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     graph: Graph,
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     backend_config: Optional[BackendConfig] = None,
 ) -> Argument:
     """
@@ -821,7 +838,7 @@ def _maybe_insert_input_observers_for_node(
     graph: Graph,
     qhandler: Optional[QuantizeHandler],
     prepare_custom_config: PrepareCustomConfig,
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     backend_config: Optional[BackendConfig] = None
 ) -> None:
     """
@@ -912,7 +929,7 @@ def _maybe_insert_output_observer_for_node(
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
 ) -> Optional[Node]:
     """
     If `node` needs an output observer, creates it, inserts it into `graph`
@@ -980,7 +997,7 @@ def _maybe_insert_observers_before_graph_output(
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
 ) -> None:
     """
     If the output needs to be quantized and there are any nodes
@@ -1426,7 +1443,7 @@ def insert_observers_for_model(
     inputs_seen_counter = 0
     outputs_seen_counter = 0
     results_node = None
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer] = {}
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
 
     # TODO: change this to insert obs/fq by pattern instead of by node
     for node in nodes_before_observation:
