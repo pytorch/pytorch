@@ -1291,7 +1291,6 @@ def bernoulli_(x, *args):
         "cpu"
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
-    V.graph.realize_users_of(x.get_name())
     ir.InplaceBernoulliFallback(x, *args)
     return x
 
@@ -2285,7 +2284,6 @@ def index_put_impl_(self, indices, values, accumulate, check):
 
     assert isinstance(self, TensorBox)
     self.realize()
-    V.graph.realize_users_of(self.get_name())
 
     # self is an scalar Tensor
     if x_ndim == 0:
@@ -2430,7 +2428,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     dim = _validate_dim(self, dim)
 
     self.realize()
-    V.graph.realize_users_of(self.get_name())
     index_loader = index.make_loader()
     src_loader = src.make_loader() if isinstance(src, TensorBox) else None
 
