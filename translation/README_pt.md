@@ -51,98 +51,96 @@ Nossa integridade (sinais de Continuous Integration) pode ser encontrada em [hud
 
 ## Mais Sobre PyTorch
 
-At a granular level, PyTorch is a library that consists of the following components:
+Em um nível granular, o PyTorch é uma biblioteca que consiste nos seguintes componentes:
 
-| Component                                                                         | Description                                                                                                                             |
+| Componente                                                                        | Descrição                                                                                                                            |
 | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| [**torch**](https://pytorch.org/docs/stable/torch.html)                           | A Tensor library like NumPy, with strong GPU support                                                                                    |
-| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html)               | A tape-based automatic differentiation library that supports all differentiable Tensor operations in torch                              |
-| [**torch.jit**](https://pytorch.org/docs/stable/jit.html)                         | A compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code                                       |
-| [**torch.nn**](https://pytorch.org/docs/stable/nn.html)                           | A neural networks library deeply integrated with autograd designed for maximum flexibility                                              |
-| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
-| [**torch.utils**](https://pytorch.org/docs/stable/data.html)                      | DataLoader and other utility functions for convenience                                                                                  |
+| [**torch**](https://pytorch.org/docs/stable/torch.html)                           | Uma biblioteca Tensor como NumPy, com forte suporte a GPU                                                                                    |
+| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html)               | Uma biblioteca de diferenciação automática baseada em fita (tape-based) que suporta todas as operações diferenciáveis do Tensor em torch                              |
+| [**torch.jit**](https://pytorch.org/docs/stable/jit.html)                         |Uma pilha de compilação (TorchScript) para criar modelos serializáveis e otimizáveis a partir do código PyTorch                                       |
+| [**torch.nn**](https://pytorch.org/docs/stable/nn.html)                           | Uma biblioteca de redes neurais profundamente integrada com autograd projetada para máxima flexibilidade                                              |
+| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Multiprocessamento Python, mas com compartilhamento de memória mágica de tensores de torch entre processos. Útil para carregamento de dados e treinamento Hogwild |
+| [**torch.utils**](https://pytorch.org/docs/stable/data.html)                      | DataLoader e outras funções utilitárias para conveniência                                                                                  |
 
-Usually, PyTorch is used either as:
+Normalmente, o PyTorch é usado como:
 
-- A replacement for NumPy to use the power of GPUs.
-- A deep learning research platform that provides maximum flexibility and speed.
+- Um substituto para o NumPy para usar o poder das GPUs.
+- Uma plataforma de pesquisa de aprendizado profundo que fornece flexibilidade e velocidade máximas.
 
-Elaborating Further:
+Elaborando mais:
 
 ### Biblioteca de Tensores Pronta para GPU
 
-If you use NumPy, then you have used Tensors (a.k.a. ndarray).
+Se você usa NumPy, então você usou Tensores (a.k.a. ndarray).
 
 ![Tensor illustration](../docs/source/_static/img/tensor_illustration.png)
 
-PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
-computation by a huge amount.
+O PyTorch fornece tensores que podem residir na CPU ou na GPU e acelera bastante a computação.
 
-We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
-such as slicing, indexing, mathematical operations, linear algebra, reductions.
-And they are fast!
+Fornecemos uma ampla variedade de rotinas de tensor para acelerar e atender às suas necessidades de computação científica, como divisão, indexação, operações matemáticas, álgebra linear e reduções.
+E eles são rápidos!
 
 ### Redes Neurais Dinâmicas: Autogradiente Baseado em Fita
 
-PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
+O PyTorch tem uma maneira única de construir redes neurais: usando e reproduzindo um gravador.
 
-Most frameworks such as TensorFlow, Theano, Caffe, and CNTK have a static view of the world.
-One has to build a neural network and reuse the same structure again and again.
-Changing the way the network behaves means that one has to start from scratch.
+A maioria das estruturas, como TensorFlow, Theano, Caffe e CNTK, tem uma visão estática do mundo.
+É preciso construir uma rede neural e reutilizar a mesma estrutura repetidamente.
+Mudar a maneira como a rede se comporta significa que é preciso começar do zero.
 
-With PyTorch, we use a technique called reverse-mode auto-differentiation, which allows you to
-change the way your network behaves arbitrarily with zero lag or overhead. Our inspiration comes
-from several research papers on this topic, as well as current and past work such as
+Com o PyTorch, usamos uma técnica chamada diferenciação automática de modo reverso, que permite
+mude a maneira como sua rede se comporta arbitrariamente com atraso ou sobrecarga zero. Nossa inspiração vem
+de vários trabalhos de pesquisa sobre este tópico, bem como trabalhos atuais e anteriores, como
 [torch-autograd](https://github.com/twitter/torch-autograd),
 [autograd](https://github.com/HIPS/autograd),
 [Chainer](https://chainer.org), etc.
 
-While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
-You get the best of speed and flexibility for your crazy research.
+Embora essa técnica não seja exclusiva do PyTorch, é uma das implementações mais rápidas até hoje.
+Você obtém o melhor em velocidade e flexibilidade para sua pesquisa maluca.
 
 ![Dynamic graph](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/dynamic_graph.gif)
 
 ### Python Primeiro
 
-PyTorch is not a Python binding into a monolithic C++ framework.
-It is built to be deeply integrated into Python.
-You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
-You can write your new neural network layers in Python itself, using your favorite libraries
-and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
-Our goal is to not reinvent the wheel where appropriate.
+PyTorch não é uma ligação Python em um monolítico C++ framework.
+Ele foi desenvolvido para ser profundamente integrado ao Python.
+Você pode usá-lo naturalmente como você usaria [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
+Você pode escrever suas novas camadas de rede neural no próprio Python, usando suas bibliotecas favoritas
+e usar pacotes como [Cython](https://cython.org/) e [Numba](http://numba.pydata.org/).
+Nosso objetivo é não reinventar a roda quando apropriado.
 
 ### Experiências Imperativas
 
-PyTorch is designed to be intuitive, linear in thought, and easy to use.
-When you execute a line of code, it gets executed. There isn't an asynchronous view of the world.
-When you drop into a debugger or receive error messages and stack traces, understanding them is straightforward.
-The stack trace points to exactly where your code was defined.
-We hope you never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
+O PyTorch foi projetado para ser intuitivo, linear em pensamento e fácil de usar.
+Quando você executa uma linha de código, ela é executada. Não existe uma visão assíncrona do mundo.
+Quando você entra em um depurador ou recebe mensagens de erro e rastreamentos de pilha, é fácil entendê-los.
+O rastreamento de pilha aponta exatamente para onde seu código foi definido.
+Esperamos que você nunca gaste horas depurando seu código por causa de rastreamentos de pilha ruins ou mecanismos de execução assíncronos e opacos.
 
 ### Rápido e Leve
 
-PyTorch has minimal framework overhead. We integrate acceleration libraries
-such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) to maximize speed.
-At the core, its CPU and GPU Tensor and neural network backends
-are mature and have been tested for years.
+O PyTorch tem sobrecarga mínima de estrutura. Integramos bibliotecas de aceleração
+como [Intel MKL](https://software.intel.com/mkl) e NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) para maximizar a velocidade.
+No núcleo, sua CPU e GPU Tensor e back-ends de rede neural
+são maduros e foram testados por anos.
 
-Hence, PyTorch is quite fast — whether you run small or large neural networks.
+Portanto, o PyTorch é bastante rápido - independentemente de você executar redes neurais pequenas ou grandes.
 
-The memory usage in PyTorch is extremely efficient compared to Torch or some of the alternatives.
-We've written custom memory allocators for the GPU to make sure that
-your deep learning models are maximally memory efficient.
-This enables you to train bigger deep learning models than before.
+O uso de memória no PyTorch é extremamente eficiente em comparação com o Torch ou algumas das alternativas.
+Escrevemos alocadores de memória personalizados para a GPU para garantir que
+seus modelos de aprendizado profundo são extremamente eficientes em termos de memória.
+Isso permite que você treine modelos de aprendizado profundo maiores do que antes.
 
 ### Extensões sem Dor
 
-Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
-and with minimal abstractions.
+Escrever novos módulos de rede neural ou fazer interface com a API Tensor do PyTorch foi projetado para ser direto
+e com abstrações mínimas.
 
-You can write new neural network layers in Python using the torch API
+Você pode escrever novas camadas de rede neural em Python usando a API da torch.
 [or your favorite NumPy-based libraries such as SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
-If you want to write your layers in C/C++, we provide a convenient extension API that is efficient and with minimal boilerplate.
-No wrapper code needs to be written. You can see [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
+Se você deseja escrever suas camadas em C/C++, fornecemos uma API de extensão conveniente que é eficiente e com o mínimo de clichê.
+Nenhum código wrapper precisa ser escrito. Você pode ver [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
 
 ## Instalação
 
