@@ -252,7 +252,7 @@ def _single_tensor_adagrad(
     weight_decay: float,
     lr_decay: float,
     eps: float,
-    has_sparse_grad: bool,
+    has_sparse_grad: Optional[bool],
     maximize: bool,
     differentiable: bool,
 ):
@@ -310,7 +310,7 @@ def _multi_tensor_adagrad(
     weight_decay: float,
     lr_decay: float,
     eps: float,
-    has_sparse_grad: bool,
+    has_sparse_grad: Optional[bool],
     maximize: bool,
     differentiable: bool,
 ):
