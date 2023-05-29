@@ -64,7 +64,7 @@ bool fallbackAllowed() {
   return true;
 }
 
-static bool fallbackEnforced() {
+bool fallbackEnforced() {
   static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
   if (tensorexpr::getTEGenerateBlockCode()) {
     return false;
@@ -78,7 +78,7 @@ static bool fallbackEnforced() {
   return false;
 }
 
-static int64_t randomTransformsRequested() {
+int64_t randomTransformsRequested() {
   const char* enable_c_str =
       std::getenv("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
   if (!enable_c_str) {
@@ -87,8 +87,7 @@ static int64_t randomTransformsRequested() {
   return std::stoi(std::string(enable_c_str));
 }
 
-#ifdef TORCH_ENABLE_LLVM
-static bool dontUseLLVMFlag() {
+bool dontUseLLVMFlag() {
   static const char* enable_c_str =
       std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
   if (!enable_c_str) {
@@ -96,7 +95,6 @@ static bool dontUseLLVMFlag() {
   }
   return std::string(enable_c_str) == "1";
 }
-#endif
 
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
@@ -144,8 +142,7 @@ c10::optional<at::Device> pickDeviceType(
   return device;
 }
 
-static c10::optional<at::Device> pickDeviceType(
-    const std::shared_ptr<Graph>& graph) {
+c10::optional<at::Device> pickDeviceType(const std::shared_ptr<Graph>& graph) {
   c10::optional<at::Device> device = c10::nullopt;
   for (auto const& node : graph->nodes()) {
     for (auto const& input : node->inputs()) {
@@ -180,7 +177,7 @@ static c10::optional<at::Device> pickDeviceType(
 
 // If v is a Tensor with concretely-known sizes and dtype, return them, else
 // nullopt.
-static c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
+c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   auto const& it = v->type()->cast<TensorType>();
 
   c10::ScalarType dtype = c10::ScalarType::Float;
@@ -203,7 +200,7 @@ static c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
   }
   return TensorInfo{*concrete_sizes, dtype};
 }
-static std::vector<int64_t> _pair_int(IValue v) {
+std::vector<int64_t> _pair_int(IValue v) {
   if (v.isIntList()) {
     return v.toIntVector();
   } else {
@@ -235,7 +232,7 @@ bool isContiguous(const torch::jit::Value* v, at::MemoryFormat memory_format) {
   return *strides == TensorType::contiguousStridesOf(*sizes, memory_format);
 }
 
-static size_t get_conv_groups_index(const torch::jit::Node* node) {
+size_t get_conv_groups_index(const torch::jit::Node* node) {
   switch (node->kind()) {
     case aten::conv2d:
       return 6;
@@ -528,7 +525,7 @@ std::vector<ExprHandle> TensorExprKernel::sizesForValue(
   throw malformed_input(msg);
 }
 
-static c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
+c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   if (v->type()->kind() == TypeKind::TensorType) {
     auto tt = v->type()->cast<TensorType>();
     if (tt->scalarType()) {
@@ -538,7 +535,7 @@ static c10::optional<ScalarType> findDtypeForValue(const torch::jit::Value* v) {
   return tryScalarTypeFromJitType(*v->type());
 }
 
-static bool constZeroDimTensorAsScalarArg(
+bool constZeroDimTensorAsScalarArg(
     const Value* v,
     std::vector<ArgValue>& args) {
   if (v->node()->kind() != prim::Constant || !v->type()->cast<TensorType>()) {
@@ -647,7 +644,7 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 // True if all the loops in this vector have equal bounds.
-static bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
+bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
   if (loops.size() <= 1) {
     return true;
   }
@@ -668,7 +665,7 @@ static bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
 // on matching bounds exists to avoid inserting conditionals on the loop
 // indices where none would be needed, which would significantly complicate
 // vectorization.
-static void fuseAllLoops(StmtPtr st) {
+void fuseAllLoops(StmtPtr st) {
   auto block = to<tensorexpr::Block>(st);
   if (block == nullptr) {
     return;
@@ -708,7 +705,7 @@ static void fuseAllLoops(StmtPtr st) {
 }
 
 // Compute the trip count of a loop if it is a constant.
-static c10::optional<int64_t> tripCount(ForPtr loop) {
+c10::optional<int64_t> tripCount(ForPtr loop) {
   auto tc = IRSimplifier::simplify(
       cast<int64_t>(ExprHandle(loop->stop()) - ExprHandle(loop->start())));
   if (auto val = to<LongImm>(tc.node())) {
@@ -1249,7 +1246,7 @@ std::vector<size_t> reverse_sort_indices(const std::vector<T>& v) {
   return idx;
 }
 
-static bool denseAndNonOverlapping(
+bool denseAndNonOverlapping(
     at::ArrayRef<int64_t> sizes,
     at::ArrayRef<int64_t> strides) {
   return (strides == at::infer_dense_strides(sizes, strides));

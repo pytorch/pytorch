@@ -60,9 +60,12 @@ def wrap_bound_arg(tx, val, options, source=None):
         from torch._dynamo.variables.builder import VariableBuilder
 
         return VariableBuilder(tx, source=source, **options)(val)
-    else:
-        assert isinstance(val, VariableTracker), typestr(val)
+    elif isinstance(val, VariableTracker):
         return val
+    else:
+        from torch._dynamo.variables.builder import VariableBuilder
+
+        return VariableBuilder(tx, source=source, **options)(val)
 
 
 def wrap_args_kwargs(tx, result, options):
@@ -308,7 +311,16 @@ class UserMethodVariable(UserFunctionVariable):
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
         # Note this is not only for allowed modules, as user customized modules can extend from
         # allowed modules but using parent's `forward` method, which is also covered by this branch.
-        if isinstance(self.obj, variables.NNModuleVariable):
+
+        # If we are tracing the higher order op, we want Dynamo to step inside
+        # the module call so that Dynamo can see the underlying parameters and
+        # buffers and raise them as inputs to the graph. The is_root_tracer
+        # check bypasses the if condition for non-root tracers and directly
+        # calls the super().call_function at the end, which is basically
+        # equivalent of inlining the method.
+        if tx.output.is_root_tracer() and isinstance(
+            self.obj, variables.NNModuleVariable
+        ):
             module_attr = getattr(self.fn, "__module__", "")
             if (
                 module_attr is not None

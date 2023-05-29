@@ -1265,7 +1265,9 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
     result = unpickler.load()
 
     torch._utils._validate_loaded_sparse_tensors()
-
+    torch._C._log_api_usage_metadata(
+        "torch.load.metadata", {"serialization_id": zip_file.serialization_id()}
+    )
     return result
 
 

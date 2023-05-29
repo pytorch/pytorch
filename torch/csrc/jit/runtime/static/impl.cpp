@@ -76,7 +76,7 @@ bool allArgsAreTensors(const Node* node) {
 // These are rarely-used ops. Disallowing them typically eliminates
 // corner cases in graph optimizations, allowing for more aggressive
 // optimizations and better performance.
-static bool isUnsupportedOp(const Node* node) {
+bool isUnsupportedOp(const Node* node) {
   auto kind = node->kind();
   if (kind != aten::__is__ && kind != aten::__isnot__) {
     return false;
@@ -1587,7 +1587,7 @@ float BlockRunner::benchmark_model(
       (static_cast<float>(main_runs) * static_cast<float>(args_list.size()));
 }
 
-static bool display_ivalue(const IValue& iv) {
+bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
     std::cout << "Tensor " << iv.toTensor().toString() << " {";
     const auto dims = iv.toTensor().sizes();
@@ -1622,7 +1622,7 @@ static bool display_ivalue(const IValue& iv) {
   return false;
 }
 
-static void display_pnode_info(const ProcessedNode& pnode) {
+void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
   const auto num_inputs = static_cast<uint32_t>(pnode.num_inputs());
   for (const auto i : c10::irange(num_inputs)) {

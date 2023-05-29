@@ -187,7 +187,7 @@ std::tuple<double, Tensor> LBFGS::_directional_evaluate(
   return std::make_tuple(loss, flat_grad);
 }
 
-static double _cubic_interpolate(
+double _cubic_interpolate(
     double x1,
     double f1,
     double g1,
@@ -236,7 +236,7 @@ using Function = std::function<std::tuple<double, Tensor>(
     const std::vector<Tensor>& x,
     double t,
     const Tensor& d)>;
-static std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
+std::tuple<double, Tensor, double, int64_t> _strong_wolfe(
     const Function& obj_func,
     const std::vector<Tensor>& x,
     double t,
