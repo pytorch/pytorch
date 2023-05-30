@@ -417,7 +417,7 @@ class TestParsePrevTests(unittest.TestCase):
         self.assertSetEqual(expected_prioritized_tests, prioritized_tests_name)
         self.assertSetEqual(expected_remaining_tests, remaining_tests_name)
 
-    def test_compute_prioritization_time_savings_with_multiple_threads(self):
+    def test_compute_prioritization_time_savings_with_multiple_threads(self) -> None:
         tests = [
             ShardedTest(name="test1", shard=1, num_shards=2, time=7.0),
             ShardedTest(name="test2", shard=1, num_shards=2, time=5.0),
@@ -442,7 +442,7 @@ class TestParsePrevTests(unittest.TestCase):
 
     def test_compute_prioritization_time_savings_with_multiple_threads_and_many_prioritized_tests(
         self,
-    ):
+    ) -> None:
         tests = [
             ShardedTest(name="test1", shard=1, num_shards=2, time=4.0),
             ShardedTest(name="test2", shard=1, num_shards=2, time=3.0),
@@ -486,7 +486,7 @@ class TestParsePrevTests(unittest.TestCase):
         )
         pass
 
-    def test_compute_prioritization_time_savings_with_serialized_test(self):
+    def test_compute_prioritization_time_savings_with_serialized_test(self) -> None:
         tests = [
             ShardedTest(name="test1", shard=1, num_shards=2, time=7.0),
             ShardedTest(name="test2", shard=1, num_shards=2, time=5.0),

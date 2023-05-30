@@ -197,18 +197,18 @@ def _python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
 
 
 class PoolTimes:
-    def __init__(self, num_procs):
+    def __init__(self, num_procs: int) -> None:
         self.pool_times = [0.0 for _ in range(num_procs)]
         self.serial_times = 0.0
 
-    def next_test_start_time(self, serial: bool):
+    def next_test_start_time(self, serial: bool) -> float:
         if serial:
             # Serial tests are run after all parallel tests complete
             return max(self.pool_times) + self.serial_times
 
         return self.pool_times[0]
 
-    def schedule_test(self, test, serial: bool):
+    def schedule_test(self, test: ShardedTest, serial: bool) -> None:
         if serial:
             self.serial_times += test.get_time()
         else:
@@ -221,7 +221,7 @@ def log_time_savings(
     prioritized_tests: List[ShardedTest],
     is_serial_test_fn: Callable[[str], bool],
     num_procs: int = NUM_PROCS,  # make this customizable for testing
-):
+) -> float:
     # The tests will be run in [num_procs] parallel threads, so we assume each test
     # is allocated to the thread that'll free up first.
     # This isn't an exact match (since other factors could change which thread
@@ -252,6 +252,8 @@ def log_time_savings(
     print(
         f"Prioritized tests will run about {duration_to_str(max_time_savings_sec)} sooner than they would've otherwise"
     )
+
+    # Return value used by tests
     return max_time_savings_sec
 
 
