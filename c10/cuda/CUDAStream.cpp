@@ -257,6 +257,8 @@ cudaStream_t CUDAStream::stream() const {
         "Unrecognized stream ",
         stream_,
         " (I didn't recognize the stream type, ",
+        st,
+        " with the value ",
         streamType,
         ")");
     return streams[st.getStreamType() - 1][device_index][si];

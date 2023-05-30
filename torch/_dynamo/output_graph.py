@@ -627,14 +627,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
-                        for leaf_name, _ in target.named_parameters(
-                            remove_duplicate=False
-                        ):
+                        for leaf_name, _ in target.named_parameters():
                             register_leaf_name(leaf_name)
                     if hasattr(target, "_buffers"):
-                        for leaf_name, _ in target.named_buffers(
-                            remove_duplicate=False
-                        ):
+                        for leaf_name, _ in target.named_buffers():
                             register_leaf_name(leaf_name)
 
                 return wrap_name(name)
@@ -843,15 +839,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
+        graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
+        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
+
         assert_no_fake_params_or_buffers(gm)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
-
-        graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
-        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)

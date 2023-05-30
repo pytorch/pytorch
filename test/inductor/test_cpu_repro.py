@@ -378,18 +378,12 @@ class CPUReproTests(TestCase):
 
     def test_index_propagation_issue_102065(self):
         def fn(x):
-            _, num_patches, _ = x.shape
-            img_size = int(num_patches**0.5)
-            rel_indices = torch.zeros(1, num_patches, num_patches, 3)
-            ind = torch.arange(img_size).view(1, -1) - torch.arange(img_size).view(
-                -1, 1
-            )
-            indx = ind.repeat(img_size, img_size)
-            return indx**2
+            x = torch.arange(x.numel())
+            return (x.unsqueeze(0) - x.unsqueeze(1)) ** 2
 
         self.common(
             fn,
-            (torch.randn(8, 8, 8),),
+            (torch.randn(8),),
         )
 
     @unittest.skipIf(
@@ -1467,6 +1461,69 @@ class CPUReproTests(TestCase):
                         self.common(fn, (x,))
                         if simdlen != 1:
                             assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_horizontal_fusion(self):
+        def fn(a, b, c, idx):
+            _a = torch.index_select(a, dim=0, index=idx)
+            _b = torch.index_select(b, dim=0, index=idx)
+            _c = torch.index_select(c, dim=0, index=idx)
+            return _a, _b, _c
+
+        with config.patch({"cpp.max_horizontal_fusion_size": 0}):
+            metrics.reset()
+            a = torch.randn(size=(4, 16), dtype=torch.bfloat16)
+            b = torch.randn(size=(4, 16), dtype=torch.bfloat16)
+            c = torch.randn(size=(4, 16), dtype=torch.bfloat16)
+            idx = torch.zeros(size=[4], dtype=torch.int64)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn(a, b, c, idx)
+            self.assertEqual(metrics.generated_kernel_count, 3)
+            self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
+
+        with config.patch({"cpp.max_horizontal_fusion_size": 1}):
+            metrics.reset()
+            a = torch.randn(size=(4, 32), dtype=torch.bfloat16)
+            b = torch.randn(size=(4, 32), dtype=torch.bfloat16)
+            c = torch.randn(size=(4, 32), dtype=torch.bfloat16)
+            idx = torch.zeros(size=[4], dtype=torch.int64)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn(a, b, c, idx)
+            self.assertEqual(metrics.generated_kernel_count, 3)
+            self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
+
+        with config.patch({"cpp.max_horizontal_fusion_size": 2}):
+            metrics.reset()
+            a = torch.randn(size=(4, 64), dtype=torch.bfloat16)
+            b = torch.randn(size=(4, 64), dtype=torch.bfloat16)
+            c = torch.randn(size=(4, 64), dtype=torch.bfloat16)
+            idx = torch.zeros(size=[4], dtype=torch.int64)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn(a, b, c, idx)
+            print(metrics.generated_kernel_count)
+            self.assertEqual(metrics.generated_kernel_count, 2)
+            self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
+
+        with config.patch({"cpp.max_horizontal_fusion_size": 3}):
+            metrics.reset()
+            a = torch.randn(size=(4, 128), dtype=torch.bfloat16)
+            b = torch.randn(size=(4, 128), dtype=torch.bfloat16)
+            c = torch.randn(size=(4, 128), dtype=torch.bfloat16)
+            idx = torch.zeros(size=[4], dtype=torch.int64)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn(a, b, c, idx)
+            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
+
+    def test_bf16_neg_abs(self):
+        def fn(x):
+            return x.neg().abs()
+
+        metrics.reset()
+        x = torch.randn(100, 100).bfloat16()
+        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        assert metrics.cpp_to_dtype_count == 0
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_transpose_non_contiguous(self):
         def fn(a):
