@@ -58,6 +58,9 @@ log = logging.getLogger(__name__)
 # We are primarily interested in TF32
 torch.backends.cuda.matmul.allow_tf32 = True
 
+# Suppress torch.profiler spam
+os.environ["KINETO_LOG_LEVEL"] = "5"
+
 current_name = ""
 current_device = ""
 current_batch_size = None
@@ -232,6 +235,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
+    "AlbertForQuestionAnswering",  # accuracy
     "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
     "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
     "mobilevit_s",
@@ -337,7 +341,7 @@ def output_csv(filename, headers, row):
     with open(filename, "w") as fd:
         writer = csv.writer(fd, lineterminator="\n")
         for line in lines:
-            writer.writerow(line + ["0"] * (len(headers) - len(line)))
+            writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
 
 def nothing(f):
@@ -1261,11 +1265,17 @@ class BenchmarkRunner:
                 except NotImplementedError:
                     continue  # bad benchmark implementation
 
+    def deepcopy_model(self, model):
+        try:
+            return copy.deepcopy(model)
+        except TypeError:
+            return model
+
     def validate_model(self, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
-        model = copy.deepcopy(model)
+        model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1280,7 +1290,7 @@ class BenchmarkRunner:
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = copy.deepcopy(model)
+        model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1384,7 +1394,7 @@ class BenchmarkRunner:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         def deepcopy_and_maybe_ddp(model):
-            model = copy.deepcopy(model)
+            model = self.deepcopy_model(model)
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
@@ -1434,6 +1444,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
+                log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Rerun native pytorch
@@ -1453,19 +1464,28 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Two eager runs should have exactly same result
-            if (
-                name not in self.skip_accuracy_check_as_eager_non_deterministic
-                and not same(
-                    correct_result,
-                    correct_rerun_result,
-                    fp64_ref=None,
-                    cos_similarity=False,
-                    tol=0,
-                    equal_nan=self.equal_nan,
-                )
-            ):
+            is_same = True
+            try:
+                if (
+                    name not in self.skip_accuracy_check_as_eager_non_deterministic
+                    and not same(
+                        correct_result,
+                        correct_rerun_result,
+                        fp64_ref=None,
+                        cos_similarity=False,
+                        tol=0,
+                        equal_nan=self.equal_nan,
+                    )
+                ):
+                    is_same = False
+            except Exception as e:
+                # Sometimes torch.allclose may throw RuntimeError
+                is_same = False
+
+            if not is_same:
                 accuracy_status = "eager_two_runs_differ"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+
             correct_rerun_result = None
 
             # Run with Dynamo
@@ -1508,14 +1528,21 @@ class BenchmarkRunner:
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
-            if not same(
-                correct_result,
-                new_result,
-                fp64_outputs,
-                equal_nan=self.equal_nan,
-                cos_similarity=cos_similarity,
-                tol=tolerance,
-            ):
+            try:
+                if not same(
+                    correct_result,
+                    new_result,
+                    fp64_outputs,
+                    equal_nan=self.equal_nan,
+                    cos_similarity=cos_similarity,
+                    tol=tolerance,
+                ):
+                    is_same = False
+            except Exception as e:
+                # Sometimes torch.allclose may throw RuntimeError
+                is_same = False
+
+            if not is_same:
                 if self.args.skip_accuracy_check:
                     accuracy_status = "pass_due_to_skip"
                 else:

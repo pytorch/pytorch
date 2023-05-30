@@ -171,6 +171,15 @@ Tensor mean_quantized_cpu(
   return result;
 }
 
+Tensor mean_quantized_cpu(
+    const Tensor& self,
+    DimnameList dim,
+    bool keepdim,
+    optional<ScalarType> dtype) {
+  return mean_quantized_cpu(
+      self, dimnames_to_positions(self, dim), keepdim, dtype);
+}
+
 Tensor& mean_out_quantized_cpu(
     Tensor& result,
     const Tensor& self,
