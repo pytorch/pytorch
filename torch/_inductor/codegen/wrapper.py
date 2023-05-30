@@ -923,12 +923,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         result.writeline("'''\n)")
         # get the hash of the wrapper code to name the extension
-        # TODO: use complete wrapper to get the has value
-        # TODO: changeing _call_func_id will lead to recompilation. Is it actually expected?
-        # TODO: self._call_func_id
-        # wrapper_call_hash = codecache.code_hash(
-        #     self.wrapper_call.getvalue() + str(self._call_func_id)
-        # )
         wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
         result.splice(
             f"""
