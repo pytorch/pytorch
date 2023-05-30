@@ -57,15 +57,15 @@ Ayrıntılı bir düzeyde, PyTorch aşağıdaki bileşenlerden oluşan bir küt�
 | ---- | --- |
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | Güçlü GPU desteğine sahip NumPy gibi bir Tensör kütüphanesi |
 | [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | Torch'taki tüm farklılaştırılabilir Tensör işlemlerini destekleyen bant tabanlı otomatik farklılaştırma kütüphanesi |
-| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | A compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
-| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | A neural networks library deeply integrated with autograd designed for maximum flexibility |
-| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
-| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
+| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | PyTorch kodundan serileştirilebilir ve optimize edilebilir modeller oluşturmak için bir derleme yığını (TorchScript)  |
+| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | Maksimum esneklik için tasarlanmış otograd ile derinlemesine entegre edilmiş bir sinir ağları kütüphanesi |
+| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing ile, PyTorch Tensor'ların süreçler arasında fevkalade bir şekilde bellek paylaşımı yapabilen bir kütüphane. Veri yükleme ve Hogwild eğitimi gibi durumlarda kullanışlıdır. |
+| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | Kolaylık için DataLoader ve diğer yardımcı işlevler |
 
-Usually, PyTorch is used either as:
+PyTorch genellikle şu şekilde kullanılır:
 
-- A replacement for NumPy to use the power of GPUs.
-- A deep learning research platform that provides maximum flexibility and speed.
+- GPU'ların gücünü kullanmak için NumPy'nin yerine geçecek bir araç.
+- Maksimum esneklik ve hız sağlayan bir derin öğrenme araştırma platformu.
 
 Daha Fazla Detaylandırma:
 
