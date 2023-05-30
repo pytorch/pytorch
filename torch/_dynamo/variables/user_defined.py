@@ -415,6 +415,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
             elif inspect.isfunction(dynamic_subobj):
                 return variables.UserFunctionVariable(subobj, source=source, **options)
+        elif isinstance(subobj, types.MethodType):
+            func = subobj.__func__
+            obj = subobj.__self__
+            obj_source = AttrSource(self.source, "__self__") if self.source else None
+            return variables.UserMethodVariable(
+                func,
+                UserDefinedObjectVariable(obj, source=obj_source, **options),
+                source=source,
+                **options,
+            )
 
         if (
             name in getattr(value, "__dict__", {})
