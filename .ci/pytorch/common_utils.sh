@@ -208,6 +208,7 @@ function install_timm() {
 }
 
 function checkout_install_torchbench() {
+  python -m pip install patch transformers
   local commit
   commit=$(get_pinned_commit torchbench)
   git clone https://github.com/pytorch/benchmark torchbench
