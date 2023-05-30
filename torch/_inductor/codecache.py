@@ -811,18 +811,19 @@ class CppWrapperCodeCache:
                 if not os.path.exists(filepath):
                     log.debug("Cpp wrapper building %s", filepath)
 
-                    cpp_flags_ = cpp_flags()
-                    opt_flags = optimization_flags()
-                    shared = get_shared()
-                    warning_all_flag_ = get_warning_all_flag()
-                    ipaths, lpaths, libs, macros_ = get_include_and_linking_paths(
+                    _cpp_flags = cpp_flags()
+                    _opt_flags = optimization_flags()
+                    _shared = get_shared()
+                    _warning_all_flag = get_warning_all_flag()
+                    _ipaths, _lpaths, _libs, _macros = get_include_and_linking_paths(
                         vec_isa=pick_vec_isa(),
                         cuda=cuda,
                     )
-                    use_custom_generated_macros_ = use_custom_generated_macros()
-                    extra_cflags = f"{cpp_flags_} {opt_flags} {warning_all_flag_} {macros_} {use_custom_generated_macros_}"
-                    extra_ldflags = f"{shared} {lpaths} {libs}"
-                    extra_include_paths = f"{ipaths}"
+                    _use_custom_generated_macros = use_custom_generated_macros()
+
+                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_use_custom_generated_macros}"
+                    extra_ldflags = f"{_shared} {_lpaths} {_libs}"
+                    extra_include_paths = f"{_ipaths}"
 
                     mod = torch.utils.cpp_extension.load_inline(
                         name=name,
