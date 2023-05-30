@@ -22,8 +22,8 @@
 <!-- toc -->
 
 - [المزيد عن PyTorch](#المزيد-عن-PyTorch)
-  - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات GPU](#مكتبة-Tenson-جاهزة-للعمل-على-وحدة-معالجة-الرسوميات-gpu)
-  - [شبكات عصبية ديناميكية: نظام تلقائي للتفاضل يعتمد على التسجيل بواسطة الشريط](#dynamic-neural-networks-tape-based-autograd)
+  - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات GPU](#مكتبة-tenson-جاهزة-للعمل-على-وحدة-معالجة-الرسوميات-gpu)
+  - [شبكات عصبية ديناميكية: نظام تلقائي للتفاضل يعتمد على التسجيل بواسطة الشريط](#شبكات-عصبية-ديناميكية)
   - [بايثون في المقام الأول](#python-first)
   - [التجارب الحتمية](#imperative-experiences)
   - [سريع وخفيف](#fast-and-lean)
@@ -84,7 +84,7 @@ We provide a wide variety of tensor routines to accelerate and fit your scientif
 such as slicing, indexing, mathematical operations, linear algebra, reductions.
 And they are fast!
 
-### Dynamic Neural Networks: Tape-Based Autograd
+### شبكات عصبية ديناميكية
 
 PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
 
