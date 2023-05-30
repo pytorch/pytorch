@@ -271,8 +271,8 @@ struct MakeDefsDominateUses {
         // Find the common ancestor block between this node and the node that
         // produced this input. For this input Use to be valid, the Value's
         // def must be present in this common ancestor node.
-        Block* common_ancestor = n->findCommonAncestorBlockWith(
-            inp_remapped->node());
+        Block* common_ancestor =
+            n->findCommonAncestorBlockWith(inp_remapped->node());
 
         Value* v_itr = inp_remapped;
         Block* b_itr = inp_remapped->node()->owningBlock();
