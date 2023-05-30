@@ -939,7 +939,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
-
     @requires_cuda()
     def test_tags_rand(self):
         def gn(x, y):
@@ -961,7 +960,6 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )  # mm recomputed in the bwd
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
-
 
     @requires_cuda()
     def test_tags_dropout(self):

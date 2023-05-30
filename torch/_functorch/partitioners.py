@@ -182,7 +182,7 @@ def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, mod
                     fwd_state = env[modified_rand_nodes[node]]
                     new_args = tuple([env[arg] for arg in node.args])
                     # What should be kwargs?
-                    output = new_graph.create_node("call_function", run_with_rng_state, args=(fwd_state, node.target.op, *new_args), kwargs=node.kwargs)
+                    output = new_graph.create_node("call_function", run_with_rng_state, args=(fwd_state, node.target, *new_args), kwargs=node.kwargs)
                     env[node] = output
                 else:
                     env[node] = new_graph.node_copy(node, lambda x: env[x])
@@ -1097,4 +1097,3 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
 def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):
     draw_graph(graph, file_name)
     return default_partition(graph, joint_inputs)
-
