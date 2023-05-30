@@ -147,6 +147,7 @@ class OptimizedModule(torch.nn.Module):
     def __dir__(self):
         return self._orig_mod.__dir__()
 
+
 def remove_from_cache(f):
     """
     Make sure f.__code__ is not cached to force a recompile

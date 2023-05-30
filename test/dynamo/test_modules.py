@@ -1404,7 +1404,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
                 self.register_buffer("buf0", torch.randn(10, 10))
-                self.register_parameter(name='param0', param=torch.nn.Parameter(torch.randn(10, 10)))
+                self.register_parameter(
+                    name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
+                )
 
             def forward(self, x):
                 return self.r(torch.sin(x)) + self.buf0
@@ -1415,9 +1417,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod_keys = dir(opt_mod)
 
         # Check user-defined attributes, parameters and buffers
-        self.assertIn('linear', opt_mod_keys)
-        self.assertIn('buf0', opt_mod_keys)
-        self.assertIn('param0', opt_mod_keys)
+        self.assertIn("linear", opt_mod_keys)
+        self.assertIn("buf0", opt_mod_keys)
+        self.assertIn("param0", opt_mod_keys)
 
         # Check all attributes, parameters and buffers
         for p1, p2 in zip(mod_keys, opt_mod_keys):
