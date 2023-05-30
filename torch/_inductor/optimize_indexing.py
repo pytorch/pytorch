@@ -97,9 +97,15 @@ def get_expr_range(expr, vars_ranges: dict):
         elif diff.is_positive is False:  # can return None
             monotonic_decreasing.append(symbol)
         else:
-            # If symbol's lower and upper bounds are the same, then it is constant.
+            # If diff_free_symbols only one symbol and it is the same as symbol,
+            # If this symbol's lower and upper bounds are the same, then it is constant.
             # Add it to monotonic_increasing or monotonic_decreasing is ok.
-            if vars_ranges[symbol].lower == vars_ranges[symbol].upper:
+            diff_free_symbols = list(diff.free_symbols)
+            if (
+                len(diff_free_symbols) == 1
+                and symbol in diff_free_symbols
+                and vars_ranges[symbol].lower == vars_ranges[symbol].upper
+            ):
                 monotonic_increasing.append(symbol)
             else:
                 other_symbols.append(symbol)
