@@ -3620,6 +3620,8 @@ def avg_pool2d_backward(
 
 def _validate_reduction_axis(x, axis):
     size = x.get_size()
+    if len(size) == 0:
+        return []
     if isinstance(axis, int):
         axis = [axis]
     elif not axis:
