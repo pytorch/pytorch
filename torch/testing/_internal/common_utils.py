@@ -773,11 +773,13 @@ def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
         other_args = []
         if DISABLED_TESTS_FILE:
-            other_args.append('--import-disabled-tests')
+            other_args.append("--import-disabled-tests")
         if SLOW_TESTS_FILE:
-            other_args.append('--import-slow-tests')
+            other_args.append("--import-slow-tests")
         if USE_PYTEST:
             other_args.append("--use-pytest")
+        if RERUN_DISABLED_TESTS:
+            other_args.append("--rerun-disabled-tests")
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -2134,6 +2136,16 @@ class TestCase(expecttest.TestCase):
 
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
+
+    def assertLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertLogs(logger, level)
+
+    def assertNoLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertNoLogs(logger, level)
 
     def wrap_with_cuda_policy(self, method_name, policy):
         test_method = getattr(self, method_name)

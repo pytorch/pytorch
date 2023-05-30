@@ -2,6 +2,7 @@ import operator
 import torch
 import warnings
 from itertools import chain
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from ..modules import Module
 from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
@@ -15,7 +16,7 @@ from torch._utils import (
 
 __all__ = ['DataParallel', 'data_parallel']
 
-def _check_balance(device_ids):
+def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
     imbalance_warn = """
     There is an imbalance between your GPUs. You may want to exclude GPU {} which
     has less than 75% of the memory or cores of GPU {}. You can do so by setting
@@ -121,7 +122,13 @@ class DataParallel(Module):
 
     # TODO: update notes/cuda.rst when this class handles 8+ GPUs well
 
-    def __init__(self, module, device_ids=None, output_device=None, dim=0):
+    def __init__(
+        self,
+        module: Module,
+        device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
+        output_device: Optional[Union[int, torch.device]] = None,
+        dim: int = 0,
+    ) -> None:
         super().__init__()
         torch._C._log_api_usage_once("torch.nn.parallel.DataParallel")
         device_type = _get_available_device_type()
@@ -132,6 +139,9 @@ class DataParallel(Module):
 
         if device_ids is None:
             device_ids = _get_all_device_indices()
+
+        if device_ids is None:
+            raise RuntimeError("no available devices were found")
 
         if output_device is None:
             output_device = device_ids[0]
@@ -147,7 +157,7 @@ class DataParallel(Module):
         if len(self.device_ids) == 1:
             self.module.to(self.src_device_obj)
 
-    def forward(self, *inputs, **kwargs):
+    def forward(self, *inputs: Any, **kwargs: Any) -> Any:
         with torch.autograd.profiler.record_function("DataParallel.forward"):
             if not self.device_ids:
                 return self.module(*inputs, **kwargs)
@@ -158,33 +168,45 @@ class DataParallel(Module):
                                        "on device {} (device_ids[0]) but found one of "
                                        "them on device: {}".format(self.src_device_obj, t.device))
 
-            inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
+            inputs, module_kwargs = self.scatter(inputs, kwargs, self.device_ids)
             # for forward function without any inputs, empty list and dict will be created
             # so the module can be executed on one device which is the first one in device_ids
-            if not inputs and not kwargs:
+            if not inputs and not module_kwargs:
                 inputs = ((),)
-                kwargs = ({},)
+                module_kwargs = ({},)
 
             if len(self.device_ids) == 1:
-                return self.module(*inputs[0], **kwargs[0])
+                return self.module(*inputs[0], **module_kwargs[0])
             replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
-            outputs = self.parallel_apply(replicas, inputs, kwargs)
+            outputs = self.parallel_apply(replicas, inputs, module_kwargs)
             return self.gather(outputs, self.output_device)
 
-    def replicate(self, module, device_ids):
+    def replicate(self, module: Module, device_ids: Sequence[Union[int, torch.device]]) -> List[Module]:
         return replicate(module, device_ids, not torch.is_grad_enabled())
 
-    def scatter(self, inputs, kwargs, device_ids):
+    def scatter(
+        self,
+        inputs: Tuple[Any, ...],
+        kwargs: Optional[Dict[str, Any]],
+        device_ids: Sequence[Union[int, torch.device]],
+    ) -> Any:
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
-    def parallel_apply(self, replicas, inputs, kwargs):
+    def parallel_apply(self, replicas: Sequence[Module], inputs: Sequence[Any], kwargs: Any) -> List[Any]:
         return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])
 
-    def gather(self, outputs, output_device):
+    def gather(self, outputs: Any, output_device: Union[int, torch.device]) -> Any:
         return gather(outputs, output_device, dim=self.dim)
 
 
-def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, module_kwargs=None):
+def data_parallel(
+    module: Module,
+    inputs: Any,
+    device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
+    output_device: Optional[Union[int, torch.device]] = None,
+    dim: int = 0,
+    module_kwargs: Optional[Any] = None,
+) -> torch.Tensor:
     r"""Evaluates module(input) in parallel across the GPUs given in device_ids.
 
     This is the functional version of the DataParallel module.
@@ -204,8 +226,14 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
 
     device_type = _get_available_device_type()
 
+    if device_type is None:
+        raise RuntimeError("device type could not be determined")
+
     if device_ids is None:
         device_ids = _get_all_device_indices()
+
+    if device_ids is None:
+        raise RuntimeError("no available devices were found")
 
     if output_device is None:
         output_device = device_ids[0]
@@ -226,6 +254,8 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
     if not inputs and not module_kwargs:
         inputs = ((),)
         module_kwargs = ({},)
+
+    assert module_kwargs is not None
 
     if len(device_ids) == 1:
         return module(*inputs[0], **module_kwargs[0])
