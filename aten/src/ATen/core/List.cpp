@@ -12,5 +12,9 @@ bool operator==(const ListImpl& lhs, const ListImpl& rhs) {
           rhs.list.cbegin(),
           _fastEqualsForContainer);
 }
+
+ListImpl::ListImpl(list_type list_, TypePtr elementType_)
+  : list(std::move(list_))
+  , elementType(std::move(elementType_)) {}
 } // namespace detail
 } // namespace c10

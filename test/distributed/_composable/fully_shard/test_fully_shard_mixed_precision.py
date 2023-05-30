@@ -37,8 +37,25 @@ class TestMixedPrecision(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_float16_on_one_submodule(self):
+        self.run_subtests(
+            {
+                "cast_root_forward_inputs_submodule": [True, False],
+                "cast_forward_inputs_submodule": [True, False],
+            },
+            self._test_float16_on_one_submodule,
+        )
+
+    def _test_float16_on_one_submodule(
+        self,
+        cast_root_forward_inputs_submodule: bool,
+        cast_forward_inputs_submodule: bool,
+    ):
         forward_inputs: Dict[nn.Module, torch.Tensor] = {}
-        float16 = MixedPrecision(param_dtype=torch.float16, cast_forward_inputs=True)
+        float16 = MixedPrecision(
+            param_dtype=torch.float16,
+            cast_root_forward_inputs=cast_root_forward_inputs_submodule,
+            cast_forward_inputs=cast_forward_inputs_submodule,
+        )
 
         model = SaveForwardInputsModel(
             forward_inputs=forward_inputs,
@@ -51,11 +68,22 @@ class TestMixedPrecision(FSDPTest):
         model.c2 = fully_shard(model.c2, mixed_precision=float16)
         fsdp = fully_shard(model)
 
-        fsdp(x).sum().backward()
+        # cast_root_forward_inputs_submodule or cast_forward_inputs_submodule should be True
+        if not cast_root_forward_inputs_submodule and not cast_forward_inputs_submodule:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "mat1 and mat2 must have the same dtype",
+            ):
+                fsdp(x).sum().backward()
+        else:
+            fsdp(x).sum().backward()
 
         self.assertEqual(forward_inputs[model].dtype, torch.float32)
         self.assertEqual(forward_inputs[c1].dtype, torch.float32)
-        self.assertEqual(forward_inputs[c2].dtype, torch.float16)
+        if cast_root_forward_inputs_submodule or cast_forward_inputs_submodule:
+            self.assertEqual(forward_inputs[c2].dtype, torch.float16)
+        else:
+            self.assertEqual(forward_inputs[c2].dtype, torch.float32)
 
 
 if __name__ == "__main__":

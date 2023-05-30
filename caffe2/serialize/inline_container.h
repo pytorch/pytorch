@@ -101,6 +101,8 @@ class TORCH_API PyTorchStreamReader final {
 
   // return dataptr, size
   std::tuple<at::DataPtr, size_t> getRecord(const std::string& name);
+  // inplace memory writing
+  size_t getRecord(const std::string& name, void* dst, size_t n);
   size_t getRecordOffset(const std::string& name);
   bool hasRecord(const std::string& name);
   std::vector<std::string> getAllRecords();

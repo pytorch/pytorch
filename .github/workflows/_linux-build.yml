@@ -53,7 +53,7 @@ on:
         value: ${{ jobs.build.outputs.docker-image }}
         description: The docker image containing the built PyTorch.
       test-matrix:
-        value: ${{ inputs.test-matrix }}
+        value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
 
 jobs:
@@ -64,6 +64,7 @@ jobs:
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -75,7 +76,7 @@ jobs:
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux

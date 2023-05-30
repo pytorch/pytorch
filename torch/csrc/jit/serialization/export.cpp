@@ -21,7 +21,9 @@
 #include <torch/version.h>
 #include <atomic>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnewline-eof")
 #include <onnx/checker.h>
+C10_DIAGNOSTIC_POP()
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")

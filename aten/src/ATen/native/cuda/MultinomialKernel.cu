@@ -92,15 +92,15 @@ void renormRows(Tensor& t) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
         <<<grid, block, (block.x / warp_size) * sizeof(scalar_t),
-        at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
+        at::cuda::getCurrentCUDAStream()>>>(t.mutable_data_ptr<scalar_t>(),
             rows, cols);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
 template <typename scalar_t>
-__device__ int binarySearchForMultinomial(scalar_t* cumdist,
-                                          scalar_t* dist,
+__device__ int binarySearchForMultinomial(const scalar_t* cumdist,
+                                          const scalar_t* dist,
                                           int size,
                                           scalar_t val) {
   int start = 0;
@@ -140,8 +140,8 @@ sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
                                  int64_t* dest,
                                  int64_t distributions,
                                  int categories,
-                                 scalar_t* normDistPrefixSum,
-                                 scalar_t* normDist) {
+                                 const scalar_t* normDistPrefixSum,
+                                 const scalar_t* normDist) {
   // At the moment, each warp computes one sample value in the binary
   // search due to divergence. It seems possible to compute multiple
   // values and limit divergence though later on.
@@ -188,8 +188,8 @@ __global__ void sampleMultinomialOnce(
     int64_t* dest,
     int64_t distributions,
     int categories,
-    scalar_t* sampled,
-    scalar_t* dist,
+    const scalar_t* sampled,
+    const scalar_t* dist,
     int stride_dist, // dist->stride(0)
     int stride_categories // dist->stride(1)
 ) {
@@ -367,11 +367,11 @@ void multinomial_with_replacement_kernel_impl(
           <<<grid, block,
           requiredShared,
           at::cuda::getCurrentCUDAStream()>>>(
-              result.data_ptr<int64_t>(),
+              result.mutable_data_ptr<int64_t>(),
                   numDist,
                   numCategories,
-                  sampled.data_ptr<scalar_t>(),
-                  self_v.data_ptr<scalar_t>(),
+                  sampled.const_data_ptr<scalar_t>(),
+                  self_v.const_data_ptr<scalar_t>(),
                   self_v.stride(0),
                   self_v.stride(1)
           );
@@ -440,10 +440,10 @@ void multinomial_with_replacement_kernel_impl(
             <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
                 rng_engine_inputs,
                 n_sample,
-                result.data_ptr<int64_t>(),
+                result.mutable_data_ptr<int64_t>(),
                 numDist, numCategories,
-                prefixSum.data_ptr<scalar_t>(),
-                normDist.data_ptr<scalar_t>());
+                prefixSum.const_data_ptr<scalar_t>(),
+                normDist.const_data_ptr<scalar_t>());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });

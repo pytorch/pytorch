@@ -69,10 +69,6 @@ build --per_file_copt='^//.*\.(cpp|cc)$'@-Werror=all
 # The following warnings come from -Wall. We downgrade them from error
 # to warnings here.
 #
-# sign-compare has a tremendous amount of violations in the
-# codebase. It will be a lot of work to fix them, just disable it for
-# now.
-build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-sign-compare
 # We intentionally use #pragma unroll, which is compiler specific.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-error=unknown-pragmas
 

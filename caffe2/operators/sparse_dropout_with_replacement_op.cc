@@ -70,7 +70,7 @@ OPERATOR_SCHEMA(SparseDropoutWithReplacement)
     .SetDoc(R"DOC(
 
 `SparseDropoutWithReplacement` takes a 1-d input tensor and a lengths tensor.
-Values in the Lengths tensor represent how many input elements consitute each
+Values in the Lengths tensor represent how many input elements constitute each
 example in a given batch.  The set of input values for an example will be
 replaced with the single dropout value with probability given by the `ratio`
 argument.

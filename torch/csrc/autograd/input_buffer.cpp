@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/input_buffer.h>
 
+#include <ATen/CachedTensorUtils.h>
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorOperators.h>
@@ -77,7 +78,8 @@ bool can_accumulate_inplace(const Variable& v) {
       v.is_non_overlapping_and_dense() &&
 
       // and we hold the last reference
-      v.use_count() == 1 && v.has_storage() && v.storage().use_count() == 1);
+      at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
+      v.storage().use_count() == 1);
 }
 } // anonymous namespace
 

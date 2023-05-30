@@ -47,11 +47,7 @@ compile_arm64() {
 }
 
 compile_x86_64() {
-  USE_DISTRIBUTED=0 WERROR=1 python setup.py bdist_wheel
-}
-
-compile_x86_64() {
-  USE_DISTRIBUTED=0 WERROR=1 python setup.py bdist_wheel
+  USE_DISTRIBUTED=0 WERROR=1 python setup.py bdist_wheel --plat-name=macosx_10_9_x86_64
 }
 
 build_lite_interpreter() {
@@ -71,6 +67,8 @@ build_lite_interpreter() {
 
     "${CPP_BUILD}/caffe2/build/bin/test_lite_interpreter_runtime"
 }
+
+print_cmake_info
 
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
   if [[ $(uname -m) == "arm64" ]]; then

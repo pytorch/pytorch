@@ -1464,11 +1464,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
-      if (set_grads_to_none_) {
-        runGradCallbackForVariable(variable, [&](auto& grad) {
-          grad.reset();
-          return true;
-        });
+      if (optim_in_backward_) {
+        // Return early if optimizer has already run.
+        runGradCallbackForVariable(variable, [&](auto& grad) { return true; });
       } else {
         RECORD_FUNCTION(
             "torch.distributed.ddp.reducer::copy_bucket_to_grad",
@@ -1486,8 +1484,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         bucket_view_in.copy_(bucket_view_out);
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
-        if (set_grads_to_none_) {
-          grad.reset();
+        if (optim_in_backward_) {
+          // Return early if optimizer has already run.
           return true;
         }
         // If a parameter is globally unused, we keep its grad untouched.
@@ -1804,10 +1802,6 @@ void Reducer::register_builtin_comm_hook(
       TORCH_WARN_ONCE(
           "Unknown built-in DDP comm hook type is provided. No comm hook will be used.");
   }
-}
-
-void Reducer::set_grads_to_none(bool set_to_none) {
-  set_grads_to_none_ = set_to_none;
 }
 
 void Reducer::ensure_prior_reduction_finished() {

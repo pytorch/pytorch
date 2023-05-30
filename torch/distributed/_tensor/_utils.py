@@ -1,13 +1,12 @@
-from typing import Tuple, Sequence
-from torch.distributed._tensor.device_mesh import DeviceMesh
-from torch.distributed._tensor.placement_types import Shard, Placement
+from typing import Sequence, Tuple
+
 from torch._prims_common import ShapeType
+from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.placement_types import Placement, Shard
 
 
 def compute_local_shape(
-    global_shape: ShapeType,
-    mesh: DeviceMesh,
-    placements: Sequence[Placement]
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[int, ...]:
     """
     Compute the shape of a local shard of the given DTensor on its current
@@ -38,9 +37,7 @@ def compute_local_shape(
 
 
 def compute_local_offset(
-    global_shape: ShapeType,
-    mesh: DeviceMesh,
-    placements: Sequence[Placement]
+    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
 ) -> Tuple[int, ...]:
     """
     Compute the offsets of a local shard of the given DTensor on its current
@@ -60,8 +57,8 @@ def compute_local_offset(
             assert my_coordinate is not None, "Rank not part of mesh!"
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
-                assert (
-                    shard_dim < len(local_shape)
+                assert shard_dim < len(
+                    local_shape
                 ), f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
                 shard_size, shard_offset = placement._local_shard_size_on_dim(
                     local_shape[shard_dim],

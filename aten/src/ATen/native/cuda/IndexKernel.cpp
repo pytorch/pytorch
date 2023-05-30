@@ -62,17 +62,14 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
   at::assert_no_internal_overlap(self);
   TORCH_CHECK(
       self.scalar_type() == source.scalar_type(),
-      "masked_scatter: expected self and source to have same dtypes but got",
+      "masked_scatter_: expected self and source to have same dtypes but got",
       self.scalar_type(),
       " and ",
       source.scalar_type());
+  TORCH_CHECK(mask.dtype() == ScalarType::Bool, "masked_scatter_ only supports boolean masks, "
+     "but got mask with dtype ", mask.dtype());
 
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_scatter_");
-
-  if (b_mask->dtype() == ScalarType::Byte) {
-    TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
 
   if (self.numel() == 0) {
     return self;

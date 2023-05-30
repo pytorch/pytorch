@@ -329,9 +329,8 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
     });
 }
 
-template <typename scalar_t, typename mask_t>
+template <typename scalar_t>
 void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
-  auto is_mask_bool = std::is_same<mask_t, bool>::value;
   std::ptrdiff_t source_cntr = 0;
   scalar_t* source_ptr = source.data_ptr<scalar_t>();
   auto numel = source.numel();
@@ -342,10 +341,7 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
     char* mask = data[1];
     const int64_t mask_stride = strides[1];
     for (const auto i : c10::irange(n)) {
-      mask_t mask_value = *(mask_t*)(mask + mask_stride * i);
-      if (!is_mask_bool) {
-        TORCH_CHECK(mask_value <= static_cast<mask_t>(1), "Mask tensor can take 0 and 1 values only");
-      }
+      auto mask_value = *reinterpret_cast<bool*>(mask + mask_stride * i);
       if (mask_value) {
         TORCH_CHECK(source_cntr < numel, "Number of elements of source < number of ones in mask");
         *(scalar_t*)(dst + dst_stride * i) = *(source_ptr);
@@ -358,6 +354,8 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
 }
 
 void masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
+ TORCH_CHECK(iter.input_dtype() == ScalarType::Bool, "masked_scatter_ only supports boolean masks, "
+    "but got mask with dtype ", iter.input_dtype());
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Bool,
       ScalarType::BFloat16,
@@ -365,12 +363,7 @@ void masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
       iter.dtype(),
       "masked_scatter",
       [&] {
-        auto mask_dtype = iter.input_dtype(0);
-        if (mask_dtype == ScalarType::Bool) {
-          cpu_masked_scatter_kernel<scalar_t, bool>(iter, source);
-        } else {
-          cpu_masked_scatter_kernel<scalar_t, unsigned char>(iter, source);
-        }
+          cpu_masked_scatter_kernel<scalar_t>(iter, source);
       });
 }
 
