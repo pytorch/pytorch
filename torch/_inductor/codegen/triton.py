@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, Iterable, List, Set
 
 import sympy
 
@@ -34,7 +34,6 @@ from ..utils import (
 from ..virtualized import ops, V
 
 from .common import (
-    can_use_32bit_indexing,
     CSEVariable,
     DeferredLine,
     free_symbol_startswith,
@@ -1887,8 +1886,58 @@ class TritonScheduling:
             return node.node.data.reduction_hint
 
     @staticmethod
+    def can_use_32bit_indexing(numel: sympy.Expr, buffers: Iterable[ir.Buffer]) -> bool:
+        int_max = torch.iinfo(torch.int32).max
+        size_hint = V.graph.sizevars.size_hint
+        if size_hint(numel) > int_max:
+            return False
+
+        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        if any(size_hint(size) > int_max for size in buf_sizes):
+            return False
+
+        # Only install guards for 32-bit indexing as there is no correctness
+        # issue with using 64-bit for everything
+        V.graph.sizevars.guard_leq(numel, int_max)
+        for size in buf_sizes:
+            V.graph.sizevars.guard_leq(size, int_max)
+        return True
+
+    @staticmethod
     def select_index_dtype(node_schedule, numel, reduction_numel):
-        if can_use_32bit_indexing(node_schedule, numel, reduction_numel):
+        # Gather all used buffer names
+        buffer_names = set()
+        for node in node_schedule:
+            if not isinstance(node, scheduler.BaseSchedulerNode):
+                continue
+
+            buffer_names.update(node.get_names())
+            buffer_names.update(node.used_buffer_names())
+
+        # Get buffers objects
+        def _get_buffer(name: str) -> ir.Buffer:
+            if name in V.graph.name_to_buffer:
+                return V.graph.name_to_buffer[name]
+            elif name in V.graph.graph_inputs:
+                return V.graph.graph_inputs[name]
+            elif name in V.graph.constants:
+                data = V.graph.constants[name]
+                return ir.ConstantBuffer(
+                    name,
+                    ir.FixedLayout(
+                        data.device, data.dtype, *V.graph.static_sizes_strides(data)
+                    ),
+                )
+            raise RuntimeError(f"Failed to find buffer matching name {name}")
+
+        buffers = [_get_buffer(name) for name in buffer_names]
+
+        # In theory we can separately check xnumel and rnumel are <= int_max
+        # but some indexers do use the full linear index so we need to be
+        # conservative here.
+        total_numel = numel * reduction_numel
+
+        if TritonScheduling.can_use_32bit_indexing(total_numel, buffers):
             return "tl.int32"
         return "tl.int64"
 

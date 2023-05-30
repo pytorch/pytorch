@@ -18,9 +18,11 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
+from ..optimize_indexing import get_expr_range, range_expressable_in_32_bits
 from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
@@ -29,10 +31,10 @@ from ..utils import (
     sympy_subs,
     sympy_symbol,
 )
+
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
-    can_use_32bit_indexing,
     CppWrapperKernelArgs,
     CSE,
     DataTypePropagation,
@@ -45,7 +47,6 @@ from .common import (
     OpOverrides,
     OptimizationContext,
 )
-
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -1622,9 +1623,7 @@ class CppTile2DKernel(CppVecKernel):
 
 
 class CppVecKernelChecker(CppVecKernel):
-    def __init__(
-        self, args, num_threads, tiling_factor, tiling_idx=-1, index_dtype=None
-    ):
+    def __init__(self, args, num_threads, tiling_factor, tiling_idx=-1):
         super().__init__(args, num_threads, tiling_factor, tiling_idx)
 
         # Since this kernel is only for checker but does not generate any
@@ -1660,7 +1659,6 @@ class CppVecKernelChecker(CppVecKernel):
         self.store_dtypes: list[torch.dtype] = []
         # The dtype is used for vectorization
         self.vec_dtype: torch.dtype = torch.float32
-        self.index_dtype: torch.dtype = index_dtype
 
     def disable_vec(self, msg=None):
         if schedule_log.isEnabledFor(logging.DEBUG):
@@ -1998,14 +1996,38 @@ class CppVecKernelChecker(CppVecKernel):
                     self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
                     return self.cse.newvar()
 
+                def mod_indexing_rep(x, y, z):
+                    if z.is_constant():
+                        return x / y
+
+                    # never really happens, we'll bail on optimizing
+                    return (x / y) % z
+
+                def indexing_div_rep(x, y):
+                    return x / y
+
                 with RecordOptimizationContext(__name__) as node_ctx:
                     assert len(self.ranges) == len(self.itervars)
 
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
+                    free_symbols = list(expr.free_symbols)
+                    vars_ranges = {
+                        k: ValueRanges(0, v)
+                        for k, v in zip(self.itervars, self.ranges)
+                        if k in free_symbols
+                    }
+                    expr_ranges = get_expr_range(expr, vars_ranges)
+                    if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
+                        can_use_int32 = False
+                    else:
+                        expr_ranges_int = ValueRanges(
+                            int(expr_ranges.lower), int(expr_ranges.upper)
+                        )
+                        can_use_int32 = range_expressable_in_32_bits(expr_ranges_int)
                     if (
                         dtype == torch.int64
-                        and self.index_dtype == torch.int32
+                        and can_use_int32
                         and all(
                             user.target in VecCheckerProxy.bin_cmp_ops
                             for user in node_ctx.current_node.users
@@ -2432,16 +2454,8 @@ class CppKernelProxy(CppKernel):
                 -1:
             ]
 
-        def select_index_dtype(nodes, group, reduction_group):
-            numel = V.graph.sizevars.size_hint(sympy_product(group))
-            rnumel = V.graph.sizevars.size_hint(sympy_product(reduction_group))
-            if can_use_32bit_indexing(nodes, numel, rnumel):
-                return torch.int32
-            return torch.int64
-
         def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types
-            index_dtype = select_index_dtype(nodes, group, reduction_group)
             tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
@@ -2449,8 +2463,7 @@ class CppKernelProxy(CppKernel):
                     deepcopy(self.kernel_group.args),
                     parallel_num_threads(),
                     tiling_factor,
-                    tiling_idx=tiling_indices[-1],
-                    index_dtype=index_dtype,
+                    tiling_indices[-1],
                 ) as vec_checker:
                     run(vec_checker)
                 if vec_checker.simd_vec:
@@ -2555,6 +2568,7 @@ class CppScheduling:
         Turn an set of pre-fused nodes into a C++ kernel.
         """
         kernel_group = self.kernel_group
+
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         cpp_kernel_proxy.codegen_nodes(nodes)
 
