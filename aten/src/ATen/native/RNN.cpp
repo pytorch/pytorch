@@ -23,6 +23,7 @@
 #include <ATen/ops/_thnn_differentiable_lstm_cell_backward_native.h>
 #include <ATen/ops/_thnn_fused_gru_cell.h>
 #include <ATen/ops/_thnn_fused_lstm_cell.h>
+#include <ATen/ops/_thnn_fused_lstm_cell_backward.h>
 #include <ATen/ops/_thnn_fused_lstm_cell_backward_impl.h>
 #include <ATen/ops/_use_cudnn_rnn_flatten_weight_native.h>
 #include <ATen/ops/cat.h>

@@ -41,7 +41,6 @@
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
-#include <torch/csrc/autograd/python_dist_functions.h>
 #include <torch/csrc/autograd/python_enum_tag.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -79,6 +78,7 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
+#include <torch/csrc/utils/verbose.h>
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
@@ -214,6 +214,22 @@ static PyObject* THPModule_crashIfATenASAN(PyObject* module, PyObject* arg) {
       "but got %s",
       THPUtils_typename(arg));
   return THPUtils_packInt32(at::_crash_if_asan(THPUtils_unpackInt(arg)));
+}
+
+static PyObject* THPModule_crashIfDebugAssertsFail(
+    PyObject* module,
+    PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkLong(arg),
+      "crash_if_debug_asserts_fail expects an int, "
+      "but got %s",
+      THPUtils_typename(arg));
+  int32_t x = THPUtils_unpackInt(arg);
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      x != 424242, "Expect anything but 424242 as an input for debug builds");
+
+  return THPUtils_packInt32(0);
 }
 
 static PyObject* THPModule_getNumThreads(PyObject* module, PyObject* noargs) {
@@ -413,6 +429,14 @@ static PyObject* THPModule_cxxFlags(PyObject* module, PyObject* noargs) {
 static PyObject* THPModule_parallelInfo(PyObject* module, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(at::get_parallel_info());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_getCpuCapability(
+    PyObject* module,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(at::get_cpu_capability());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1016,9 +1040,14 @@ static PyMethodDef TorchMethods[] = {
     {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
     {"_crash_if_vptr_ubsan", THPModule_crashIfvptrUBSAN, METH_NOARGS, nullptr},
     {"_crash_if_aten_asan", THPModule_crashIfATenASAN, METH_O, nullptr},
+    {"_crash_if_debug_asserts_fail",
+     THPModule_crashIfDebugAssertsFail,
+     METH_O,
+     nullptr},
     {"_show_config", THPModule_showConfig, METH_NOARGS, nullptr},
     {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
     {"_parallel_info", THPModule_parallelInfo, METH_NOARGS, nullptr},
+    {"_get_cpu_capability", THPModule_getCpuCapability, METH_NOARGS, nullptr},
     {"_set_backcompat_broadcast_warn",
      THPModule_setBackcompatBroadcastWarn,
      METH_O,
@@ -1230,10 +1259,6 @@ void initIttBindings(PyObject* module);
 } // namespace torch
 #endif
 
-namespace torch {
-void initVerboseBindings(PyObject* module);
-} // namespace torch
-
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -1329,7 +1354,6 @@ PyObject* initModule() {
   torch::autograd::initNestedFunctions(module);
   torch::autograd::initSparseFunctions(module);
   torch::autograd::initSpecialFunctions(module);
-  torch::autograd::initDistFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::profiler::initPythonBindings(module);
   torch::python::init_bindings(module);

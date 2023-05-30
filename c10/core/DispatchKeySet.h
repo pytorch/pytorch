@@ -750,7 +750,7 @@ constexpr auto autograd_privateuse3_ks =
 constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
 constexpr auto autograd_nested =
     DispatchKeySet(DispatchKey::AutogradNestedTensor);
-// keyset correpsonding to functorch keys that have their own dedicated
+// keyset corresponding to functorch keys that have their own dedicated
 // TensorImpl subclass.
 constexpr auto functorch_transforms_ks = DispatchKeySet(
     {DispatchKey::FuncTorchBatched,

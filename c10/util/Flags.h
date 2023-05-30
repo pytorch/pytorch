@@ -81,7 +81,7 @@ C10_API bool CommandLineFlagsHasBeenParsed();
 // export on Windows platform (with dllexport) but not on linux/mac (with
 // default visibility). As a result, to ensure that we are always exporting
 // global variables, we will redefine the GFLAGS_DLL_DEFINE_FLAG macro if we
-// are building C10 as a shared libray.
+// are building C10 as a shared library.
 // This has to be done after the inclusion of gflags, because some early
 // versions of gflags.h (e.g. 2.0 on ubuntu 14.04) directly defines the
 // macros, so we need to do definition after gflags is done.
@@ -111,7 +111,7 @@ namespace gflags = google;
 // (3) Gflags has a design issue that does not properly expose the global flags,
 // if one builds the library with -fvisibility=hidden. The current gflags (as of
 // Aug 2018) only deals with the Windows case using dllexport, and not the Linux
-// counterparts. As a result, we will explciitly use C10_EXPORT to export the
+// counterparts. As a result, we will explicitly use C10_EXPORT to export the
 // flags defined in C10. This is done via a global reference, so the flag
 // itself is not duplicated - under the hood it is the same global gflags flag.
 #define C10_GFLAGS_DEF_WRAPPER(type, real_type, name, default_value, help_str) \

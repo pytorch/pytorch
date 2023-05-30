@@ -14,7 +14,7 @@ def get_shape(i):
         return i.shape
     return i
 
-def mm_flop(a_shape, b_shape, out=None) -> int:
+def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for matmul.
     """
@@ -26,13 +26,13 @@ def mm_flop(a_shape, b_shape, out=None) -> int:
     # NB(chilli): Should be 2 * k - 1 technically for FLOPs.
     return m * n * 2 * k
 
-def addmm_flop(self_shape, a_shape, b_shape, out=None, **kwargs) -> int:
+def addmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """
     Count flops for addmm
     """
     return mm_flop(a_shape, b_shape)
 
-def bmm_flop(a_shape, b_shape, out=None) -> int:
+def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """
     Count flops for the bmm operation.
     """
@@ -46,7 +46,7 @@ def bmm_flop(a_shape, b_shape, out=None) -> int:
     flop = b * m * n * 2 * k
     return flop
 
-def baddbmm_flop(self_shape, a_shape, b_shape, out=None) -> int:
+def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     """
     Count flops for the baddbmm operation.
     """
@@ -83,11 +83,11 @@ def conv_flop_count(
     flop = batch_size * prod(conv_shape) * c_out * prod(dims) * 2 * c_in
     return flop
 
-def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out=None, **kwargs) -> int:
+def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for convolution.
     """
-    return conv_flop_count(x_shape, w_shape, out, transposed=transposed)
+    return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
 def transpose_shape(shape):
     return [shape[1], shape[0]] + list(shape[2:])
@@ -104,14 +104,14 @@ def conv_backward_flop(
         _output_padding,
         _groups,
         output_mask,
-        out) -> int:
+        out_shape) -> int:
     flop_count = 0
 
     if output_mask[0]:
-        grad_input_shape = get_shape(out[0])
+        grad_input_shape = get_shape(out_shape[0])
         flop_count += conv_flop_count(grad_out_shape, w_shape, grad_input_shape, not transposed)
     if output_mask[1]:
-        grad_weight_shape = get_shape(out[1])
+        grad_weight_shape = get_shape(out_shape[1])
         flop_count += conv_flop_count(transpose_shape(x_shape), grad_out_shape, grad_weight_shape, transposed)
 
     return flop_count
@@ -134,7 +134,7 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
 
 
 
-def sdpa_flop(query_shape, key_shape, value_shape, *args, out=None, **kwargs) -> int:
+def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for self-attention.
     """
@@ -169,7 +169,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
     return total_flops
 
 
-def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out=None, **kwargs) -> int:
+def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """
     Count flops for self-attention backward.
     """
@@ -306,6 +306,9 @@ class FlopCounterMode(TorchDispatchMode):
 
         return PopState.apply
 
+    def get_total_flops(self) -> int:
+        return sum(self.flop_counts['Global'].values())
+
     def get_flop_counts(self) -> Dict[str, Dict[Any, int]]:
         """Returns the flop counts as a dictionary of dictionaries. The outer
         dictionary is keyed by module name, and the inner dictionary is keyed by
@@ -326,7 +329,7 @@ class FlopCounterMode(TorchDispatchMode):
         tabulate.PRESERVE_WHITESPACE = True
         header = ["Module", "FLOP", "% Total"]
         values = []
-        global_flops = sum(self.flop_counts['Global'].values())
+        global_flops = self.get_total_flops()
         global_suffix = get_suffix_str(global_flops)
         is_global_subsumed = False
 
@@ -394,7 +397,7 @@ class FlopCounterMode(TorchDispatchMode):
         if func_packet in self.flop_mapping:
             flop_count_func = self.flop_mapping[func_packet]
             args, kwargs, out_shape = tree_map(get_shape, (args, kwargs, out))
-            flop_count = flop_count_func(*args, **kwargs, out=out_shape)  # type: ignore[operator]
+            flop_count = flop_count_func(*args, **kwargs, out_shape=out_shape)  # type: ignore[operator]
             for par in self.parents:
                 self.flop_counts[par][func_packet] += flop_count
 

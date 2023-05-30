@@ -232,9 +232,9 @@ class _CPUinfo():
             if numa_id not in numa_ids:
                 numa_ids.append(numa_id)
         if len(numa_ids) > 1:
-            logger.warning(f"Numa Aware: cores:{str(core_list)} on different NUMA nodes:{str(numa_ids)}. To avoid \
+            logger.warning("Numa Aware: cores:%s on different NUMA nodes:%s. To avoid \
 this behavior, please use --ncores-per-instance knob to make sure number of cores is divisible by --ncores-per-\
-instance. Alternatively, please use --skip-cross-node-cores knob.")
+instance. Alternatively, please use --skip-cross-node-cores knob.", str(core_list), str(numa_ids))
         if len(numa_ids) == 0:
             raise RuntimeError("invalid number of NUMA nodes; please make sure numa_ids >= 1")
         return numa_ids
@@ -307,7 +307,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_tc = self.add_lib_preload(lib_type="tcmalloc")
             if not find_tc:
                 msg = f"{self.msg_lib_notfound} you can use \"conda install -c conda-forge gperftools\" to install {{0}}"
-                logger.warning(msg.format("TCmalloc", "tcmalloc"))
+                logger.warning(msg.format("TCmalloc", "tcmalloc"))  # noqa: G001
             else:
                 logger.info("Use TCMalloc memory allocator")
 
@@ -315,7 +315,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             find_je = self.add_lib_preload(lib_type="jemalloc")
             if not find_je:
                 msg = f"{self.msg_lib_notfound} you can use \"conda install -c conda-forge jemalloc\" to install {{0}}"
-                logger.warning(msg.format("Jemalloc", "jemalloc"))
+                logger.warning(msg.format("Jemalloc", "jemalloc"))  # noqa: G001
             else:
                 logger.info("Use JeMalloc memory allocator")
                 self.set_env("MALLOC_CONF", "oversize_threshold:1,background_thread:true,metadata_thp:auto")
@@ -332,23 +332,23 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             if find_je:
                 logger.info("Use JeMalloc memory allocator")
                 return
-            logger.warning(f"""Neither TCMalloc nor JeMalloc is found in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib
+            logger.warning("""Neither TCMalloc nor JeMalloc is found in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib
                             or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or
-                           {expanduser("~")}/.local/lib/ so the LD_PRELOAD environment variable will not be set.
-                           This may drop the performance""")
+                           %s/.local/lib/ so the LD_PRELOAD environment variable will not be set.
+                           This may drop the performance""", expanduser("~"))
 
     def log_env_var(self, env_var_name=""):
         if env_var_name in os.environ:
-            logger.info(f"{env_var_name}={os.environ[env_var_name]}")
+            logger.info("%s=%s", env_var_name, os.environ[env_var_name])
 
     def set_env(self, env_name, env_value):
         if not env_value:
-            logger.warning(f"{env_name} is None")
+            logger.warning("%s is None", env_name)
         if env_name not in os.environ:
             os.environ[env_name] = env_value
         elif os.environ[env_name] != env_value:
-            logger.warning(f"Overriding value with the one set in environment variable: {env_name}. \
-Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
+            logger.warning("Overriding value with the one set in environment variable: %s. \
+Value applied: %s. Value ignored: %s", env_name, os.environ[env_name], env_value)
         self.log_env_var(env_name)
 
     # set_kmp_affinity is used to control whether to set KMP_AFFINITY or not.
@@ -371,7 +371,7 @@ Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
             find_iomp = self.add_lib_preload(lib_type="iomp5")
             if not find_iomp:
                 msg = f"{self.msg_lib_notfound} you can use \"conda install mkl\" to install {{0}}"
-                logger.warning(msg.format("iomp", "iomp5"))
+                logger.warning(msg.format("iomp", "iomp5"))  # noqa: G001
             else:
                 logger.info("Using Intel OpenMP")
                 if set_kmp_affinity:
@@ -391,8 +391,8 @@ Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
             if args.ncores_per_instance == -1:
                 raise RuntimeError("please specify the \"--ncores-per-instance\" if you have pass the --core-list params")
             elif args.ninstances > 1 and args.ncores_per_instance * args.ninstances < len(cores):
-                logger.warning(f"only first {args.ncores_per_instance * args.ninstances} cores will be used, \
-but you specify {len(cores)} cores in core_list")
+                logger.warning("only first %s cores will be used, \
+but you specify %s cores in core_list", args.ncores_per_instance * args.ninstances, len(cores))
             else:
                 args.ninstances = len(cores) // args.ncores_per_instance
 
@@ -429,9 +429,9 @@ please make sure ninstances <= total_cores)")
                     num_leftover_cores = ncore_per_node % args.ncores_per_instance
                     if args.ncores_per_instance > ncore_per_node:
                         # too many ncores_per_instance to skip cross-node cores
-                        logger.warning("there are {} core(s) per socket, but you specify {} ncores_per_instance and \
+                        logger.warning("there are %s core(s) per socket, but you specify %s ncores_per_instance and \
 skip_cross_node_cores. Please make sure --ncores-per-instance < core(s) per \
-socket".format(ncore_per_node, args.ncores_per_instance))
+socket", ncore_per_node, args.ncores_per_instance)
                         exit(-1)
                     elif num_leftover_cores == 0:
                         # aren't any cross-node cores
@@ -469,7 +469,7 @@ won\'t take effect even if it is set explicitly.')
                 args.ncores_per_instance = len(cores) // args.ninstances
 
         if args.ninstances > 1 and args.rank != -1:
-            logger.info(f"assigning {args.ncores_per_instance} cores for instance {args.rank}")
+            logger.info("assigning %s cores for instance %s", args.ncores_per_instance, args.rank)
 
         if not args.disable_numactl:
             numactl_available = self.is_numactl_available()
@@ -667,7 +667,7 @@ def main(args):
             if len(matches) > 0:
                 lst_valid.append(item)
             else:
-                logger.warning(f"{item} doesn't exist. Removing it from LD_PRELOAD.")
+                logger.warning("%s doesn't exist. Removing it from LD_PRELOAD.", item)
         if len(lst_valid) > 0:
             os.environ["LD_PRELOAD"] = ":".join(lst_valid)
         else:
@@ -676,7 +676,7 @@ def main(args):
     launcher = _Launcher()
     launcher.launch(args)
     for x in sorted(set(os.environ.keys()) - env_before):
-        logger.debug("{x}={os.environ[x]}")
+        logger.debug("%s=%s", x, os.environ[x])
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="This is a script for launching PyTorch inference on Intel(R) Xeon(R) Scalable "

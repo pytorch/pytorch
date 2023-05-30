@@ -101,7 +101,6 @@ def define_ovrsource_targets():
 
     common_c10_cmake_defines = [
         ("#cmakedefine C10_BUILD_SHARED_LIBS", ""),
-        ("#cmakedefine C10_DISABLE_NUMA", ""),
         ("#cmakedefine C10_USE_NUMA", ""),
         ("#cmakedefine C10_USE_MSVC_STATIC_RUNTIME", ""),
     ]

@@ -27,34 +27,11 @@ env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
-  # This needs to be run right before the test starts so that it can gather the
-  # latest labels from the PR
-  filter:
-    runs-on: [self-hosted, linux.large]
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
-      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
-      keep-going: ${{ steps.filter.outputs.keep-going }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          fetch-depth: 1
-          submodules: false
-
-      - name: Select all requested test configurations
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
-
   test:
-    needs: filter
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
-      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
@@ -120,7 +97,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
 
@@ -149,6 +126,16 @@ jobs:
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
 
+      - name: Check for keep-going label
+        # This uses the filter-test-configs action because it conviniently
+        # checks for labels.  It does not actually do any filtering.  All
+        # filtering is done in the build step.
+        id: keep-going
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
       - name: Test
         id: test
         shell: bash
@@ -158,7 +145,7 @@ jobs:
           PYTHON_VERSION: 3.8
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VS_VERSION: "16.8.6"
@@ -178,7 +165,7 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
 
           # sanitize the input commit message and PR body here:
           #

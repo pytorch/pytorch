@@ -820,7 +820,7 @@ class CheckSparseTensorInvariantsContext {
   bool state;
 };
 
-Tensor sparse_compressed_tensor_ctor_worker(
+static Tensor sparse_compressed_tensor_ctor_worker(
     std::string name,
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,

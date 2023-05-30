@@ -209,7 +209,7 @@ class _RecordLoadStoreInner(V.MockHandler):
             return index, tuple([x for x in sizes if x != 1])
 
         # Try to further simplify the indexes even if simplify_loops didn't
-        # convert it to the simpliest form because of the interference from
+        # convert it to the simplest form because of the interference from
         # different indexing formulas.
         index_vars = list(self._var_ranges.keys())
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(

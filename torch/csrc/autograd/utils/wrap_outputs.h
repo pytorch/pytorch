@@ -100,6 +100,10 @@ inline PyObject* wrap(at::IntArrayRef list) {
   return r.release();
 }
 
+inline PyObject* wrap(at::Stream stream) {
+  return THPStream_Wrap(stream);
+}
+
 namespace detail {
 template <typename F, typename Tuple, size_t... Is>
 void apply_with_idx_impl(

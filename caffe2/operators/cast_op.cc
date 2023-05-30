@@ -144,7 +144,7 @@ message TensorProto {
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/cast_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/cast_op.cc
 
 <details>
 

@@ -225,7 +225,7 @@ i.e. `SEGMENT_IDS[-1]+1`. Other dimensions are inherited from the input tensor.
         0,
         "OUTPUT",
         "Aggregated tensor with the first dimension of K and the "
-        "other dimentsions inherited from DATA");
+        "other dimensions inherited from DATA");
   }
   using ForwardOp = AbstractSortedSegmentRangeOp<
       T,
@@ -1370,7 +1370,7 @@ tensor.
  *   P+1: INDICES - 1-D vector with indices to look up in DATA. Should have the
  *                  same dimension as LENGTHS
  *   # P+1 if SparseFused == false:
- *   P+1 or P+2: LENGTHS - lengths on indecies vector
+ *   P+1 or P+2: LENGTHS - lengths on indices vector
  *
  * Output:
  *   Tensor with first dimension of K, where K = len(LENGTHS). Rest

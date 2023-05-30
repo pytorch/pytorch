@@ -40,6 +40,6 @@ Region of Interest (RoI) align operation as used in Mask R-CNN.
         "Y",
         "4D Int8 Tensor output of shape (R, C, pooled_h, pooled_w). "
         "The r-th batch element "
-        "is a pooled feature map cooresponding to the r-th RoI.");
+        "is a pooled feature map corresponding to the r-th RoI.");
 
 } // namespace caffe2
