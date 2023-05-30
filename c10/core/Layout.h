@@ -14,6 +14,7 @@ enum class Layout : int8_t {
   SparseCsc,
   SparseBsr,
   SparseBsc,
+  SemiStructuredSparse,
   NumOptions
 };
 
@@ -24,6 +25,7 @@ constexpr auto kMkldnn = Layout::Mkldnn;
 constexpr auto kSparseCsc = Layout::SparseCsc;
 constexpr auto kSparseBsr = Layout::SparseBsr;
 constexpr auto kSparseBsc = Layout::SparseBsc;
+constexpr auto kSemiStructuredSparse = Layout::SemiStructuredSparse;
 
 inline Layout layout_from_backend(Backend backend) {
   switch (backend) {
@@ -35,6 +37,7 @@ inline Layout layout_from_backend(Backend backend) {
       return Layout::Sparse;
     case Backend::MkldnnCPU:
       return Layout::Mkldnn;
+    //case Backend::SemiStructuredSparse:
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
       TORCH_CHECK(
@@ -59,6 +62,8 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "SparseBsr";
     case at::kSparseBsc:
       return stream << "SparseBsc";
+    case at::kSemiStructuredSparse:
+      return stream << "SemiStructuredSparse";
     case at::kMkldnn:
       return stream << "Mkldnn";
     default:

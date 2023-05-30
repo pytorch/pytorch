@@ -1,93 +1,5 @@
 import torch
 
-from torch.utils._python_dispatch import TorchDispatchMode
-
-
-class LazySparseResult(torch.Tensor):
-
-    @staticmethod
-    def __new__(
-        cls,
-        custom_shape,
-        compressed_tensor,
-        cslt,
-    ):
-        kwargs = {}
-        kwargs["device"] = compressed_tensor.device
-        kwargs["dtype"] = compressed_tensor.dtype
-        # layout will be set to semi_structured_sparse eventually, but keep this strided for now
-        kwargs["layout"] = torch.sparse_coo
-        # currently backprop is not implented for cusparselt matmul
-        kwargs["requires_grad"] = False
-
-        return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)
-
-    def __init__(
-        self,
-        custom_shape,
-        compressed_tensor: torch.Tensor,
-        cslt,
-        transpose_sparse, 
-        transpose_dense, 
-        transpose_result,
-        a,
-        bias,
-    ):
-        self.compressed_tensor = compressed_tensor
-        self.cslt = cslt
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
-    @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs):
-
-        if func is torch.ops.aten.detach.default:
-            # since we create a new compressed tensor, the tensor will already be detached.
-            return SemiStructuredSparseTensor(
-                args[0].shape,
-                args[0].compressed_tensor,
-                args[0].cslt,
-            )
-
-        if func is torch.ops.aten.t.default:
-            # Because we cannot go from the compressed representation back to the dense representation currently,
-            # we just keep track of how many times we have been transposed. If it's an odd number of times, we'll
-            # throw an error since we can't handle this situation.
-            return SemiStructuredSparseTensor(
-                args[0].shape,
-                args[0].compressed_tensor,
-                args[0].cslt,
-                not args[0].transposed,
-            )
-
-        if (
-            func is torch.ops.aten.addmm.default
-            and args[0].is_cuda
-        ):
-            bias, a, b = args
-            if isinstance(a, SemiStructuredSparseTensor) and not a.transposed:
-                # currently BIAS is broadcasted the wrong way in cusparselt, so we need to call mm and then add at the end
-                return bias + a.cslt.mm(b, false, false)
-            # b must be transposed so we can undo it
-            elif isinstance(b, SemiStructuredSparseTensor) and b.transposed:
-                # here we check if cusparselt object is set.
-                res = b.t().cslt.addmm(a, bias, True, cls.fuse_transpose)
-                return res if cls.fuse_transpose else res.T
-
-        if func is torch.ops.aten.mm.default:
-            a, b = args
-            if isinstance(a, SemiStructuredSparseTensor):
-                if not a.transposed:
-                    return a.cslt.mm(b, False, False)
-            elif isinstance(b, SemiStructuredSparseTensor):
-                if b.transposed:
-                    res = b.t().cslt.mm(a, True, cls.fuse_transpose)
-                    return res if cls.fuse_transpose else res.T
-                else:
-                    return b.cslt.mm(a, True, cls.fuse_transpose)
-
-        raise NotImplementedError(f"{func} on {args} is not implemented!")
-
 class SemiStructuredSparseTensor(torch.Tensor):
     """
     This class implementes 2x4 sparsity as a tensor subclass.
@@ -105,7 +17,14 @@ class SemiStructuredSparseTensor(torch.Tensor):
     In this case, we store some additional metadata containg the sparse matrix descriptor in order for 
     faster matmul performance. 
 
+
     When this cslt object is not set, we default to using CUTLASS kernels and _structured_sparse_linear.
+
+    fuse_transpose : bool 
+
+    When fuse_transpose is set to True, we fuse a .T into the cuSPASRELt matmul operation. 
+    We do this in a bit of a hacky manner, by just creating a transposed matrix and then setting 
+    the output order to be Column major instead of Row major. 
 
     """
     fuse_transpose = True
@@ -116,6 +35,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         custom_shape,
         compressed_tensor,
         cslt,
+        transposed
     ):
         kwargs = {}
         kwargs["device"] = compressed_tensor.device
@@ -132,14 +52,11 @@ class SemiStructuredSparseTensor(torch.Tensor):
         custom_shape,
         compressed_tensor: torch.Tensor,
         cslt,
-        transpose_sparse, 
-        transpose_dense, 
-        transpose_result,
-        a,
-        bias,
+        transposed, 
     ):
         self.compressed_tensor = compressed_tensor
         self.cslt = cslt
+        self.transposed = transposed
 
     @property
     def kept_elements(self):
@@ -154,25 +71,30 @@ class SemiStructuredSparseTensor(torch.Tensor):
         return self.compressed_tensor[num_kept_elements:].view(m, -1).view(torch.int16)
 
     def __repr__(self):
-        return f"SemiStructruredSparseTensor(shape={self.shape})"
+        return f"SemiStructruredSparseTensor(shape={self.shape} \n kept_elements={self.kept_elements} \n metadata={self.metadata})"
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
 
+        arg_types = [type(arg) for arg in args]
+        print(f"Calling func: {func} on types: {arg_types}")
+
+        # since we create a new compressed tensor, the tensor will already be detached
+        # this effecitvely functions as a no-op. 
         if func is torch.ops.aten.detach.default:
-            # since we create a new compressed tensor, the tensor will already be detached.
             return SemiStructuredSparseTensor(
                 args[0].shape,
                 args[0].compressed_tensor,
                 args[0].cslt,
+                args[0].transposed,
             )
 
+        # Because we cannot go from the compressed representation back to the dense representation currently,
+        # we just keep track of how many times we have been transposed. If it's an odd number of times, we'll
+        # throw an error since we can't handle this situation.
         if func is torch.ops.aten.t.default:
-            # Because we cannot go from the compressed representation back to the dense representation currently,
-            # we just keep track of how many times we have been transposed. If it's an odd number of times, we'll
-            # throw an error since we can't handle this situation.
             return SemiStructuredSparseTensor(
                 args[0].shape,
                 args[0].compressed_tensor,
@@ -180,31 +102,45 @@ class SemiStructuredSparseTensor(torch.Tensor):
                 not args[0].transposed,
             )
 
-        if (
-            func is torch.ops.aten.addmm.default
-            and args[0].is_cuda
-        ):
-            bias, a, b = args
-            if isinstance(a, SemiStructuredSparseTensor) and not a.transposed:
-                # currently BIAS is broadcasted the wrong way in cusparselt, so we need to call mm and then add at the end
-                return bias + a.cslt.mm(b, false, false)
-            # b must be transposed so we can undo it
-            elif isinstance(b, SemiStructuredSparseTensor) and b.transposed:
-                # here we check if cusparselt object is set.
-                res = b.t().cslt.addmm(a, bias, True, cls.fuse_transpose)
+        if func is torch.ops.aten.addmm.default:
+            bias, input_A, input_B = args
+
+            # Currently, we only support the first matrix being sparse for addmm/mm in cuSPARSELT and CUTLASS. 
+            # CUTLASS only supports the first input to be sparse for a given matmul. 
+            # cuSPARSELt does not have this limitation, although it appears that it uses CUTLASS under the hood, since it will be slower to have the second matrix be sparse.
+            # It may be using the same transpose trick we are using below 
+            # input_A cannot be transposed. 
+            if isinstance(input_A, SemiStructuredSparseTensor) and not input_A.transposed:
+                return input_A.cslt.addmm(input_B, bias, False, False)
+
+            # Although we only support the first matrix being sparse, we can suppor the second matrix being sparse using some transpose properties. 
+            # F.linear(x) = addmm(bias, input, weight.t()) = b + xW' = (b + xW')'' = (W''x' + b')' = (Wx' + b')' = W.cslt.addmm(input, ).T
+            elif isinstance(input_B, SemiStructuredSparseTensor) and input_B.transposed:
+                res = input_B.t().cslt.addmm(input_A.T, bias, True, cls.fuse_transpose)
                 return res if cls.fuse_transpose else res.T
+            
+            raise NotImplementedError(f"func: {func} is currently not supported for \n opA: {input_A.transposed} A: {input_A} \n opB: {input_B.transposed} B {input_B}")
 
         if func is torch.ops.aten.mm.default:
-            a, b = args
-            if isinstance(a, SemiStructuredSparseTensor):
-                return LazySparseResult( )
-                if not a.transposed:
-                    return a.cslt.mm(b, False, False)
-            elif isinstance(b, SemiStructuredSparseTensor):
-                if b.transposed:
-                    res = b.t().cslt.mm(a, True, cls.fuse_transpose)
-                    return res if cls.fuse_transpose else res.T
-                else:
-                    return b.cslt.mm(a, True, cls.fuse_transpose)
+            input_A, input_B = args
+
+            if isinstance(input_A, SemiStructuredSparseTensor) and not input_A.transposed:
+                return input_A.cslt.mm(input_B, False, False)
+
+            elif isinstance(input_B, SemiStructuredSparseTensor) and input_B.transposed:
+                res = input_B.t().cslt.mm(input_A.T, True, cls.fuse_transpose)
+                return res if cls.fuse_transpose else res.T
+            
+            raise NotImplementedError(f"func: {func} is currently not supported for \n opA: {input_A.transposed} A: {input_A} \n opB: {input_B.transposed} B {input_B}")
+
+        # When torch is run with inference mode, it looks like pytorch does some merging in order to make linear faster. 
+        # The end result is that it will use this aten.linear.default op instead of decomposing into a .t() and addmm()
+        # We handle this case in order to support with torch.inference_mode()
+        if func is torch.ops.aten.linear.default:
+            input, weight, bias = args
+            if isinstance(weight, SemiStructuredSparseTensor):
+                res = weight.t().cslt.addmm(input.T, bias, True, cls.fuse_transpose)
+                return res if cls.fuse_transpose else res.T
+
 
         raise NotImplementedError(f"{func} on {args} is not implemented!")

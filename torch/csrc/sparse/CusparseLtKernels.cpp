@@ -31,7 +31,8 @@
 namespace torch {
 namespace ao {
 namespace pruning {
-// create a container that holds relevant data for cusparselt linear
+
+// create a container that holds relevant data for cusparselt matmul 
 struct CusparseLt : public torch::CustomClassHolder {
   constexpr static auto order{CUSPARSE_ORDER_ROW};
   // this tensor is magic, will segfault when removed?
@@ -74,7 +75,8 @@ struct CusparseLt : public torch::CustomClassHolder {
   void compress(const at::Tensor& sparse_input, bool transpose_sparse);
   CusparseLt(const at::Tensor& sparse_compressed)
       : sparse_compressed{sparse_compressed} {
-    // Check CUDA compatibility
+
+    // Check CUDA compatibility, currently only supported on 8.0, 8.6, 8.9, and 9.0
     int major_cc, minor_cc;
     CHECK_CUDA(
         cudaDeviceGetAttribute(&major_cc, cudaDevAttrComputeCapabilityMajor, 0))
@@ -113,8 +115,6 @@ struct CusparseLt : public torch::CustomClassHolder {
 void CusparseLt::compress(
     const at::Tensor& sparse_input,
     bool is_sparse_input_transposed) {
-  // SETTING UP VALUES
-  //--------------------------------------------------------------------------
   int64_t m = sparse_input.size(0);
   int64_t k = sparse_input.size(1);
 

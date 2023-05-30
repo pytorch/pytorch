@@ -1,9 +1,8 @@
 import torch
 from .semi_structured_sparse_tensor import SemiStructuredSparseTensor
 
-
 def to_semi_structured_sparse(
-    original_tensor: torch.Tensor, backend="cusparselt", transposed=False
+    original_tensor: torch.Tensor,  transposed=False
 ):
     # This code calculates the size of the compressed tensor.
 
@@ -24,27 +23,12 @@ def to_semi_structured_sparse(
         device=original_tensor.device,
     )
 
-    # pytorch build with cusparselt support
-    if backend == "cusparselt":
-        cslt = torch.classes.cusparselt.CusparseLt(compressed_tensor)
-        # TODO is there a better way to check this?
-        # if not contiguous -> assume is transposed
-        cslt.compress(original_tensor, False)
+    cslt = torch.classes.cusparselt.CusparseLt(compressed_tensor)
+    cslt.compress(original_tensor, False)
 
-        return SemiStructuredSparseTensor(
-            original_tensor.shape, compressed_tensor, cslt, transposed
-        )
-    else:
-        sparse, meta = convert_2by4_dense_to_sparse_meta(original_tensor)
-        print(sparse.nelement(), meta.nelement())
-        m, k = original_tensor.shape
-
-        compressed_tensor[: m * k // 2] = sparse.flatten()
-        compressed_tensor[m * k // 2 :] = meta.flatten().view(sparse.dtype)
-
-        return SemiStructuredSparseTensor(
-            original_tensor.shape, compressed_tensor, None, transposed
-        )
+    return SemiStructuredSparseTensor(
+        original_tensor.shape, compressed_tensor, cslt, transposed
+    )
 
 
 def convert_2by4_dense_to_sparse_meta(dense):

@@ -6,8 +6,8 @@ from torch.ao.pruning import WeightNormSparsifier
 from tqdm import tqdm
 import pandas as pd
 import argparse
-import random
 from torch.sparse import to_semi_structured_sparse
+from torch.sparse.semi_structured.utils import gen_two_four_sparse_mask
 
 
 torch.set_printoptions(
@@ -32,7 +32,6 @@ class Model(nn.Module):
 
 
 
-
 def test_linear(m, k, n, dtype, contiguous, backend):
     mask = gen_two_four_sparse_mask(
         m, k, dtype=dtype
@@ -49,12 +48,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     dense_output = model(input_tensor)
 
     # sparsify weights
-    if backend == "cutlass":
-        model.linear.weight = nn.Parameter(
-            SemiStructuredSparseTensorCUTLASS(sparse_weight, mask_or_meta=mask.bool())
-        )
-    else:
-        model.linear.weight = nn.Parameter(to_semi_structured_sparse(sparse_weight))
+    model.linear.weight = nn.Parameter(to_semi_structured_sparse(sparse_weight))
 
     sparse_output = model(input_tensor)
 
@@ -85,10 +79,7 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
     B = torch.zeros(k, n).to(dtype).cuda()
     bias = torch.rand(n).to(dtype).cuda()
 
-    if backend == "cutlass":
-        sA = to_semi_structured_sparse(A, mask_or_meta=A)
-    else:
-        sA = to_semi_structured_sparse(A)
+    sA = to_semi_structured_sparse(A)
 
     # torch.mm calculation
     if dtype is not torch.int8:
