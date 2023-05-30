@@ -939,6 +939,30 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
         self._validate(fn, backend, x)
 
+
+    @requires_cuda()
+    def test_tags_rand(self):
+        def gn(x, y):
+            return torch.sigmoid(torch.rand_like(x) * y)
+
+        def fn(x, y):
+            x = torch.sin(x)
+            z = torch.utils.checkpoint.checkpoint(gn, x, y)
+            x = torch.sin(z)
+            z = torch.utils.checkpoint.checkpoint(gn, x, y)
+            return z
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops, freq=6, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(fn, backend, x, y)
+
+
     @requires_cuda()
     def test_tags_dropout(self):
         # Figure out a way to test the number of inductor_random calls
