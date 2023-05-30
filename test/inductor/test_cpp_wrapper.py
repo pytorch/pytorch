@@ -234,6 +234,7 @@ if RUN_CUDA:
             "test_silu",
             "test_sum_dtype",
             "test_transpose",
+            "test_foreach_cpp_wrapper",
         ]
 
         cuda_tests = [test for test in cuda_tests if test.name not in exclude_rocm_list]
