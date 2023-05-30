@@ -1925,8 +1925,8 @@ Tensor pinv_jvp(const Tensor& A, const Tensor& pinvA, const Tensor& dA) {
 
 Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
   at::NoTF32Guard disable_tf32;
-  auto m = A.size(-2);
-  auto n = A.size(-1);
+  auto m = A.sym_size(-2);
+  auto n = A.sym_size(-1);
   auto pinvAh = pinvA.mH();
   auto gradh = grad.mH();
   // optimization to produce matrices of the smallest dimension

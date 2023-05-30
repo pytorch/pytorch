@@ -287,7 +287,10 @@ class NNModuleVariable(VariableTracker):
                 # is_allowed or other variations.
                 initialize_lazy_module(tx, mod, args, kwargs)
 
-            if is_allowed(mod.__class__):
+            # If we are tracing the higher order op, we want Dynamo to step
+            # inside the module call so that Dynamo can see the underlying
+            # parameters and buffers and raise them as inputs to the graph.
+            if tx.output.is_root_tracer() and is_allowed(mod.__class__):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
@@ -499,6 +502,8 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
+        elif name == "buffers":
+            return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "keys":
             assert not (args or kwargs)
             result = []
