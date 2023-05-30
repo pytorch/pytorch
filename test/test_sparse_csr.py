@@ -3388,6 +3388,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         size = [6, 12, 0]
         block_size = [2, 3]
 
+        # General correctness
         for row_block, col_block, b, m, n in itertools.product(block_size, block_size, batches, size, size):
             input = tensor(b + (m, n))
             input.diagonal(dim1=-2, dim2=-1).fill_(m * n)
@@ -3399,6 +3400,11 @@ class TestSparseCompressedTritonKernels(TestCase):
             res_tri = bsr_softmax(bsr)
             res_coo = torch.sparse.softmax(coo, -1)
             self.assertEqual(res_tri, res_coo.to(input.dtype))
+
+        # Test long rows which exceed Triton's max numel limit set to 2 ** 17
+        input = tensor(b + (1, 150000))
+        bsr = input.to_sparse_bsr(1)
+        self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
 
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
