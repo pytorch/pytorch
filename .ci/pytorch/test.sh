@@ -452,8 +452,6 @@ test_dynamo_benchmark() {
   shift
   local shard_id="$1"
   shift
-  
-  python -m pip install patch transformers
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
