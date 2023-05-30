@@ -1468,6 +1468,29 @@ class TestProfiler(TestCase):
                 self.assertTrue(ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits")
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
 
+    def test_profiler_disable_fwd_bwd_link(self):
+        try:
+            torch._C._profiler._set_fwd_bwd_enabled_val(False)
+
+            with _profile(use_kineto=True) as prof:
+                t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
+                z = torch.add(t1, t2)
+                y = torch.ones(1)
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
+                loss.backward()
+
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with io.open(fname, 'r') as f:
+                    j = json.load(f)
+                    events = j["traceEvents"]
+
+                    for e in events:
+                        self.assertNotEqual(getattr(e, "cat", None), "fwdbwd")
+        finally:
+            torch._C._profiler._set_fwd_bwd_enabled_val(True)
+
+
     def test_profiler_type(self):
         profiler_type = torch._C._autograd._profiler_type
         ActiveProfilerType = torch._C._profiler.ActiveProfilerType

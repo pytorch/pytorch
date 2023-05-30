@@ -813,7 +813,9 @@ void passEventsToKineto(
     }
   }
 
-  generateForwardBackwardLinks(cpu_trace.get(), results);
+  if (get_fwd_bwd_enabled()) {
+    generateForwardBackwardLinks(cpu_trace.get(), results);
+  }
 
   // Kineto adds the events that it collected.
   cpu_trace.transferCpuTrace(end_time_us);
