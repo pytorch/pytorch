@@ -392,7 +392,7 @@ void check_inputs(
 
     check_tensor(
         input,
-        i == static_cast<std::remove_cv<decltype(i)>::type>(root)
+        i == static_cast<std::remove_cv_t<decltype(i)>>(root)
             ? at::optional<at::Tensor>{output}
             : at::nullopt,
         input_multiplier,
@@ -621,7 +621,7 @@ void reduce(
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
-        static_cast<std::remove_cv<decltype(i)>::type>(root) == i
+        static_cast<std::remove_cv_t<decltype(i)>>(root) == i
             ? output.data_ptr()
             : nullptr,
         count,
