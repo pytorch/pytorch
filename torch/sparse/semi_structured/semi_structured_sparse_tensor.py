@@ -111,7 +111,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
             # It may be using the same transpose trick we are using below 
             # input_A cannot be transposed. 
             if isinstance(input_A, SemiStructuredSparseTensor) and not input_A.transposed:
-                return input_A.cslt.addmm(input_B, bias, False, False)
+                return input_A.cslt.addmm(input_B, bias, not input_B.is_contiguous(), False)
 
             # Although we only support the first matrix being sparse, we can suppor the second matrix being sparse using some transpose properties. 
             # F.linear(x) = addmm(bias, input, weight.t()) = b + xW' = (b + xW')'' = (W''x' + b')' = (Wx' + b')' = W.cslt.addmm(input, ).T
@@ -125,7 +125,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
             input_A, input_B = args
 
             if isinstance(input_A, SemiStructuredSparseTensor) and not input_A.transposed:
-                return input_A.cslt.mm(input_B, False, False)
+                return input_A.cslt.mm(input_B, not input_B.is_contiguous(), False)
 
             elif isinstance(input_B, SemiStructuredSparseTensor) and input_B.transposed:
                 res = input_B.t().cslt.mm(input_A.T, True, cls.fuse_transpose)
