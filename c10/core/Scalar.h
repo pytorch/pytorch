@@ -1,9 +1,7 @@
 #pragma once
 
-#include <assert.h>
 #include <stdint.h>
 #include <stdexcept>
-#include <string>
 #include <type_traits>
 #include <utility>
 

@@ -56,7 +56,8 @@ class NCCLTest : public NCCLTestBase {
   NCCLTest(
       const std::string& path,
       int worldSize,
-      std::chrono::milliseconds pgTimeout = kBackendDefaultTimeout)
+      std::chrono::milliseconds pgTimeout = kBackendDefaultTimeout,
+      int inputDim = 3)
       : NCCLTestBase(path, pgTimeout),
         numDevices_(cudaNumDevices()),
         worldSize_(worldSize) {
@@ -68,12 +69,12 @@ class NCCLTest : public NCCLTestBase {
     at::cuda::OptionalCUDAGuard deviceGuard;
     for (const auto i : c10::irange(numDevices_)) {
       deviceGuard.set_index(i);
-      tensors_[i] = at::empty({3, 3}, at::kCUDA);
+      tensors_[i] = at::empty({inputDim, inputDim}, at::kCUDA);
       inputs_[i].resize(worldSize_ * numDevices_);
       outputs_[i].resize(worldSize_ * numDevices_);
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
-        inputs_[i][j] = at::empty({3, 3}, at::kCUDA);
-        outputs_[i][j] = at::empty({3, 3}, at::kCUDA);
+        inputs_[i][j] = at::empty({inputDim, inputDim}, at::kCUDA);
+        outputs_[i][j] = at::empty({inputDim, inputDim}, at::kCUDA);
       }
     }
 
