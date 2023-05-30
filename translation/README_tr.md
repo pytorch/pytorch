@@ -78,24 +78,22 @@ If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
 computation by a huge amount.
 
-We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
-such as slicing, indexing, mathematical operations, linear algebra, reductions.
-And they are fast!
+Birçok tensor rutini sunarak bilimsel hesaplama ihtiyaçlarınızı hızlandırmak ve uyumlu hale getirmek için çeşitli seçenekler sunarız.
+Bu rutinler arasında dilimleme (slicing), indeksleme, matematiksel operasyonlar, lineer cebir ve azaltma (reduction) gibi işlemler bulunur.
+Ve hızlılardır!
 
-### Dynamic Neural Networks: Tape-Based Autograd
+### Dinamik Sinir Ağları: Bant Tabanlı Otograd
 
-PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
+PyTorch'un sinir ağları oluşturma konusunda benzersiz bir yöntemi vardır: bir bant kaydediciyi kullanma ve tekrar oynatma.
 
-Most frameworks such as TensorFlow, Theano, Caffe, and CNTK have a static view of the world.
-One has to build a neural network and reuse the same structure again and again.
-Changing the way the network behaves means that one has to start from scratch.
+TensorFlow, Theano, Caffe ve CNTK gibi çoğu çerçeve statik bir dünya görüşüne sahiptir.
+Bir sinir ağı inşa etmek ve aynı yapıyı tekrar tekrar kullanmak gerekir.
+Ağın davranış şeklini değiştirmek, sıfırdan başlamak gerektiği anlamına gelir.
 
-With PyTorch, we use a technique called reverse-mode auto-differentiation, which allows you to
-change the way your network behaves arbitrarily with zero lag or overhead. Our inspiration comes
-from several research papers on this topic, as well as current and past work such as
-[torch-autograd](https://github.com/twitter/torch-autograd),
-[autograd](https://github.com/HIPS/autograd),
-[Chainer](https://chainer.org), etc.
+PyTorch ile, ağınızın davranış şeklini sıfır gecikme veya ek yük ile keyfi olarak değiştirmenize olanak tanıyan ters mod otomatik farklılaştırma adı verilen bir teknik kullanıyoruz. İlham kaynağımız gibi güncel ve geçmiş çalışmaların yanı sıra bu konudaki çeşitli araştırma makalelerinden
+[torch-otograd](https://github.com/twitter/torch-autograd),
+[otograd](https://github.com/HIPS/autograd),
+[Zincirleme](https://chainer.org), vb.
 
 While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
 You get the best of speed and flexibility for your crazy research.
