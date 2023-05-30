@@ -1240,7 +1240,7 @@ namespace {
             for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();
                 qint_b[j] = generator.get();
-                if (std::is_same<underlying, int>::value) {
+                if constexpr (std::is_same<underlying, int>::value) {
                     //filter overflow cases
                     filter_sub_overflow(qint_vals[j], qint_b[j]);
                 }
