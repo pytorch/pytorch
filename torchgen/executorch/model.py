@@ -1,8 +1,11 @@
-# represents all kernels used by an Executorch model.
+# Represents all kernels used by an Executorch model.
 # It maintains a Dict[OperatorName, Dict[ETKernelKey, BackendMetadata]] structure.
+
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
-from typing import Dict, Union
+from typing import Dict, List, Tuple, Union
+from enum import IntEnum
+import itertools
 
 from torchgen.model import (
     BackendIndex,
@@ -14,13 +17,94 @@ from torchgen.model import (
 )
 from torchgen.utils import assert_never
 
+KERNEL_KEY_VERSION = 1
+
+# TODO: Duplicated Subset from codegen.tool.gen_oplist, remove declaration in codegen
+class ScalarType(IntEnum):
+    Byte = 0
+    Char = 1
+    Short = 2
+    Int = 3
+    Long = 4
+    Float = 6
+    Double = 7
+    Bool = 11
+
 ETParsedYaml = namedtuple("ETParsedYaml", ["native_functions", "kernel_index"])
 
+@dataclass(frozen=True)
+class ETKernelKeyOpArgMeta():
+    arg_name: str
+    dtype: str
+    # The order of the dimensions if entry is a Tensor
+    dim_order: Tuple[int, ...]
+
+    def to_native_string(self) -> str:
+        dtype_str = ScalarType[self.dtype].value
+        dim_str = str(self.dim_order)[1:-1].replace(" ", "")
+        return f"{dtype_str};{dim_str}"
 
 @dataclass(frozen=True)
 class ETKernelKey:
+    # Field undefined is default = True
+    arg_meta: Tuple[ETKernelKeyOpArgMeta, ...] = ()
+
+    # Indicator for this kernel being used as a catch all
     default: bool = False
-    # TODO: jackkhuu to add more fields
+
+    @staticmethod
+    def gen_from_yaml(args: Dict[str, Tuple[str, str]],
+                        type_alias_map: Dict[str, List[str]],  # TODO: Support unwrapped str val
+                        dim_order_alias_map: Dict[str, List[int]],
+    ) -> List["ETKernelKey"]:
+        """ Generate ETKernelKeys from arg kernel specs
+        Multiple ETKernelKeys are returned due to dtype permutations from utilizing
+        type_alias_map (actualizing each potential type permutation as a KernelKey)
+
+        Args:
+            args: Mapping from argument name to kernel specs
+                Kernel specs are a tuple of (dtype, dim_order).
+                Currently tuple entries must be aliased via the alias map arguments
+            type_alias_map: Mapping from type alias to potential type enums
+                i.e { T0 : [Double, Int] } means T0 can be either Double or Int
+                Used for lookup by args
+            dim_order_alias_map: Mapping from alias to a list of dimension orders
+                Used for lookup by args
+        """
+        kernel_keys = []
+
+        # Get all used Dtype Alias
+        dtype_alias_used = set()
+        for (type_alias, dim_order) in args.values():
+            # Enforce usage of alias initially
+            # TODO: Support inlined arguments
+            assert type_alias in type_alias_map, "Undefined type alias: " + str(type_alias)
+            assert dim_order in dim_order_alias_map, "Undefined dim_order alias: " + str(dim_order)
+            dtype_alias_used.add(type_alias)
+
+        # Generate all permutations of dtype alias values
+        alias_dtypes = [[(alias, dtype) for dtype in type_alias_map[alias]] for alias in dtype_alias_used]
+        alias_permutations = [dict(permutation) for permutation in list(itertools.product(*alias_dtypes))]
+
+        # Using each alias value permutation, generate kernel keys
+        op_arg_cache = {}
+        for permutation in alias_permutations:
+            arg_list = []
+            for arg_name, arg_spec in args.items():
+                dtype = permutation[arg_spec[0]]
+                dim_order = dim_order_alias_map[arg_spec[1]]
+                if (cache_key := (arg_name, dtype, tuple(dim_order))) not in op_arg_cache:
+                    op_arg_cache[cache_key] = ETKernelKeyOpArgMeta(*cache_key)
+
+                arg_list.append(op_arg_cache[cache_key])
+            kernel_keys.append(ETKernelKey(tuple(arg_list)))
+
+        return kernel_keys
+
+    def to_native_string(self) -> str:
+        if self.default:
+            return "default"
+        return "v" + str(KERNEL_KEY_VERSION)  + "/" + "|".join([arg.to_native_string() for arg in self.arg_meta])
 
 
 @dataclass(frozen=True)
