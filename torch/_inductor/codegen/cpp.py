@@ -175,33 +175,33 @@ def reduction_acc_type_vec(reduction_type, dtype):
 
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     if reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     if reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
     if reduction_type == "any":
-        return f"{var} = {var} || {next_value}"
+        return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
-        return f"{var} = {reduction_type}_propagate_nan({var}, {next_value})"
+        return f"{reduction_type}_propagate_nan({var}, {next_value})"
     if reduction_type == "var":
-        return f"{var} = welford_combine({var}, {next_value})"
+        return f"welford_combine({var}, {next_value})"
     raise AssertionError(reduction_type)
 
 
 def reduction_combine_vec(reduction_type, var, next_value):
     if reduction_type == "max":
-        return f"{var} = at::vec::maximum({var}, {next_value})"
+        return f"at::vec::maximum({var}, {next_value})"
     elif reduction_type == "min":
-        return f"{var} = at::vec::minimum({var}, {next_value})"
+        return f"at::vec::minimum({var}, {next_value})"
     elif reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     elif reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     elif reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
     elif reduction_type == "var":
-        return f"{var} = welford_combine({var}, {next_value})"
+        return f"welford_combine({var}, {next_value})"
     else:
         raise NotImplementedError()
 
@@ -1149,7 +1149,7 @@ class CppKernel(Kernel):
             self.reduction_prefix.writeline(
                 f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
             )
-            self.stores.writeline(f"{reduction_combine(reduction_type, acc, value)};")
+            self.stores.writeline(f"{acc} = {reduction_combine(reduction_type, acc, value)};")
 
         tmpvar = self.cse.generate(
             self.reduction_suffix, f"{reduction_project(reduction_type, acc)}"
@@ -1436,7 +1436,7 @@ class CppVecKernel(CppKernel):
                     f"""\
 #pragma omp declare reduction(\
 {RTYPE_TO_CPP[reduction_type]}:{acc_type}:\
-{reduction_combine(reduction_type, "omp_out", "omp_in")}) \
+omp_out = {reduction_combine(reduction_type, "omp_out", "omp_in")}) \
 initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
             """
                 )
@@ -1444,7 +1444,7 @@ initializer(omp_priv={{{reduction_init(reduction_type, dtype)}}})
                 f"""\
 #pragma omp declare reduction(\
 {RTYPE_TO_CPP[reduction_type]}:{acc_type_vec}:\
-{reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
+omp_out = {reduction_combine_vec(reduction_type, "omp_out", "omp_in")}) \
 initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             """
             )
@@ -1464,7 +1464,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             f"{acc_type_vec} {acc_vec} = {reduction_init_vec(reduction_type, dtype)};"
         )
         self.stores.writeline(
-            f"{reduction_combine_vec(reduction_type, acc_vec, value)};"
+            f"{acc_vec} = {reduction_combine_vec(reduction_type, acc_vec, value)};"
         )
 
         if self.tiling_idx >= self.reduction_depth:
