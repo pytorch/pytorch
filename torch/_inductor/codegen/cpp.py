@@ -1408,7 +1408,8 @@ class CppVecKernel(CppKernel):
             next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {tmpvar_vec})"
             self.reduction_suffix.writeline(
                 DeferredLine(
-                    name, f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, next_value)};"
+                    name,
+                    f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, next_value)};",
                 )
             )
 
