@@ -1,3 +1,4 @@
+import ast
 from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
 import functools
 from collections import namedtuple, OrderedDict
@@ -39,13 +40,26 @@ FlattenFunc = Callable[[PyTree], Tuple[List, Context]]
 UnflattenFunc = Callable[[List, Context], PyTree]
 
 class NodeDef(NamedTuple):
+    type: Type[Any]
     flatten_fn: FlattenFunc
     unflatten_fn: UnflattenFunc
+    to_str: str
 
 SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
+SUPPORTED_STR_TO_TYPE: Dict[str, NodeDef] = {}
 
-def _register_pytree_node(typ: Any, flatten_fn: FlattenFunc, unflatten_fn: UnflattenFunc) -> None:
-    SUPPORTED_NODES[typ] = NodeDef(flatten_fn, unflatten_fn)
+def _register_pytree_node(
+    typ: Any,
+    flatten_fn: FlattenFunc,
+    unflatten_fn: UnflattenFunc,
+    to_str: str = "",
+) -> None:
+    if len(to_str) == 0:
+        to_str = "C"
+    assert len(to_str) == 1
+    node_def = NodeDef(typ, flatten_fn, unflatten_fn, to_str)
+    SUPPORTED_NODES[typ] = node_def
+    SUPPORTED_STR_TO_TYPE[to_str] = node_def
 
 def _dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
@@ -78,11 +92,11 @@ def _odict_unflatten(values: List[Any], context: Context) -> 'OrderedDict[Any, A
     return OrderedDict((key, value) for key, value in zip(context, values))
 
 
-_register_pytree_node(dict, _dict_flatten, _dict_unflatten)
-_register_pytree_node(list, _list_flatten, _list_unflatten)
-_register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten)
-_register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten)
-_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
+_register_pytree_node(dict, _dict_flatten, _dict_unflatten, "D")
+_register_pytree_node(list, _list_flatten, _list_unflatten, "L")
+_register_pytree_node(tuple, _tuple_flatten, _tuple_unflatten, "T")
+_register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten, "N")
+_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten, "O")
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
@@ -337,3 +351,126 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
             return None
 
     return result
+
+
+def pytree_to_str(spec: TreeSpec) -> str:
+    if isinstance(spec, LeafSpec):
+        return "*"
+
+    elif spec.type in (list, tuple):
+        type_str = SUPPORTED_NODES[spec.type].to_str
+        child_strings = [pytree_to_str(child) for child in spec.children_specs]
+        return f"{type_str}({','.join(child_strings)})"
+
+    elif spec.type == namedtuple:
+        context_type = spec.context.__name__
+        type_str = SUPPORTED_NODES[spec.type].to_str
+        child_strings = [pytree_to_str(child) for child in spec.children_specs]
+        return f"{type_str}({context_type},{','.join(child_strings)})"
+
+    elif spec.type in (dict, OrderedDict):
+        type_str = SUPPORTED_NODES[spec.type].to_str
+        child_strings = []
+        for key, child in zip(spec.context, spec.children_specs):
+            child_string = pytree_to_str(child)
+            child_strings.append(f"{repr(key)}:{child_string}")
+        return f"{type_str}({','.join(child_strings)})"
+
+    else:
+        raise NotImplementedError(f"Serializing {spec.type} in pytree not supported yet")
+
+
+def str_to_pytree(str_spec: str) -> TreeSpec:
+    if str_spec == "*":
+        return LeafSpec()
+    elif (
+        str_spec.startswith(SUPPORTED_NODES[list].to_str) or
+        str_spec.startswith(SUPPORTED_NODES[tuple].to_str)
+    ):
+        assert str_spec[1] == "("
+        assert str_spec[-1] == ")"
+        children_string = str_spec[2:-1]
+        children_spec = [
+            str_to_pytree(child_string)
+            for child_string in _split_nested(children_string)
+        ]
+        return TreeSpec(
+            SUPPORTED_STR_TO_TYPE[str_spec[0]].type,
+            None,
+            children_spec,
+        )
+    elif str_spec.startswith(SUPPORTED_NODES[namedtuple].to_str):  # type: ignore[index]
+        # NamedTuples are serialized like N(type, value, value...)
+        assert str_spec[1] == "("
+        assert str_spec[-1] == ")"
+        type_end_index = str_spec.find(",")
+        context_type_str = str_spec[2:type_end_index]
+        context_type = namedtuple(context_type_str, [])  # type: ignore[misc]
+        assert str_spec[type_end_index] == ","
+
+        children_string = str_spec[type_end_index + 1:-1]
+        children_spec = [
+            str_to_pytree(child_string)
+            for child_string in _split_nested(children_string)
+        ]
+        return TreeSpec(
+            SUPPORTED_STR_TO_TYPE[str_spec[0]].type,
+            context_type,
+            children_spec,
+        )
+    elif (
+        str_spec.startswith(SUPPORTED_NODES[dict].to_str) or
+        str_spec.startswith(SUPPORTED_NODES[OrderedDict].to_str)
+    ):
+        context, children_spec = _parse_dict_children_spec(str_spec)
+        return TreeSpec(SUPPORTED_STR_TO_TYPE[str_spec[0]].type, context, children_spec)
+    else:
+        raise NotImplementedError(f"Deserializing {str_spec} in pytree not supported yet")
+
+
+def _split_nested(string: str) -> List[str]:
+    nested_parentheses = 0
+    splits = []
+    start_index = 0
+
+    for i, char in enumerate(string):
+        if char == "(":
+            nested_parentheses += 1
+        elif char == ")":
+            nested_parentheses -= 1
+
+        if nested_parentheses == 0 and char == ",":
+            splits.append(string[start_index:i])
+            start_index = i + 1
+
+    splits.append(string[start_index:])
+    return splits
+
+
+def _parse_dict_children_spec(toplevel_str: str) -> Tuple[List[str], List[TreeSpec]]:
+    assert toplevel_str[1] == "("
+    assert toplevel_str[-1] == ")"
+    children_string = toplevel_str[2:-1]
+
+    child_strings = []
+    context_strings = []
+    nested_parentheses = 0
+    start_index = 0
+    for i, char in enumerate(children_string):
+        if char == ":":
+            if nested_parentheses == 0:
+                key = children_string[start_index:i]
+                context_strings.append(ast.literal_eval(key))
+                start_index = i + 1
+        elif char == "(":
+            nested_parentheses += 1
+        elif char == ")":
+            nested_parentheses -= 1
+
+        if nested_parentheses == 0 and char == ",":
+            child_strings.append(children_string[start_index:i])
+            start_index = i + 1
+
+    child_strings.append(children_string[start_index:])
+    children = [str_to_pytree(child_string) for child_string in child_strings]
+    return context_strings, children
