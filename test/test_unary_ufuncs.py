@@ -38,7 +38,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     precisionOverride,
     dtypesIfCPU,
-    tol
 )
 
 from torch.testing import make_tensor

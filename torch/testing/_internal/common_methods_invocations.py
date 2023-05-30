@@ -10026,6 +10026,11 @@ op_db: List[OpInfo] = [
                            toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-03)}),
                            'TestUnaryUfuncs', device_type='cuda'),
                        precisionOverride({torch.bfloat16: 1e-2}),
+                       DecorateInfo(
+                            toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=1e-05)}),
+                                            'TestUnaryUfuncs',
+                                            'test_reference_numerics_extremal',
+                                            device_type='cuda'),
                    ],
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
