@@ -2011,6 +2011,15 @@ class InstructionTranslator(InstructionTranslatorBase):
                     ]
                     self.output.guards.update(index_guards)
 
+            # Additionally, we need to add guards for self, if it is a NNModule.
+            # The outer invocation of Module.__call__ is a use of "self" that's not seen
+            # by the tracer.
+            if "self" in self.symbolic_locals:
+                val = self.symbolic_locals["self"]
+                if isinstance(val, NNModuleVariable):
+                    local_guards = VariableTracker.propagate(val)["guards"]
+                    self.output.guards.update(local_guards)
+
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
