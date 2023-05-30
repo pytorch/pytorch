@@ -61,7 +61,7 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "SparseBsr";
     case at::kSparseBsc:
       return stream << "SparseBsc";
-    case at::SemiStructuredSparse:
+    case at::kSemiStructuredSparse:
       return stream << "SemiStructuredSparse";
     case at::kMkldnn:
       return stream << "Mkldnn";
