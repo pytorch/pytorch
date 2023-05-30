@@ -76,7 +76,7 @@ struct CusparseLt : public torch::CustomClassHolder {
   CusparseLt(const at::Tensor& sparse_compressed)
       : sparse_compressed{sparse_compressed} {
 
-    // Check CUDA compatibility, currently only supported on 8.0, 8.6, 8.9, and 9.0
+    // Check CUDA compatibility, currently only supported on 8.0, 8.6, 8.9
     int major_cc, minor_cc;
     CHECK_CUDA(
         cudaDeviceGetAttribute(&major_cc, cudaDevAttrComputeCapabilityMajor, 0))
