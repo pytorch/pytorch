@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Optional, Any, Union
+from typing import Optional, Any, Union, Type
 
 import torch
 import torch.nn as nn
@@ -491,7 +491,7 @@ def _add_module_to_qconfig_obs_ctr(
 
     return QConfig(activation, weight)
 
-_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, ObserverBase, FakeQuantizeBase]
+_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, Type[ObserverBase], Type[FakeQuantizeBase]]
 
 def _obs_or_fq_ctr_equals(obs_or_fq1: _ObserverOrFakeQuantizeConstructor, obs_or_fq2: _ObserverOrFakeQuantizeConstructor):
     if isinstance(obs_or_fq1, _PartialWrapper) and isinstance(obs_or_fq2, _PartialWrapper):
