@@ -116,7 +116,11 @@ def _maybe_insert_input_observers_for_node(
         )
         new_args.append(new_arg)
 
-    assert len(node.kwargs) == 0, " expecting kwargs for aten op IR to be empty"
+    # Clone has memory_format kwarg that persist in exported graph
+    # this is just a work around for that.
+    assert (
+        node.target == torch.ops.aten.clone.default or len(node.kwargs) == 0
+    ), " expecting kwargs for aten op IR to be empty"
 
     # assign the new args to the node, inplace
     node.args = tuple(new_args)
