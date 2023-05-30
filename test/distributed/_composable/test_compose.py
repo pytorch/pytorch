@@ -7,10 +7,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, fully_shard, replicate
-from torch.distributed._composable_state import _get_module_state
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
-from torch.distributed.fsdp._common_utils import _FSDPState
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
@@ -171,7 +169,10 @@ class TestFSDPCheckpoint(FSDPTest):
             f"{module_name}.{n}"
             for module_name, mod in replicated_modules
             for n, _ in mod.named_parameters()
-        ].extend([n for n, _ in model.named_parameters(recurse=False)])
+        ]
+        replicated_param_names.extend(
+            [n for n, _ in model.named_parameters(recurse=False)]
+        )
         self.assertEqual(set(param_names), set(replicated_param_names))
 
     @skip_if_lt_x_gpu(2)
