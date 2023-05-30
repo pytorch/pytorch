@@ -17,7 +17,7 @@ import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torch.distributed import get_world_size, ProcessGroup
+from torch.distributed import get_backend, get_world_size
 from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
@@ -205,17 +205,22 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
 
 
 def _init_device_mesh(
-    pg: ProcessGroup,
+    root_state: _FSDPState,
 ) -> Optional[DeviceMesh]:
     # We are testing 1D DeviceMesh where dist.get_world_size(pg) == dist.get_world_size() for now.
     # TODO: Address cases when dist.get_world_size(pg) != dist.get_world_size(). This would capture
     #       what 1D DeviceMesh currently would not work for:
     #       1) HSDP Hybrid Sharding, 2) 2D FSDP + TP, 3) dist.new_group() cannot be expressed in 1D DeviceMesh.
-    if get_world_size(pg) != get_world_size():
+    if get_world_size(root_state.process_group) != get_world_size():
         return None
-    mesh_tensor = torch.arange(get_world_size(pg))
-    device_mesh = DeviceMesh("cuda", mesh_tensor, _init_process_groups=False)
-    device_mesh._dim_groups = [pg]
+    # Temporarily skip DeviceMesh initialization when the backend is set to fake.
+    # TODO: Remove the condition once the issue of "Default PG backend: fake not supporting CUDA!" is resolved.
+    if get_backend() == "fake" or not root_state.compute_device:
+        return None
+    device_type = root_state.compute_device.type
+    mesh_tensor = torch.arange(get_world_size(root_state.process_group))
+    device_mesh = DeviceMesh(device_type, mesh_tensor, _init_process_groups=False)
+    device_mesh._dim_groups = [root_state.process_group]
     return device_mesh
 
 
@@ -237,7 +242,7 @@ def _share_state_and_init_handle_attrs(
         attr_name_to_values[attr_name] = set()
     root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
-    root_state._device_mesh = _init_device_mesh(root_state.process_group)
+    root_state._device_mesh = _init_device_mesh(root_state)
 
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
