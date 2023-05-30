@@ -14,7 +14,7 @@ from sympy.printing.printer import Printer
 import torch
 import torch.fx
 
-from .. import ir, metrics
+from .. import metrics
 
 from ..utils import (
     DeferredLineBase,
@@ -876,6 +876,7 @@ class OptimizationContext:
 def can_use_32bit_indexing(
     node_schedule, numel: sympy.Expr, reduction_numel: sympy.Expr
 ) -> bool:
+    from ..ir import Buffer, ConstantBuffer, FixedLayout
     from ..scheduler import BaseSchedulerNode
 
     buffer_names = set()
@@ -887,16 +888,16 @@ def can_use_32bit_indexing(
         buffer_names.update(node.used_buffer_names())
 
     # Get buffers objects
-    def _get_buffer(name: str) -> ir.Buffer:
+    def _get_buffer(name: str) -> Buffer:
         if name in V.graph.name_to_buffer:
             return V.graph.name_to_buffer[name]
         elif name in V.graph.graph_inputs:
             return V.graph.graph_inputs[name]
         elif name in V.graph.constants:
             data = V.graph.constants[name]
-            return ir.ConstantBuffer(
+            return ConstantBuffer(
                 name,
-                ir.FixedLayout(
+                FixedLayout(
                     data.device, data.dtype, *V.graph.static_sizes_strides(data)
                 ),
             )
