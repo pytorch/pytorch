@@ -26,6 +26,7 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import (
     _maybe_resize_out,
     _resize_output_check,
+    _safe_copy_out,
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes
@@ -756,24 +757,6 @@ def linalg_qr_meta(
     return Q, R
 
 
-@register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
-@out_wrapper("sign", "logabsdet", "LU", "pivots")
-def _linalg_slogdet(A: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
-    squareCheckInputs(A, "linalg.slogdet")
-    checkFloatingOrComplex(A, "linalg.slogdet", False)
-    shape = A.shape
-    sign = A.new_empty(shape[:-2])
-    logabsdet = A.new_empty(shape[:-2], dtype=toRealValueType(A.dtype))
-    LU = torch.empty_strided(
-        size=shape,
-        stride=make_contiguous_strides_for(shape, False),
-        dtype=A.dtype,
-        device=A.device,
-    )
-    pivots = A.new_empty(shape[:-1], dtype=torch.int32)
-    return sign, logabsdet, LU, pivots
-
-
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 # NOTE: matching defaults in aten/src/ATen/native/native_functions.yaml
 @register_meta(aten._linalg_svd.default)
@@ -846,58 +829,6 @@ def _linalg_broadcast_batch_dims_name(
         arg2 if arg2_expand_size == arg2.shape else arg2.expand(arg2_expand_size)
     )
     return arg1_broadcasted, arg2_broadcasted
-
-
-def linalg_solve_is_vector_rhs(input: Tensor, other: Tensor) -> bool:
-    expected_batched_rhs_shape = input.shape[:-1]
-    vector_case = other.ndim == 1 or (
-        input.ndim - 1 == other.ndim and other.shape == expected_batched_rhs_shape
-    )
-    return vector_case
-
-
-@register_meta([aten._linalg_solve_ex.default, aten._linalg_solve_ex.result])
-@out_wrapper("result", "LU", "pivots", "info")
-def _linalg_solve_ex(
-    A: Tensor, B: Tensor, *, left: bool = True, check_errors: bool = False
-) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
-    checkFloatingOrComplex(A, "linalg.solve")
-    check(
-        A.dtype == B.dtype,
-        lambda: (
-            f"linalg.solve: Expected A and B to have the same dtype, but found A of type "
-            f"{A.dtype} and B of type {B.dtype} instead"
-        ),
-    )
-    vector_case = linalg_solve_is_vector_rhs(A, B)
-    B_ = B.unsqueeze(-1) if vector_case else B
-    checkInputsSolver(A, B_, left, "linalg.solve")
-    B_broad_shape, _ = _linalg_broadcast_batch_dims(B_, A)
-    check(
-        left or not vector_case,
-        lambda: (
-            "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. "
-            "In this case linalg.solve is equivalent to B / A.squeeze(-1)"
-        ),
-    )
-    result_shape = B_broad_shape[:-1] if vector_case else B_broad_shape
-    result = torch.empty_strided(
-        size=result_shape,
-        stride=make_contiguous_strides_for(result_shape, not left),
-        dtype=B.dtype,
-        device=B.device,
-    )
-    shape = A.shape
-    ndim = A.ndim
-    LU = torch.empty_strided(
-        size=shape,
-        stride=make_contiguous_strides_for(shape, False),
-        dtype=A.dtype,
-        device=A.device,
-    )
-    pivots = A.new_empty(shape[:-1], dtype=torch.int32)
-    info = A.new_empty(shape[:-2], dtype=torch.int32)
-    return result, LU, pivots, info
 
 
 @register_meta([aten.linalg_solve_triangular.default, aten.linalg_solve_triangular.out])
@@ -3264,9 +3195,23 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
         aten.sort.values_stable,
     ]
 )
-@out_wrapper("values", "indices")
-def meta_sort(self, stable=None, dim=-1, descending=False):
-    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
+    v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+    if values is not None and indices is not None:
+        assert isinstance(values, TensorLike)
+        assert isinstance(indices, TensorLike)
+        # Makes sure values and indices have the same strides. For cases where
+        # these have different shapes, like (5, 10, 5) and (0) in msort.
+        out_shape = v.shape
+        out_stride = v.stride()
+        values = _maybe_resize_out(values, out_shape)
+        indices = _maybe_resize_out(indices, out_shape)
+        values.as_strided_(out_shape, out_stride)
+        indices.as_strided_(out_shape, out_stride)
+        _safe_copy_out(copy_from=v, copy_to=values)  # type: ignore[arg-type]
+        _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
+        return values, indices
+    return v, i
 
 
 def rnn_cell_checkSizes(
