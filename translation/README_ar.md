@@ -71,7 +71,7 @@ Usually, PyTorch is used either as:
 
 Elaborating Further:
 
-### مكتبة تنسور جاهزة للعمل على وحدة معالجة الرسوميات (GPU)
+### مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات (GPU)
 
 If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
