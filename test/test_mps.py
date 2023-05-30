@@ -5662,6 +5662,19 @@ class TestNLLLoss(TestCaseMPS):
                 torch.tensor((10, 20, 30, 40, 50), device=device),
                 atol=0, rtol=0
             )
+    def test_sort_strided_view(self):
+        device = 'mps'
+        x = torch.randn(5, 9, 7, 4, device=device)
+        x_strided = x[:, :, ::2, :]
+        res1val, res1ind = torch.sort(x_strided)
+
+        res2val = torch.tensor((), device=device)
+        res2ind = torch.tensor((), device=device, dtype=torch.long)
+        torch.sort(x_strided, out=(res2val, res2ind))
+        self.assertEqual(res1val, res2val, atol=0, rtol=0)
+        self.assertEqual(res1ind, res2ind, atol=0, rtol=0)
+        self.assertEqual(torch.argsort(x_strided), res1ind)
+        self.assertEqual(x_strided.argsort(), res1ind)
 
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
