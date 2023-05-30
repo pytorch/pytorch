@@ -96,7 +96,7 @@ void initScriptListBindings(PyObject* module) {
       .def(
           "__len__",
           [](const std::shared_ptr<ScriptList>& self) {
-            return toPyObject(static_cast<int64_t>(self->len()));
+            return toPyObject(self->len());
           })
       .def(
           "__contains__",
