@@ -58,6 +58,7 @@ def make_dynamic_cls(cls, *, static_default=False):
         cls_prefix,
         suffix,
         (config, "dynamic_shapes", True),
+        (config, "translation_validation", True),
         (config, "assume_static_by_default", static_default),
         (config, "specialize_int", static_default),
     )
@@ -136,6 +137,12 @@ unittest.expectedFailure(
 unittest.expectedFailure(
     DynamicShapesNNModuleTests.test_lazy_module6_dynamic_shapes
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
+    # Ref: https://github.com/sympy/sympy/issues/25146
+    DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes
 )
 
 if __name__ == "__main__":

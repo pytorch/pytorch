@@ -17,9 +17,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
+import torch.fx
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import (  # noqa: F401
@@ -532,7 +533,7 @@ class SymNode:
     This is a type erased SymInt/SymFloat which we use to do actual operations.
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
-    def __init__(self, expr, shape_env, pytype, hint: Optional[Union[int, float]], constant=None):
+    def __init__(self, expr, shape_env, pytype, hint: Optional[Union[int, float]], constant=None, fxnode=None):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
@@ -564,6 +565,10 @@ class SymNode:
             self._hint_expr = None
             self._hint = hint
         self.constant: Optional[Union[int, float, bool]] = constant
+        # Record the FX node of the current node if we are doing translation
+        # validation. They will be used for building the input assertions for
+        # the translation validation problem.
+        self.fxnode = fxnode if _translation_validator_enabled() else None
 
     @property
     def expr(self):
@@ -616,15 +621,15 @@ class SymNode:
 
     def wrap_int(self, num):
         assert type(num) is int
-        return SymNode(sympy.Integer(num), self.shape_env, int, num, constant=num)
+        return SymNode(sympy.Integer(num), self.shape_env, int, num, constant=num, fxnode=num)
 
     def wrap_float(self, num):
         assert type(num) is float
-        return SymNode(sympy.Float(num), self.shape_env, float, num, constant=num)
+        return SymNode(sympy.Float(num), self.shape_env, float, num, constant=num, fxnode=num)
 
     def wrap_bool(self, num):
         assert type(num) is bool
-        return SymNode(sympy.true if num else sympy.false, self.shape_env, bool, num, constant=num)
+        return SymNode(sympy.true if num else sympy.false, self.shape_env, bool, num, constant=num, fxnode=num)
 
     def clone(self):
         return self
@@ -747,7 +752,7 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fxnode=self.fxnode)
         try:
             return int(r)
         except Exception:
@@ -757,7 +762,7 @@ class SymNode:
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fxnode=self.fxnode)
         try:
             return float(r)
         except Exception:
@@ -767,7 +772,7 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fxnode=self.fxnode)
         try:
             return bool(r)
         except Exception:
@@ -1208,7 +1213,10 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        return SymNode(out, self.shape_env, pytype, out_hint)
+        # Create a FX node that corresponds to the operation being applied to
+        # this node.
+        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode, other.fxnode), pytype)
+        return SymNode(out, self.shape_env, pytype, out_hint, fxnode=fxnode)
 
     def unary_magic_impl(self):
         op = method_to_operator(method)
@@ -1237,7 +1245,8 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        return SymNode(out, self.shape_env, pytype, out_hint)
+        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode,), pytype)
+        return SymNode(out, self.shape_env, pytype, out_hint, fxnode=fxnode)
 
     if method in unary_magic_methods:
         setattr(SymNode, f"_{method_attr}", unary_magic_impl)
@@ -1361,6 +1370,458 @@ for method, func in magic_methods.items():
 
 del method
 del func
+
+try:
+    import z3
+
+    # Implementation of Python semantics as Z3 expressions.
+    #
+    # Z3 Real-Int theory has operators with semantics that differ that of
+    # Python. Therefore, in order to get it right, we need to implement
+    # the (Python) semantics we are relying on in Z3.
+    class Z3Ops:
+        # The 2 functions below are used for conditionally casting between
+        # integer and reals.
+        #
+        # Returns a real expression from 'x'.
+        @staticmethod
+        def to_real(x: z3.ArithRef) -> z3.ArithRef:
+            return x if x.is_real() else z3.ToReal(x)
+
+        # Returns an integer expression from 'x'.
+        @staticmethod
+        def to_int(x: z3.ArithRef) -> z3.ArithRef:
+            return x if x.is_int() else z3.ToInt(x)
+
+        # Implements Python division semantics.
+        # This is needed because Z3 integer division does not have the
+        # same semantics as Python true division.
+        @staticmethod
+        def div(numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            return Z3Ops.to_real(numerator) / Z3Ops.to_real(denominator)
+
+        @staticmethod
+        def floor(number: z3.ArithRef) -> z3.ArithRef:
+            return Z3Ops.to_int(number)
+
+        @staticmethod
+        def floordiv(numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            return Z3Ops.to_int(Z3Ops.div(numerator, denominator))
+
+        @staticmethod
+        def ceil(number: z3.ArithRef) -> z3.ArithRef:
+            return z3.If(Z3Ops.floor(number) < number, Z3Ops.floor(number + 1), number)  # type: ignore
+
+        @staticmethod
+        def mod(p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
+            return Z3Ops.to_int(p) % Z3Ops.to_int(q)
+
+    # Lifts a callable to be used in Z3.
+    #
+    # This function handles callables into callables that:
+    #
+    #   1. work as is with Z3 inhabitants
+    #   2. need to be replaced by their Z3 equals
+    #
+    # In both of them, we need to lift the arguments to live
+    # in Z3, before actually applying the operation.
+    def _operator_to_z3(op: Callable) -> Callable:
+
+        # Lift literals, so that we can use them in Z3 functions.
+        def lift_literals(func):
+            def wrap(a):
+                if isinstance(a, (int, sympy.Integer)):
+                    return z3.IntVal(int(a))
+                return a
+
+            @functools.wraps(func)
+            def wrapper(*args):
+                args = tuple(wrap(a) for a in args)
+                return func(*args)
+
+            return wrapper
+
+        replacement_map = {
+            operator.not_: lift_literals(z3.Not),
+            operator.and_: lift_literals(z3.And),
+            operator.floordiv: lift_literals(Z3Ops.floordiv),
+            operator.truediv: lift_literals(Z3Ops.div),
+            operator.mod: lift_literals(Z3Ops.mod),
+            math.ceil: lift_literals(Z3Ops.ceil),
+
+            torch.sym_float: lift_literals(Z3Ops.to_real),
+            # Not lifted because we only use this function as a
+            # marker for adding the expression as validator input.
+            torch._assert: torch._assert,
+        }
+        return replacement_map[op] if op in replacement_map else lift_literals(op)
+
+    # Processes an FX graph, populating the given validator.
+    #
+    # This function walks through each node in the FX graph, translating
+    # them into the Z3 world.
+    #
+    # Then, whenever it finds an 'torch._assert' call_function operation,
+    # it adds the Z3 expression corresponding to the argument as validator
+    # input.
+    def _populate_validator_with_fx_graph(
+            validator: "TranslationValidator",
+            graph: torch.fx.Graph
+    ) -> None:
+        node_to_z3 = {}
+
+        # Creates a Z3 variable, taking into account the node type.
+        def run_placeholder(node: torch.fx.Node) -> None:
+            assert "symbol" in node.meta
+            node_to_z3[node] = validator.z3var(node.meta["symbol"])
+
+        # Actually runs the node target function (which is already
+        # lifted) with its arguments.
+        def run_call_function(node: torch.fx.Node) -> None:
+            args = [
+                node_to_z3[a]
+                if isinstance(a, torch.fx.Node) else a
+                for a in node.args
+            ]
+
+            assert callable(node.target)
+            node_to_z3[node] = node.target(*args)
+
+        # Adds the Z3 expression corresponding to the first argument
+        # as a validator input.
+        def run_assertion(node: torch.fx.Node) -> None:
+            assertion = node.args[0]
+            assert isinstance(assertion, torch.fx.Node)
+            validator._inputs.add(node_to_z3[assertion])
+
+        for node in graph.nodes:
+            if node.op == "placeholder":
+                run_placeholder(node)
+            elif node.op == "call_function":
+                if node.target == torch._assert:
+                    run_assertion(node)
+                else:
+                    run_call_function(node)
+            else:
+                assert False, f"unsupported operation: {node.op}"
+
+    # Translates SymPy expressions into Z3 expressions.
+    #
+    # Traverses the SymPy AST recursively, translating from its leaves
+    # to the root of the tree.
+    #
+    # At the time of the translation, all free variables present in the
+    # SymPy expression being translated must be already mapped to a Z3
+    # integer variable.
+    class SympyToZ3:
+        def __init__(
+                self,
+                validator: "TranslationValidator",
+                symbols: Dict[sympy.Symbol, z3.ArithRef],
+        ) -> None:
+            self._validator = validator
+            self._symbols = symbols
+
+        # This guarantees that the solution found does not depend on the
+        # solution of a division-by-zero, which is unspecified for Z3.
+        def _add_assertion_nonzero_denominator(self, denominator: z3.ArithRef) -> z3.ArithRef:
+            self._validator.add_assertion(denominator != 0)
+            return denominator
+
+        def _Add(self, expr: sympy.Add) -> z3.ArithRef:
+            return functools.reduce(operator.add, self(expr.args))
+
+        def _And(self, expr: sympy.And) -> z3.BoolRef:
+            return cast(z3.BoolRef, z3.And(*self(expr.args)))
+
+        def _bool(self, expr: sympy.logic.boolalg.BooleanAtom) -> z3.BoolRef:
+            return z3.BoolVal(bool(expr))
+
+        def _Float(self, expr: sympy.Float) -> z3.ArithRef:
+            return z3.RealVal(float(expr))
+
+        def _floor(self, expr: sympy.floor) -> z3.ArithRef:
+            return Z3Ops.to_int(self(expr.args[0]))
+
+        def _FloorDiv(self, expr: FloorDiv) -> z3.ArithRef:
+            denominator = self._add_assertion_nonzero_denominator(self(expr.divisor))
+            return Z3Ops.floordiv(self(expr.base), denominator)
+
+        def _int(self, expr: int) -> z3.ArithRef:
+            return z3.IntVal(expr)
+
+        def _Mod(self, expr: sympy.Mod) -> z3.ArithRef:
+            p, q = self(expr.args)
+            q = self._add_assertion_nonzero_denominator(q)
+            return Z3Ops.mod(p, q)
+
+        # Turns the multiplication into a division, if there is any
+        # appropriate term.
+        #
+        # SymPy expresses division as a term in the multiplication that consists
+        # of a power expression where the exponent is negative.
+        #
+        # Therefore, we separate the whole multiplication into numerator and
+        # denominator. Then, we create a division node if necessary (i.e. there
+        # is any denominator not equal to 1).
+        #
+        # This separation was based on:
+        # sympy.printing.codeprinter.CodePrinter._print_Mul method.
+        def _Mul(self, expr: sympy.Mul) -> z3.ArithRef:
+            numerator_list = []
+            denominator_list = []
+
+            for item in expr.args:
+                if (
+                        item.is_commutative
+                        and isinstance(item, sympy.Pow)
+                        and item.exp.is_Rational
+                        and item.exp.is_negative
+                ):
+                    denominator_list.append(sympy.Pow(item.base, -item.exp))
+                else:
+                    numerator_list.append(item)
+
+            numerator = self._int(1)
+            if len(numerator_list) > 0:
+                numerator = functools.reduce(operator.mul, self(numerator_list))
+
+            if len(denominator_list) > 0:
+                denominator = functools.reduce(operator.mul, self(denominator_list))
+                denominator = self._add_assertion_nonzero_denominator(denominator)
+                return Z3Ops.div(numerator, denominator)
+
+            return numerator
+
+        def _Not(self, expr: sympy.Not) -> z3.BoolRef:
+            return cast(z3.BoolRef, z3.Not(self(expr.args[0])))
+
+        # We don't check for cases where:
+        #
+        # - 'base' is zero + 'exp' is negative
+        # - 'base' is negative + 'exp' is not an integer
+        #
+        # Ref: https://github.com/pytorch/pytorch/pull/101146#discussion_r1194404896
+        def _Pow(self, expr: sympy.Pow) -> z3.ArithRef:
+            return self(expr.base) ** self(expr.exp)
+
+        def _Rational(self, expr: sympy.Rational) -> z3.ArithRef:
+            return Z3Ops.div(self(expr.p), self(expr.q))
+
+        def _Rel(self, expr: sympy.Rel) -> z3.ArithRef:
+            opmap = {
+                "==": operator.eq,
+                "!=": operator.ne,
+                ">=": operator.ge,
+                ">": operator.gt,
+                "<=": operator.le,
+                "<": operator.lt,
+            }
+            assert isinstance(expr, (sympy.Eq, sympy.Ne, sympy.Ge, sympy.Gt, sympy.Le, sympy.Lt))
+            return opmap[expr.rel_op](self(expr.lhs), self(expr.rhs))
+
+        def _Symbol(self, expr: sympy.Symbol) -> z3.ArithRef:
+            return self._symbols[expr]
+
+        # Entry point for the translation process.
+        #
+        # 'expr' can be either a 'sympy.Expr', a tuple, or a list. If the latter,
+        # this method will convert the elements and return a new list (or tuple).
+        #
+        # This function dispatches to another method according to the type of
+        # the expression being translated. In other words, 'expr' shall be dispatched
+        # to '_type(expr)'. e.g. if 'type(expr) == sympy.Add', it shall be dispatched
+        # to '_Add' method.
+        #
+        # A few exceptions are:
+        # - lists and tuples: recursively called with each element
+        #
+        # - sympy.Rel operations: although 'isinstance(expr, sympy.Rel)' is true,
+        #   'type(expr)' returns either 'Eq', 'Ne', 'Lt'... We combine them into
+        #   a single dispatch call: '_Rel'.
+        #
+        # - sympy.Integer and IntegerConstant: are dispatched to '_int' with its
+        #   corresponding value.
+        def __call__(self, expr) -> Any:
+            if isinstance(expr, (tuple, list)):
+                return type(expr)(self(e) for e in expr)
+            if isinstance(expr, sympy.Rel):
+                typename = "Rel"
+            elif isinstance(expr, sympy.Integer):
+                typename = "int"
+                expr = int(expr)
+            elif isinstance(expr, sympy.core.numbers.IntegerConstant):
+                constantmap = {
+                    sympy.S.Zero: 0,
+                    sympy.S.One: 1,
+                    sympy.S.NegativeOne: -1,
+                }
+                typename = "int"
+                expr = constantmap[expr]
+            elif isinstance(expr, sympy.core.numbers.RationalConstant):
+                typename = "Rational"
+            elif isinstance(expr, sympy.logic.boolalg.BooleanAtom):
+                typename = "bool"
+            else:
+                typename = type(expr).__name__
+
+            method = f"_{typename}"
+            assert hasattr(self, method), (
+                f"unsupported sympy operation: {expr} ({method})"
+            )
+            return getattr(self, method)(expr)
+
+    # Frontend class to Z3 validation.
+    #
+    # Given:
+    # - Input: all the generated SymPy expressions (no optimizations applied)
+    # - Output: optimized SymPy expressions
+    #
+    # Shows whether the transformations applied to the input expressions are
+    # sound. In other words, solves the following soundness problem:
+    #
+    # (for all possible assignments of the free variables)
+    #
+    # "If the conjunction of the output expressions is true, is the conjunctions
+    # of the input expressions also true?"
+    #
+    # In practice: if there is any assignment of the free variables such that
+    # the conjunction of the inputs is FALSE but the conjunction of the outputs
+    # is TRUE, it would mean that an unsound transformation was applied at some
+    # point.
+    #
+    # That is exactly what this class does. Checks whether the following holds
+    # for any assignment of free variables:
+    #
+    # Not(And(Input)) AND And(Output)
+    #
+    # If the above equation is true, it means that there is a case where the
+    # generated guard (using the output expressions) is incorrectly true.
+    # Otherwise, it shows that the optimized output expressions is sound.
+    class TranslationValidator:
+        def __init__(self) -> None:
+            super().__init__()
+
+            # Mapping of SymPy symbols to Z3 integer variables.
+            self._symbols = {}
+
+            # Set of Z3 expressions representing all the generated guards.
+            # i.e. without any transformation/skipping.
+            self._inputs = set()
+
+            # Set of Z3 expressions representing the actual issued guards.
+            # i.e. those that will actually be used in the guard function.
+            self._outputs = set()
+
+            # Set of Z3 expressions representing assertions over both the
+            # input and output expressions.
+            self._assertions = set()
+
+            # Translator of SymPy expressions to Z3.
+            self._z3 = SympyToZ3(self, self._symbols)
+
+        # Retrieves the corresponding Z3 variable.
+        def z3var(self, symbol: sympy.Symbol) -> z3.ArithRef:
+            assert symbol in self._symbols
+            return self._symbols[symbol]
+
+        # Create an integer variable in Z3, if it doesn't already exists.
+        def add_int(self, symbol: sympy.Symbol) -> None:
+            if symbol not in self._symbols:
+                self._symbols[symbol] = z3.Int(symbol.name)
+
+                # If 's' is positive (SymPy assumption), we have to convey it to Z3 as well.
+                if symbol.is_positive:  # type: ignore
+                    self._outputs.add(self._symbols[symbol] > 0)
+
+        # Create a float variable in Z3, if it doesn't already exists.
+        def add_real(self, symbol: sympy.Symbol) -> None:
+            if symbol not in self._symbols:
+                self._symbols[symbol] = z3.Real(symbol.name)
+
+        # Create a boolean variable in Z3, if it doesn't already exists.
+        def add_bool(self, symbol: sympy.Symbol) -> None:
+            if symbol not in self._symbols:
+                var = self._symbols[symbol] = z3.Int(symbol.name)
+                self.add_assertion(z3.Or(var == 0, var == 1))  # type: ignore
+
+        # Checks whether all symbols were already added.
+        def _check_freesymbols(self, e: sympy.Basic) -> None:
+            assert all(isinstance(s, sympy.Symbol) and s in self._symbols for s in e.free_symbols)
+
+        def add_input(self, e: sympy.Expr) -> None:
+            self._check_freesymbols(e)
+            self._inputs.add(self._z3(e))
+
+        def add_output(self, e: sympy.Expr) -> None:
+            self._check_freesymbols(e)
+            self._outputs.add(self._z3(e))
+
+        def add_assertion(self, e: Union[sympy.Basic, z3.BoolRef]) -> None:
+            if isinstance(e, sympy.Basic):
+                self._check_freesymbols(e)
+                expr = self._z3(e)
+            else:
+                assert isinstance(e, z3.BoolRef)
+                expr = e
+            self._assertions.add(expr)
+
+        # The result of a validation run.
+        @dataclass
+        class Result:
+            success: bool
+
+            # Mapping of the name of each free variable to the value assigned to it.
+            model: Optional[z3.ModelRef] = None
+
+            # List of the expressions that failed due to the assignment.
+            failed_inputs: Optional[List] = None
+
+            # List of output expressions
+            outputs: Optional[Set] = None
+
+        def validate(self) -> "TranslationValidator.Result":
+            from torch._dynamo.utils import dynamo_timed
+
+            # Here, we use "QF_NRA" logic for the solver, since guards have no quantifiers
+            # and are potentially non-linear.
+            solver = z3.SolverFor("QF_NRA")
+
+            # Add all the assertions to the solver.
+            for assertion in self._assertions:
+                solver.add(assertion)
+
+            # "Is there any case where it's TRUE for the outputs but FALSE for the inputs?"
+            solver.add(z3.And(z3.Not(z3.And(*self._inputs)), z3.And(*self._outputs)))
+
+            log.debug(f"translation validation: start")
+            if dynamo_timed()(solver.check)() == z3.sat:
+                # Output expressions are unsound.
+                # Log the found model and input expressions that failed.
+                model = solver.model()
+                return self.Result(
+                    success=False,
+                    model=model,
+                    failed_inputs=[inp for inp in self._inputs if not model.evaluate(inp)],
+                    outputs=self._outputs,
+                )
+            else:
+                # Output expressions are sound.
+                log.debug("translation validation: success")
+                return self.Result(success=True)
+except ImportError:
+    _HAS_Z3 = False
+else:
+    _HAS_Z3 = True
+
+
+def _translation_validator_enabled() -> bool:
+    assert _HAS_Z3 or not torch._dynamo.config.translation_validation, (
+        "translation validation requires Z3 package. Please, either install "
+        "z3-solver or disable translation validation."
+    )
+    return torch._dynamo.config.translation_validation
+
 
 def _lru_cache(fn, maxsize=None):
     """
@@ -1785,8 +2246,98 @@ class ShapeEnv:
         self.frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
 
+        self.graph_added_nodes: Dict[Tuple[Callable, Tuple[Any, ...]], torch.fx.Node] = {}
+        self.source_to_symbol: Dict[str, sympy.Symbol] = {}
+        if _translation_validator_enabled():
+            self.validator = TranslationValidator()
+            self.tracer = torch.fx.Tracer()
+            self.tracer.graph = torch.fx.Graph()
+
     def freeze(self):
         self.frozen = True
+
+    def _create_symbol_for_source(self, source: Source, positive: bool =True) -> Optional[sympy.Symbol]:
+        if _translation_validator_enabled():
+            srcname = source.name()
+            if source not in self.source_to_symbol:
+                self.source_to_symbol[srcname] = sympy.Symbol(srcname, positive=positive, integer=True)
+            return self.source_to_symbol[srcname]
+
+    def _add_z3var_for(self, symbol: sympy.Symbol, type: Type) -> None:
+        if _translation_validator_enabled():
+            if type == int:
+                self.validator.add_int(symbol)
+            elif type == float:
+                self.validator.add_real(symbol)
+            else:
+                assert type == bool
+                self.validator.add_bool(symbol)
+
+    def _add_input_guard(self, expr) -> None:
+        if _translation_validator_enabled():
+            self.validator.add_input(expr)
+
+    def _add_output_guard(self, expr) -> None:
+        if _translation_validator_enabled():
+            self.validator.add_output(expr)
+
+    def _add_assertion(self, expr) -> None:
+        if _translation_validator_enabled():
+            self.validator.add_assertion(expr)
+
+    def _check_translation_validate(self) -> None:
+        if _translation_validator_enabled():
+            result = self.validator.validate()
+            if not result.success:
+                assert result.model is not None and result.failed_inputs is not None and result.outputs is not None
+                oneline_model = {sym: result.model[sym] for sym in result.model}
+                failed_inputs = "\n".join(f"==>> {inp}" for inp in result.failed_inputs)
+                outputs = "\n".join(f"==>> {out}" for out in result.outputs)
+                raise RuntimeError(f"""translation validation failed with model: {oneline_model}
+Outputs:
+{outputs}
+
+Failed inputs:
+{failed_inputs}""")
+
+    def create_fx_call_function(
+            self,
+            op: Callable,
+            args: Tuple,
+            pytype: Optional[Type]
+    ) -> Optional[torch.fx.Node]:
+        # Cache this tuple in order to avoid dupplicated nodes.
+        node_key = (op, args)
+
+        if _translation_validator_enabled() and node_key not in self.graph_added_nodes:
+            # Presence of None in the arguments implies that we should ignore this operation.
+            if any(a is None for a in args):
+                # We check if we are not mixing SymNode that should not be ignored
+                # (fxnode is not None) with those that should (fxnode is None).
+                assert all(not isinstance(a, torch.fx.Node) for a in args)
+                return None
+
+            # If translation validation is enabled, all arguments must have its
+            # own FX node.
+            assert all(a is not None for a in args), f"missing arg in FX graph ({op.__name__}): {args}"
+
+            node = self.tracer.create_node("call_function", _operator_to_z3(op), args, {})
+            node.meta["pytype"] = pytype
+            self.graph_added_nodes[node_key] = node
+
+        return self.graph_added_nodes.get(node_key, None)
+
+    def create_fx_placeholder(
+            self,
+            pytype: Type,
+            name: Optional[str],
+            symbol: Optional[sympy.Symbol] = None,
+    ) -> Optional[torch.fx.Node]:
+        if _translation_validator_enabled() and name is not None:
+            node = self.tracer.create_node("placeholder", name, (), {})
+            node.meta["symbol"] = symbol
+            node.meta["pytype"] = pytype
+            return node
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -1875,6 +2426,7 @@ class ShapeEnv:
                 if stride[i] is None and ex.stride()[i] in candidates:
                     stride[i] = candidates[ex.stride()[i]]
                     candidates[ex.size(i) * ex.stride()[i]] = size[i] * stride[i]
+
             if any(x is None for x in stride):
                 # bind the smallest unbound stride to a new variable
                 val, i = min(
@@ -1893,49 +2445,85 @@ class ShapeEnv:
                 )
         assert all(x is not None for x in stride)
 
-        sym_sizes = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
+        sym_sizes = [
+            self.create_symintnode(sym, hint=hint, source=TensorPropertySource(source, TensorProperty.SIZE, i), positive=True)
+            for i, (sym, hint) in enumerate(zip(size, ex.size()))
+        ]
         sym_stride = []
         for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
-            sym_stride.append(self.create_symintnode(stride_expr, hint=ex.stride(i)))
+            sym_stride.append(self.create_symintnode(
+                stride_expr, hint=ex.stride(i), source=TensorPropertySource(source, TensorProperty.STRIDE, i), positive=True
+            ))
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex.storage_offset(),
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
             # TODO: This should be DYNAMIC, using DUCK for BC
             dynamic_dim=DimDynamic.DUCK,
             constraint_dim=None,
-        ), hint=ex.storage_offset())
+        ), hint=ex.storage_offset(), source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), positive=True)
         return sym_sizes, sym_stride, sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best
     # guess
-    def create_symintnode(self, sym: "sympy.Expr", *, hint: Optional[int]):
+    def create_symintnode(self, sym: "sympy.Expr", *, hint: Optional[int], source: Optional[Source] =None, positive: bool =False):
+        if _translation_validator_enabled() and source is not None:
+            # Create a new symbol for this source.
+            symbol = self._create_symbol_for_source(source, positive=positive)
+            assert symbol is not None
+
+            self._add_z3var_for(symbol, int)
+            fxnode = self.create_fx_placeholder(int, name=symbol.name, symbol=symbol)
+
+            # If the given expression is not static, add an equality assertion
+            # between the newly created symbol and the given expr.
+            if len(sym.free_symbols) > 0:
+                self.log.debug("create_symintnode: add assertion: %s == %s", symbol, sym)
+                self._add_assertion(sympy.Eq(symbol, sym))
+            else:
+                self.log.debug("create_symintnode: ignoring assertion: %s == %s", symbol, sym)
+        else:
+            fxnode = None
+
         if isinstance(sym, sympy.Integer):
             if hint is not None:
                 assert int(sym) == hint
             return int(sym)
-        return SymInt(SymNode(sym, self, int, hint))
+        return SymInt(SymNode(sym, self, int, hint, fxnode=fxnode))
 
     def create_unbacked_symfloat(self):
-        symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        name = f"f{next(self.unbacked_symfloat_counter)}"
+        symbol: sympy.Symbol = sympy.Symbol(name)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges.unknown()
-        return SymFloat(SymNode(symbol, self, float, None))
+        self._add_z3var_for(symbol, float)
+        fxnode = self.create_fx_placeholder(float, name, symbol=symbol)
+        return SymFloat(SymNode(symbol, self, float, None, fxnode=fxnode))
 
     def create_unbacked_symint(self):
-        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        name = f"i{next(self.unbacked_symint_counter)}"
+        symbol: sympy.Symbol = sympy.Symbol(name, integer=True)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
-        return SymInt(SymNode(symbol, self, int, None))
+        self._add_z3var_for(symbol, int)
+        fxnode = self.create_fx_placeholder(int, name, symbol=symbol)
+        return SymInt(SymNode(symbol, self, int, None, fxnode=fxnode))
 
     def create_unbacked_symbool(self):
-        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        name = f"i{next(self.unbacked_symint_counter)}"
+        symbol: sympy.Symbol = sympy.Symbol(name, integer=True)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges(0, 1)
-        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
+        # Add output guards for the validator.
+        # Necessary, since they are implicit constraints. i.e. guards might not
+        # be issued because of them.
+        self._add_z3var_for(symbol, bool)
+        self._add_assertion(sympy.And(sympy.Eq(symbol, 0), sympy.Eq(symbol, 1)))  # type: ignore
+        fxnode = self.create_fx_placeholder(bool, name, symbol=symbol)
+        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fxnode=fxnode))
 
     def create_symbol(
         self,
@@ -1979,6 +2567,9 @@ class ShapeEnv:
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
+            # Add assertions for the newly created symbols
+            self._add_z3var_for(sympy_expr, int)
+            self._add_assertion(sympy.And(sympy.Ne(sympy_expr, 0), sympy.Ne(sympy_expr, 1)))
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
@@ -2006,6 +2597,7 @@ class ShapeEnv:
 
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
+
         return r
 
     # Generates a list of guards strings which, when evaluated in a context that
@@ -2218,14 +2810,6 @@ class ShapeEnv:
 
         if not _simplified:
             for source, expr in input_guards:
-                # Small optimization
-                if (
-                    isinstance(expr, sympy.Symbol) and
-                    expr in symbol_to_source and
-                    source == symbol_to_source[expr][0]
-                ):
-                    continue
-
                 # This logic excludes static values found on tensors from guarding, because
                 # dynamo's check_tensor_fn does that (see guards.cpp).
                 # However, for non tensor sources, we still need to guard here.
@@ -2233,6 +2817,21 @@ class ShapeEnv:
                     if len(expr.free_symbols) == 0:
                         self.log.debug("Skipping guard %s", f"{source_ref(source)} == {expr}")
                         continue
+
+                if _translation_validator_enabled():
+                    # Ignore sources that were not turned into SymInts.
+                    srcname = source.name()
+                    if srcname in self.source_to_symbol:
+                        r = sympy.Eq(self.source_to_symbol[srcname], expr)
+                        self._add_output_guard(r)
+
+                # Small optimization
+                if (
+                    isinstance(expr, sympy.Symbol) and
+                    expr in symbol_to_source and
+                    source == symbol_to_source[expr][0]
+                ):
+                    continue
 
                 if is_dim(source):
                     self.dim_constraints.add_equality(source, expr)
@@ -2256,6 +2855,7 @@ class ShapeEnv:
                     self.dim_constraints.add(g)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
                 exprs.append(guard_expr)
+                self._add_output_guard(g)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
                 if len(g.free_symbols) == 1:
@@ -2348,6 +2948,21 @@ class ShapeEnv:
             elif len(warn_msgs) > 0:
                 log.debug("%s Warning only constraints violated", len(warn_msgs))
 
+        if _translation_validator_enabled():
+            # Add value range bound guards for all symbols with no trivial bounds.
+            # Reason: '_maybe_evaluate_static' may eliminate guards based on the
+            # refined value ranges.
+            for sym, vr in self.var_to_range.items():
+                if vr.lower != -sympy.oo:
+                    self._add_output_guard(sympy.Le(vr.lower, sym))
+                if vr.upper != sympy.oo:
+                    self._add_output_guard(sympy.Le(sym, vr.upper))
+
+            # Before validating, populate the input of the validator with the
+            # built FX graph.
+            _populate_validator_with_fx_graph(self.validator, self.tracer.graph)
+
+        self._check_translation_validate()
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
@@ -2578,6 +3193,10 @@ class ShapeEnv:
                 self.log.debug("SPECIALIZATION", stack_info=True)
         self.replacements[a] = expr
 
+        # When specializing 'a == expr', the equality should be also conveyed to
+        # Z3, in case an expression uses 'a'.
+        self._add_output_guard(sympy.Eq(a, expr))
+
     @_lru_cache
     def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
         """
@@ -2669,10 +3288,33 @@ class ShapeEnv:
         return self.simplify(expr)
 
     @lru_cache(256)
-    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fxnode=None):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
+        def guard_from(expr, concrete_val):
+            if concrete_val is sympy.true:
+                return expr
+            elif concrete_val is sympy.false:
+                return sympy.Not(expr)
+            else:
+                return sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
+        if hint is None:
+            concrete_val = self.size_hint(orig_expr)
+        else:
+            concrete_val = sympy.sympify(hint)
+
+        if _translation_validator_enabled() and fxnode is not None:
+            if concrete_val is sympy.true:
+                self.create_fx_call_function(torch._assert, (fxnode,), None)
+            elif concrete_val is sympy.false:
+                neg = self.create_fx_call_function(operator.not_, (fxnode,), bool)
+                self.create_fx_call_function(torch._assert, (neg,), None)
+            else:
+                eql = self.create_fx_call_function(operator.eq, (fxnode, concrete_val), bool)
+                self.create_fx_call_function(torch._assert, (eql,), None)
+
         if len(orig_expr.free_symbols) == 0:
             self.log.debug("eval %s [trivial]", orig_expr)
             return orig_expr
@@ -2691,11 +3333,6 @@ class ShapeEnv:
             if not (new_expr.free_symbols <= self.var_to_val.keys()):
                 raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
             expr = new_expr
-
-        if hint is None:
-            concrete_val = self.size_hint(expr)
-        else:
-            concrete_val = sympy.sympify(hint)
 
         if self.frozen:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
@@ -2716,12 +3353,7 @@ class ShapeEnv:
             # maybe_guard_eq in those cases.
             self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
-        if concrete_val is sympy.true:
-            g = expr
-        elif concrete_val is sympy.false:
-            g = sympy.Not(expr)
-        else:
-            g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+        g = guard_from(expr, concrete_val)
 
         if not self._suppress_guards_tls():
             tb = traceback.extract_stack()[:-1]

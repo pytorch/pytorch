@@ -10,6 +10,7 @@ import math
 import operator
 import os
 import sys
+import sympy
 import typing
 import unittest
 import unittest.mock as mock
@@ -40,7 +41,7 @@ from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, FloorDiv, SympyToZ3, TranslationValidator
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -5102,6 +5103,138 @@ def fn():
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
 
+    def _prepare_sympy_and_z3_symbols(self):
+        import z3
+
+        # SymPy symbols.
+        s0, s1, s2 = sympy.symbols("x0 x1 x2", integer=True)
+
+        # SymPy -> Z3 symbols.
+        symbols = {sym: z3.Int(sym.name) for sym in (s0, s1, s2)}
+
+        # Z3 symbols.
+        z3_symbols = [symbols[s] for s in (s0, s1, s2)]
+
+        return (s0, s1, s2), z3_symbols, symbols
+
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_sympy_to_z3_translation(self):
+        import z3
+
+        (s0, s1, s2), (z0, z1, z2), symbols = self._prepare_sympy_and_z3_symbols()
+
+        test_cases = [
+            # Integer constants.
+            (
+                sympy.S.Zero,
+                z3.IntVal(0)
+            ),
+            (
+                sympy.S.One,
+                z3.IntVal(1)
+            ),
+            (
+                sympy.S.NegativeOne,
+                z3.IntVal(-1)
+            ),
+            (
+                sympy.Integer(2),
+                z3.IntVal(2)
+            ),
+            (
+                s0,
+                symbols[s0]
+            ),
+
+            # Arithmetic operations.
+            *[
+                (op(s0, s1), op(z0, z1))
+                for op in (
+                        operator.add,
+                        operator.mod,
+                        operator.mul,
+                        operator.pow,
+                )
+            ],
+
+            # Logical operations.
+            *[
+                (sympy_op(s0, s1), z3_op(z0, z1))
+                for sympy_op, z3_op in (
+                        (sympy.Eq, operator.eq),
+                        (sympy.Ne, operator.ne),
+                        (sympy.Lt, operator.lt),
+                        (sympy.Le, operator.le),
+                        (sympy.Gt, operator.gt),
+                        (sympy.Ge, operator.ge),
+                )
+            ],
+
+            # Other operations.
+            (
+                s0 - s1,
+                z0 + z3.IntVal(-1) * z1,
+            ),
+            (
+                s0 / s1,
+                z3.ToReal(z0) / z3.ToReal(z1),
+            ),
+            (
+                s2 % (s0 / s1),
+                z2 % z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))
+            ),
+            (
+                s2 % (s0 ** 3),
+                z2 % z3.ToInt(z0 ** 3)
+            ),
+            (
+                FloorDiv(s0, s1),
+                z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))
+            ),
+        ]
+
+        toZ3 = SympyToZ3(TranslationValidator(), symbols)
+        for sympy_expr, z3_expr in test_cases:
+            result = toZ3(sympy_expr)
+            self.assertTrue(z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}")
+
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_translation_validator_sat(self):
+        import z3
+
+        (s0, s1, s2), (z0, z1, z2), symbols = self._prepare_sympy_and_z3_symbols()
+
+        validator = TranslationValidator()
+        validator.add_input(s0 > 5)
+        validator.add_input(s1 / 2 > s0)
+
+        # Solutions for output is a subset of the solutions for the input.
+        validator.add_output(s0 > 20)
+        validator.add_output(s1 > s0 ** 2)
+
+        r = validator.validate()
+        self.assertEqual(r.success, True, msg=f"failed with model: {r.model}")
+        self.assertIsNone(r.model)
+        self.assertIsNone(r.failed_inputs)
+
+    @torch._dynamo.config.patch(translation_validation=True)
+    def test_translation_validator_unsat(self):
+        import z3
+
+        (s0, s1, s2), (z0, z1, z2), symbols = self._prepare_sympy_and_z3_symbols()
+
+        validator = TranslationValidator()
+        validator.add_input(s0 > 5)
+        validator.add_input(s1 / 2 > s0)
+
+        # Solutions for output is a subset of the solutions for the input.
+        validator.add_output(s0 > 20)
+        validator.add_output(s1 > s0 + 2)
+
+        r = validator.validate()
+        self.assertEqual(r.success, False, msg=f"failed with model: {r.model}")
+        self.assertIsNotNone(r.model)
+        self.assertIsNotNone(r.failed_inputs)
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
