@@ -19,6 +19,7 @@ from torch.ao.quantization._pt2e.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
     Quantizer,
+    FixedQParamsQuantizationSpec,
     SharedQuantizationSpec,
     DerivedQuantizationSpec,
 )
@@ -358,6 +359,75 @@ class TestQuantizePT2E(QuantizationTestCase):
             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
             ns.call_function(torch.ops.aten.convolution.default),
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+        ]
+        self.checkGraphModuleNodes(
+            m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
+        )
+
+    def test_fixed_qparams_qspec(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.sigmoid(x)
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.sigmoid.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        act_qspec = FixedQParamsQuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            scale=1.0 / 256.0,
+                            zero_point=0,
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                            },
+                            output_qspec=act_qspec,
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+            @classmethod
+            def get_supported_operators(cls) -> List[OperatorConfig]:
+                pass
+
+        m = M().eval()
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+
+        # program capture
+        m, guards = torchdynamo.export(
+            m,
+            *copy.deepcopy(example_inputs),
+            aten_graph=True,
+        )
+        m = prepare_pt2e_quantizer(m, BackendAQuantizer())
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        fixed_scale = 1.0 / 256.0
+        fixed_zero_point = 0
+        self.assertEqual(m._scale_0, fixed_scale)
+        self.assertEqual(m._zero_point_0, fixed_zero_point)
+        self.assertEqual(m._scale_1, fixed_scale)
+        self.assertEqual(m._zero_point_1, fixed_zero_point)
+        node_occurrence = {
+            # two for input of the first conv, one for output for the first conv
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+        }
+        node_list = [
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+            ns.call_function(torch.ops.aten.sigmoid.default),
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
         ]
         self.checkGraphModuleNodes(
