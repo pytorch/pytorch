@@ -771,7 +771,8 @@ if _has_triton():
         values_row_block_stride,
         values_nnz_col_block_stride,
         row_block, col_block,
-        MAX_ROW_NNZ: tl.constexpr
+        MAX_ROW_NNZ: tl.constexpr,
+        TILE: tl.constexpr
     ):
         batch_pid = tl.program_id(axis=2)
         row_block_offset_pid = tl.program_id(axis=1)
@@ -791,22 +792,45 @@ if _has_triton():
         if row_nnz == 0:
             return
 
-        row_arange = tl.arange(0, MAX_ROW_NNZ)
+        row_arange = tl.arange(0, TILE)
         mask = row_arange < row_nnz * col_block
 
         curr_row_values_ptrs = (
             values_ptr
             + values_batch_stride * batch_pid
             + values_row_block_stride * row_block_offset_pid
-            + nnz_offset * col_block + row_arange
+            + nnz_offset * col_block
         )
 
-        curr_row_values = tl.load(curr_row_values_ptrs, mask=mask, other=-float('inf')).to(tl.float32)
-        tl.store(
-            curr_row_values_ptrs,
-            tl.softmax(curr_row_values).to(values_ptr.dtype.element_ty),
-            mask=mask
-        )
+        # find max in the row
+        row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+        max_row_value = tl.max(row_tile, axis=0)
+        for _ in range(TILE, MAX_ROW_NNZ, TILE):
+            row_arange += TILE
+            mask = row_arange < row_nnz * col_block
+            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            curr_max_row_value = tl.max(row_tile, axis=0)
+            max_row_value = tl.where(max_row_value > curr_max_row_value, max_row_value, curr_max_row_value)
+
+        # find denominator for stable softmax
+        num = tl.exp(row_tile - max_row_value)
+        denom = tl.sum(num, axis=0)
+        for _ in range(TILE, MAX_ROW_NNZ, TILE):
+            row_arange -= TILE
+            mask = row_arange < row_nnz * col_block
+            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            num = tl.exp(row_tile - max_row_value)
+            denom += tl.sum(num, axis=0)
+
+        # populate output
+        tl.store(curr_row_values_ptrs + row_arange, (num / denom).to(values_ptr.dtype.element_ty), mask=mask)
+        for _ in range(TILE, MAX_ROW_NNZ, TILE):
+            row_arange += TILE
+            mask = row_arange < row_nnz * col_block
+            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            num = tl.exp(row_tile - max_row_value)
+            tl.store(curr_row_values_ptrs + row_arange, (num / denom).to(values_ptr.dtype.element_ty), mask=mask)
+
 
     def bsr_softmax(input, max_row_nnz=None):
         f_name = "bsr_softmax"
@@ -827,7 +851,17 @@ if _has_triton():
             max_row_nnz = triton.next_power_of_2(max_row_nnz)
 
         crow_indices = input.crow_indices().unsqueeze(0).flatten(0, -2)
-        values = input.values().transpose(-3, -2).contiguous().unsqueeze(0).flatten(0, -4).reshape(-1, row_block, nnz * col_block)
+        # reshape values from
+        # (b1, ..., bn, nnz, row_block, col_block) to
+        # (b1 * ... * bn, row_block, nnz * col_block).
+        # This simplifies batch dim manipulation and unlocks
+        # the possibility to access all nnzs in any given row.
+        if input.values().transpose(-3, -2).is_contiguous():
+            # Need to clone to avoid `contiguous` returning a view.
+            values = input.values().clone()
+        else:
+            values = input.values()
+        values = values.transpose(-3, -2).contiguous().unsqueeze(0).flatten(0, -4).reshape(-1, row_block, nnz * col_block)
         full_grid = (values.shape[0], row_block, m // row_block)
         grid_blocks = None
         tensor_dims_map = {
@@ -840,7 +874,9 @@ if _has_triton():
             _bsr_softmax_kernel[grid](
                 *ptr_stride_extractor(*sliced_tensors),
                 row_block, col_block,
-                max_row_nnz
+                max_row_nnz,
+                # Triton's max numel is bounded by 2 ** 17.
+                min(2 ** 17, max_row_nnz)
             )
 
         launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
