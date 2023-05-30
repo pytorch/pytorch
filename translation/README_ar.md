@@ -22,7 +22,7 @@
 <!-- toc -->
 
 - [المزيد عن PyTorch](#المزيد-عن-PyTorch)
-  - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات GPU](#مكتبة-tenson-جاهزة-للعمل-على-وحدة-معالجة-الرسوميات-gpu)
+  - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات GPU](#مكتبة-tensor)
   - [شبكات عصبية ديناميكية: نظام تلقائي للتفاضل يعتمد على التسجيل بواسطة الشريط](#شبكات-عصبية-ديناميكية)
   - [بايثون في المقام الأول](#python-first)
   - [التجارب الحتمية](#imperative-experiences)
@@ -71,7 +71,7 @@ Usually, PyTorch is used either as:
 
 Elaborating Further:
 
-### مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات GPU
+### مكتبة Tensor
 
 If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
