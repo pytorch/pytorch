@@ -67,7 +67,7 @@ jobs:
         id: calculate-docker-image
         uses: ./.github/actions/calculate-docker-image
         with:
-          docker-image-name: ${{ inputs.docker-image-name }}
+          docker-image-name: ${{ inputs.docker-image }}
           xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
