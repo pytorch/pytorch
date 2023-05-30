@@ -822,6 +822,37 @@ class TestSparseCompressed(TestCase):
 
     @skipMeta
     @onlyCPU
+    @largeTensorTest("30GB", "cpu")
+    def test_invalid_input_csr_large(self):
+        rows = 2 ** 31
+        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in row dimension'):
+            torch.sparse_csr_tensor(torch.arange(rows + 1, dtype=torch.int32) // rows,
+                                    torch.tensor([0], dtype=torch.int32),
+                                    torch.tensor([1]), (rows, 1))
+        torch.sparse_csr_tensor(torch.arange(rows + 1, dtype=torch.int64) // rows,
+                                torch.tensor([0], dtype=torch.int64),
+                                torch.tensor([1]), (rows, 1))
+
+        cols = 2 ** 31
+        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in column dimension'):
+            torch.sparse_csr_tensor(torch.arange(2, dtype=torch.int32),
+                                    torch.tensor([0], dtype=torch.int32),
+                                    torch.tensor([1]), (1, cols))
+        torch.sparse_csr_tensor(torch.arange(2, dtype=torch.int64),
+                                torch.tensor([0], dtype=torch.int64),
+                                torch.tensor([1]), (1, cols))
+
+        nnz = 2 ** 31
+        with self.assertRaisesRegex(RuntimeError, '32-bit integer overflow in nnz'):
+            torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz], dtype=torch.int32),
+                                    torch.arange(nnz // 2, dtype=torch.int32).repeat(2),
+                                    torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
+        torch.sparse_csr_tensor(torch.tensor([0, nnz // 2, nnz], dtype=torch.int64),
+                                torch.arange(nnz // 2, dtype=torch.int64).repeat(2),
+                                torch.ones(nnz, dtype=torch.int8), (2, nnz // 2))
+
+    @skipMeta
+    @onlyCPU
     @all_sparse_compressed_layouts()
     def test_dim(self, layout):
         for (compressed_indices, plain_indices, values), kwargs in self.generate_simple_inputs(layout, output_tensor=False):
