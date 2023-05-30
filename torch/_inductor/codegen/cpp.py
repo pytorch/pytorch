@@ -123,29 +123,29 @@ def reduction_init(reduction_type, dtype):
 
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     if reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     if reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
     if reduction_type == "any":
-        return f"{var} = {var} || {next_value}"
+        return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
-        return f"{var} = {reduction_type}_propagate_nan({var}, {next_value})"
+        return f"{reduction_type}_propagate_nan({var}, {next_value})"
     raise AssertionError(reduction_type)
 
 
 def reduction_combine_vec(reduction_type, var, next_value):
     if reduction_type == "max":
-        return f"{var} = at::vec::maximum({var}, {next_value})"
+        return f"at::vec::maximum({var}, {next_value})"
     elif reduction_type == "min":
-        return f"{var} = at::vec::minimum({var}, {next_value})"
+        return f"at::vec::minimum({var}, {next_value})"
     elif reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     elif reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     elif reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
     else:
         raise NotImplementedError()
 
@@ -1090,7 +1090,7 @@ class CppKernel(Kernel):
                     f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
             self.stores.writeline(
-                f"{reduction_combine(reduction_type, tmpvar, value)};"
+                f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, value)};"
             )
 
         if name not in V.graph.removed_buffers:
@@ -1370,6 +1370,7 @@ class CppVecKernel(CppKernel):
         if reduction_type not in self.reduction_omp_dec:
             vec_reduc_prefix = "#pragma omp declare reduction("
             vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
+            vec_reduc_prefix += "omp_out = "
             vec_reduc_prefix += reduction_combine_vec(
                 reduction_type, "omp_out", "omp_in"
             )
@@ -1395,7 +1396,7 @@ class CppVecKernel(CppKernel):
             f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
         )
         self.stores.writeline(
-            f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+            f"{tmpvar_vec} = {reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
         )
 
         if self.tiling_idx >= self.reduction_depth:
@@ -1404,10 +1405,10 @@ class CppVecKernel(CppKernel):
                 "{ return " + reduction_combine_vec(reduction_type, "x", "y") + "; }"
             )
             vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
-            next_value = f"{vec_reduce_all_func}([]({vec} x, {vec} y) {reduce_all_body}, {tmpvar_vec})"
+            next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {tmpvar_vec})"
             self.reduction_suffix.writeline(
                 DeferredLine(
-                    name, f"{reduction_combine(reduction_type, tmpvar, next_value)};"
+                    name, f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, next_value)};"
                 )
             )
 
