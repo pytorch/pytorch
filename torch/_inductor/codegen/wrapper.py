@@ -219,7 +219,9 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
-        assert self.node.get_name() not in V.graph.removed_buffers
+        if self.node.get_name() in V.graph.removed_buffers:
+            assert self.reused_as.get_name() in V.graph.removed_buffers
+            return NullLine(self.wrapper)
         assert self.reused_as.get_name() not in V.graph.removed_buffers
         return self
 
@@ -887,6 +889,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         self.prefix.writeline(f"at::Tensor {input_key} = args[{idx}];")
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+
+            self.wrapper_call.splice(
+                """
+                c10::optional<at::Scalar> optional_scalar;
+                c10::optional<c10::string_view> optional_string;
+                torch::List<c10::optional<at::Scalar>> optional_list;
+                """
+            )
 
     def generate(self):
         self.write_wrapper_decl()

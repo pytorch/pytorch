@@ -25,10 +25,11 @@ class TestPassInfra(TestCase):
         class NullPass(ExportPassBase):
             pass
 
-        gm = export(f, (torch.ones(3, 2),)).find_method("forward")
-        new_gm = NullPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_nodes = new_gm.graph_module.graph.nodes
+        ep = export(f, (torch.ones(3, 2),))
+        old_nodes = ep.graph.nodes
+
+        ep = ep.transform(NullPass())
+        new_nodes = ep.graph.nodes
 
         for node in new_nodes:
             if node.op != "call_function":
@@ -36,7 +37,6 @@ class TestPassInfra(TestCase):
             self.assertTrue(hasattr(node, "stack_trace"))
             self.assertIsNotNone(node.stack_trace)
 
-        old_nodes = gm.graph.nodes
         self.assertEqual(len(new_nodes), len(old_nodes))
         for new_node, old_node in zip(new_nodes, old_nodes):
             self.assertEqual(new_node.op, old_node.op)
@@ -70,12 +70,10 @@ class TestPassInfra(TestCase):
             z = x + y
             return torch.ops.aten.relu.default(z)
 
-        gm = export(
-            f, (torch.randn(2, 2), torch.randn(2, 2)),
-        ).find_method("forward")
+        ep = export(f, (torch.randn(2, 2), torch.randn(2, 2)))
         FileCheck().check("torch.ops.aten.add.Tensor").check(
             "torch.ops.aten.relu.default"
-        ).run(gm.code)
+        ).run(ep.graph_module.code)
 
         class AddReluFusionPass(ExportPassBase):
             def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
@@ -88,6 +86,7 @@ class TestPassInfra(TestCase):
                     return backend_op(x, y)
 
                 subgraph_rewriter.replace_pattern(graph_module, pattern, replacement)
+                return PassResult(graph_module, True)
 
         class BackendNullPass(ExportPassBase):
             def get_valid_dialects(self) -> List[Type]:
@@ -117,17 +116,15 @@ class TestPassInfra(TestCase):
                     )
                 return super().call_operator(op, args, kwargs, meta)
 
-        AddReluFusionPass()(gm)
+        ep = ep.transform(AddReluFusionPass())
         FileCheck().check(
             "torch.ops.DO_NOT_USE_TEST_ONLY.add_relu.default"
-        ).run(gm.code)
+        ).run(ep.graph_module.code)
 
-        new_gm = BackendNullPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_gm = new_gm.graph_module
+        ep = ep.transform(BackendNullPass())
 
         with self.assertRaisesRegex(ExportPassBaseError, "Expecting op of dialects:"):
-            _ = BackendViolatePass()(gm)
+            ep.transform(BackendViolatePass())
 
     def test_cond(self) -> None:
         class M(torch.nn.Module):
@@ -151,9 +148,8 @@ class TestPassInfra(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        gm = export(mod, (torch.tensor(True), x, y)).find_method("forward")
+        _ = export(mod, (torch.tensor(True), x, y)).transform(ExportPassBase())
 
-        ExportPassBase()(gm)
 
 if __name__ == '__main__':
     run_tests()
