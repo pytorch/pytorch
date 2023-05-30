@@ -615,8 +615,9 @@ class ReplacementPatternEntry(PatternEntry):
                             result.meta[key] = first_node.meta[key]
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
-                        assert "tensor_meta" in node.meta
-                        result.meta["tensor_meta"] = node.meta["tensor_meta"]
+                        if isinstance(node.meta["val"], torch.Tensor):
+                            assert "tensor_meta" in node.meta
+                            result.meta["tensor_meta"] = node.meta["tensor_meta"]
                     return result
                 raise NotImplementedError(f"unhandled {node}")
 
