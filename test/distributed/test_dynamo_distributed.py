@@ -150,8 +150,6 @@ class FakeDDP(nn.Module):
         DDP._active_ddp_module = self
         try:
             yield
-        except Exception:
-            raise
         finally:
             DDP._active_ddp_module = None
 

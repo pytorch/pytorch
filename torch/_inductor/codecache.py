@@ -80,7 +80,7 @@ def cubin_cache_dir():
     return cubin_dir
 
 
-class PersistentCache:
+class CacheBase:
     def __init__(self):
         if not torch.cuda.is_available():
             return
@@ -128,6 +128,33 @@ class PersistentCache:
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
         )
 
+
+class LocalCache(CacheBase):
+    def lookup(self, *keys: List[str]):
+        cache = self.get_local_cache()
+
+        sub_cache = cache
+        for key in keys:
+            if key in cache:
+                sub_cache = cache[key]
+            else:
+                return None
+
+        return sub_cache
+
+    def set_value(self, *keys: List[str], value: Any):
+        cache = self.get_local_cache()
+
+        sub_cache = cache
+        for key in keys[0:-1]:
+            sub_cache.setdefault(key, {})
+            sub_cache = sub_cache[key]
+        sub_cache[keys[-1]] = value
+
+        self.update_local_cache(cache)
+
+
+class PersistentCache(CacheBase):
     @functools.lru_cache(None)
     def get_global_cache(self):
         if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):

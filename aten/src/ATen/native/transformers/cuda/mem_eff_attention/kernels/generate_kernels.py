@@ -21,7 +21,7 @@ DTYPES = {
     "bf16": "cutlass::bfloat16_t",
 }
 
-SM = [50, 70, 75, 80]
+SM = [50, 70, 75, 80, 100]  # Sm80 kernels support up to Sm100
 
 KERNEL_IMPL_TEMPLATE = """__global__ void __launch_bounds__(
     {CPP_CLASS}::kNumThreads,
@@ -116,7 +116,7 @@ class FwdKernel:
     def get_all(cls) -> List["FwdKernel"]:
         kernels: List[FwdKernel] = []
         for aligned, dtype, (sm, sm_max) in itertools.product(
-            [True, False], DTYPES.keys(), zip(SM, SM[1:] + [90])
+            [True, False], DTYPES.keys(), zip(SM, SM[1:])
         ):
             # Remove some kernels we don't use
             if dtype == "bf16" and sm < 80:
@@ -227,7 +227,7 @@ class BwdKernel:
         for aligned, dtype, (sm, sm_max), apply_dropout, max_k in itertools.product(
             [True, False],
             DTYPES.keys(),
-            zip(SM, SM[1:] + [90]),
+            zip(SM, SM[1:]),
             [True, False],
             [32, 64, 128, 2**16],
         ):
@@ -286,7 +286,7 @@ class BwdKernel:
                 cls(
                     aligned=True,
                     dtype=dtype,
-                    sm_range=(80, 90),
+                    sm_range=(80, SM[SM.index(80) + 1]),
                     apply_dropout=False,
                     preload_mmas=True,
                     block_i=128,
@@ -300,8 +300,6 @@ class BwdKernel:
 
 
 T = TypeVar("T", FwdKernel, BwdKernel)
-
-# impl_file takes absolute paths
 
 
 def write_decl_impl(
