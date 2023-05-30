@@ -143,6 +143,9 @@ class OptimizedModule(torch.nn.Module):
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._forward(*args, **kwargs)
 
+    def __dir__(self):
+        return self._orig_mod.__dir__()
+
 
 def remove_from_cache(f):
     """
@@ -702,6 +705,14 @@ class Constraint(ConstraintTarget):
             "dim": self.dim,
             "min": self.constraint_range.vr.lower,
             "max": self.constraint_range.vr.upper,
+            "shared": (
+                None
+                if self.shared is None
+                else {
+                    "t_id": self.shared.t_id,
+                    "dim": self.shared.dim,
+                }
+            ),
         }
 
     def __eq__(self, other):
@@ -937,7 +948,9 @@ def export(
             constraint_violation_error = e
     remove_from_cache(f)
 
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+    if (
+        shape_env := getattr(fake_mode, "shape_env", None)
+    ) is not None and not skipfiles.check(inspect.getsourcefile(call_to_inspect)):
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
@@ -1132,9 +1145,6 @@ def export(
     )
 
     new_graph.recompile()
-    # TODO remove this once Executorch uses proper functionalization
-    new_graph._matched_input_elements_positions = matched_input_elements_positions
-
     return (new_graph, out_guards)
 
 
