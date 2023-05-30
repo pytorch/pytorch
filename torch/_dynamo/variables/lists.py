@@ -331,7 +331,11 @@ class ListVariable(CommonListMethodsVariable):
             key, value = args
             items = list(self.items)
             if isinstance(key, SliceVariable):
-                items[key.as_python_constant()] = list(value.items)
+                if not value.has_unpack_var_sequence(tx):
+                    unimplemented(
+                        f"Missing dynamo support for expanding {value} into a list for slice assignment."
+                    )
+                items[key.as_python_constant()] = value.unpack_var_sequence(tx)
             else:
                 items[key.as_python_constant()] = value
             result = ListVariable(items, regen_guards=False, **options)
