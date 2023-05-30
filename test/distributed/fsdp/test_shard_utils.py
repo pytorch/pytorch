@@ -11,11 +11,11 @@ from torch.distributed.fsdp._shard_utils import (
     _create_chunk_sharded_tensor,
     _gather_dtensor_state_dict,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    skip_if_lt_x_gpu,
     with_comms,
 )
 
@@ -51,7 +51,7 @@ class TestShardUtilsDistributed(FSDPTest):
 class TestShardUtilsDistributedDTensor(DTensorTestBase):
     @property
     def world_size(self):
-        return 4
+        return 2
 
     def _create_tensor(self, *size):
         # Keep everything deterministic.
@@ -59,6 +59,7 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
         return torch.rand(*size).cuda()
 
     @with_comms
+    @skip_if_lt_x_gpu(2)
     def test_create_chunk_dtensor(self):
         device_mesh = self.build_device_mesh()
 
@@ -75,6 +76,7 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
                 self.assertEqual(self.rank >= len(tensor_chunks), True)
 
     @with_comms
+    @skip_if_lt_x_gpu(2)
     def test_gather_state_dict_dtensor(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
