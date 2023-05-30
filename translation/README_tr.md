@@ -104,9 +104,8 @@ Bu teknik PyTorch'a özgü olmasa da, bugüne kadarki en hızlı uygulamalardan 
 PyTorch, monolitik bir C++ çerçevesine bağlanmış bir Python değildir.
 Python'a derinlemesine entegre olacak şekilde tasarlanmıştır.
 Kullandığınız gibi, doğal bir şekilde kullanabilirsiniz [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) vb.
-You can write your new neural network layers in Python itself, using your favorite libraries
-and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
-Our goal is to not reinvent the wheel where appropriate.
+Yeni sinir ağı katmanlarınızı Python'da yazabilir, favori kütüphanelerinizi kullanabilir ve şu gibi paketleri kullanabilirsiniz [Cython](https://cython.org/) ve [Numba](http://numba.pydata.org/).
+Amacımız, uygun olduğu yerlerde tekerleği yeniden icat etmemektir.
 
 ### Imperative Experiences
 
