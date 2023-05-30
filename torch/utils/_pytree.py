@@ -52,10 +52,8 @@ def _register_pytree_node(
     typ: Any,
     flatten_fn: FlattenFunc,
     unflatten_fn: UnflattenFunc,
-    to_str: str = "",
+    to_str: str = "C",
 ) -> None:
-    if len(to_str) == 0:
-        to_str = "C"
     assert len(to_str) == 1
     node_def = NodeDef(typ, flatten_fn, unflatten_fn, to_str)
     SUPPORTED_NODES[typ] = node_def
