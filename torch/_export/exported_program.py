@@ -186,8 +186,8 @@ def _process_constraints(
     inline_constraints = graph_module.meta.get("inline_constraints", [])
 
     # Create dict mapping tensor_id to node names
-    # And another dict mapping placeholder node names to their nodes
     tensor_id_to_nodes: Dict[int, List[str]] = defaultdict(list)
+    # Create dict mapping placeholder node names to their nodes
     placeholder_nodes: Dict[str, torch.fx.Node] = {}
     for i, node in enumerate(graph_module.graph.nodes):
         if node.op != "placeholder":
@@ -219,29 +219,14 @@ def _process_constraints(
                     other_node_dim = NodeDim(other_node, shared["dim"])
                     equality_constraints[node_dim].append(other_node_dim)
 
-    # Create dict mapping symbol to a range (lower, upper)
+    # Create dict mapping symbol to a singular range (lower, upper)
     symbol_to_range: Dict[sympy.Symbol, RangeConstraint] = {}
 
-    # Convert simple sympy Integers into concrete int to
-    # insert into graph
-    def _convert_to_int(val):
-        if val == sympy.oo:
-            return math.inf
-        if val == -sympy.oo:
-            return -math.inf
-        if isinstance(val, sympy.Integer):
-            return int(val)
-        raise RuntimeError(
-            "Export constraints cannot be non-integer expressions"
-        )
-
-    # Add inline constraints to symbol_to_ranges
+    # Add inline constraints to symbol_to_range
     for symbol, (min_val, max_val) in inline_constraints.items():
-        symbol_to_range[symbol] = RangeConstraint(
-            _convert_to_int(min_val), _convert_to_int(max_val)
-        )
+        symbol_to_range[symbol] = RangeConstraint(min_val, max_val)
 
-    # Add input range constraints to symbol_ro_ranges
+    # Add input range constraints to symbol_to_ranges
     for (node_name, dim), range_constraints in range_constraints.items():  # type: ignore[assignment]
         # Simplify the range constraints into a single range constraint
         # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]
@@ -256,8 +241,6 @@ def _process_constraints(
         symint = val.shape[dim]
         assert isinstance(symint, SymInt)
         symbol = symint.node._expr
-        symbol_to_range[symbol] = RangeConstraint(
-            _convert_to_int(min_val), _convert_to_int(max_val)
-        )
+        symbol_to_range[symbol] = RangeConstraint(min_val, max_val)
 
     return symbol_to_range, equality_constraints

@@ -28,6 +28,26 @@ class RangeConstraint(NamedTuple):
     max_val: int
 
 
+def _convert_to_int(val):
+    # Convert simple sympy Integers into concrete int
+    if val == sympy.oo:
+        return math.inf
+    if val == -sympy.oo:
+        return -math.inf
+    if isinstance(val, sympy.Integer):
+        return int(val)
+    raise RuntimeError(
+        "Export constraints cannot be non-integer expressions"
+    )
+
+
+def _convert_range_to_int(range: RangeConstraint):
+    assert isinstance(range, RangeConstraint)
+    min_val = _convert_to_int(range.min_val)
+    max_val = _convert_to_int(range.max_val)
+    return min_val, max_val
+
+
 class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def __init__(
         self,
@@ -107,7 +127,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         """
 
         dim_node = graph.call_function(torch.ops.aten.sym_size, (node, dim))
-        min_val, max_val = range
+        min_val, max_val = _convert_range_to_int(range)
         assert_msg = (
             f"Input {node.name}.shape[{dim}]'s value is "
             f"outside of specified dynamic range [{min_val}, {max_val}]"
@@ -197,10 +217,8 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 if symbol.name.startswith("i"):
                     # We only care about unbacked symints for these inline
                     # constraints, which are prefixed with 'i'
-
                     constraint = self.symbol_to_range[symbol]
-                    assert isinstance(constraint, RangeConstraint)
-                    min_val, max_val = constraint
+                    min_val, max_val = _convert_range_to_int(constraint)
                     assert_msg = f" is outside of inline constraint [{min_val}, {max_val}]."
                     call_backs.append(
                         partial(self._assert_range_constraint, lower=min_val, upper=max_val)
