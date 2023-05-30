@@ -96,9 +96,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::SparseCsrCUDA:
       return "SparseCsrCUDA";
 
-    case DispatchKey::SemiStructuredSparse:
-      return "SemiStructuredSparse";
-
     case DispatchKey::NestedTensor:
       return "NestedTensor";
 

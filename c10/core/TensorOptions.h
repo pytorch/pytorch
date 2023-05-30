@@ -701,16 +701,6 @@ inline DispatchKey computeDispatchKey(
               " layout: ",
               device_.type());
       }
-    case Layout::SemiStructuredSparse:
-      switch(device_.type()){
-          case DeviceType::CUDA:
-            return DispatchKey::SemiStructuredSparse;
-          default:
-            TORCH_CHECK_NOT_IMPLEMENTED(
-                false,
-                "Unsupported device type for SemiStructuredSparse layout: ",
-                device_.type());
-      }
     default:
       TORCH_CHECK(false, "Unsupported layout: ", layout_);
   }
@@ -731,8 +721,6 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
           " to a unique layout.");
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
-    case DispatchKey::SemiStructuredSparse:
-      return Layout::SemiStructuredSparse;
     default:
       return Layout::Strided;
   }

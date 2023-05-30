@@ -44,7 +44,6 @@ void initializeLayouts() {
   REGISTER_LAYOUT(sparse_csc, SparseCsc)
   REGISTER_LAYOUT(sparse_bsr, SparseBsr)
   REGISTER_LAYOUT(sparse_bsc, SparseBsc)
-  REGISTER_LAYOUT(semi_structured_sparse, SemiStructuredSparse)
 
   PyObject* mkldnn_layout = THPLayout_New(at::Layout::Mkldnn, "torch._mkldnn");
   Py_INCREF(mkldnn_layout);
