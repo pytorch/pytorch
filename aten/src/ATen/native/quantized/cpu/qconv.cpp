@@ -607,7 +607,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
    * quantization means XNNPACK will ignore kernel zero point(s).
    */
 
-  if ((std::is_same<underlying_t, c10::quint8>::value )) {
+  if constexpr (std::is_same<underlying_t, c10::quint8>::value) {
     TORCH_CHECK(!per_channel(),
       func_name, ": xnnpack does not currently have per_channel support with activation dtype of c10::quint8."
     );

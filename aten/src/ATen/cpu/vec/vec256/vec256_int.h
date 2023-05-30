@@ -1398,7 +1398,7 @@ Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c0 = _mm256_sllv_epi32(a0, b0);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same<T, int8_t>::value)
       c0 = _mm256_srav_epi32(a0, b0);
     else
       c0 = _mm256_srlv_epi32(a0, b0);
@@ -1412,7 +1412,7 @@ Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c1 = _mm256_sllv_epi32(a1, b1);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same<T, int8_t>::value)
       c1 = _mm256_srav_epi32(a1, b1);
     else
       c1 = _mm256_srlv_epi32(a1, b1);
@@ -1426,7 +1426,7 @@ Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c2 = _mm256_sllv_epi32(a2, b2);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same<T, int8_t>::value)
       c2 = _mm256_srav_epi32(a2, b2);
     else
       c2 = _mm256_srlv_epi32(a2, b2);
@@ -1440,7 +1440,7 @@ Vectorized<T> inline shift_256_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c3 = _mm256_sllv_epi32(a3, b3);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same<T, int8_t>::value)
       c3 = _mm256_srav_epi32(a3, b3);
     else
       c3 = _mm256_srlv_epi32(a3, b3);
