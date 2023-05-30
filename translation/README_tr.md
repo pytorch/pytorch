@@ -69,7 +69,7 @@ PyTorch genellikle şu şekilde kullanılır:
 
 Daha Fazla Detaylandırma:
 
-### A GPU-Ready Tensor Library
+### GPU'ya Hazır Bir Tensör Kütüphanesi
 
 NumPy kullanıyorsanız, Tensörleri kullanmışsınızdır (a.k.a. ndarray).
 
@@ -94,16 +94,16 @@ PyTorch ile, ağınızın davranış şeklini sıfır gecikme veya ek yük ile k
 [otograd](https://github.com/HIPS/autograd),
 [Zincirleme](https://chainer.org), vb.
 
-While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
-You get the best of speed and flexibility for your crazy research.
+Bu teknik PyTorch'a özgü olmasa da, bugüne kadarki en hızlı uygulamalardan biridir.
+Çılgın araştırmanız için en iyi hız ve esnekliğe sahip olursunuz.
 
-![Dynamic graph](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/dynamic_graph.gif)
+![Dinamik grafik](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/dynamic_graph.gif)
 
 ### Python First
 
-PyTorch is not a Python binding into a monolithic C++ framework.
-It is built to be deeply integrated into Python.
-You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
+PyTorch, monolitik bir C++ çerçevesine bağlanmış bir Python değildir.
+Python'a derinlemesine entegre olacak şekilde tasarlanmıştır.
+Kullandığınız gibi, doğal bir şekilde kullanabilirsiniz [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) vb.
 You can write your new neural network layers in Python itself, using your favorite libraries
 and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
 Our goal is to not reinvent the wheel where appropriate.
