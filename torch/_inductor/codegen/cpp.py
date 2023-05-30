@@ -1149,7 +1149,9 @@ class CppKernel(Kernel):
             self.reduction_prefix.writeline(
                 f"{acc_type} {acc} = {reduction_init(reduction_type, dtype)};"
             )
-            self.stores.writeline(f"{acc} = {reduction_combine(reduction_type, acc, value)};")
+            self.stores.writeline(
+                f"{acc} = {reduction_combine(reduction_type, acc, value)};"
+            )
 
         tmpvar = self.cse.generate(
             self.reduction_suffix, f"{reduction_project(reduction_type, acc)}"
@@ -1468,6 +1470,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
         )
 
         if self.tiling_idx >= self.reduction_depth:
+            # Horizontal reduction
             if reduction_type == "var":
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
@@ -1477,7 +1480,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                     + "; }"
                 )
                 vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
-                next_value = f"{vec_reduce_all_func}([]({vec} x, {vec} y) {reduce_all_body}, {acc_vec})"
+                next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
                 f"{reduction_combine(reduction_type, acc, next_value)};"
