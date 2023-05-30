@@ -28,7 +28,6 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
-from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
@@ -1489,8 +1488,6 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
-            # Sometime CI fails with random triton compilation failure which will be skipped for now
-            # TODO: revisit this after switching to new Triton runtime
             reset_rng_state()
             torch._dynamo.reset()
             try:
@@ -1500,30 +1497,15 @@ class BenchmarkRunner:
                 new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
-                if (
-                    self.args.ci
-                    and isinstance(e, BackendCompilerFailed)
-                    and (
-                        "Internal Triton PTX codegen error" in str(e)
-                        or "cubin" in str(e)
-                    )
-                ):
-                    accuracy_status = "pass_due_to_skip"
-                    return record_status(
-                        accuracy_status, dynamo_start_stats=start_stats
-                    )
-                else:
-                    print(
-                        "TorchDynamo optimized model failed to run because of following error"
-                    )
-                    accuracy_status = (
-                        "OOM"
-                        if isinstance(e, torch.cuda.OutOfMemoryError)
-                        else "fail_to_run"
-                    )
-                    return record_status(
-                        accuracy_status, dynamo_start_stats=start_stats
-                    )
+                print(
+                    "TorchDynamo optimized model failed to run because of following error"
+                )
+                accuracy_status = (
+                    "OOM"
+                    if isinstance(e, torch.cuda.OutOfMemoryError)
+                    else "fail_to_run"
+                )
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
