@@ -1,7 +1,6 @@
 from collections import defaultdict
 import copy
 import dataclasses
-import math
 import sympy
 from typing import Any, Dict, List, Optional, Tuple, Union
 

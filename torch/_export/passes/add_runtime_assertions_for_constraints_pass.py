@@ -109,7 +109,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def _insert_specialized_shape_assert_inplace(
         self, graph: torch.fx.Graph, node: torch.fx.Node, dim: int, shape: int,
     ):
-        assert_msg = f"Input {node.name}.shape[{dim}]'s value is specialized at {shape}"
+        assert_msg = f"Input {node.name}.shape[{dim}] is specialized at {shape}"
         dim_node = graph.call_function(torch.ops.aten.sym_size, (node, dim))
         with graph.inserting_after(dim_node):
             eq_node = graph.call_function(operator.eq, (dim_node, shape))
@@ -129,7 +129,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         dim_node = graph.call_function(torch.ops.aten.sym_size, (node, dim))
         min_val, max_val = _convert_range_to_int(range)
         assert_msg = (
-            f"Input {node.name}.shape[{dim}]'s value is "
+            f"Input {node.name}.shape[{dim}] is "
             f"outside of specified dynamic range [{min_val}, {max_val}]"
         )
         # TODO (tmanlaibaatar) we are making an assumption that graph generated for
@@ -161,7 +161,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             with graph.inserting_after(dim_node):
                 for other_name, other_dim in equalities:
                     assert_msg = (
-                        f"Input {name}.shape[{dim}]'s value is "
+                        f"Input {name}.shape[{dim}] is "
                         f"not equal to input {other_name}.shape[{other_dim}]"
                     )
                     other_node = placeholder_nodes[other_name]
