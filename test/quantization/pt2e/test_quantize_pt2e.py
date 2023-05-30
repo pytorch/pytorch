@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
-import unittest
 from typing import Any, List, Optional, Tuple
 
 import torch
@@ -535,9 +534,6 @@ class TestQuantizePT2E(QuantizationTestCase):
         fx_quant_output = m_fx(*example_inputs)
         self.assertTrue(torch.allclose(fx_quant_output, pt2_quant_output))
 
-    @unittest.skip(
-        "Skip due to linear traces into a different pattern. See test comment."
-    )
     def test_qnnpack_quantizer_conv_linear(self):
         """
         This test fails because linear decompositon changes due to the presence of
@@ -586,22 +582,31 @@ class TestQuantizePT2E(QuantizationTestCase):
         m(*example_inputs)
         m = convert_pt2e(m)
         pt2_quant_output = m(*example_inputs)
+        # TODO: due to permute op we get extra quant/dequant nodes.
+        # Validate if this is valid
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 2,
-            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 2,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 5,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 5,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 3,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 3,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
         qconfig = default_per_channel_symmetric_qnnpack_qconfig
         qconfig_mapping = QConfigMapping().set_global(qconfig)
         backend_config = get_qnnpack_backend_config()
-        m_copy = copy.deepcopy(m)
+        m_copy = copy.deepcopy(m_eager)
         m_fx = prepare_fx(
             m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
         )
-        m_fx = convert_to_reference_fx(m_fx, backend_config=backend_config)
+        m_fx(*example_inputs)
+        m_fx = _convert_to_reference_decomposed_fx(m_fx, backend_config=backend_config)
+        node_occurrence = {
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 5,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 5,
+        }
+        self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
         fx_quant_output = m_fx(*example_inputs)
         self.assertTrue(torch.allclose(fx_quant_output, pt2_quant_output))
 
