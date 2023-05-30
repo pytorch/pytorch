@@ -702,12 +702,16 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 self.fc1 = nn.Linear(2, 40, bias=False)
                 self.bn = nn.BatchNorm1d(4, affine=affine)
                 self.fc2 = nn.Linear(40, 4, bias=False)
+                self.ln = nn.LayerNorm(4)
+                self.fc3 = nn.Linear(4, 4, bias=False)
 
             def forward(self, x):
                 x = torch.reshape(self.fc1(x), (-1, 4, 10))
                 x = self.bn(x)
                 x = torch.reshape(x, (-1, 40))
                 x = self.fc2(x)
+                x = self.ln(x)
+                x = self.fc3(x)
                 return F.softmax(x, dim=1)
 
         def never_wrap_policy(*args, **kwargs):
@@ -723,6 +727,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             param_dtype=torch.float16,
             reduce_dtype=torch.float16,
             buffer_dtype=torch.float16,
+            _module_classes_to_ignore=[_BatchNorm, nn.LayerNorm],
         )
         with self.assertWarnsRegex(
             expected_warning=UserWarning,
@@ -734,14 +739,16 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 auto_wrap_policy=never_wrap_policy,
             )
 
-        bn = model.bn
-        self.assertTrue(isinstance(bn, FSDP))
+        no_mp = MixedPrecision()
+        for mod in [model.ln, model.bn]:
+            self.assertTrue(isinstance(mod, FSDP))
+            self.assertEqual(no_mp, mod.mixed_precision)
         # policy should not have wrapped any other submodules
-        self.assertFalse(isinstance(model.fc1, FSDP))
-        self.assertFalse(isinstance(model.fc2, FSDP))
-        no_mixed_precision = MixedPrecision()
-        self.assertEqual(no_mixed_precision, bn.mixed_precision)
-        self.assertNotEqual(no_mixed_precision, model.mixed_precision)
+        for mod in [model.fc1, model.fc2, model.fc3]:
+            self.assertFalse(isinstance(mod, FSDP))
+
+        # Overall mixed precision is still enabled
+        self.assertEqual(mp_config, model.mixed_precision)
 
         inp = torch.randn((1, 2), device="cuda")
         # Without FSDP BN mixed precision fix, this would result in

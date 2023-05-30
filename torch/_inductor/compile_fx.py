@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
+import torch._functorch.config as functorch_config
 
 import torch.fx
 import torch.utils._pytree as pytree
@@ -32,7 +33,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 if config.is_fbcode():
@@ -51,6 +52,7 @@ else:
 
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 ALIGNMENT = 16
 
 
@@ -194,8 +196,17 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 }
                 compiled = inner_compile(gm, example_inputs, **kwargs_patched)
                 if detect_fake_mode(example_inputs):
+
+                    def materialize(x):
+                        if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                            # Need concrete value to run dynamic shapes and tune the result
+                            return x.node.hint
+                        else:
+                            # TODO: the defaked value may be problematic in some cases
+                            return defake(x)
+
                     with torch.utils._python_dispatch._disable_current_modes():
-                        inputs_real = [defake(t) for t in example_inputs]
+                        inputs_real = [materialize(t) for t in example_inputs]
                 else:
                     inputs_real = deepcopy(example_inputs)
 
@@ -316,19 +327,19 @@ def compile_fx_inner(
                 compiled_graph.__call__ = compiled_artifact
 
             if len(set(compiled_graph.device_types)) > 1:
-                developer_warning("skipping cudagraphs due to multiple devices")
+                perf_hint_log.warning("skipping cudagraphs due to multiple devices")
             elif set(compiled_graph.device_types) == {"cuda"}:
                 if compiled_graph.mutated_inputs:
-                    developer_warning("skipping cudagraphs due to input mutation")
+                    perf_hint_log.warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    developer_warning(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to complex input striding"
                     )
                 elif (
                     len(compiled_graph.device_idxs) > 1
                     and config.triton.cudagraph_trees
                 ):
-                    developer_warning(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to multiple device indexes"
                     )
 
@@ -619,14 +630,18 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     Infers which inputs are static for a backwards graph
     """
 
-    def is_not_gradout(x):
-        return "tangents" not in x.name
+    def is_saved_tensor(x):
+        return (
+            "tangents" not in x.name
+            and "bwd_seed" not in x.name
+            and "bwd_base_offset" not in x.name
+        )
 
     arg_count = 0
     static_arg_idxs = []
     for n in fx_g.graph.nodes:
         if n.op == "placeholder":
-            if is_not_gradout(n):
+            if is_saved_tensor(n):
                 static_arg_idxs.append(arg_count)
             arg_count += 1
 
@@ -731,7 +746,8 @@ def compile_fx(
             # partition_fn won't be called
             joint_graph_passes(model)
 
-        fixed = len(example_inputs) - num_example_inputs
+        num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
+        fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
         return inner_compile(
             model,
             example_inputs,
