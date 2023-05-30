@@ -33,7 +33,7 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 from torch.nn.utils.fusion import fuse_linear_bn_weights
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
-from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes
+from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps,\
@@ -9682,6 +9682,35 @@ class TestNNDeviceType(NNTestCase):
                     out_cpu.backward(g_cpu)
 
                     self.assertEqual(a_cuda.grad, a_cpu.grad)
+
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("num_channels", [3, 5])
+    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic"])
+    @parametrize_test("dtype", integral_types() + floating_types())
+    @onlyNativeDeviceTypes
+    def test_upsamplingBiMode2d_nonsupported_dtypes(self, device, antialias, num_channels, mode, dtype):
+        x = torch.ones(1, num_channels, 32, 32, dtype=dtype, device=device)
+
+        should_raise_runtime_error = True
+
+        if "nearest" in mode:
+            if antialias:
+                raise SkipTest("Nearest mode does not have antialiasing")
+            if dtype in (torch.uint8, ) + floating_types():
+                should_raise_runtime_error = False
+
+        elif mode == "bilinear":
+            if dtype in floating_types() or (device == "cpu" and dtype == torch.uint8):
+                should_raise_runtime_error = False
+        elif mode == "bicubic":
+            if dtype in floating_types():
+                should_raise_runtime_error = False
+
+        if should_raise_runtime_error:
+            with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
+        else:
+            _ = F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBilinear2d_aa_correctness(self, device, memory_format):
