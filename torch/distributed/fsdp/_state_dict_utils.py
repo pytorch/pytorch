@@ -30,7 +30,11 @@ from torch.distributed.fsdp._runtime_utils import (
     _get_orig_buffer_dtypes,
     _lazy_init,
 )
-from torch.distributed.fsdp.api import FullStateDictConfig, StateDictType
+from torch.distributed.fsdp.api import (
+    FullStateDictConfig,
+    ShardingStrategy,
+    StateDictType,
+)
 from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import (
@@ -122,8 +126,8 @@ def _common_pre_state_dict_hook(
     fsdp_state: _FSDPState,
 ) -> None:
     """Performs the pre-state_dict tasks shared by all state_dict types."""
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    if fsdp_state._device_handle.is_available():
+        fsdp_state._device_handle.synchronize()
     # TODO: need to check if this is always correct for composable FSDP.
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
@@ -513,7 +517,7 @@ def _sharded_post_state_dict_hook(
             tensor=param,
             rank=fsdp_state.rank,
             world_size=fsdp_state.world_size,
-            num_devices_per_node=torch.cuda.device_count(),
+            num_devices_per_node=fsdp_state._device_handle.device_count(),
             pg=fsdp_state.process_group,
         )
         if fsdp_state._state_dict_config.offload_to_cpu:
@@ -645,6 +649,10 @@ def _post_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
+    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
+        fsdp_state._state_dict_config = FullStateDictConfig()
+        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+
     _post_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_state_dict_hook,
@@ -669,6 +677,14 @@ def _pre_state_dict_hook(
     ``fsdp_state._state_dict_type`` is used to decide what postprocessing will
     be done.
     """
+    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
+        fsdp_state._state_dict_config = FullStateDictConfig()
+        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+        warnings.warn(
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "be returned."
+        )
+
     _pre_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
@@ -696,14 +712,18 @@ def _pre_load_state_dict_hook(
     ``fsdp_state._state_dict_type`` is used to decide what preprocessing will
     be done.
     """
+    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
+        fsdp_state._state_dict_config = FullStateDictConfig()
+        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+
     _pre_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_pre_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_pre_load_state_dict_hook,
         StateDictType.SHARDED_STATE_DICT: _sharded_pre_load_state_dict_hook,
     }
     # Code that is common for all state_dict impls
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    if fsdp_state._device_handle.is_available():
+        fsdp_state._device_handle.synchronize()
     # Dispatch into state_dict specific implementation of pre-hook.
     _pre_load_state_dict_hook_fn[fsdp_state._state_dict_type](
         module, fsdp_state, state_dict, prefix
@@ -717,6 +737,10 @@ def _post_load_state_dict_hook(
     module: nn.Module,
     *args: Any,
 ) -> None:
+    if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
+        fsdp_state._state_dict_config = FullStateDictConfig()
+        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+
     _post_load_state_dict_hook_fn = {
         StateDictType.FULL_STATE_DICT: _full_post_load_state_dict_hook,
         StateDictType.LOCAL_STATE_DICT: _local_post_load_state_dict_hook,

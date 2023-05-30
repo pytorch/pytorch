@@ -584,7 +584,7 @@ class {module_name}(torch.nn.Module):
             if node.op == "call_module" or node.op == "get_attr":
 
                 # A list of strings representing the different parts
-                # of the path. For exmaple, `foo.bar.baz` gives us
+                # of the path. For example, `foo.bar.baz` gives us
                 # ["foo", "bar", "baz"]
                 fullpath = node.target.split(".")
 

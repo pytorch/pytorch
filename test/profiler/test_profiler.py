@@ -106,7 +106,7 @@ class TestProfilerCUDA(TestCase):
         # with CUDA events leaking the increase in memory was ~7 MB between
         # profiler invocations above
         is_increasing = all(
-            [last_rss[idx] > last_rss[idx - 1] for idx in range(1, len(last_rss))])
+            last_rss[idx] > last_rss[idx - 1] for idx in range(1, len(last_rss)))
         max_diff = -1
         for idx in range(1, len(last_rss)):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
@@ -216,9 +216,9 @@ class TestRecordFunction(TestCase):
             if has_iter and has_mux:
                 break
 
-            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+            if not has_iter and "IterableWrapper" in e.name:
                 has_iter = True
-            if not has_mux and e.name == "enumerate(DataPipe)#MultiplexerIterDataPipe":
+            if not has_mux and "Multiplexer" in e.name:
                 has_mux = True
         self.assertTrue(has_iter)
         self.assertTrue(has_mux)
@@ -271,9 +271,9 @@ class TestRecordFunction(TestCase):
             if has_iter and has_child:
                 break
 
-            if not has_iter and e.name == "enumerate(DataPipe)#IterableWrapperIterDataPipe":
+            if not has_iter and "IterableWrapper" in e.name:
                 has_iter = True
-            if not has_child and e.name == "enumerate(DataPipe)#_ChildDataPipe":
+            if not has_child and "_ChildDataPipe" in e.name:
                 has_child = True
         self.assertTrue(has_iter)
         self.assertTrue(has_child)
@@ -530,11 +530,11 @@ class TestProfiler(TestCase):
 
         for e in p.function_events:
             if "aten::add" in e.name or "AddBackward" in e.name:
-                self.assertTrue(any(["test_profiler" in entry for entry in e.stack]))
-                self.assertTrue(any([(
+                self.assertTrue(any("test_profiler" in entry for entry in e.stack))
+                self.assertTrue(any((
                     "test_source" in entry or
                     "ts_method_1" in entry or
-                    "ts_method_2" in entry) for entry in e.stack]))
+                    "ts_method_2" in entry) for entry in e.stack))
 
         # TODO: https://github.com/pytorch/kineto/issues/617
         if kineto_available() and not IS_WINDOWS:
@@ -739,7 +739,7 @@ class TestProfiler(TestCase):
         for e in p.function_events:
             if "aten::mm" in e.name:
                 found_mm = True
-            if "gemm" in e.name:
+            if "gemm" in e.name or "Cijk" in e.name:
                 found_gemm = True
             if "Memcpy" in e.name or "memcpy" in e.name:
                 found_memcpy = True
@@ -1429,7 +1429,7 @@ class TestProfiler(TestCase):
                 f_ts_1 = flow_f_to_ts[1]
                 s_ts_2 = flow_s_to_ts[2]
                 f_ts_2 = flow_f_to_ts[2]
-                self.assertTrue(all([ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]]))
+                self.assertTrue(all(ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]))
                 self.assertTrue(ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits")
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
 

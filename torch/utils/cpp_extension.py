@@ -553,7 +553,7 @@ class BuildExtension(build_ext):
             _ccbin = os.getenv("CC")
             if (
                 _ccbin is not None
-                and not any([flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags])
+                and not any(flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags)
             ):
                 cflags.extend(['-ccbin', _ccbin])
 
@@ -1462,7 +1462,7 @@ def _jit_compile(name,
 
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
-    with_cudnn = any(['cudnn' in f for f in extra_ldflags or []])
+    with_cudnn = any('cudnn' in f for f in extra_ldflags or [])
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -2011,6 +2011,7 @@ def _write_ninja_file_to_build_library(path,
                 cuda_flags = ['-Xcompiler', flag] + cuda_flags
             for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                 cuda_flags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cuda_flags
+            cuda_flags = cuda_flags + ['-std=c++17']
             cuda_flags = _nt_quote_args(cuda_flags)
             cuda_flags += _nt_quote_args(extra_cuda_cflags)
         else:

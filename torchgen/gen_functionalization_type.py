@@ -494,7 +494,7 @@ def wrap_propagate_mutations_and_return(
         non_aliased_wrapped_ret_names.append(ret_name)
 
     # Next, take all of the mutated outputs from the inner call corresponding to mutated inputs,
-    # and propogate the mutations
+    # and propagate the mutations
     for outer_arg, inner_ret in zip(
         mutable_arg_names, non_aliased_inner_rets[len(non_aliased_outer_rets) :]
     ):

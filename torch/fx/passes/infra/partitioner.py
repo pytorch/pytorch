@@ -57,7 +57,7 @@ class CapabilityBasedPartitioner:
 
     def propose_partitions(self) -> List[Partition]:
         # assumptions: nodes in candidate list is sorted in topological order
-        assignment: Dict[Node, int] = {}   # maping from node to partition_id
+        assignment: Dict[Node, int] = {}   # mapping from node to partition_id
         partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
         new_partition_id = itertools.count()
 
@@ -161,7 +161,7 @@ class CapabilityBasedPartitioner:
                 self_id = merge_candidates_list[0]
                 for other_id in merge_candidates_list[1:]:
                     # note: merge partition `other_id` into partition `self_id` if
-                    # it doesn't create cyclic depenency in the graph, otherwise,
+                    # it doesn't create cyclic dependency in the graph, otherwise,
                     # this is a no-op
                     maybe_merge_partition(self_id, other_id)
 
@@ -207,7 +207,7 @@ class CapabilityBasedPartitioner:
 
         logger.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
-            logger.debug(f"partition #{id}", [node.name for node in partition.nodes])
+            logger.debug("partition #%s: %s", id, [node.name for node in partition.nodes])
 
         return list(partitions_by_id.values())
 

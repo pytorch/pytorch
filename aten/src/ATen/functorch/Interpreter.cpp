@@ -57,10 +57,13 @@ DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(TransformType key) {
   return exclude;
 }
 
-void setup_dispatch_key_tls(DispatchKeySet exclude, DispatchKeySet include) {
+void setup_dispatch_key_tls(TransformType key, DispatchKeySet also_include) {
   auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-  local_keyset.excluded_ = local_keyset.excluded_ | exclude;
-  local_keyset.included_ = local_keyset.included_ | include;
+  auto to_exclude = local_keyset.excluded_;
+  to_exclude = to_exclude | keysToExcludeWhenEnteringDynamicLayer(key);
+  to_exclude = to_exclude - keysForEnteringDynamicLayer(key);
+  local_keyset.excluded_ = to_exclude;
+  local_keyset.included_ = local_keyset.included_ | also_include;
   c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
 }
 

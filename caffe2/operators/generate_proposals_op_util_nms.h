@@ -242,7 +242,7 @@ int rotated_rect_intersection_pts(
   rect1.get_vertices(pts1);
   rect2.get_vertices(pts2);
 
-  // Specical case of rect1 == rect2
+  // Special case of rect1 == rect2
   bool same = true;
 
   for (const auto i : c10::irange(4)) {

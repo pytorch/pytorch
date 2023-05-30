@@ -626,7 +626,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
   }
 
   void AddParamGradientAccumulationOps(const OperatorDef& operator_def) {
-    // If a user passes in param_grads mapping, we can copy dirrectly
+    // If a user passes in param_grads mapping, we can copy directly
     // form a blob where backward cell net written data to.
     // This becomes handy in a case where gradient from the cell net
     // is an internal blob of the backward cell. This happens, for example,

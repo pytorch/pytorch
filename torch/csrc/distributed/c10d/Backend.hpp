@@ -54,12 +54,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual void startCoalescing() {
-    // no-op for backends that have not implemented startCoalescing
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), "does not implement startCoalescing"));
   }
 
-  virtual void endCoalescing(
-      std::vector<c10::intrusive_ptr<Work>>& /* reqs */) {
-    // no-op for backends that have not implemented endCoalescing
+  virtual c10::intrusive_ptr<Work> endCoalescing() {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), "does not implement endCoalescing"));
   }
 
   // Subclasses must override this method to return the backend name

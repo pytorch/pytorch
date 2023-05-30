@@ -1,7 +1,14 @@
 //  Copyright © 2022 Apple Inc.
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at::native::mps {
 
@@ -152,8 +159,7 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
   }
 }
 
-NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
-  int64_t ndim = t.dim();
+NSArray<NSNumber*>* getTensorAxes(int64_t ndim) {
   auto axes = [NSMutableArray<NSNumber*> arrayWithCapacity:ndim];
   for (const auto i : c10::irange(ndim)) {
     axes[i] = [NSNumber numberWithInteger:i];
@@ -161,7 +167,15 @@ NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
   return axes;
 }
 
-NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim) {
+NSArray<NSNumber*>* getTensorAxes(const Tensor& t) {
+  return getTensorAxes(t.dim());
+}
+
+NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes) {
+  return getTensorAxes(sizes.size());
+}
+
+NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim) {
   if (dim.has_value() && dim.value().size() != 0) {
     IntArrayRef dimValues = dim.value();
     int ndim = dimValues.size();
@@ -173,7 +187,7 @@ NSArray<NSNumber*>* getTensorAxes(const Tensor& t, at::OptionalIntArrayRef dim) 
     return axes;
   }
 
-  return getTensorAxes(t);
+  return getTensorAxes(sizes);
 }
 
 std::string getMPSShapeString(MPSShape* shape) {
@@ -376,6 +390,24 @@ MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar&
 
 void resize_tensor(Tensor* output) {
   output->resize_(output->sizes());
+}
+
+Tensor wrapped_scalar_tensor_mps(const Scalar& scalar, const Device device) {
+  // Copied and modified from aten/stc/ATen/ScalarOps.h
+  // as MPS doesn't support float64 tensor.
+  Tensor tensor;
+  if (scalar.isFloatingPoint()) {
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kFloat));
+  } else if (scalar.isBoolean()) {
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kBool));
+  } else if (scalar.isComplex()) {
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kComplexDouble));
+  } else {
+    AT_ASSERT(scalar.isIntegral(false));
+    tensor = at::scalar_tensor(scalar, at::device(device).dtype(at::kLong));
+  }
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
 }
 
 MPSGraph* make_mps_graph() {

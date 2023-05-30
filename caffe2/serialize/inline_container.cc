@@ -13,9 +13,9 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 
 #include "caffe2/core/common.h"
-#include "caffe2/core/logging.h"
 #include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"
 #include "caffe2/serialize/istream_adapter.h"
@@ -295,6 +295,29 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
   valid("reading file ", name.c_str());
 
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
+}
+
+// inplace memory writing
+size_t
+PyTorchStreamReader::getRecord(const std::string& name, void* dst, size_t n) {
+  std::lock_guard<std::mutex> guard(reader_lock_);
+  if ((!load_debug_symbol_) && c10::string_view(name).ends_with(kDebugPklSuffix)) {
+    return 0;
+  }
+  size_t key = getRecordID(name);
+  mz_zip_archive_file_stat stat;
+  mz_zip_reader_file_stat(ar_.get(), key, &stat);
+  TORCH_CHECK(
+      n == stat.m_uncomp_size,
+      "record size ",
+      stat.m_uncomp_size,
+      " mismatch with dst size ",
+      n);
+  valid("retrieving file meta-data for ", name.c_str());
+  mz_zip_reader_extract_to_mem(ar_.get(), key, dst, stat.m_uncomp_size, 0);
+  valid("reading file ", name.c_str());
+
+  return stat.m_uncomp_size;
 }
 
 static int64_t read_le_16(uint8_t* buf) {

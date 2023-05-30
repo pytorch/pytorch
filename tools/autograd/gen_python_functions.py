@@ -67,7 +67,8 @@ from torchgen.model import (
     Type,
     Variant,
 )
-from torchgen.utils import FileManager, split_name_params, YamlLoader
+from torchgen.utils import FileManager, split_name_params
+from torchgen.yaml_utils import YamlLoader
 
 from .gen_trace_type import should_trace
 
@@ -157,6 +158,8 @@ _SKIP_PYTHON_BINDINGS = [
     "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
     "_nested_view_from_buffer_copy",
     "_nested_view_from_buffer_copy_out",
+    "nbytes",
+    "itemsize",
 ]
 
 SKIP_PYTHON_BINDINGS = [
@@ -237,10 +240,6 @@ def is_py_sparse_function(f: NativeFunction) -> bool:
 
 def is_py_special_function(f: NativeFunction) -> bool:
     return f.python_module == "special"
-
-
-def is_py_dist_function(f: NativeFunction) -> bool:
-    return f.python_module == "dist"
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -347,15 +346,6 @@ def gen(
         "python_special_functions.cpp",
         method=False,
         symint=symint,
-    )
-
-    create_python_bindings(
-        fm,
-        functions,
-        is_py_dist_function,
-        "torch.distributed.functional",
-        "python_dist_functions.cpp",
-        method=False,
     )
 
     # Currently, we only use `functions` to generate `return_types` bindings.
@@ -915,7 +905,6 @@ if(check_has_torch_function(self_)) {{
             "torch.nested": "THPNestedVariableFunctionsModule",
             "torch.sparse": "THPSparseVariableFunctionsModule",
             "torch.special": "THPSpecialVariableFunctionsModule",
-            "torch.distributed.functional": "THPDistVariableFunctionsModule",
         }[module]
         if module
         else "THPVariableClass"
@@ -1023,24 +1012,20 @@ def method_def(
     """
     pycname = get_pycname(name)
 
+    if name.dunder_method:
+        # PyMethodDef entry for binary op, throws not implemented error
+        pycname = f"TypeError_to_NotImplemented_<{pycname}>"
+
     if is_noarg(overloads):
-        pyfunc_cast = ""
         flags = "METH_NOARGS" if method else "METH_VARARGS | METH_KEYWORDS"
     else:
-        pyfunc_cast = "castPyCFunctionWithKeywords"
+        pycname = f"castPyCFunctionWithKeywords({pycname})"
         flags = "METH_VARARGS | METH_KEYWORDS"
 
     if module == "torch":
         flags += " | METH_STATIC"
 
-    if name.dunder_method:
-        # PyMethodDef entry for binary op, throws not implemented error
-        return f"""\
-{{"{name}", {pyfunc_cast}(TypeError_to_NotImplemented_<{pycname}>), {flags}, NULL}},"""
-    else:
-        # PyMethodDef entry
-        return f"""\
-{{"{name}", {pyfunc_cast}({pycname}), {flags}, NULL}},"""
+    return f'{{"{name}", {pycname}, {flags}, NULL}},'
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

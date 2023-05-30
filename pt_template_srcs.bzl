@@ -149,7 +149,6 @@ def get_generate_code_bin_outs():
             "autograd/generated/python_return_types.cpp": ["autograd/generated/python_return_types.cpp"],
             "autograd/generated/python_sparse_functions.cpp": ["autograd/generated/python_sparse_functions.cpp"],
             "autograd/generated/python_special_functions.cpp": ["autograd/generated/python_special_functions.cpp"],
-            "autograd/generated/python_dist_functions.cpp": ["autograd/generated/python_dist_functions.cpp"],
             "autograd/generated/python_torch_functions_0.cpp": ["autograd/generated/python_torch_functions_0.cpp"],
             "autograd/generated/python_torch_functions_1.cpp": ["autograd/generated/python_torch_functions_1.cpp"],
             "autograd/generated/python_torch_functions_2.cpp": ["autograd/generated/python_torch_functions_2.cpp"],
