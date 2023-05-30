@@ -2245,7 +2245,7 @@ class DistributedDataParallel(Module, Joinable):
         Checks if the reducer has processed all buckets and finalized the backward
         appropriately.
 
-        It is useful to call this method after calling .backward() in your trianing loop
+        It is useful to call this method after calling .backward() in your training loop
         in order to avoid subsequent hard to debug errors down the road due to the
         reducer not finalizing backward.
         """
