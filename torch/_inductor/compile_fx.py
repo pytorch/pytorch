@@ -225,6 +225,9 @@ def compile_fx_inner(
     is_inference=False,
     boxed_forward_device_index=None,
 ):
+    if dynamo_utils.count_calls(gm.graph) == 0:
+        return make_boxed_func(gm.forward)
+    
     # Inputs to fx_codegen_and_compile
     graph_args = [gm, example_inputs]
     graph_kwargs = {
@@ -358,9 +361,6 @@ def fx_codegen_and_compile(
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
-
-    if dynamo_utils.count_calls(gm.graph) == 0:
-        return make_boxed_func(gm.forward)
 
     # lift the maximum depth of the Python interpreter stack
     # to adapt large/deep models
