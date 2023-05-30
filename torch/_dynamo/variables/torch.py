@@ -16,7 +16,7 @@ from torch.utils import _pytree as pytree
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
-from ..exc import unimplemented, UserError, UserErrorType
+from ..exc import unimplemented, Unsupported, UserError, UserErrorType
 from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
@@ -779,12 +779,6 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return output, tx.output.graph, tracer.lifted_freevars
             else:
-                if not isinstance(
-                    output,
-                    (TensorVariable, ConstantVariable, ListVariable, TupleVariable),
-                ):
-                    unimplemented("HigherOrderOperator with body with pytree output")
-
                 if isinstance(output, (ListVariable, TupleVariable)):
                     if any(
                         not isinstance(var, TensorVariable)
@@ -793,6 +787,14 @@ def speculate_subgraph(
                         unimplemented(
                             "HigherOrderOperator body's output must consist of tensors only"
                         )
+
+                if not isinstance(
+                    output,
+                    (ListVariable, TupleVariable),
+                ) and not isinstance(output, TensorVariable):
+                    unimplemented(
+                        "HigherOrderOperator can't return non-tensor scalar output"
+                    )
 
                 tx.output.guards.update(output.guards)
                 tx.output.create_node(
@@ -810,7 +812,7 @@ def speculate_subgraph(
                     lifted_freevars,
                 )
 
-    except torch._dynamo.exc.Unsupported as ex:
+    except Unsupported as ex:
         log.warning(
             "TorchDynamo tracing of HigherOrderOperator did not go well. "
             "Falling back to eager behavior. This can result in a slowdown."
@@ -958,20 +960,19 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     ret_val, ret_graph, ret_lifted_freevars = speculate_subgraph(
                         tx, args[ix], operands, graph_checkpoint, checkpoint
                     )
-                except Exception as e:
+                # Reraise because we want to suggest workarounds
+                except Unsupported as e:
                     raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e)) from e
+
                 if not isinstance(ret_val, TensorVariable):
                     raise UserError(
                         UserErrorType.DYNAMIC_CONTROL_FLOW,
-                        "Expected branch out type to be a single tensor but got {}".format(
-                            str(ret_val.python_type())
-                        ),
+                        "Expected branch out type to be a single tensor",
                     )
                 return ret_val, ret_graph, ret_lifted_freevars
 
             (true_r, true_graph, true_lifted_freevars) = speculate_branch(True)
 
-            tx.output.side_effects.prune_dead_object_new(tx)
             state_after_true_branch = tx.copy_graphstate()
             true_guards = state_after_true_branch.output.guards
             true_nn_modules = state_after_true_branch.output.nn_modules
@@ -979,7 +980,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
             (false_r, false_graph, false_lifted_freevars) = speculate_branch(False)
 
-            tx.output.side_effects.prune_dead_object_new(tx)
             state_after_false_branch = tx.copy_graphstate()
             false_guards = state_after_false_branch.output.guards
             false_nn_modules = state_after_false_branch.output.nn_modules

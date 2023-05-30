@@ -2987,7 +2987,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected branch out type to be a single tensor",
+            "HigherOrderOperator can't return non-tensor scalar output",
         ):
             torch._dynamo.export(
                 f_branch_return_non_tensor,

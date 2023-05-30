@@ -211,7 +211,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         name_set = set()
         for name, _ in map_gm.named_modules():
             name_set.add(name)
-        self.assertEqual(name_set, {"", "map_body_0.map_body_0", "map_body_0"})
+        self.assertEqual(name_set, {"", "map_body_1.map_body_0", "map_body_1"})
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -249,10 +249,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             name_set,
             {
                 "",
-                "cond_true_0",
-                "cond_false_0",
-                "cond_false_0.cond_false_0",
-                "cond_false_0.cond_true_0",
+                "cond_true_1",
+                "cond_false_1",
+                "cond_false_1.cond_false_0",
+                "cond_false_1.cond_true_0",
             },
         )
 
