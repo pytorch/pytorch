@@ -10173,7 +10173,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             (x,),
             training=torch.onnx.TrainingMode.TRAINING,
             rtol=1e-3,
-            atol=1.3e-5,
+            atol=1e-5,
         )
         model_export.train()
         self.run_test(
@@ -10181,7 +10181,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             (x,),
             training=torch.onnx.TrainingMode.PRESERVE,
             rtol=1e-3,
-            atol=1.3e-5,
+            atol=1e-5,
         )
 
     def test_batchnorm_eval_mode_train_layer(self):
