@@ -255,6 +255,9 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         d = d.copy()
         d.append(d.popleft())
 
+        empty = collections.deque()
+        d.extend(empty)
+
         # dynamo same() util doesn't support deque so just return a list
         return list(d)
 
