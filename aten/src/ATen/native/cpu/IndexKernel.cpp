@@ -369,6 +369,7 @@ void masked_scatter_kernel(TensorIterator& iter, const TensorBase& source) {
 
 template <typename scalar_t, typename mask_t, typename func_t>
 void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
+  auto is_mask_bool = std::is_same<mask_t, bool>::value;
   int64_t offset = 0;
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     char* dst = data[0];
@@ -376,7 +377,7 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
     char* mask = data[2];
     for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
-      if constexpr (!std::is_same<mask_t, bool>::value) {
+      if (!is_mask_bool) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {
@@ -407,6 +408,7 @@ void masked_select_serial_kernel(TensorIterator& iter, int64_t result_stride) {
 
 template <typename scalar_t, typename mask_t, typename func_t>
 void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
+  auto is_mask_bool = std::is_same<mask_t, bool>::value;
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     char* dst = data[0];
     char* src = data[1];
@@ -414,7 +416,7 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
     char* mask_prefix_sum = data[3];
     for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
-      if constexpr (!std::is_same<mask_t, bool>::value) {
+      if (!is_mask_bool) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {

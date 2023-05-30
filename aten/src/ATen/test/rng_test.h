@@ -72,7 +72,7 @@ void test_random_from_to(const at::Device& device) {
 
   std::vector<int64_t> froms;
   std::vector<c10::optional<int64_t>> tos;
-  if constexpr (::std::is_same<T, bool>::value) {
+  if (std::is_same<T, bool>::value) {
     froms = {
       0L
     };
@@ -80,7 +80,7 @@ void test_random_from_to(const at::Device& device) {
       1L,
       static_cast<c10::optional<int64_t>>(c10::nullopt)
     };
-  } else if constexpr (::std::is_signed<T>::value) {
+  } else if (std::is_signed<T>::value) {
     froms = {
       min_from,
       -42L,
@@ -150,7 +150,7 @@ void test_random_from_to(const at::Device& device) {
             ASSERT_TRUE(static_cast<int64_t>(exp) < *to);
           }
           const auto expected = torch::full_like(actual, exp);
-          if constexpr (::std::is_same<T, bool>::value) {
+          if (std::is_same<T, bool>::value) {
             ASSERT_TRUE(torch::allclose(actual.toType(torch::kInt), expected.toType(torch::kInt)));
           } else {
             ASSERT_TRUE(torch::allclose(actual, expected));
@@ -159,7 +159,7 @@ void test_random_from_to(const at::Device& device) {
       }
     }
   }
-  if constexpr (::std::is_same<T, int64_t>::value) {
+  if (std::is_same<T, int64_t>::value) {
     ASSERT_TRUE(full_64_bit_range_case_covered);
   }
   ASSERT_TRUE(from_to_case_covered);
@@ -186,15 +186,15 @@ void test_random(const at::Device& device) {
     actual.random_(gen);
 
     uint64_t range;
-    if constexpr (::std::is_floating_point<T>::value) {
-      range = static_cast<uint64_t>((1ULL << ::std::numeric_limits<T>::digits) + 1);
-    } else if constexpr (::std::is_same<T, bool>::value) {
+    if (std::is_floating_point<T>::value) {
+      range = static_cast<uint64_t>((1ULL << std::numeric_limits<T>::digits) + 1);
+    } else if (std::is_same<T, bool>::value) {
       range = 2;
     } else {
-      range = static_cast<uint64_t>(::std::numeric_limits<T>::max()) + 1;
+      range = static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1;
     }
     T exp;
-    if constexpr (::std::is_same<T, double>::value || ::std::is_same<T, int64_t>::value) {
+    if (std::is_same<T, double>::value || std::is_same<T, int64_t>::value) {
       exp = val % range;
     } else {
       exp = static_cast<uint32_t>(val) % range;
@@ -204,7 +204,7 @@ void test_random(const at::Device& device) {
     ASSERT_TRUE(static_cast<uint64_t>(exp) < range);
 
     const auto expected = torch::full_like(actual, exp);
-    if constexpr (::std::is_same<T, bool>::value) {
+    if (std::is_same<T, bool>::value) {
       ASSERT_TRUE(torch::allclose(actual.toType(torch::kInt), expected.toType(torch::kInt)));
     } else {
       ASSERT_TRUE(torch::allclose(actual, expected));

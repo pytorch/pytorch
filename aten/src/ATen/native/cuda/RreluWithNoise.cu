@@ -104,7 +104,7 @@ inline void _rrelu_with_noise_cuda_train(
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  if constexpr (std::is_same<scalar_t, double>::value) {
+  if (std::is_same<scalar_t, double>::value) {
     rrelu_with_noise_cuda_kernel<scalar_t, 2><<<grid, block, 0, stream>>>(
         numel,
         rng_engine_inputs,
