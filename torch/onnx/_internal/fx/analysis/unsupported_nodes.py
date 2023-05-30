@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Dict, List, Set
 
-from torch.onnx._internal.fx import _pass, diagnostics, function_dispatcher
+from torch.onnx._internal.fx import _pass, diagnostics
 
 
 @dataclasses.dataclass
@@ -55,8 +55,12 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
         for node in self.module.graph.nodes:
             if node.op == "call_function":
                 try:
-                    function_dispatcher.get_symbolic_function(
-                        self.diagnostic_context, node
+                    # NOTE: OPSchema matcher is not in this analysis scope.
+                    aten_name = self.dispatcher._get_aten_name(
+                        node, self.diagnostic_context
+                    )
+                    self.dispatcher._get_function_overloads(
+                        node, aten_name, self.diagnostic_context
                     )
                 except diagnostics.RuntimeErrorWithDiagnostic as e:
                     errors.append(e)
