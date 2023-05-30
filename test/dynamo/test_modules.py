@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import itertools
 import traceback
 import types
 import unittest
@@ -1386,6 +1387,16 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check parameteres and buffers
         for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
+        for b1, b2 in zip(mod.buffers(), opt_mod.buffers()):
+            self.assertTrue(id(b1) == id(b2))
+
+        def get_parameter_dtype(mod: torch.nn.Module):
+            parameters_and_buffers = itertools.chain(mod.parameters(), mod.buffers())
+            return next(parameters_and_buffers).dtype
+
+        opt_mod = torch._dynamo.optimize("eager")(get_parameter_dtype)
+        out_dtype = opt_mod(mod)
+        self.assertEqual(out_dtype, torch.float32)
 
     def test_recursion(self):
         mod = MockModule()
