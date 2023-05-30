@@ -620,7 +620,7 @@ void reduce(
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
-        static_cast<decltype(i)>(root) == i ? output.data_ptr() : nullptr,
+        static_cast<std::remove_cv<decltype(i)>::type>(root) == i ? output.data_ptr() : nullptr,
         count,
         data_type,
         to_nccl_red_op(op),
