@@ -190,6 +190,33 @@ def ir_node_to_tensor(x, guard_shape=True):
     return t
 
 
+class OptionalAttr:
+    def __init__(self):
+        self.name = "optional_attr"
+
+    def __repr__(self):
+        return self.name
+
+
+class OptionalString(OptionalAttr):
+    def __init__(self):
+        self.name = "optional_string"
+
+
+class OptionalList(OptionalAttr):
+    def __init__(self):
+        self.name = "optional_list"
+
+
+class OptionalScalar(OptionalAttr):
+    def __init__(self):
+        self.name = "optional_scalar"
+
+
+def may_convert_to_optional(optional_value, value):
+    return optional_value if not value and V.graph.cpp_wrapper else value
+
+
 class ModularIndexing(sympy.Function):
     """
     ModularIndexing(a, b, c) => (a // b) % c
@@ -1149,6 +1176,27 @@ def is_stride_order_storage_and_layout(x, stride_order):
 class BaseView(IRNode):
     data: IRNode
 
+    def make_reindexer(self):
+        raise NotImplementedError(f"make_reindexer NYI on {self}")
+
+    def make_indexer(self):
+        inner = self.data.make_indexer()
+        reindex = self.make_reindexer()
+
+        def indexer(idx):
+            return inner(reindex(idx))
+
+        return indexer
+
+    def make_loader(self):
+        inner = self.data.make_loader()
+        reindex = self.make_reindexer()
+
+        def loader(idx):
+            return inner(reindex(idx))
+
+        return loader
+
     def get_dtype(self):
         return self.data.get_dtype()
 
@@ -1242,22 +1290,21 @@ class ExpandView(BaseView):
     def get_size(self):
         return self.size
 
-    def make_loader(self):
+    def make_reindexer(self):
         target = self.get_size()
         actual = self.data.get_size()
         skip = len(target) - len(actual)
-        inner = self.data.make_loader()
 
-        def load(index):
+        def reindex(index):
             index = list(index[skip:])
             assert len(index) == len(actual)
             for i in range(len(actual)):
                 if actual[i] == 1:
                     # zero out broadcast dimension
                     index[i] = sympy.Integer(0)
-            return inner(index)
+            return index
 
-        return load
+        return reindex
 
 
 @dataclasses.dataclass
@@ -1291,17 +1338,15 @@ class PermuteView(BaseView):
         size = self.data.get_size()
         return [size[i] for i in self.dims]
 
-    def make_loader(self):
-        inner = self.data.make_loader()
+    def make_reindexer(self):
         inv = {j: i for i, j in enumerate(self.dims)}
         inv = [inv[i] for i in range(len(self.dims))]
         assert set(inv) == set(range(len(self.dims)))
 
-        def load(index):
-            index = [index[i] for i in inv]
-            return inner(index)
+        def reindex(index):
+            return [index[i] for i in inv]
 
-        return load
+        return reindex
 
 
 class SqueezeView(BaseView):
@@ -1367,13 +1412,8 @@ class View(BaseView):
     size: List[Expr]
     reindex: Callable[..., Any]
 
-    def make_indexer(self):
-        base_indexer = self.data.make_indexer()
-
-        def indexer(idx):
-            return base_indexer(self.reindex(idx))
-
-        return indexer
+    def make_reindexer(self):
+        return self.reindex
 
     @staticmethod
     def handle_negative_index(idx, size):
@@ -1521,13 +1561,6 @@ class View(BaseView):
 
     def get_size(self):
         return self.size
-
-    def make_loader(self):
-        def load(index):
-            return inner(self.reindex(index))
-
-        inner = self.data.make_loader()
-        return load
 
 
 @dataclasses.dataclass
@@ -1971,6 +2004,8 @@ class MutationLayout(Layout):
             None,  # type: ignore[arg-type]
         )
         self.target = target
+        name = self.get_buffer().get_name()
+        V.graph.mark_buffer_mutated(name)
 
     @Layout.stride.getter
     def stride(self):
@@ -1979,7 +2014,7 @@ class MutationLayout(Layout):
     def storage_size(self) -> sympy.Expr:
         return self.real_layout().storage_size()
 
-    def real_layout(self):
+    def get_buffer(self) -> "Buffer":
         def unwrap_views(target):
             if isinstance(target, MutationLayout):
                 return unwrap_views(target.target)
@@ -1989,12 +2024,16 @@ class MutationLayout(Layout):
                 return unwrap_views(target.data)
             return target
 
-        return unwrap_views(self.target).layout
+        result = unwrap_views(self.target)
+        assert isinstance(result, Buffer), "MutationLayout must refer to a buffer"
+        return result
+
+    def real_layout(self):
+        return self.get_buffer().layout
 
     @classmethod
     def realize_into(cls, src, dst):
         dst.realize()
-        V.graph.realize_users_of(dst.get_name())
 
         if isinstance(src, TensorBox):
             src = src.data
@@ -2186,6 +2225,17 @@ class ComputedBuffer(Buffer):
                     self.get_store_function(),
                     self.data.get_size(),
                 )
+
+    def make_loader(self):
+        # Inline constants and index_expressions
+        can_inline = (
+            hasattr(self.data, "make_loader")
+            and self.name not in V.graph.mutated_buffers
+            and len(self.get_read_writes().reads) == 0
+        )
+        if can_inline:
+            return self.data.make_loader()
+        return super().make_loader()
 
     def get_store_function(self):
         indexer = self.layout.as_fixed().make_indexer()
@@ -2677,16 +2727,19 @@ class ExternKernel(InputsKernel):
         if isinstance(x, ReinterpretView):
             return x
 
+        # NOTE: Don't use extract_read_writes here as it fails when
+        # make_loader() inlines the computation
         x.unwrap_view().freeze_layout()
-        rw = extract_read_writes(x.make_loader(), x.get_size(), normalize=False)
-        assert len(rw.reads) == 1
-
-        index = V.graph.sizevars.simplify_with_ranges(
-            list(rw.reads)[0].index, rw.var_ranges
+        index_args, var_ranges = dependencies.index_vars_squeeze(
+            x.get_size(), prefix="r"
         )
-        strides = V.graph.sizevars.stride_vars(index, rw.range_vars)
-        offset = V.graph.sizevars.offset_var(index, rw.range_vars)
-        expected = sympy_dot(rw.range_vars, strides) + offset
+        range_vars = index_args[0]
+        index = x.make_indexer()(range_vars)
+
+        index = V.graph.sizevars.simplify_with_ranges(index, var_ranges)
+        strides = V.graph.sizevars.stride_vars(index, range_vars)
+        offset = V.graph.sizevars.offset_var(index, range_vars)
+        expected = sympy_dot(range_vars, strides) + offset
 
         if index != expected:
             log.debug(
@@ -3473,8 +3526,6 @@ def _prepare_convolution_fusion_create(
 
 
 class ConvolutionUnary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._convolution_pointwise"
-
     def __init__(
         self,
         layout,
@@ -3482,12 +3533,35 @@ class ConvolutionUnary(ExternKernelAlloc):
         constant_args=(),
         kernel="torch.ops.mkldnn._convolution_pointwise",
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkldnn._convolution_pointwise",
+            cpp_kernel="mkldnn::_convolution_pointwise",
+        )
+        self.cpp_kernel_key = "convolution_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& input_t,
+                const at::Tensor& weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                at::IntArrayRef padding,
+                at::IntArrayRef stride,
+                at::IntArrayRef dilation,
+                int64_t groups,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            self.codegen_args(),
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -3506,35 +3580,66 @@ class ConvolutionUnary(ExternKernelAlloc):
         scalars,
         algorithm,
     ):
-        kernel = "torch.ops.mkldnn._convolution_pointwise"
         (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
-        constant_args = constant_args + [attr, scalars, algorithm]
+        optional_string = OptionalString()
+        optional_list = OptionalList()
+        constant_args = constant_args + [
+            attr,
+            may_convert_to_optional(optional_list, scalars),
+            may_convert_to_optional(optional_string, algorithm),
+        ]
         return ConvolutionUnary(
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
-            kernel=kernel,
         )
 
 
 class ConvolutionBinary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
-
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn._convolution_pointwise.binary",
+        cpp_constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkldnn._convolution_pointwise.binary",
+            cpp_kernel="mkldnn::_convolution_pointwise",
+        )
+        self.cpp_kernel_overlad_name = "binary"
+        self.cpp_kernel_key = "convolution_pointwise_binary"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& input_t,
+                const at::Tensor& other_t,
+                const at::Tensor& weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                at::IntArrayRef padding,
+                at::IntArrayRef stride,
+                at::IntArrayRef dilation,
+                int64_t groups,
+                c10::string_view binary_attr,
+                c10::optional<at::Scalar> alpha,
+                c10::optional<c10::string_view> unary_attr,
+                torch::List<c10::optional<at::Scalar>> unary_scalars,
+                c10::optional<c10::string_view> unary_algorithm)"""
+        self.cpp_constant_args = cpp_constant_args
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            self.codegen_args(),
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+            self.cpp_kernel_overlad_name,
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -3556,7 +3661,6 @@ class ConvolutionBinary(ExternKernelAlloc):
         unary_scalars: Optional[List[Any]],
         unary_algorithm: Optional[str],
     ):
-        kernel = "torch.ops.mkldnn._convolution_pointwise.binary"
         (
             inputs,
             constant_args,
@@ -3567,18 +3671,20 @@ class ConvolutionBinary(ExternKernelAlloc):
         )
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
+        optional_scalar = OptionalScalar()
+        optional_string = OptionalString()
+        optional_list = OptionalList()
         constant_args = constant_args + [
             binary_attr,
-            binary_alpha,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
+            may_convert_to_optional(optional_scalar, binary_alpha),
+            may_convert_to_optional(optional_string, unary_attr),
+            may_convert_to_optional(optional_list, unary_scalars),
+            may_convert_to_optional(optional_string, unary_algorithm),
         ]
         return ConvolutionBinary(
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
-            kernel=kernel,
         )
 
 
@@ -3631,7 +3737,6 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         other = cls.require_stride_order(other, req_stride_order)
-        V.graph.realize_users_of(other.get_name())
         inputs.insert(1, other)
         constant_args = constant_args + [
             binary_attr,
