@@ -21,7 +21,7 @@
 #include <ATen/ops/ones.h>
 #include <ATen/ops/zeros.h>
 #endif
-
+#include <iostream>
 namespace at::native {
 namespace {
 
@@ -198,7 +198,7 @@ batch_norm_cpu_collect_stats_contiguous_impl(
           sum += input_data[offset];
         }
       }
-      opmath_t mean = sum / N;
+      scalar_t mean = sum / N;
       mean_data[c] = mean;
 
       // compute variance per input
@@ -621,10 +621,12 @@ batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
 
   const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
   if (mixed_type) {
+    std::cout << "mixed_type batch_norm_cpu_contiguous_impl\n";
     batch_norm_cpu_collect_linear_and_constant_terms<opmath_t, opmath_t>(
         alpha_data, beta_data, n_channel, weight, bias,
         save_mean, save_invstd, running_mean, running_var, train, eps);
   } else {
+    std::cout << "lower batch_norm_cpu_contiguous_impl\n";
     batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, opmath_t>(
         alpha_data, beta_data, n_channel, weight, bias,
         save_mean, save_invstd, running_mean, running_var, train, eps);
@@ -685,10 +687,12 @@ batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
 
   const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
   if (mixed_type) {
+    std::cout << "mixed_type batch_norm_cpu_channels_last_impl\n";
     batch_norm_cpu_collect_linear_and_constant_terms<opmath_t, opmath_t>(
         alpha_data, beta_data, n_channel, weight, bias,
         save_mean, save_invstd, running_mean, running_var, train, eps);
   } else {
+    std::cout << "lower batch_norm_cpu_channels_last_impl\n";
     batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, opmath_t>(
         alpha_data, beta_data, n_channel, weight, bias,
         save_mean, save_invstd, running_mean, running_var, train, eps);
@@ -793,8 +797,10 @@ batch_norm_cpu_collect_stats_contiguous_impl(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
   const bool mixed_type = is_mixed_type(input, mean, var_sum);
   if (mixed_type) {
+    std::cout << "mixed_type batch_norm_cpu_collect_stats_contiguous_impl\n";
     batch_norm_cpu_collect_stats_contiguous_internal<scalar_t, at::opmath_type<scalar_t>>(mean, var_sum, input);
   } else {
+    std::cout << "lower batch_norm_cpu_collect_stats_contiguous_impl\n";
     batch_norm_cpu_collect_stats_contiguous_internal<scalar_t, scalar_t>(mean, var_sum, input);
   }
 }
@@ -890,8 +896,10 @@ batch_norm_cpu_collect_stats_channels_last_impl(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
   const bool mixed_type = is_mixed_type(input, mean, var_sum);
   if (mixed_type) {
+    std::cout << "mixed_type batch_norm_cpu_collect_stats_channels_last_impl\n";
     batch_norm_cpu_collect_stats_channels_last_internal<scalar_t, at::opmath_type<scalar_t>>(mean, var_sum, input);
   } else {
+    std::cout << "lower batch_norm_cpu_collect_stats_channels_last_impl\n";
     batch_norm_cpu_collect_stats_channels_last_internal<scalar_t, scalar_t>(mean, var_sum, input);
   }
 }
@@ -1014,9 +1022,11 @@ batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_weight,
     bool train, double eps) {
   const bool mixed_type = is_mixed_type(input, weight, running_mean, running_var, save_mean, save_invstd);
   if (mixed_type) {
+    std::cout << "mixed_type batch_norm_cpu_backward_contiguous_impl\n";
     batch_norm_cpu_backward_contiguous_internal<scalar_t, at::opmath_type<scalar_t>>(grad_input, grad_weight, grad_bias,
         grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
   } else {
+    std::cout << "lower batch_norm_cpu_backward_contiguous_impl\n";
     batch_norm_cpu_backward_contiguous_internal<scalar_t, scalar_t>(grad_input, grad_weight, grad_bias,
         grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
   }
@@ -1227,9 +1237,11 @@ batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad_weig
     bool train, double eps) {
   const bool mixed_type = is_mixed_type(input, weight, running_mean, running_var, save_mean, save_invstd);
   if (mixed_type) {
+    std::cout << "mixed_type batch_norm_cpu_backward_channels_last_impl\n";
     batch_norm_cpu_backward_channels_last_internal<scalar_t, at::opmath_type<scalar_t>>(grad_input, grad_weight, grad_bias,
         grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
   } else {
+    std::cout << "lower batch_norm_cpu_backward_channels_last_impl\n";
     batch_norm_cpu_backward_channels_last_internal<scalar_t, scalar_t>(grad_input, grad_weight, grad_bias,
         grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
   }
@@ -1239,6 +1251,7 @@ void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean,  const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
   int64_t image_size = input.numel() / input.size(0) / input.size(1);
+  std::cout << "batch_norm_cpu_kernel input.scalar_type() " << input.scalar_type() << "\n";
   if (input.is_contiguous()) { // NC11 is also channels last
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "batch_norm_cpu_contiguous", [&] {
       if (image_size == 1) {
@@ -1262,6 +1275,7 @@ void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
 void batch_norm_cpu_collect_stats_kernel(
     Tensor& mean, Tensor& var_sum, const Tensor& input) {
   int64_t image_size = input.numel() / input.size(0) / input.size(1);
+  std::cout << "batch_norm_cpu_collect_stats_kernel input.scalar_type() " << input.scalar_type() << "\n";
   if (input.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "batch_norm_cpu_collect_stats_contiguous", [&] {
       if (image_size == 1) { // NC11 is also channels last
@@ -1284,6 +1298,7 @@ void batch_norm_cpu_backward_kernel(Tensor& grad_input, Tensor& grad_weight, Ten
     const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
     bool train, double eps) {
   int64_t image_size = input.numel() / input.size(0) / input.size(1);
+  std::cout << "batch_norm_cpu_backward_kernel input.scalar_type() " << input.scalar_type() << "\n";
   if (input.is_contiguous()) {
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, input.scalar_type(), "batch_norm_cpu_backward_contiguous", [&] {
       if (image_size == 1) { // NC11 is also channels last
