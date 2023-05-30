@@ -102,8 +102,17 @@ Tensor repeat_interleave(
     int64_t repeats,
     c10::optional<int64_t> dim,
     c10::optional<int64_t> output_size) {
+  Tensor input = self;
   at::Tensor repeats_ = at::empty(1, self.options().dtype(at::kLong)).fill_(repeats);
-  return at::native::repeat_interleave(self, repeats_, dim, output_size);
+  if (!output_size) {
+    if (!dim) {
+      input = input.flatten();
+      dim = 0;
+    }
+    auto input_size = input.sym_size(dim.value()).guard_int(__FILE__, __LINE__);
+    output_size = input_size * repeats;
+  }
+  return at::native::repeat_interleave(input, repeats_, dim, output_size);
 }
 
 Tensor repeat_interleave_symint(

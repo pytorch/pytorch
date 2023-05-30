@@ -16,18 +16,6 @@ def get_loggers():
     ]
 
 
-# Set the level of all loggers that torchdynamo is responsible for
-def set_loggers_level(level):
-    """Write current log level"""
-    for logger in get_loggers():
-        logger.setLevel(level)
-
-
-def get_loggers_level():
-    """Read current log level"""
-    return get_loggers()[0].level
-
-
 # Creates a logging function that logs a message with a step # prepended.
 # get_step_logger should be lazily called (i.e. at runtime, not at module-load time)
 # so that step numbers are initialized properly. e.g.:
@@ -64,6 +52,6 @@ def get_step_logger(logger):
     step = next(_step_counter)
 
     def log(level, msg):
-        logger.log(level, f"Step {step}: {msg}")
+        logger.log(level, "Step %s: %s", step, msg)
 
     return log

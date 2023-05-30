@@ -3,9 +3,6 @@
 Complex Numbers
 ===============
 
-.. note:: When using complex numbers, use Pytorch with CUDA 11.6 downloaded via pip wheel as described in
-   `Get Started <https://pytorch.org/get-started/locally/>`__ and select the CUDA 11.6 pip package.
-
 Complex numbers are numbers that can be expressed in the form :math:`a + bj`, where a and b are real numbers,
 and *j* is called the imaginary unit, which satisfies the equation :math:`j^2 = -1`. Complex numbers frequently occur in mathematics and
 engineering, especially in topics like signal processing. Traditionally many users and libraries (e.g., TorchAudio) have

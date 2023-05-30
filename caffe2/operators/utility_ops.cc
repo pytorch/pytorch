@@ -100,8 +100,8 @@ This operator takes a list of $N$ equal integers as input which represent the le
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/utility_ops.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/utility_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/utility_ops.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/utility_ops.cc
 
 
 <details>
@@ -490,7 +490,7 @@ OPERATOR_SCHEMA(GatherRanges)
 Given DATA tensor of rank 1, and RANGES tensor of rank 3, gather
 corresponding ranges into a 1-D tensor OUTPUT.
 
-RANGES dimentions description:
+RANGES dimensions description:
 1: represents list of examples within a batch
 2: represents list features
 3: two values which are start and length or a range (to be applied on DATA)
@@ -925,7 +925,7 @@ OPERATOR_SCHEMA(Size)
 Return a 1D tensor of type *int64* that contains the number of elements of the input tensor.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/utility_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/utility_ops.cc
 
 <details>
 
@@ -1016,8 +1016,8 @@ Generates an output tensor within the half-open interval $[start, stop)$ (the in
 - The type of the `output` tensor is determined by the types of inputs used.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/utility_ops.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/utility_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/utility_ops.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/utility_ops.cc
 
 
 <details>

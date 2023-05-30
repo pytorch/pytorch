@@ -261,8 +261,10 @@ CUDAStream getStreamFromPool(
     const bool isHighPriority,
     DeviceIndex device_index) {
   initCUDAStreamsOnce();
-  if (device_index == -1)
+  if (device_index == -1) {
     device_index = current_device();
+    c10::cuda::SetTargetDevice();
+  }
   check_gpu(device_index);
 
   // Initializes the stream pools (once)
@@ -289,6 +291,7 @@ CUDAStream getDefaultCUDAStream(DeviceIndex device_index) {
   initCUDAStreamsOnce();
   if (device_index == -1) {
     device_index = current_device();
+    c10::cuda::SetTargetDevice();
   }
   check_gpu(device_index);
   return CUDAStreamForId(device_index, makeStreamId(StreamIdType::DEFAULT, 0));
@@ -298,6 +301,7 @@ CUDAStream getCurrentCUDAStream(DeviceIndex device_index) {
   initCUDAStreamsOnce();
   if (device_index == -1) {
     device_index = current_device();
+    c10::cuda::SetTargetDevice();
   }
   check_gpu(device_index);
   return CUDAStreamForId(device_index, current_streams[device_index]);

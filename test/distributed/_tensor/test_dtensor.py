@@ -3,18 +3,16 @@
 
 import torch
 import torch.nn.functional as F
-from torch.distributed.tensor.parallel import (
-    PairwiseParallel,
-    parallelize_module,
-)
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
+from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
 
 class DummyMLP(torch.nn.Module):
     def __init__(self, device):
@@ -33,6 +31,7 @@ class DummyMLP(torch.nn.Module):
             self.net1.bias.fill_(1.5)
             self.net2.bias.fill_(1.2)
 
+
 class DTensorTest(DTensorTestBase):
     @with_comms
     def test_dtensor_constructor(self):
@@ -47,7 +46,7 @@ class DTensorTest(DTensorTestBase):
             shape=dist_tensor_shape,
             dtype=local_tensor.dtype,
             requires_grad=True,
-            stride=local_tensor.stride()
+            stride=local_tensor.stride(),
         )
         self.assertEqual(dist_tensor.size(), torch.Size((self.world_size * 3, 3)))
 
@@ -59,7 +58,7 @@ class DTensorTest(DTensorTestBase):
                 shape=dist_tensor_shape,
                 dtype=local_tensor.dtype,
                 requires_grad=False,
-                stride=local_tensor.stride()
+                stride=local_tensor.stride(),
             )
 
         local_tensor = torch.randn(3, 3, requires_grad=False)
@@ -71,7 +70,7 @@ class DTensorTest(DTensorTestBase):
                 shape=dist_tensor_shape,
                 dtype=local_tensor.dtype,
                 requires_grad=True,
-                stride=local_tensor.stride()
+                stride=local_tensor.stride(),
             )
 
     @with_comms
@@ -106,7 +105,9 @@ class DTensorTest(DTensorTestBase):
         model_tp.reset_parameters()
         optim = torch.optim.SGD(model_tp.parameters(), lr=0.1)
         model_regular = DummyMLP(self.device_type)
-        model_regular_tp = parallelize_module(model_regular, device_mesh, PairwiseParallel())
+        model_regular_tp = parallelize_module(
+            model_regular, device_mesh, PairwiseParallel()
+        )
         optim_regular = torch.optim.SGD(model_regular_tp.parameters(), lr=0.1)
         model_regular_tp.reset_parameters()
         torch.manual_seed(0)
@@ -148,9 +149,7 @@ class DTensorTest(DTensorTestBase):
         local_tensor_t = local_tensor.permute(1, 2, 0)
         global_shape = torch.Size([4, self.world_size * 8, 8])
         self.assertEqual(local_tensor_t.stride(), (8, 1, 32))
-        dist_tensor = DTensor.from_local(
-            local_tensor_t, device_mesh, shard1_spec
-        )
+        dist_tensor = DTensor.from_local(local_tensor_t, device_mesh, shard1_spec)
         global_stride = (8 * self.world_size, 1, 32 * self.world_size)
         self.assertEqual(dist_tensor.stride(), global_stride)
 
@@ -207,7 +206,7 @@ class DTensorTest(DTensorTestBase):
             shape=dist_tensor_shape,
             dtype=local_tensor_with_grad.dtype,
             requires_grad=True,
-            stride=local_tensor_with_grad.stride()
+            stride=local_tensor_with_grad.stride(),
         )
         self.assertEqual(sharded_tensor.size(), dist_tensor_shape)
         self.assertEqual(sharded_tensor.to_local(), local_tensor_with_grad)
@@ -421,7 +420,9 @@ class DTensorMeshTest(DTensorTestBase):
         logical_tensor = torch.randn(tensor_shape)
         for shard_spec, expected_shard_offsets in shard_spec_and_offsets:
             dtensor = distribute_tensor(logical_tensor, device_mesh, shard_spec)
-            offset = compute_local_offset(dtensor.shape, device_mesh, dtensor.placements)
+            offset = compute_local_offset(
+                dtensor.shape, device_mesh, dtensor.placements
+            )
             self.assertEqual(expected_shard_offsets, offset)
 
     @with_comms
@@ -473,8 +474,8 @@ class DTensorMeshTest(DTensorTestBase):
         dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)]).sum()
         self.sub_mesh_assert_equal(
             mesh.mesh,
-            torch.tensor(12.),
-            torch.tensor(0.),
+            torch.tensor(12.0),
+            torch.tensor(0.0),
             dtensor.to_local(),
         )
 

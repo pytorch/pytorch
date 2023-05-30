@@ -85,6 +85,9 @@ class SyncBatchNorm(Function):
             invstd_all = invstd_all[mask]
 
         # calculate global mean & invstd
+        counts = count_all.view(-1)
+        if running_mean is not None and counts.dtype != running_mean.dtype:
+            counts = counts.to(running_mean.dtype)
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
             mean_all,
@@ -93,7 +96,7 @@ class SyncBatchNorm(Function):
             running_var,
             momentum,
             eps,
-            count_all.view(-1)
+            counts,
         )
 
         self.save_for_backward(input, weight, mean, invstd, count_all.to(torch.int32))
@@ -138,6 +141,8 @@ class SyncBatchNorm(Function):
                 sum_dy, sum_dy_xmu = torch.split(combined, num_channels)
 
                 # backward pass for gradient calculation
+                if weight is not None and weight.dtype != mean.dtype:
+                    weight = weight.to(mean.dtype)
                 grad_input = torch.batch_norm_backward_elemt(
                     grad_output,
                     saved_input,
@@ -160,7 +165,7 @@ class SyncBatchNorm(Function):
             # Although this process can directly set grad_input as an empty
             # tensor of zeros, it still needs to participate in the collective
             # communication to unblock its peers, as other peer processes might
-            # have recieved non-empty inputs.
+            # have received non-empty inputs.
             num_channels = saved_input.shape[1]
             if self.needs_input_grad[0]:
                 # launch all_reduce to unblock other peer processes

@@ -249,7 +249,7 @@ class InlineOptionalDeviceGuard {
   explicit InlineOptionalDeviceGuard(Args&&... args)
       : guard_(in_place, std::forward<Args>(args)...) {}
 
-  // TODO: Consider readding Tensor and TensorList constructors here, when
+  // TODO: Consider reading Tensor and TensorList constructors here, when
   // Tensor moves to c10.  (These are only valid on OptionalDeviceGuard,
   // because a Tensor may be undefined, in which case we need an uninitialized
   // tensor guard.)

@@ -81,7 +81,7 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
 
   Tensor alpha = at::empty({n_channel}, input.options());
   Tensor beta = at::empty({n_channel}, input.options());
-  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* alpha_data = alpha.mutable_data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
   batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, scalar_t>(
@@ -132,7 +132,7 @@ void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
 
   Tensor alpha = at::empty({n_channel}, input.options());
   Tensor beta = at::empty({n_channel}, input.options());
-  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* alpha_data = alpha.mutable_data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
   batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, scalar_t>(
@@ -608,7 +608,7 @@ void batch_norm_cpu_contiguous_impl<BFloat16>(Tensor& output, const Tensor& inpu
   // use float as acc type
   Tensor alpha = at::empty({n_channel}, input.options().dtype(kFloat));
   Tensor beta = at::empty({n_channel}, input.options().dtype(kFloat));
-  float* alpha_data = alpha.data_ptr<float>();
+  float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
   const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
@@ -671,7 +671,7 @@ void batch_norm_cpu_channels_last_impl<BFloat16>(Tensor& output, const Tensor& i
 
   Tensor alpha = at::empty({n_channel}, input.options().dtype(kFloat));
   Tensor beta = at::empty({n_channel}, input.options().dtype(kFloat));
-  float* alpha_data = alpha.data_ptr<float>();
+  float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
   const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);

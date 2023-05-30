@@ -146,7 +146,7 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   return std::make_tuple( std::move(result), 0 );
 }
 
-std::tuple<Tensor,optional<int64_t>> where_self_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> where_self_batch_rule(
     const Tensor& condition, optional<int64_t> condition_bdim,
     const Tensor& self, optional<int64_t> self_bdim, const Tensor& other, optional<int64_t> other_bdim) {
   auto condition_logical_rank = rankWithoutBatchDim(condition, condition_bdim);
@@ -164,7 +164,7 @@ std::tuple<Tensor,optional<int64_t>> where_self_batch_rule(
   return std::make_tuple(at::where(condition_, self_, other_), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> gelu_backward_batch_rule(
+static std::tuple<Tensor, optional<int64_t>> gelu_backward_batch_rule(
     const Tensor& grad_out, optional<int64_t> grad_out_bdim, const Tensor& input, optional<int64_t> input_bdim,
     c10::string_view approximate) {
 
@@ -181,7 +181,7 @@ std::tuple<Tensor, optional<int64_t>> gelu_backward_batch_rule(
   return std::make_tuple(at::gelu_backward(grad_out_, input_, approximate), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& mask, optional<int64_t> mask_bdim) {
   TORCH_CHECK(!mask_bdim.has_value(),
@@ -200,7 +200,7 @@ std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
     const Tensor& grad, optional<int64_t> grad_bdim,
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& mask, optional<int64_t> mask_bdim) {
@@ -225,7 +225,7 @@ std::tuple<Tensor,optional<int64_t>> masked_select_backward_batch_rule(
   return std::make_tuple(result, 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
+static std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
     const Tensor& grad, optional<int64_t> grad_bdim,
     const Tensor& x1, optional<int64_t> x1_bdim,
     const Tensor& x2, optional<int64_t> x2_bdim,
@@ -270,7 +270,7 @@ std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
   return std::make_tuple(out, out_bdim);
 }
 
-void fill__Tensor_batch_rule(
+static void fill__Tensor_batch_rule(
     Tensor& self,
     optional<int64_t> self_bdim,
     const Tensor& other,
@@ -289,7 +289,7 @@ void fill__Tensor_batch_rule(
   std::get<0>(self_and_other).copy_(std::get<1>(self_and_other));
 }
 
-std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
+static std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
   Tensor& grad, optional<int64_t> grad_bdim,
   Tensor& self, optional<int64_t> self_bdim,
   Tensor& buffer, optional<int64_t> buffer_bdim) {
@@ -307,7 +307,7 @@ std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
   return std::make_tuple(at::log_sigmoid_backward(out_grad, out_self, out_buffer), 0);
 }
 
-Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
+static Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
   return at::binomial(count, prob.contiguous(), std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
 

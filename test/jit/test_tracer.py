@@ -1973,6 +1973,22 @@ class TestTracer(JitTestCase):
         m2 = torch.jit.trace(model, (torch.ones(1), torch.ones(1)))
         m3 = torch.jit.trace(model, example_kwarg_inputs={'x': torch.ones(1), "y": torch.ones(1)}, strict=False)
 
+    def test_trace_with_tuple_tensor(self):
+        class MyClass(torch.nn.Module):
+            def __init__(self):
+                super(MyClass, self).__init__()
+
+            def forward(self, x, y):
+                return x + y[0] + y[1]
+
+        model = MyClass()
+        traced_model = torch.jit.trace(model, (torch.ones(1), (torch.ones(1), torch.ones(1))))
+        input_dict = {"x": torch.tensor([2, 3]), "y": (torch.tensor([5, 6]), torch.tensor([7, 8]))}
+        self.assertEqual(model(**input_dict), traced_model(**input_dict))
+        traced_model = torch.jit.trace(model, example_kwarg_inputs={
+                                       'x': torch.ones(1), "y": (torch.ones(1), torch.ones(1))})
+        self.assertEqual(model(**input_dict), traced_model(**input_dict))
+
 
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):

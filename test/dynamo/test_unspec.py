@@ -4,9 +4,10 @@ import unittest
 
 import numpy as np
 import torch
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
+
+from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import same
 
 
@@ -115,6 +116,20 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    def test_compiled_random_calls_are_random(self):
+        # For compiled functions with random calls,
+        # it should return different values for every iteration.
+        # https://github.com/pytorch/pytorch/issues/95425
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return (x + 1) * random.uniform(0, 1)
+
+        res = []
+        for _ in range(5):
+            res.append(fn(torch.ones(2)))
+        for i in range(1, 5):
+            self.assertFalse(same(res[i - 1], res[i]))
+
     def test_random_call_with_while_loop(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=3)
@@ -211,6 +226,33 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize("eager")(fn)
         torch._dynamo.mark_dynamic(x, 0)
         opt_fn(x)
+
+    def test_isinstance_symint(self):
+        def fn(x):
+            assert isinstance(x.size(0), int)
+            return x * 2
+
+        x = torch.randn(20)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn(x)
+        y = torch.randn(30)
+        torch._dynamo.mark_dynamic(y, 0)
+        opt_fn(y)
+
+    @torch._dynamo.config.patch("assume_static_by_default", True)
+    def test_propagate_dynamic_dim(self):
+        x = torch.randn(20)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        @torch.compile()
+        def fn(x):
+            y = x * 2
+            comptime.graph_break()
+            z = y * 2
+            return z
+
+        z = fn(x)
+        self.assertEqual(z._dynamo_weak_dynamic_indices, {0})
 
 
 if __name__ == "__main__":

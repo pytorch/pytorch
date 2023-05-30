@@ -484,7 +484,7 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
     nodes.push(node);
   };
 
-  // Main loop for buttom up huffman tree construction.
+  // Main loop for bottom up huffman tree construction.
   while (!nodes.empty()) {
     auto lNode = get_next_node();
     if (!nodes.empty()) {
@@ -626,7 +626,7 @@ search tree.
     .Arg(
         "tree",
         "Serialized TreeProto string containing a tree "
-        "including all intermidate nodes and leafs. All nodes must have names "
+        "including all intermediate nodes and leafs. All nodes must have names "
         "for correct outputs")
     .Arg(
         "beam",

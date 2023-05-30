@@ -1,4 +1,5 @@
 """Utilities for manipulating the torch.Graph object and the torchscript."""
+from __future__ import annotations
 
 # TODO(justinchuby): Move more of the symbolic helper functions here and expose
 # them to the user.
@@ -173,7 +174,7 @@ def add_op_with_blocks(
 
     Returns:
         A tuple of (output_values, new_contexts, node) where:
-            output_values: ONe or more output value of this operator
+            output_values: One or more output value of this operator
                 (see the `outputs` keyword argument for multi-return nodes).
             new_contexts: A tuple of new graph contexts for each sub-block.
             node: The node representing the operator.

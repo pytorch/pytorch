@@ -1284,11 +1284,11 @@ Tensor inner(const Tensor& self, const Tensor& other) {
 
   // Last dimension should match (tensordot does not enforce this)
   TORCH_CHECK(
-      self.size(-1) == other.size(-1),
+      self.sym_size(-1) == other.sym_size(-1),
       "inner() the last dimension must match on both input tensors but got shapes ",
-      self.sizes(),
+      self.sym_sizes(),
       " and ",
-      other.sizes());
+      other.sym_sizes());
 
   return at::tensordot(self, other, -1, -1);
 }
@@ -1312,6 +1312,11 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
+
+  TORCH_CHECK(
+    m1.dtype() == m2.dtype(),
+    "expected m1 and m2 to have the same dtype, but got: ", m1.dtype(), " != ", m2.dtype()
+  )
   // Array access is faster than .size(n) and .stride(n)
   const auto self_sizes = self.sizes();
   auto m1_strides = m1.strides();
@@ -1416,21 +1421,37 @@ static void addmm_impl_cpu_(
   // Always ensure the conjugation for c is resolved since there's no way to specify c's conjugation in the gemm call
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c.is_conj());
 
-  // Apply BLAS routine
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
-      result.scalar_type(), "addmm_impl_cpu_",
-      [&]{
-        using opmath_t = at::opmath_type<scalar_t>;
-        at::native::cpublas::gemm(
-            transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
-            transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
-            m, n, k,
-            alpha.to<opmath_t>(),
-            a.data_ptr<scalar_t>(), lda,
-            b.data_ptr<scalar_t>(), ldb,
-            beta.to<opmath_t>(),
-            c.data_ptr<scalar_t>(), ldc);
-      });
+  bool dispatched = false;
+#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+  // On AArch64 if LHS matrix in BLAS routine is transposed but RHS is not then
+  // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
+  // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
+  // additionally have support for running kernel with BF16 instructions
+  if(transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+      mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
+      // We have dispatched to ACL GEMM for single precision float
+      // so do not need to dispatch to BLAS GEMM below
+      dispatched = true;
+  }
+#endif
+
+  if(!dispatched) {
+    // Apply BLAS routine
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
+        result.scalar_type(), "addmm_impl_cpu_",
+        [&]{
+          using opmath_t = at::opmath_type<scalar_t>;
+          at::native::cpublas::gemm(
+              transpose_a ? a.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
+              transpose_b ? b.is_conj() ? TransposeType::ConjTranspose : TransposeType::Transpose : TransposeType::NoTranspose,
+              m, n, k,
+              alpha.to<opmath_t>(),
+              a.const_data_ptr<scalar_t>(), lda,
+              b.const_data_ptr<scalar_t>(), ldb,
+              beta.to<opmath_t>(),
+              c.mutable_data_ptr<scalar_t>(), ldc);
+        });
+  }
 
   if (!c.is_same(result)) {
     result.copy_(c);
@@ -1541,7 +1562,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
   auto s0 = self.accessor<scalar_t, 3>();
   auto m0 = mat2.accessor<scalar_t, 3>();
 
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
   using opmath_t = at::opmath_type<scalar_t>;
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
       for (const auto b : c10::irange(b_begin, b_end)) {

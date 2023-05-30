@@ -10,6 +10,7 @@
 #include <array>
 #include <mutex>
 #include <set>
+#include <unordered_set>
 
 namespace c10 {
 
@@ -127,6 +128,7 @@ struct SegmentInfo {
   int64_t active_size = 0;
   cudaStream_t stream = 0;
   bool is_large = false;
+  bool is_expandable = false;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
 };
@@ -144,7 +146,9 @@ struct TraceEntry {
                     // This event is generated when a free actually completes.
     SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
     SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
-                  // defragement or empty_caches)
+                  // defragment or empty_caches)
+    SEGMENT_MAP, // a call to cuMemMap (used with expandable_segments)
+    SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
     OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
@@ -214,14 +218,53 @@ class CUDAAllocator : public Allocator {
       MempoolId_t mempool_id) = 0;
   virtual void endAllocateStreamToPool(int device, cudaStream_t stream) = 0;
   virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
+  // returns true if the allocated blocks are equal to expected live allocations
+  virtual bool checkPoolLiveAllocations(
+      int device,
+      MempoolId_t mempool_id,
+      const std::unordered_set<void*>& expected_live_allocations) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support checkPoolLiveAllocations. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
+  virtual bool isHistoryEnabled() {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support recordHistory. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual void recordHistory(
       bool enabled,
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       bool alloc_trace_record_context) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
-  virtual bool needsPoolSpecificPeerAccess() = 0;
+
+  virtual void enablePeerAccess(int dev, int dev_to_access) = 0;
+
+  // memory not allocated from cudaMalloc cannot be copied
+  // across devices using cudaMemcpyAsync if peer to peer access is disabled.
+  // instead it requres cudaMemcpyAsyncPeer
+  //  with P2P Enabled, all combinations work
+  //  with P2P Disabled:
+  //                       cudaMalloc cudaMallocAsync/cuMemMap
+  // cudaMemcpyAsyncPeer   works      works
+  // cudaMemcpyAsync       works      error
+
+  // This function performs chooses to use the Peer version of
+  // memcpy if required based on where the allocated put dst/src.
+  virtual cudaError_t memcpyAsync(
+      void* dst,
+      int dstDevice,
+      const void* src,
+      int srcDevice,
+      size_t count,
+      cudaStream_t stream,
+      bool p2p_enabled) = 0;
   virtual std::shared_ptr<AllocatorState> getCheckpointState(
       int device,
       MempoolId_t id) = 0;
@@ -331,6 +374,18 @@ inline void recordHistory(
       alloc_trace_record_context);
 }
 
+inline bool isHistoryEnabled() {
+  return get()->isHistoryEnabled();
+}
+
+inline bool checkPoolLiveAllocations(
+    int device,
+    MempoolId_t mempool_id,
+    const std::unordered_set<void*>& expected_live_allocations) {
+  return get()->checkPoolLiveAllocations(
+      device, mempool_id, expected_live_allocations);
+}
+
 inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
   return get()->attachOutOfMemoryObserver(observer);
 }
@@ -345,6 +400,22 @@ inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
 
 inline std::string name() {
   return get()->name();
+}
+
+inline cudaError_t memcpyAsync(
+    void* dst,
+    int dstDevice,
+    const void* src,
+    int srcDevice,
+    size_t count,
+    cudaStream_t stream,
+    bool p2p_enabled) {
+  return get()->memcpyAsync(
+      dst, dstDevice, src, srcDevice, count, stream, p2p_enabled);
+}
+
+inline void enablePeerAccess(int dev, int dev_to_access) {
+  return get()->enablePeerAccess(dev, dev_to_access);
 }
 
 } // namespace CUDACachingAllocator

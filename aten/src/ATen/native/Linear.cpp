@@ -726,12 +726,13 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
 // in the two dimension lists
 Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
   TORCH_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
-  int64_t csize = 1;  // total size of the contracted dimensions
+  TORCH_CHECK(input1.scalar_type() == input2.scalar_type(), "both inputs should have same dtype");
+  SymInt csize = 1;  // total size of the contracted dimensions
   Tensor t1 = input1;
   Tensor t2 = input2;
   for (const auto i : c10::irange(dims1.size())) {
-    int s1 = input1.size(dims1[i]);
-    int s2 = input2.size(dims2[i]);
+    SymInt s1 = input1.sym_size(dims1[i]);
+    SymInt s2 = input2.sym_size(dims2[i]);
     if (s2 == 1) { // broadcasted dimensions can be summed right away
       t1 = t1.sum(dims1[i], true);
     } else if (s1 == 1) {
@@ -745,19 +746,20 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
 
   auto cdims1 = at::dim_list_to_bitset(dims1, input1.dim());
   auto cdims2 = at::dim_list_to_bitset(dims2, input2.dim());
-  std::vector<int64_t> p1, p2, rsizes;  // p1, p2: input permutations, rsizes: sizes of the result
+  std::vector<int64_t> p1, p2;  // p1, p2: input permutations
+  std::vector<SymInt> rsizes;  // rsizes: sizes of the result
   p1.reserve(input1.dim());
   p2.reserve(input2.dim());
   rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
-  int64_t size1 = 1; // number of non-contracted elements in input1
-  int64_t size2 = 1; // number of non-contracted elements in input2
+  SymInt size1 = 1; // number of non-contracted elements in input1
+  SymInt size2 = 1; // number of non-contracted elements in input2
 
   // fill the permutations and compute sizes
   for (const auto i : c10::irange(input1.dim())) {
     if (! cdims1[i]) {
       p1.emplace_back(i);
-      size1 *= t1.size(i);
-      rsizes.emplace_back(t1.size(i));
+      size1 *= t1.sym_size(i);
+      rsizes.emplace_back(t1.sym_size(i));
     }
   }
   for (const auto x : dims1) {
@@ -769,15 +771,15 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   for (const auto i : c10::irange(input2.dim())) {
     if (! cdims2[i]) {
       p2.emplace_back(i);
-      size2 *= t2.size(i);
-      rsizes.emplace_back(t2.size(i));
+      size2 *= t2.sym_size(i);
+      rsizes.emplace_back(t2.sym_size(i));
     }
   }
   // permut and reshape for matrix multiplication
-  t1 = t1.permute(p1).reshape({size1, csize});
-  t2 = t2.permute(p2).reshape({csize, size2});
+  t1 = t1.permute(p1).reshape_symint({size1, csize});
+  t2 = t2.permute(p2).reshape_symint({csize, size2});
   // multiply and reshape to target size
-  return at::mm(t1, t2).reshape(rsizes);
+  return at::mm(t1, t2).reshape_symint(rsizes);
 }
 
 Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {

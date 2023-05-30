@@ -566,9 +566,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
   // fast path for single thread when both inputs and result are contiguous and not empty
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
   ScalarType dtype = materialized[valid].get().scalar_type();
-  bool serial_dtype =
-      (dtype == ScalarType::Double || dtype == ScalarType::Float ||
-       dtype == ScalarType::BFloat16 || dtype == ScalarType::Half);
+  bool serial_dtype = at::isFloatingType(dtype);
   if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
     cat_serial_stub(kCPU, result, materialized, dim);
     return;
@@ -1107,6 +1105,8 @@ Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
            "): the number of sizes provided (", size.size(), ") ",
            "must be greater or equal to the number of dimensions in the tensor (",
            self.dim(), ")");
+  TORCH_CHECK(!self.is_sparse() && !at::sparse_csr::is_sparse_compressed(self),
+            "expand is unsupported for ", self.layout(), " tensors");
 
   auto expandedSizesAndStrides = inferExpandGeometry_dimvector(self.sizes(), self.strides(), size);
 
@@ -2069,7 +2069,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
             const auto start = tid * chunk_size_src;
             const auto end = std::min(start + chunk_size_src, src_len);
-            const auto tid_offset = thread_offsets.data_ptr<int64_t>()[tid];
+            const auto tid_offset = thread_offsets.const_data_ptr<int64_t>()[tid];
             const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
             const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
             const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
@@ -2251,7 +2251,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       ) -> std::tuple<Tensor, Tensor> {
         const auto src_intersection_counts = src_counts.mul(idx_counts > 0);
         const auto src_intersection_offsets = src_intersection_counts.cumsum(0);
-        const auto src_idx_len = src_intersection_offsets.data_ptr<int64_t>()[size - 1];
+        const auto src_idx_len = src_intersection_offsets.const_data_ptr<int64_t>()[size - 1];
         auto src_idx = at::empty({src_idx_len}, src.options());
 
         const auto* ptr_src = src.data_ptr<int64_t>();
@@ -2536,21 +2536,21 @@ std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t
 std::vector<Tensor> hsplit(const Tensor& self, int64_t split_size) {
   TORCH_CHECK(self.dim() >= 1, "torch.hsplit requires a tensor with at least 1 dimension, but got a tensor with ", self.dim(), " dimensions!")
   int64_t dim = (self.dim() == 1) ? 0 : 1;
-  TORCH_CHECK(split_size != 0 && self.sizes()[dim] % split_size == 0,
+  TORCH_CHECK(split_size != 0 && self.sym_sizes()[dim] % split_size == 0,
     "torch.hsplit attempted to split along dimension ", dim,", but the size of the dimension ", self.sizes()[dim], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, dim);
 }
 
 std::vector<Tensor> vsplit(const Tensor& self, int64_t split_size) {
   TORCH_CHECK(self.dim() >= 2, "torch.vsplit requires a tensor with at least 2 dimension, but got a tensor with ", self.dim(), " dimensions!")
-  TORCH_CHECK(split_size != 0 && self.sizes()[0] % split_size == 0,
+  TORCH_CHECK(split_size != 0 && self.sym_sizes()[0] % split_size == 0,
     "torch.vsplit attempted to split along dimension ", 0,", but the size of the dimension ", self.sizes()[0], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, 0);
 }
 
 std::vector<Tensor> dsplit(const Tensor& self, int64_t split_size) {
   TORCH_CHECK(self.dim() >= 3, "torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with ", self.dim(), " dimensions!")
-  TORCH_CHECK(split_size != 0 && self.sizes()[2] % split_size == 0,
+  TORCH_CHECK(split_size != 0 && self.sym_sizes()[2] % split_size == 0,
     "torch.dsplit attempted to split along dimension ", 2,", but the size of the dimension ", self.sizes()[2], " is not divisible by the split_size ", split_size, "!");
   return at::tensor_split(self, split_size, 2);
 }
@@ -2807,7 +2807,7 @@ static std::vector<Tensor> reshape_input_for_column_stack(TensorList tensors) {
   auto transform_lambda = [](const Tensor& input) -> Tensor {
     // reshape 0D or 1D tensor t into (t.numel(), 1)
     if (input.dim() <= 1) {
-      return input.reshape({input.numel(), 1});
+      return input.reshape_symint({input.sym_numel(), 1});
     }
     return input;
   };

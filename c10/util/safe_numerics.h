@@ -45,6 +45,19 @@ C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #endif
 }
 
+C10_ALWAYS_INLINE bool mul_overflows(int64_t a, int64_t b, int64_t* out) {
+#if C10_HAS_BUILTIN_OVERFLOW()
+  return __builtin_mul_overflow(a, b, out);
+#else
+  volatile int64_t tmp = a * b;
+  *out = tmp;
+  if (a == 0 || b == 0) {
+    return false;
+  }
+  return !(a == tmp / b);
+#endif
+}
+
 template <typename It>
 bool safe_multiplies_u64(It first, It last, uint64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
