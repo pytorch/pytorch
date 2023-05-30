@@ -283,7 +283,7 @@ def _get_param_to_fqns(
         ):
             local_fqns = (
                 param._fqns
-                if type(param) is flat_param_file.FlatParameter
+                if isinstance(param, flat_param_file.FlatParameter)
                 else [param_name]
             )  # prefixed from `module`
             global_fqns = [
@@ -293,7 +293,7 @@ def _get_param_to_fqns(
             if not is_shared_param:
                 param_to_fqns[param] = global_fqns
             else:
-                if type(param) is flat_param_file.FlatParameter:
+                if isinstance(param, flat_param_file.FlatParameter):
                     # DMP overwrites `named_parameters` and skip (advance to
                     # the next child module) the wrapped_module (e.g.,
                     # _dmp_wrapped_module and _fsdp_wrapped_module). When a user
