@@ -41,7 +41,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         kwargs["device"] = compressed_tensor.device
         kwargs["dtype"] = compressed_tensor.dtype
         # layout will be set to semi_structured_sparse eventually, but keep this strided for now
-        kwargs["layout"] = torch.sparse_coo
+        kwargs["layout"] = compressed_tensor.layout
         # currently backprop is not implented for cusparselt matmul
         kwargs["requires_grad"] = False
 
@@ -78,8 +78,8 @@ class SemiStructuredSparseTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
 
-        arg_types = [type(arg) for arg in args]
-        print(f"Calling func: {func} on types: {arg_types}")
+        # arg_types = [type(arg) for arg in args]
+        # print(f"Calling func: {func} on types: {arg_types}")
 
         # since we create a new compressed tensor, the tensor will already be detached
         # this effecitvely functions as a no-op. 
