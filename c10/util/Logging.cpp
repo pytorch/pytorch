@@ -457,4 +457,148 @@ void setLogLevelFlagFromEnv() {
 
 } // namespace
 } // namespace detail
+
+void LogState::enable_log(const char* log_qname, int64_t log_level) {
+  TORCH_INTERNAL_ASSERT(log_qname != nullptr);
+  LogStateMap::iterator it = log_qname_to_level.find(log_qname);
+
+  if (it == log_qname_to_level.end()) {
+    size_t log_qname_len = std::strlen(log_qname) + 1;
+    char* key = new char[log_qname_len];
+    std::strncpy(key, log_qname, log_qname_len);
+    log_qname_to_level[key] = log_level;
+  } else {
+    it->second = log_level;
+  }
+}
+
+void LogState::enable_log(const std::string& log_qname, int64_t log_level) {
+  enable_log(log_qname.c_str(), log_level);
+}
+
+bool LogState::is_log_enabled(const char* log_qname, int64_t log_level) {
+  TORCH_INTERNAL_ASSERT(log_qname != nullptr);
+  LogStateMap::iterator it = log_qname_to_level.find(log_qname);
+  TORCH_CHECK(
+      it != log_qname_to_level.end(),
+      "Log component alias not found: ",
+      log_qname);
+  return log_level >= it->second;
+}
+
+bool LogState::is_log_enabled(const std::string& log_qname, int64_t log_level) {
+  return is_log_enabled(log_qname.c_str(), log_level);
+}
+
+LogState::~LogState() {
+  for (auto& it : log_qname_to_level) {
+    const char* key = it.first;
+
+    if (key) {
+      delete[] key;
+    }
+  }
+}
+
+static LogState log_state;
+
+LogState* getLogState() {
+  return &log_state;
+}
+
+Log::Log(
+    const char* log_qname,
+    int64_t py_log_level,
+    const SourceLocation& source_location,
+    std::string msg)
+    : log_qname_(std::string(log_qname)),
+      py_log_level_(py_log_level),
+      source_location_(source_location),
+      msg_(std::move(msg)) {}
+
+Log::Log(
+    const char* log_qname,
+    int64_t py_log_level,
+    const SourceLocation& source_location,
+    const char* msg)
+    : log_qname_(std::string(log_qname)),
+      py_log_level_(py_log_level),
+      source_location_(source_location),
+      msg_(std::string(msg)) {}
+
+Log::Log(
+    const char* log_qname,
+    int64_t py_log_level,
+    const SourceLocation& source_location,
+    detail::CompileTimeEmptyString msg)
+    : Log(log_qname, py_log_level, source_location, "") {}
+
+const std::string& Log::log_qname() const {
+  return log_qname_;
+}
+
+int64_t Log::py_log_level() const {
+  return py_log_level_;
+}
+
+const SourceLocation& Log::source_location() const {
+  return source_location_;
+}
+
+const std::string& Log::msg() const {
+  return msg_;
+}
+
+void LogHandler::process(const Log& log) {
+  LOG_AT_FILE_LINE(INFO, log.source_location().file, log.source_location().line)
+      << "Log: " << log.msg() << " (function " << log.source_location().function
+      << ")";
+}
+
+namespace LogUtils {
+
+namespace {
+
+LogHandler* getBaseHandler() {
+  static LogHandler base_log_handler_ = LogHandler();
+  return &base_log_handler_;
+}
+
+class ThreadLogHandler {
+ public:
+  ThreadLogHandler() = delete;
+
+  static LogHandler* get_handler() {
+    if (!log_handler_) {
+      log_handler_ = getBaseHandler();
+    }
+    return log_handler_;
+  }
+
+  static void set_handler(LogHandler* handler) {
+    log_handler_ = handler;
+  }
+
+ private:
+  static thread_local LogHandler* log_handler_;
+};
+
+thread_local LogHandler* ThreadLogHandler::log_handler_ = nullptr;
+
+} // namespace
+
+void set_log_handler(LogHandler* handler) noexcept(true) {
+  ThreadLogHandler::set_handler(handler);
+}
+
+LogHandler* get_log_handler() noexcept(true) {
+  return ThreadLogHandler::get_handler();
+}
+
+} // namespace LogUtils
+
+void log(const Log& log) {
+  LogUtils::ThreadLogHandler::get_handler()->process(log);
+}
+
 } // namespace c10

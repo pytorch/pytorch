@@ -367,6 +367,122 @@ C10_API bool LogAPIUsageFakeReturn(const std::string& context);
 // Initializes the c10 logger.
 C10_API void initLogging();
 
+class C10_API LogState {
+ public:
+  // Enable logs under the given component alias to be emitted if they are
+  // greater than or equal to the given level
+  void enable_log(const char* log_qname, int64_t log_level);
+  void enable_log(const std::string& log_qname, int64_t log_level);
+
+  // Check if the given component alias is enabled with a log level less than or
+  // equal to the given level
+  bool is_log_enabled(const char* log_qname, int64_t log_level);
+  bool is_log_enabled(const std::string& log_qname, int64_t log_level);
+
+  ~LogState();
+
+ private:
+  struct CharPtrComparator {
+    bool operator()(const char* a, const char* b) const {
+      return std::strcmp(a, b) < 0;
+    }
+  };
+
+  using LogStateMap = std::map<const char*, int64_t, CharPtrComparator>;
+
+  LogStateMap log_qname_to_level;
+};
+
+C10_API LogState* getLogState();
+
+class C10_API Log {
+ public:
+  Log(const char* log_qname,
+      int64_t py_log_level,
+      const SourceLocation& source_location,
+      std::string msg);
+
+  Log(const char* log_qname,
+      int64_t py_log_level,
+      const SourceLocation& source_location,
+      const char* msg);
+
+  Log(const char* log_qname,
+      int64_t py_log_level,
+      const SourceLocation& source_location,
+      ::c10::detail::CompileTimeEmptyString msg);
+
+  const std::string& log_qname() const;
+  int64_t py_log_level() const;
+  const SourceLocation& source_location() const;
+  const std::string& msg() const;
+
+ private:
+  // The name of the component under which to emit the log message.
+  std::string log_qname_;
+
+  // The Python log level to emit the log as.
+  int64_t py_log_level_;
+
+  // Where the log happened.
+  SourceLocation source_location_;
+
+  // The actual log message.
+  std::string msg_;
+};
+
+// Issue a log with a given message. Dispatched to the current
+// log handler.
+C10_API void log(const Log& log);
+
+class C10_API LogHandler {
+ public:
+  virtual ~LogHandler() = default;
+
+  virtual void process(const Log& log);
+};
+
+namespace LogUtils {
+
+/// Sets the global log handler. This is not thread-safe, so it should
+/// generally be called once during initialization or while holding the GIL
+/// for programs that use python.
+/// User is responsible for keeping the LogHandler alive until
+/// it is not needed.
+C10_API void set_log_handler(LogHandler* handler) noexcept(true);
+
+/// Gets the global log handler.
+C10_API LogHandler* get_log_handler() noexcept(true);
+
+class C10_API LogHandlerGuard {
+  LogHandler* prev_handler_;
+
+ public:
+  LogHandlerGuard(LogHandler* new_handler)
+      : prev_handler_(c10::LogUtils::get_log_handler()) {
+    c10::LogUtils::set_log_handler(new_handler);
+  }
+  ~LogHandlerGuard() {
+    c10::LogUtils::set_log_handler(prev_handler_);
+  }
+};
+
+} // namespace LogUtils
+
 } // namespace c10
+
+// TODO: Combine `TORCH_LOG` with `LOG_AT_FILE_LINE`
+#ifdef DISABLE_LOG
+#define TORCH_LOG(...) ((void)0);
+#else
+#define TORCH_LOG(log_qname, log_level, ...)                        \
+  if (::c10::getLogState()->is_log_enabled(log_qname, log_level)) { \
+    ::c10::log(::c10::Log(                                          \
+        log_qname,                                                  \
+        log_level,                                                  \
+        {__func__, __FILE__, static_cast<uint32_t>(__LINE__)},      \
+        WARNING_MESSAGE_STRING(__VA_ARGS__)));                      \
+  }
+#endif
 
 #endif // C10_UTIL_LOGGING_H_

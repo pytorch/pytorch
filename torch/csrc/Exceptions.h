@@ -10,6 +10,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/StringUtil.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Export.h>
@@ -51,6 +52,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define HANDLE_TH_ERRORS                              \
   try {                                               \
     torch::PyWarningHandler __enforce_warning_buffer; \
+    torch::PyLogHandler __log_buffer;                 \
     try {
 #define _CATCH_GENERIC_ERROR(ErrorType, PythonErrorType, retstmnt) \
   catch (const c10::ErrorType& e) {                                \
@@ -106,6 +108,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   }                                                                 \
   catch (...) {                                                     \
     __enforce_warning_buffer.set_in_exception();                    \
+    __log_buffer.set_in_exception();                                \
     throw;                                                          \
   }                                                                 \
   }                                                                 \
@@ -330,6 +333,39 @@ struct LinAlgError : public PyTorchError {
   PyObject* python_type() override {
     return THPException_LinAlgError;
   }
+};
+
+void registerLogComponent(std::string log_qname);
+
+// ATen log handler for Python
+struct PyLogHandler {
+  struct InternalHandler : at::LogHandler {
+    ~InternalHandler() override = default;
+    void process(const c10::Log& log) override;
+
+    std::vector<c10::Log> log_buffer_;
+  };
+
+ public:
+  /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
+  TORCH_PYTHON_API PyLogHandler() noexcept(true);
+  // NOLINTNEXTLINE(bugprone-exception-escape)
+  TORCH_PYTHON_API ~PyLogHandler() noexcept(false);
+
+  /** Call if an exception has been thrown
+
+   *  Necessary to determine if it is safe to throw from the desctructor since
+   *  std::uncaught_exception is buggy on some platforms and generally
+   *  unreliable across dynamic library calls.
+   */
+  void set_in_exception() {
+    in_exception_ = true;
+  }
+
+ private:
+  InternalHandler internal_handler_;
+  at::LogHandler* prev_handler_;
+  bool in_exception_;
 };
 
 // ATen warning handler for Python

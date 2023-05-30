@@ -266,6 +266,102 @@ LinAlgError::LinAlgError(const char* format, ...) {
   va_end(fmt_args);
 }
 
+// Maps component alias to the `log` function of its `logging.Logger` object
+std::map<std::string, PyObject*> _component_log_funcs;
+
+// Returns a pointer to `logging.getLogger`
+PyObject* get_logging_getLogger() {
+  auto logging_module = THPObjectPtr(PyImport_ImportModule("logging"));
+  if (!logging_module)
+    TORCH_CHECK(false, "Could not import 'logging' module");
+
+  PyObject* logging_getLogger =
+      PyObject_GetAttrString(logging_module.get(), "getLogger");
+  if (!logging_getLogger)
+    TORCH_CHECK(false, "Could not get logging.getLogger");
+
+  return logging_getLogger;
+}
+
+void registerLogComponent(std::string log_qname) {
+  static PyObject* logging_getLogger = get_logging_getLogger();
+  auto args = THPObjectPtr(Py_BuildValue("(s)", log_qname.c_str()));
+  auto kwargs = THPObjectPtr(PyDict_New());
+  auto logger =
+      THPObjectPtr(PyObject_Call(logging_getLogger, args.get(), kwargs.get()));
+  if (!logger)
+    TORCH_CHECK(false, "Could not get logging.getLogger('", log_qname, "')");
+
+  auto component_log_func = PyObject_GetAttrString(logger, "log");
+  if (!component_log_func) {
+    TORCH_CHECK(
+        false, "Could not get logging.getLogger('", log_qname, "').log");
+  }
+
+  _component_log_funcs[log_qname] = component_log_func;
+}
+
+void PyLogHandler::InternalHandler::process(const c10::Log& log) {
+  log_buffer_.push_back(log);
+}
+
+PyLogHandler::PyLogHandler() noexcept(true)
+    : prev_handler_(c10::LogUtils::get_log_handler()), in_exception_(false) {
+  c10::LogUtils::set_log_handler(&internal_handler_);
+}
+
+PyLogHandler::~PyLogHandler() noexcept(false) {
+  c10::LogUtils::set_log_handler(prev_handler_);
+  auto& log_buffer = internal_handler_.log_buffer_;
+
+  if (!log_buffer.empty()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    PyObject *type, *value, *traceback;
+    pybind11::gil_scoped_acquire gil;
+    auto result = 0;
+    if (in_exception_) {
+      // This (combined with PyErr_Restore below) also works when no python
+      // error has been set yet
+      PyErr_Fetch(&type, &value, &traceback);
+    }
+    for (const auto& log : log_buffer) {
+      auto msg = log.msg();
+      auto log_level = log.py_log_level();
+      auto log_qname = log.log_qname();
+      processErrorMsgInplace(msg);
+
+      if (_component_log_funcs.find(log_qname) == _component_log_funcs.end()) {
+        // NOTE: If the component name is not found, then we cannot emit the
+        // log. We also cannot use TORCH_CHECK to throw an error, since C++
+        // exceptions cannot be thrown in constructors. Throwing a Python error
+        // is possible, but I'm not sure if it's a good idea.
+
+        std::stringstream ss;
+        ss << "Logger with qualified name '" << log_qname
+           << "' was not registered";
+        PyErr_SetString(PyExc_SystemError, ss.str());
+
+      } else {
+        PyObject* log_func = _component_log_funcs[std::string(log_qname)];
+        auto args =
+            THPObjectPtr(Py_BuildValue("(i, s)", log_level, msg.c_str()));
+        auto kwargs = THPObjectPtr(PyDict_New());
+        PyObject_Call(log_func, args.get(), kwargs.get());
+      }
+    }
+    log_buffer.clear();
+    if ((result < 0) && (!in_exception_)) {
+      /// A log raised an error, we need to force the parent
+      /// function to return an error code.
+      throw python_error();
+    }
+    if (in_exception_) {
+      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
+      PyErr_Restore(type, value, traceback);
+    }
+  }
+}
+
 void PyWarningHandler::InternalHandler::process(const c10::Warning& warning) {
   warning_buffer_.push_back(warning);
 }

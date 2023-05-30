@@ -717,6 +717,50 @@ PyObject* THPModule_warnDeprecation(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_log(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+
+  static torch::PythonArgParser parser(
+      {"_log(c10::string_view log_qname, int64_t log_level=20, c10::string_view message=\"default message\")"});
+  torch::ParsedArgs<3> parsed_args{};
+  auto r = parser.parse(args, {}, parsed_args);
+  std::string log_qname = r.string(0);
+  int64_t log_level = r.toInt64(1);
+  std::string message = r.string(2);
+  TORCH_LOG(log_qname.c_str(), log_level, message);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_enableLog(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  static torch::PythonArgParser parser(
+      {"_enable_log(c10::string_view log_qname, int64_t log_level)"});
+  torch::ParsedArgs<2> parsed_args{};
+  auto r = parser.parse(args, {}, parsed_args);
+  std::string log_qname = r.string(0);
+  int64_t log_level = r.toInt64(1);
+
+  c10::getLogState()->enable_log(log_qname, log_level);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_registerLogComponent(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+
+  static torch::PythonArgParser parser(
+      {"register_log_component(c10::string_view log_qname)"});
+  torch::ParsedArgs<1> parsed_args{};
+  auto r = parser.parse(args, {}, parsed_args);
+  std::string log_qname = r.string(0);
+  torch::registerLogComponent(log_qname);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setBenchmarkCuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -1121,6 +1165,12 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_set_warnAlways", THPModule_setWarnAlways, METH_O, nullptr},
     {"_warn", THPModule_warn, METH_NOARGS, nullptr},
     {"_warn_deprecation", THPModule_warnDeprecation, METH_NOARGS, nullptr},
+    {"_log", THPModule_log, METH_VARARGS, nullptr},
+    {"_register_log_component",
+     THPModule_registerLogComponent,
+     METH_VARARGS,
+     nullptr},
+    {"_enable_log", THPModule_enableLog, METH_VARARGS, nullptr},
     {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS, nullptr},
     {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O, nullptr},
     {"_get_float32_matmul_precision",
