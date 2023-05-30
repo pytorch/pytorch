@@ -263,7 +263,10 @@ class TestPytree(TestCase):
         (TreeSpec(list, None, [LeafSpec()]), "L(*)"),
         (TreeSpec(list, None, [LeafSpec(), LeafSpec()]), "L(*,*)"),
         (TreeSpec(tuple, None, [LeafSpec(), LeafSpec(), LeafSpec()]), "T(*,*,*)"),
-        (TreeSpec(dict, ['a', 'b', 'c'], [LeafSpec(), LeafSpec(), LeafSpec()]), "D('a':*,'b':*,'c':*)"),
+        (
+            TreeSpec(dict, ['a', 'b', 'c'], [LeafSpec(), LeafSpec(), LeafSpec()]),
+            "D(a:*,b:*,c:*)"
+        ),
         (TreeSpec(list, None, [
             TreeSpec(tuple, None, [
                 LeafSpec(),
@@ -277,22 +280,20 @@ class TestPytree(TestCase):
     ], name_fn=lambda _, str_spec: str_spec)
     def test_pytree_serialize(self, spec, str_spec):
         self.assertEqual(pytree_to_str(spec), str_spec)
-        print(spec)
-        print(str_to_pytree(str_spec))
         self.assertTrue(spec == str_to_pytree(str_spec))
         self.assertTrue(spec == str_to_pytree(pytree_to_str(spec)))
 
     def test_pytree_serialize_namedtuple(self):
-        Point = namedtuple('Point', ['x', 'y'])
+        Point = namedtuple("Point", ["x", "y"])
         spec = TreeSpec(namedtuple, Point, [LeafSpec(), LeafSpec()])
-        str_spec = "N(Point,*,*)"
+        str_spec = "N(Point(x, y),*,*)"
 
         self.assertEqual(pytree_to_str(spec), str_spec)
 
         roundtrip_spec = str_to_pytree(pytree_to_str(spec))
-        # The context in the namedtuple is different now because we recreate the
-        # namedtuple type.
-        self.assertEqual(spec.children_specs, roundtrip_spec.children_specs)
+        # The context in the namedtuple is different now because we recreated
+        # the namedtuple type.
+        self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
 
 
 instantiate_parametrized_tests(TestPytree)
