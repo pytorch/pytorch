@@ -589,9 +589,6 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: torch.fx.Graph,
         args: List[Any],
     ):
-        output_nodes = match.output_nodes()
-        first_node = output_nodes[0]
-
         class Replacer(torch.fx.Interpreter):
             call_method = None
             call_module = None
@@ -606,13 +603,13 @@ class ReplacementPatternEntry(PatternEntry):
                     result = graph.call_function(target, args, kwargs)
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
-                    # Retain the meta tags from the first node in the match.
-                    # This is useful for retaining tags like recompute.
-                    result.meta.update(first_node.meta)
                     return result
                 raise NotImplementedError(f"unhandled {node}")
 
-        with graph.inserting_before(first_node):
+        output_nodes = match.output_nodes()
+        node = output_nodes[0]
+
+        with graph.inserting_before(node):
             replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
