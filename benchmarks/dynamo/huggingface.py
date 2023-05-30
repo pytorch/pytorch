@@ -429,6 +429,8 @@ class HuggingfaceRunner(BenchmarkRunner):
         model_cls, config = self._get_model_cls_and_config(model_name)
         model = self._download_model(model_name)
         model = model.to(device, dtype=dtype)
+        if self.args.enable_activation_checkpointing:
+            model.gradient_checkpointing_enable()
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:

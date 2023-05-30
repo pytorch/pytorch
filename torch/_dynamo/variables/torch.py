@@ -20,6 +20,7 @@ from torch.utils import _pytree as pytree
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import ArgsMismatchError, unimplemented, UserError, UserErrorType
+from ..guards import GuardBuilder
 from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
@@ -782,26 +783,42 @@ def speculate_subgraph(
     tx, f, sub_args, graph_checkpoint, checkpoint, *, always_restore=False
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
+    from .builder import wrap_fx_proxy
 
     try:
         with tx.output.new_subtracer() as tracer:
             args = []
             # One argument to graph per sub_args
             for a in sub_args:
-                if a is None:
-                    a = ConstantVariable(None)
                 assert not isinstance(
                     a, torch.Tensor
                 ), "Tensors should already be tracked?"
+                if a is None:
+                    a = ConstantVariable(None)
+
                 if isinstance(a, ConstantVariable):
-                    proxy = tracer.create_graph_input("const")
-                elif isinstance(a, (TensorVariable, AutogradFunctionContextVariable)):
+                    # This arg is not used in the body of the higher order op.
+                    # Currently, this new input is added to make the calls
+                    # happy, which expect a fixed number of arguments. In
+                    # future, we can clean this up.
+                    tracer.create_graph_input("const")
+                    # Ensures that we recompile when the constant value changes
+                    a.add_guard(GuardBuilder.CONSTANT_MATCH)
+                    new_arg = a
+                elif isinstance(a, TensorVariable):
+                    new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
+                    example_value = a.as_proxy().node.meta["example_value"]
+                    new_arg = wrap_fx_proxy(
+                        tx=tx, proxy=new_proxy, example_value=example_value
+                    )
+                elif isinstance(a, AutogradFunctionContextVariable):
                     tracer.create_graph_input(a.as_proxy().node.name)
+                    new_arg = a
                 else:
                     raise unimplemented(
                         "HigherOrderOperator with body that accepts non-Tensors as input"
                     )
-                args.append(a)
+                args.append(new_arg)
             output = f.call_function(tx, args, {})
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
@@ -834,6 +851,7 @@ def speculate_subgraph(
                     {},
                 )
                 graph = tx.output.graph
+                graph.lint()
                 lifted_freevars = tracer.lifted_freevars
 
                 return (
@@ -1245,6 +1263,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             body_name = add_subgraph(
                 "wrap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
             )
+
             body_node = make_attr(body_name)
             p_args = (
                 body_node,
