@@ -606,6 +606,18 @@ class NNModuleVariable(VariableTracker):
                 [self] + args,
                 kwargs,
             )
+        elif name == "_conv_forward":
+            # inline the torch.nn.modules.conv._conv_forward
+            fn = getattr(module, name).__func__
+            module_attr = getattr(fn, "__module__", "")
+            if module_attr is not None and module_attr.startswith(
+                "torch.nn.modules.conv"
+            ):
+                return tx.inline_user_function_return(
+                    variables.UserMethodVariable(fn, self, **options),
+                    [self] + args,
+                    kwargs,
+                )
         # A loose heuristic, but seems to be generally good before we drop into the
         # manual handling of inputs
         elif (
