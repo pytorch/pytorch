@@ -3,14 +3,10 @@ from .semi_structured_sparse_tensor import SemiStructuredSparseTensor
 import random
 
 
-
 def gen_semi_structured_sparse_mask(r, c, dtype=torch.float16, device="cuda"):
     """
-    this function returns a 1:2 sparse matrix of size (r, c).
-    Note that this matrix will also be 2:4 and 4:8 sparse as well.
-    
-
-    We use this to generate a sparse mask for testing. 
+    This function returns a 1:2 sparse matrix of size (r, c).
+    Note that this means this matrix will also be 2:4 and 4:8 sparse as well.
     """
 
     choices = [[0, 1], [1, 0]]
@@ -18,9 +14,11 @@ def gen_semi_structured_sparse_mask(r, c, dtype=torch.float16, device="cuda"):
     mask_entries = [random.choice(choices) for i in range(r * c // 2)]
     # print(mask_entries)
 
-    return torch.tensor(mask_entries,
-                        dtype=dtype,
-                        device=device).reshape(r, c).contiguous()
+    return (
+        torch.tensor(mask_entries, dtype=dtype, device=device)
+        .reshape(r, c)
+        .contiguous()
+    )
 
 
 def is_semi_structured_sparse(tensor: torch.Tensor, zeros_per_block=2):
@@ -30,7 +28,7 @@ def is_semi_structured_sparse(tensor: torch.Tensor, zeros_per_block=2):
 
     if not tensor.is_contiguous():
         raise Exception("Tensor is not contiguous")
-    
+
     block_size = 2 * zeros_per_block
     contiguous_flattened = tensor.view(-1)
     # okay if not the same tensor since values will be the same
@@ -38,27 +36,8 @@ def is_semi_structured_sparse(tensor: torch.Tensor, zeros_per_block=2):
     assert ((block_tensor == 0).sum(dim=1) == zeros_per_block).all()
 
 
-def print_model_sparsity(model, verbose=True):
-    total_params = 0
-    total_nonzero_params = 0
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            nonzero = torch.count_nonzero(param.data)
-            if verbose:
-                size = ", ".join(map(str, param.data.size()))
-                print(
-                    f"{name: <60}| {size: <15} |{param.data.numel():10d}|{nonzero:10d}"
-                )
-            total_nonzero_params += nonzero
-            total_params += param.data.numel()
-    print(f"=== Total Number of Parameters: {total_params} ===")
-    print(f"=== Total Number of Non-Zero Parameters: {total_nonzero_params} ===")
-    return total_params
-
-
-
 def to_semi_structured_sparse(
-    original_tensor : torch.Tensor,
+    original_tensor: torch.Tensor,
     transposed=False,
     backend="cusparselt",
 ):
@@ -90,9 +69,8 @@ def to_semi_structured_sparse(
         )
     else:
         return SemiStructuredSparseTensor(
-                original_tensor.shape, compressed_tensor, None, transposed)
-
-
+            original_tensor.shape, compressed_tensor, None, transposed
+        )
 
 
 def convert_2by4_dense_to_sparse_meta(dense):
