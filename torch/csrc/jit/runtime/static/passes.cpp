@@ -666,7 +666,7 @@ void ReplaceWithMaybeCopy(
 #endif
 }
 
-static void ReplaceWithCopyImpl(
+void ReplaceWithCopyImpl(
     std::shared_ptr<Graph>& graph,
     const c10::FastMap<c10::Symbol, c10::Symbol>& supported,
     const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>>&

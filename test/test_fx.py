@@ -37,7 +37,7 @@ from collections import namedtuple
 
 from torch.fx.proxy import TraceError
 from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
-from torch.fx._symbolic_trace import PHBase
+from torch.fx._symbolic_trace import PHBase, PHWithMeta
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
@@ -3572,6 +3572,61 @@ class TestFX(JitTestCase):
 
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
+
+    def test_metadata_on_ph(self):
+        def f_sum(a: int, b: int) -> int:
+            return a + b
+
+        # Due to unflattening of dict, the batch argument
+        # will be split into two separate nodes with the names
+        # "batch_1" and "batch_2", referring to the keys
+        # "f1" and "f2" respectively in the dict.
+        def f_dict(a: Dict[str, str]) -> bool:
+            return a["f1"] == a["f2"]
+
+        def verify_metadata(gm: GraphModule, arg_names: List[str], metadata: List[str]):
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    self.assertTrue(node.name in arg_names)
+                    self.assertTrue(node.ph_key in metadata)
+
+        verify_metadata(
+            gm=symbolic_trace(
+                f_sum,
+                concrete_args={"a": PHWithMeta(ph_key="a"), "b": PHWithMeta(ph_key="b")}
+            ),
+            arg_names=["a_1", "b_1"],
+            metadata=["a", "b"]
+        )
+        verify_metadata(
+            gm=symbolic_trace(
+                f_dict,
+                concrete_args={"a": {"f1": PHWithMeta(ph_key="f1"), "f2": PHWithMeta(ph_key="f2")}}
+            ),
+            arg_names=["a_1", "a_2"],
+            metadata=["f1", "f2"]
+        )
+
+        # Ensures that tags on nodes are NOT overwritten by PH attributes with same attr name (tag)
+        class TaggingTracer(Tracer):
+            def create_node(self, kind : str, target : Union[str, Callable],
+                            args : Tuple[Argument, ...], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            type_expr : Optional[Any] = None) -> Node:
+                n = super().create_node(kind, target, args, kwargs, name)
+                n.tag = "foo"
+                return n
+
+        class PHWithTag(PHBase):
+            def __init__(self, tag: str):
+                super().__init__()
+
+                self.tag = tag
+
+        g = TaggingTracer().trace(f_sum, concrete_args={"a": PHWithTag(tag="bar"), "b": PHWithTag(tag="bar")})
+        for n in g.nodes:
+            self.assertTrue(hasattr(n, "tag"))
+            # Ensure that tag is still "foo" and not "bar" (from PHWithTag)
+            self.assertEqual(n.tag, "foo")
 
     def test_custom_codegen(self):
         class ListCodeGen(CodeGen):
