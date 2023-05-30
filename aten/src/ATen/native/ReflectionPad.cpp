@@ -154,10 +154,12 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
       ") is too small."
       " Calculated output D: ", output_d, " H: ", output_h, " W: ", output_w);
 
+  const auto memory_format = input.suggest_memory_format();
+  const auto options = input.options().memory_format(memory_format);
   if (batch_mode) {
-    set_output_raw_strided(0, {input.size(0), nplane, output_d, output_h, output_w}, {}, input.options());
+    set_output_raw_strided(0, {input.size(0), nplane, output_d, output_h, output_w}, {}, options);
   } else {
-    set_output_raw_strided(0, {nplane, output_d, output_h, output_w}, {}, input.options());
+    set_output_raw_strided(0, {nplane, output_d, output_h, output_w}, {}, options);
   }
 }
 
@@ -201,7 +203,8 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
   TORCH_CHECK(output_d == grad_output.size(dim_d), "grad_output depth unexpected."
     " Expected: ", output_h, ", Got: ", grad_output.size(dim_d));
 
-  set_output_raw_strided(0, input.sizes(), {}, input.options());
+  const auto memory_format = input.suggest_memory_format();
+  set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format));
 }
 } // namespace meta
 
@@ -256,7 +259,12 @@ void reflection_pad2d_out_template(
   if (ndim == 3) {
     output.resize_({nplane, output_h, output_w});
   } else {
-    output.resize_({nbatch, nplane, output_h, output_w});
+    if (input.is_quantized()) {
+      // quantized tensor can not be resized with argument `memory_format`
+      output.resize_({nbatch, nplane, output_h, output_w});
+    } else {
+      output.resize_({nbatch, nplane, output_h, output_w}, input.suggest_memory_format());
+    }
   }
   reflection_pad2d_kernel(kCPU, output, input, padding);
 }
@@ -294,7 +302,7 @@ void reflection_pad2d_backward_out_template(
     grad_output.size(dim_h));
 
   /* resize */
-  grad_input.resize_(input.sizes());
+  grad_input.resize_(input.sizes(), input.suggest_memory_format());
   grad_input.zero_();
 
   reflection_pad2d_backward_kernel(kCPU, grad_input, grad_output, padding);
