@@ -543,13 +543,6 @@ test_libtorch() {
 
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
 
-    # Start background download
-    MNIST_DIR="${PWD}/test/cpp/api/mnist"
-    python tools/download_mnist.py --quiet -d "${MNIST_DIR}" &
-
-    # Wait for background download to finish
-    wait
-
     if [[ -z "${SHARD}" || "${SHARD}" == "1" ]]; then
       test_libtorch_jit
     fi
@@ -591,6 +584,10 @@ test_libtorch_jit() {
 }
 
 test_libtorch_api() {
+  # Start background download
+  MNIST_DIR="${PWD}/test/cpp/api/mnist"
+  python tools/download_mnist.py --quiet -d "${MNIST_DIR}"
+
   if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
