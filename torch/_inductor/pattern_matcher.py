@@ -35,6 +35,10 @@ NodeOrConstant = Union[Constant, torch.fx.Node]
 # Sentinel indicating multiple quantities can be matched
 MULTIPLE = object()
 
+# Preserve these keys while pattern matching. All the nodes in the replacement
+# graph will preserve the key from the first node in the original pattern.
+preserve_meta_keys = {"recompute"}
+
 
 class Match:
     """
@@ -604,11 +608,15 @@ class ReplacementPatternEntry(PatternEntry):
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     result = graph.call_function(target, args, kwargs)
-                    if "val" in node.meta and "val" not in result.meta:
-                        result.meta["val"] = node.meta["val"]
                     # Retain the meta tags from the first node in the match.
                     # This is useful for retaining tags like recompute.
-                    result.meta.update(first_node.meta)
+                    for key in first_node.meta.keys():
+                        if key in preserve_meta_keys:
+                            result.meta[key] = first_node.meta[key]
+                    if "val" in node.meta and "val" not in result.meta:
+                        result.meta["val"] = node.meta["val"]
+                        assert "tensor_meta" in node.meta
+                        result.meta["tensor_meta"] = node.meta["tensor_meta"]
                     return result
                 raise NotImplementedError(f"unhandled {node}")
 
