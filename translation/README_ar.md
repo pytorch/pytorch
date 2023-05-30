@@ -9,20 +9,20 @@
 <kbd>[<img title="Türkçe" alt="Türkçe" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/tr.svg" width="30">](README_tr.md)</kbd>
 <kbd>[<img title="Deutsch" alt="Deutsch" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/de.svg" width="30">](README_de.md)</kbd>
 
-PyTorch:
+مكتبة PyTorch:
 هي حزمة برمجية في لغة Python توفر ميزتين على مستوى عالٍ:
 - حساب التنسورات (مثل Numpy) بتسارع قوي باستخدام وحدة المعالجة الرسومية (GPU).
 - شبكات عصبية عميقة مبنية على نظام تلقائي للتفاضل يعتمد على تقنية الشريط (autograd system)، وهي تقنية تساعد على تحسين أداء الشبكة وتعلمها.
+
+يمكنك إعادة استخدام حزم بايثون المفضلة لديك مثل (NumPy/SciPyan/Cython) لتوسيع حزمة PyTorch عند الحاجة.
  
-
-You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
-
-Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.org](https://hud.pytorch.org/ci/pytorch/pytorch/main).
+ 
+يمكن العثور على مؤشرات صحة جذعنا (تكامل مستمر) في الرابط التالي[hud.pytorch.org](https://hud.pytorch.org/ci/pytorch/pytorch/main).
 
 <!-- toc -->
 
-- [More About PyTorch](#more-about-pytorch)
-  - [A GPU-Ready Tensor Library](#a-gpu-ready-tensor-library)
+- [المزيد عن PyTorch](#more-about-pytorch)
+  - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات (GPU)](#a-gpu-ready-tensor-library)
   - [Dynamic Neural Networks: Tape-Based Autograd](#dynamic-neural-networks-tape-based-autograd)
   - [Python First](#python-first)
   - [Imperative Experiences](#imperative-experiences)
