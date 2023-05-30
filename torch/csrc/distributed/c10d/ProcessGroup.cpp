@@ -13,7 +13,7 @@
 
 namespace c10d {
 
-static ProcessGroup::BackendType strToBackendType(std::string backend) {
+ProcessGroup::BackendType strToBackendType(std::string backend) {
   if (backend == "undefined") {
     return ProcessGroup::BackendType::UNDEFINED;
   } else if (backend == "gloo") {
@@ -29,7 +29,7 @@ static ProcessGroup::BackendType strToBackendType(std::string backend) {
   }
 }
 
-static std::string backendTypeToStr(ProcessGroup::BackendType backendType) {
+std::string backendTypeToStr(ProcessGroup::BackendType backendType) {
   switch (backendType) {
     case ProcessGroup::BackendType::UNDEFINED:
       return "undefined";

@@ -3454,7 +3454,13 @@ class TestSparse(TestSparseBase):
                 return torch.sparse_coo_tensor(x._indices(), x._values().log(),
                                                x.size(), dtype=x.dtype, device=x.device)
 
-            for dim in range(x.sparse_dim() + x.dense_dim()):
+            # Check dim out of bounds
+            with self.assertRaisesRegex(IndexError, r"Dimension out of range"):
+                torch.sparse.softmax(x, x.dim())
+            with self.assertRaisesRegex(IndexError, r"Dimension out of range"):
+                torch.sparse.softmax(x, -x.dim() - 1)
+
+            for dim in range(x.dim()):
                 # Check sparse softmax definition
 
                 # check Python sparse softmax
@@ -3464,12 +3470,13 @@ class TestSparse(TestSparseBase):
                 self.assertEqual(r1, r2)
 
                 # check C++ sparse softmax
-                y1 = torch.sparse.softmax(x, dim)
-                self.assertEqual(y, y1)
+                for d in (dim, dim - x.dim()):
+                    y1 = torch.sparse.softmax(x, d)
+                    self.assertEqual(y, y1)
 
-                # check C++ sparse log_softmax
-                ly1 = torch.sparse.log_softmax(x, dim)
-                self.assertEqual(ly1, sparse_log(y1))
+                    # check C++ sparse log_softmax
+                    ly1 = torch.sparse.log_softmax(x, d)
+                    self.assertEqual(ly1, sparse_log(y1))
 
                 # Check autograd support on sparse softmax
 

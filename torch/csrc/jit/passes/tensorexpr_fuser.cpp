@@ -43,7 +43,7 @@ namespace jit {
 
 static bool texpr_reductions_enabled = false;
 
-static bool isSupportedForBlock(Node* node) {
+bool isSupportedForBlock(Node* node) {
   switch (node->kind()) {
     case aten::add:
     case aten::mul:
@@ -187,7 +187,7 @@ bool texprReductionsEnabled() {
   return texpr_reductions_enabled;
 }
 
-static void removeProfileNodesAndSpecializeTypes(Block* b) {
+void removeProfileNodesAndSpecializeTypes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::profile) {
       GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
@@ -275,7 +275,7 @@ bool hasTensorTypeSpecialization(Value* v) {
   return true;
 }
 
-static void removeTensorTypeSpecialization(Value* v) {
+void removeTensorTypeSpecialization(Value* v) {
   if (hasTensorTypeSpecialization(v)) {
     v->setType(TensorType::get());
   }
@@ -1364,7 +1364,7 @@ void FuseTensorExprs(
   GRAPH_DUMP("After TExprFuser: ", graph);
 }
 
-static Operation createTensorExprOp(const Node* node) {
+Operation createTensorExprOp(const Node* node) {
   bool dynamic_shape_fusion_node =
       node->hasAttribute(attr::striding_inputs_desc);
   if (!dynamic_shape_fusion_node) {
