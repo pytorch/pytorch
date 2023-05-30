@@ -28,7 +28,6 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
-from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
@@ -1505,9 +1504,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "fail_to_run"
                 )
-                return record_status(
-                    accuracy_status, dynamo_start_stats=start_stats
-                )
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
