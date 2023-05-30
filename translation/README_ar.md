@@ -21,8 +21,8 @@
 
 <!-- toc -->
 
-- [المزيد عن PyTorch](#more-about-pytorch)
-  - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات (GPU)](#a-gpu-ready-tensor-library)
+- [المزيد عن PyTorch](#المزيد-عن-PyTorch)
+  - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات (GPU)](#مكتبة-Tenson-جاهزة-للعمل-على-وحدة-معالجة-الرسوميات-(GPU))
   - [شبكات عصبية ديناميكية: نظام تلقائي للتفاضل يعتمد على التسجيل بواسطة الشريط](#dynamic-neural-networks-tape-based-autograd)
   - [بايثون في المقام الأول](#python-first)
   - [التجارب الحتمية](#imperative-experiences)
