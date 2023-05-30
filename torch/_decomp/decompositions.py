@@ -155,7 +155,6 @@ def fill_tensor(self, value: Tensor):
     )
     return torch.full_like(self, value.item())
 
-
 @register_decomposition(aten.hardsigmoid)
 @pw_cast_for_opmath
 def hardsigmoid(self: Tensor) -> Tensor:
@@ -3432,6 +3431,15 @@ def arange_start(
     return aten.arange.start_step(
         start, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
+
+
+@register_decomposition(aten.__lshift__.Scalar)
+def lshift_Scalar(self, value):
+    return torch.bitwise_left_shift(self, value)
+
+@register_decomposition(aten.__lshift__.Tensor)
+def lshift_Tensor(self, value):
+    return torch.bitwise_left_shift(self, value)
 
 
 def register_inplace(aten_op, outplace_op):

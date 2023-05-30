@@ -255,6 +255,8 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten._log_softmax_backward_data,
             aten.logspace,
             aten.logsumexp.default,
+            aten.__lshift__.Scalar,
+            aten.__lshift__.Tensor,
             aten.masked_fill,
             aten.masked_fill_,
             aten.max_pool2d_with_indices_backward,
