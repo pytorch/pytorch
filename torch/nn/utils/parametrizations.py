@@ -461,7 +461,7 @@ def spectral_norm(module: Module,
     Example::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
-        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> snm = spectral_norm(nn.Linear(20, 40))
         >>> snm
         ParametrizedLinear(

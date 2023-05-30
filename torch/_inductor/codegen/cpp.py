@@ -22,18 +22,25 @@ from torch._prims_common import is_float_dtype
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..scheduler import SchedulerNode
-from ..utils import cache_on_self, sympy_product, sympy_subs, sympy_symbol
+from ..utils import (
+    cache_on_self,
+    get_fused_kernel_name,
+    sympy_product,
+    sympy_subs,
+    sympy_symbol,
+)
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
-    data_type_propagation,
+    DataTypePropagation,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
     KernelArgs,
+    OpDtypeClassifier,
     OpOverrides,
     OptimizationContext,
 )
@@ -210,46 +217,58 @@ class CppPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
         x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
+        if div != 1:
+            div = self.paren(self.doprint(div))
+            if expr.is_integer:
+                x = f"at::native::div_floor_integer({x}, {div})"
+            else:
+                x = f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
         mod = self.paren(self.doprint(mod))
-        if div != "1":
-            x = f"({x} / {div})"
         return f"static_cast<{INDEX_TYPE}>({x}) % static_cast<{INDEX_TYPE}>({mod})"
 
     def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
-        return f"({x} / {div})"
+        if expr.is_integer:
+            return f"at::native::div_floor_integer({x}, {div})"
+        return f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"std::floor({self._print(expr.args[0])})"
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
         if exp == 0.5:
-            return f"std::sqrt({base})"
+            r = f"std::sqrt({base})"
+            return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
-            return "*".join([self.paren(base)] * exp)
+            r = "*".join([self.paren(base)] * exp)
         elif exp < 0:
-            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
-            return "1"
+            r = "1.0"
+
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div
         if expr.q == 1:
-            return f"{expr.p}"
-        return f"{expr.p}.0/{expr.q}.0"
+            r = f"{expr.p}"
+        else:
+            r = f"{expr.p}.0/{expr.q}.0"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
-        return f"std::ceil({self._print(expr.args[0])})"
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
 
 cexpr = CppPrinter().doprint
@@ -347,6 +366,10 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def erf(x):
         return f"{x}.erf()"
+
+    @staticmethod
+    def erfc(x):
+        return f"{x}.erfc()"
 
     @staticmethod
     def sqrt(x):
@@ -462,10 +485,6 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def log10(x):
         return f"{x}.log10()"
-
-    @staticmethod
-    def erfc(x):
-        return f"{x}.erfc()"
 
     @staticmethod
     def nextafter(x):
@@ -717,6 +736,10 @@ class CppOverrides(OpOverrides):
         return f"std::erf({x})"
 
     @staticmethod
+    def erfc(x):
+        return f"std::erfc({x})"
+
+    @staticmethod
     def sqrt(x):
         return f"std::sqrt({x})"
 
@@ -845,10 +868,6 @@ class CppOverrides(OpOverrides):
         return f"std::hypot({x}, {y})"
 
     @staticmethod
-    def erfc(x):
-        return f"std::erfc({x})"
-
-    @staticmethod
     def log10(x):
         return f"std::log10({x})"
 
@@ -959,16 +978,16 @@ class CppOverrides(OpOverrides):
         return f"decltype({x})({x} ^ {y})"
 
     @staticmethod
-    def rand(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(normalized_rand_cpu({seed}, {offset}));"
+    def rand(seed: sympy.Expr, offset: sympy.Expr):
+        return f"normalized_rand_cpu({seed}, {offset})"
 
     @staticmethod
-    def randn(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randn_cpu({seed}, {offset}));"
+    def randn(seed: sympy.Expr, offset: sympy.Expr):
+        return f"randn_cpu({seed}, {offset})"
 
     @staticmethod
-    def randint(seed: sympy.Expr, offset: sympy.Expr, dtype):
-        return f"static_cast<{DTYPE_TO_CPP[dtype]}>(randint_cpu({seed}, {offset}));"
+    def randint64(seed: sympy.Expr, offset: sympy.Expr, low, high):
+        return f"randint64_cpu({seed}, {offset}, {low}, {high})"
 
     @staticmethod
     def sigmoid(x):
@@ -981,8 +1000,10 @@ class CppOverrides(OpOverrides):
         left = V.kernel.cse.newvar()
         right = V.kernel.cse.newvar()
         result = V.kernel.cse.newvar()
-        code.writeline(f"auto {left} = {x} > 0 ? 1 : 0;")
-        code.writeline(f"auto {right} = {x} < 0 ? 1 : 0;")
+        scalar_zero = f"decltype({x})(0)"
+        scalar_one = f"decltype({x})(1)"
+        code.writeline(f"auto {left} = {x} > 0 ? {scalar_one} : {scalar_zero};")
+        code.writeline(f"auto {right} = {x} < 0 ? {scalar_one} : {scalar_zero};")
         code.writeline(f"auto {result} = {left} - {right};")
         V.kernel.compute.splice(code)
         return result
@@ -1015,6 +1036,10 @@ class CppKernel(Kernel):
         replacement = {var: var * scale + offset}
         new_index = sympy_subs(index, replacement)
         return new_index
+
+    @staticmethod
+    def indirect_indexing(index_var, size, check=True):
+        return sympy_symbol(str(index_var))
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1228,11 +1253,18 @@ class CppKernel(Kernel):
 class CppVecKernel(CppKernel):
     overrides = CppVecOverrides
 
-    def __init__(self, args, num_threads, tiling_factor=0, tiling_idx=-1):
+    def __init__(
+        self,
+        args,
+        num_threads,
+        tiling_factor=0,
+        tiling_idx=-1,
+        tiling_dtype=torch.float,
+    ):
         super().__init__(args, num_threads)
         assert codecache.pick_vec_isa()
         if tiling_factor == 0:
-            tiling_factor = codecache.pick_vec_isa().nelements()
+            tiling_factor = codecache.pick_vec_isa().nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
         self.reduction_omp_dec: Dict[str, str] = {}
@@ -1277,7 +1309,7 @@ class CppVecKernel(CppKernel):
             if dtype in [torch.bfloat16]:
                 tmpbufsize += " * 2"
             tmpbufdeclare = f"__at_align__ {tmpbuftype} tmpbuf[{tmpbufsize}];"
-            inner = sympy.symbols(f"{tiling_var}_inner")
+            inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
@@ -1317,7 +1349,7 @@ class CppVecKernel(CppKernel):
         else:
             line = f"{value}.store({var_expr});"
         if non_contiguous:
-            inner = sympy.symbols(f"{tiling_var}_inner")
+            inner = sympy_symbol(f"{tiling_var}_inner")
             new_index = self.scale_index_with_offset(
                 index, itervar_idx=self.tiling_idx, offset=inner
             )
@@ -1325,7 +1357,7 @@ class CppVecKernel(CppKernel):
                 f"{self.tiling_factor}*sizeof(float)/sizeof({DTYPE_TO_CPP[dtype]})"
             )
             line = (
-                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{tmp_bufsize}]; {line}; "
+                f"{{ __at_align__ {DTYPE_TO_CPP[dtype]} tmpbuf[{tmp_bufsize}]; {line} "
                 f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
                 f"{var}[{cexpr_index(new_index)}] = tmpbuf[{inner}]; }}"
             )
@@ -1449,12 +1481,14 @@ class CppTile2DKernel(CppVecKernel):
             ...
     """
 
-    def __init__(self, args, num_threads, tiling_factor, tiling_indices):
-        super().__init__(args, num_threads, tiling_factor, tiling_indices[1])
+    def __init__(self, args, num_threads, tiling_factor, tiling_indices, tiling_dtype):
+        super().__init__(
+            args, num_threads, tiling_factor, tiling_indices[1], tiling_dtype
+        )
         self.tiling_indices = tiling_indices
 
     def inner_itervar(self):
-        return sympy.symbols(f"{self.itervars[self.outer_idx]}_inner")
+        return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
         return stride_at(self.itervars[self.outer_idx], index) == 1 and index.has(
@@ -1944,8 +1978,8 @@ class CppVecKernelChecker(CppVecKernel):
                     return tmp_var
 
             @staticmethod
-            def indirect_indexing(index_var, size):
-                return sympy.Symbol(str(index_var))
+            def indirect_indexing(index_var, size, check=True):
+                return sympy_symbol(str(index_var))
 
             @staticmethod
             def masked(mask, body, other):
@@ -2036,7 +2070,51 @@ class CppKernelProxy(CppKernel):
     def data_type_propagation(self, nodes):
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
-            data_type_propagation(_node)
+            DataTypePropagation.propagate_scheduler_node(_node)
+
+    # Check if all the nodes of a given fx graph can support BF16
+    def is_bf16_scheduler(self, scheduler_node: SchedulerNode):
+        if not isinstance(scheduler_node._body, ir.LoopBody):
+            return True
+
+        scheduler_node.is_bf16 = False
+
+        # Propagate the dtype to check if all the fx node is bf16
+        DataTypePropagation.propagate_scheduler_node(scheduler_node)
+
+        sub_blocks = [scheduler_node._body.root_block] + list(
+            scheduler_node._body.subblocks.values()
+        )
+        for sub_block in sub_blocks:
+            for _node in sub_block.graph.nodes:
+                # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
+                # the data type as well.
+                if (
+                    _node.op in OpDtypeClassifier.io_ops()
+                    or _node.target in OpDtypeClassifier.index_ops()
+                ):
+                    continue
+
+                # Fast path if all operations can support bf16 without converting to fp32
+                if _node.target not in [
+                    "load",
+                    "constant",
+                    "store",
+                    "abs",
+                    "neg",
+                ]:
+                    return False
+
+                if hasattr(_node, "meta") and _node.meta:
+                    assert OptimizationContext.key in _node.meta
+                    opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
+                    if not opt_ctx.dtype or opt_ctx.dtype is not torch.bfloat16:
+                        return False
+                else:
+                    return False
+
+        scheduler_node.is_bf16 = True
+        return True
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
@@ -2152,6 +2230,28 @@ class CppKernelProxy(CppKernel):
             for sub_block in sub_blocks:
                 add_to_dtype(sub_block.graph)
 
+        if all(
+            isinstance(_node, SchedulerNode) and self.is_bf16_scheduler(_node)
+            for _node in nodes
+        ):
+            # Mark the load node to load bf16
+            for _node in nodes:
+                sub_blocks = [_node._body.root_block] + list(
+                    _node._body.subblocks.values()
+                )
+                for sub_block in sub_blocks:
+                    for fx_node in sub_block.graph.nodes:
+                        if fx_node.target in ["load", "constant", "store"]:
+                            assert fx_node.meta
+                            assert OptimizationContext.key in fx_node.meta
+                            opt_ctx: OptimizationContext = fx_node.meta[
+                                OptimizationContext.key
+                            ]
+                            assert opt_ctx.dtype is torch.bfloat16
+
+            # Bypass the legalization as the kernel can run with bf16 directly
+            return
+
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
             assert isinstance(_node._body, ir.LoopBody)
@@ -2172,6 +2272,12 @@ class CppKernelProxy(CppKernel):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_bf16(nodes)
         self.data_type_propagation(nodes)
+
+        vec_dtype = (
+            torch.bfloat16
+            if all(hasattr(_node, "is_bf16") and _node.is_bf16 for _node in nodes)
+            else torch.float
+        )
 
         kernel_group = self.kernel_group
         _, (group, reduction_group) = max(
@@ -2240,6 +2346,9 @@ class CppKernelProxy(CppKernel):
             contig_only = (
                 contig_vars - non_contig_stride_const - non_contig_stride_other
             )
+            if len(contig_vars) == 0:
+                # no contiguous vars
+                return [len(self.itervars) - 1]
             if contig_only:
                 return sorted(contig_only)[-1:]
             contig_and_const_stride = (
@@ -2256,9 +2365,9 @@ class CppKernelProxy(CppKernel):
                 -1:
             ]
 
-        def select_tiling():
+        def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types
-            tiling_factor = self.picked_vec_isa.nelements(dtype=torch.float)
+            tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
                 with CppVecKernelChecker(
@@ -2280,14 +2389,16 @@ class CppKernelProxy(CppKernel):
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-            tiling_factors, tiling_indices = select_tiling()
+            tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 main_loop.set_kernel(
-                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
+                    codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
                 )
                 tail_loop.set_kernel(scalar_kernel)
                 main_loop.simd_vec = True
@@ -2311,10 +2422,14 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
                 inner_main_loop.set_kernel(
-                    codegen_kernel(CppTile2DKernel, tiling_factors[0], tiling_indices)
+                    codegen_kernel(
+                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
+                    )
                 )
                 inner_tail_loop.set_kernel(
-                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
+                    codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
                 )
 
     def codegen_loops(self, code, worksharing):
@@ -2337,8 +2452,7 @@ class CppScheduling:
         else:
             self.kernel_group = KernelGroup()
 
-    @staticmethod
-    def can_fuse_horizontal(node1, node2):
+    def _can_fuse_horizontal_impl(self, node1, node2):
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
         if vars1 == vars2 and reduce1 == reduce2:
@@ -2348,9 +2462,17 @@ class CppScheduling:
         # TODO(jansel): allow fusion pointwise (vars1, ()) suffix?
         return False
 
-    @classmethod
-    def can_fuse_vertical(cls, node1, node2):
-        return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
+    def can_fuse_horizontal(self, node1, node2):
+        if (
+            len(node1.get_nodes()) + len(node2.get_nodes())
+            > config.cpp.max_horizontal_fusion_size
+        ):
+            return False
+
+        return self._can_fuse_horizontal_impl(node1, node2)
+
+    def can_fuse_vertical(self, node1, node2):
+        return self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
 
     def codegen_nodes(self, nodes):
         """
@@ -2361,7 +2483,7 @@ class CppScheduling:
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         cpp_kernel_proxy.codegen_nodes(nodes)
 
-        kernel_group.finalize_kernel(cpp_kernel_proxy, None)
+        kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
 
     def codegen_sync(self):
         pass
@@ -2379,23 +2501,28 @@ class KernelGroup:
         self.ws = WorkSharing(self.loops_code)
         self.stack = contextlib.ExitStack()
         self.stack.enter_context(self.ws)
-        self.count = 0
+        self.scheduled_nodes = []
 
     def new_kernel(self, cls, *args):
         return cls(self.args, parallel_num_threads(), *args)
 
-    def finalize_kernel(self, new_kernel, scheduler):
-        self.count += 1
+    def finalize_kernel(self, new_kernel, nodes):
+        self.scheduled_nodes += nodes
         code = self.loops_code
         ws = self.ws
         new_kernel.codegen_loops(code, ws)
 
     def codegen_define_and_call(self, wrapper):
         self.stack.close()
-        if self.count == 0:
+        if not self.scheduled_nodes:
             return
 
-        kernel_name = "kernel_cpp_" + wrapper.next_kernel_suffix()
+        fused_name = (
+            get_fused_kernel_name(self.scheduled_nodes, config.cpp.descriptive_names)
+            if config.cpp.descriptive_names
+            else ""
+        )
+        kernel_name = "_".join(["cpp", fused_name, wrapper.next_kernel_suffix()])
         arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         arg_defs = ",\n".ljust(25).join(arg_defs)
         arg_types = ",".join(arg_types)
@@ -2434,9 +2561,9 @@ class KernelGroup:
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
         # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
         codecache_str = codecache_str.replace("#pragma CMT", "//")
-        wrapper.define_kernel(kernel_name, codecache_str, cpp=True)
+        wrapper.define_kernel(kernel_name, codecache_str, cuda=False)
         # generate the code to call this
-        wrapper.generate_kernel_call(kernel_name, call_args, cpp=True)
+        wrapper.generate_kernel_call(kernel_name, call_args, cuda=False)
 
 
 class CppWrapperKernelGroup(KernelGroup):
