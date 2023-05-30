@@ -597,7 +597,7 @@ def run_test(
     should_file_rerun = (
         "--subprocess" not in command
         and not RERUN_DISABLED_TESTS
-        and not options.continue_on_error
+        and not options.continue_through_error
     )
     timeout = (
         THRESHOLD * 3
