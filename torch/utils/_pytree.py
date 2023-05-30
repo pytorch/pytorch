@@ -1,4 +1,3 @@
-import ast
 from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
 import functools
 from collections import namedtuple, OrderedDict
@@ -361,17 +360,19 @@ def pytree_to_str(spec: TreeSpec) -> str:
         return f"{type_str}({','.join(child_strings)})"
 
     elif spec.type == namedtuple:
+        context_type = {spec.context.__name__}
+        context_fields = str(spec.context._fields).replace("'", "")
         context_type = spec.context.__name__
         type_str = SUPPORTED_NODES[spec.type].to_str
         child_strings = [pytree_to_str(child) for child in spec.children_specs]
-        return f"{type_str}({context_type},{','.join(child_strings)})"
+        return f"{type_str}({context_type}{context_fields},{','.join(child_strings)})"
 
     elif spec.type in (dict, OrderedDict):
         type_str = SUPPORTED_NODES[spec.type].to_str
         child_strings = []
         for key, child in zip(spec.context, spec.children_specs):
             child_string = pytree_to_str(child)
-            child_strings.append(f"{repr(key)}:{child_string}")
+            child_strings.append(f"{key}:{child_string}")
         return f"{type_str}({','.join(child_strings)})"
 
     else:
@@ -401,15 +402,19 @@ def str_to_pytree(str_spec: str) -> TreeSpec:
         # NamedTuples are serialized like N(type, value, value...)
         assert str_spec[1] == "("
         assert str_spec[-1] == ")"
-        type_end_index = str_spec.find(",")
-        context_type_str = str_spec[2:type_end_index]
-        context_type = namedtuple(context_type_str, [])  # type: ignore[misc]
-        assert str_spec[type_end_index] == ","
+        children_strings = _split_nested(str_spec[2:-1])
 
-        children_string = str_spec[type_end_index + 1:-1]
+        # Construct the namedtuple type with fields
+        namedtuple_str = children_strings[0]
+        type_end_idx = namedtuple_str.find("(")
+        context_type_str = namedtuple_str[:type_end_idx]
+        assert namedtuple_str[-1] == ")"
+        namedtuple_fields_str = namedtuple_str[type_end_idx + 1:-1]
+        context_type = namedtuple(context_type_str, namedtuple_fields_str)  # type: ignore[misc]
+
         children_spec = [
             str_to_pytree(child_string)
-            for child_string in _split_nested(children_string)
+            for child_string in children_strings[1:]
         ]
         return TreeSpec(
             SUPPORTED_STR_TO_TYPE[str_spec[0]].type,
@@ -457,8 +462,7 @@ def _parse_dict_children_spec(toplevel_str: str) -> Tuple[List[str], List[TreeSp
     for i, char in enumerate(children_string):
         if char == ":":
             if nested_parentheses == 0:
-                key = children_string[start_index:i]
-                context_strings.append(ast.literal_eval(key))
+                context_strings.append(children_string[start_index:i])
                 start_index = i + 1
         elif char == "(":
             nested_parentheses += 1
