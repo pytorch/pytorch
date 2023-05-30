@@ -39,7 +39,8 @@ class TestSemiStructuredSparse(TestCase):
         assert a.dtype == a_sparse.dtype
         
         # check layout
-        # assert a_sparse.layout is torch.semi_structured_sparse
+        print("layout", a_sparse.layout)
+        assert a_sparse.layout == torch.semi_structured_sparse
 
         assert isinstance(a, torch.Tensor)
         assert isinstance(a_sparse, SemiStructuredSparseTensor)

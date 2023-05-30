@@ -5,15 +5,13 @@ import random
 
 
 def gen_semi_structured_sparse_mask(r, c, dtype=torch.float16, device="cuda"):
-    lookup  = {
-        torch.int8: 4,
-        torch.float16: 2,
-        torch.bfloat16: 2, 
-        torch.float32: 1,
-    }
+    """
+    this function returns a 1:2 sparse matrix of size (r, c).
+    Note that this matrix will also be 2:4 and 4:8 sparse as well.
+    
 
-    n = lookup[dtype]
-
+    We use this to generate a sparse mask for testing. 
+    """
 
     choices = [[0, 1], [1, 0]]
 
@@ -61,7 +59,8 @@ def print_model_sparsity(model, verbose=True):
 
 def to_semi_structured_sparse(
     original_tensor : torch.Tensor,
-    transposed=False
+    transposed=False,
+    backend="cusparselt",
 ):
     # This code calculates the size of the compressed tensor.
 
@@ -82,12 +81,18 @@ def to_semi_structured_sparse(
         device=original_tensor.device,
     )
 
-    cslt = torch.classes.cusparselt.CusparseLt(compressed_tensor)
-    cslt.compress(original_tensor, False)
+    if backend == "cusparselt":
+        cslt = torch.classes.cusparselt.CusparseLt(compressed_tensor)
+        cslt.compress(original_tensor, False)
 
-    return SemiStructuredSparseTensor(
-        original_tensor.shape, compressed_tensor, cslt, transposed
-    )
+        return SemiStructuredSparseTensor(
+            original_tensor.shape, compressed_tensor, cslt, transposed
+        )
+    else:
+        return SemiStructuredSparseTensor(
+                original_tensor.shape, compressed_tensor, None, transposed)
+
+
 
 
 def convert_2by4_dense_to_sparse_meta(dense):

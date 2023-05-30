@@ -37,16 +37,12 @@ class SemiStructuredSparseTensor(torch.Tensor):
         cslt,
         transposed
     ):
-        kwargs = {}
-        kwargs["device"] = compressed_tensor.device
-        kwargs["dtype"] = compressed_tensor.dtype
-        # layout will be set to semi_structured_sparse eventually, but keep this strided for now
-        kwargs["layout"] = compressed_tensor.layout
-        # kwargs["layout"] = torch.semi_structured_sparse
-        # currently backprop is not implented for cusparselt matmul
-        kwargs["requires_grad"] = False
 
-        return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)
+        breakpoint()
+        res = torch.Tensor._make_wrapper_subclass(cls, custom_shape, layout=torch.semi_structured_sparse, device=compressed_tensor.device, dtype=compressed_tensor.dtype, requires_grad=False)
+        breakpoint()
+
+        return res
 
     def __init__(
         self,
@@ -72,7 +68,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         return self.compressed_tensor[num_kept_elements:].view(m, -1).view(torch.int16)
 
     def __repr__(self):
-        return f"SemiStructruredSparseTensor(shape={self.shape} \n kept_elements={self.kept_elements} \n metadata={self.metadata})"
+        return f"SemiStructruredSparseTensor(shape={self.shape} layout={self.layout}\n kept_elements={self.kept_elements} \n metadata={self.metadata})"
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
@@ -112,6 +108,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
             # It may be using the same transpose trick we are using below 
             # input_A cannot be transposed. 
             if isinstance(input_A, SemiStructuredSparseTensor) and not input_A.transposed:
+                torch._structured_sparse_linear(bias, )
                 return input_A.cslt.addmm(input_B, bias, not input_B.is_contiguous(), False)
 
             # Although we only support the first matrix being sparse, we can suppor the second matrix being sparse using some transpose properties. 

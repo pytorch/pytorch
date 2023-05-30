@@ -209,12 +209,15 @@ enum class DispatchKey : uint16_t {
   MkldnnCPU, // registered at build/aten/src/ATen/RegisterMkldnnCPU.cpp
   // NB: not to be confused with MKLDNN, which is Caffe2 only
 
+  // SemiStructured Sparse
+  SemiStructuredSparse,
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Sparse,
 
   // TODO: Make SparseCsr a functionality key
   SparseCsrCPU,
   SparseCsrCUDA,
+
 
   NestedTensor,
 
