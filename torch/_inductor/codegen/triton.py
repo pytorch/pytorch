@@ -575,7 +575,7 @@ class IterationRangesRoot(IterationRanges):
             return f"{pid}.to({self.kernel.index_dtype})"
         return pid
 
-    def codegen_header(self, code):
+    def codegen_header(self, code, no_x_dim=False):
         x = self.prefix
         if self.is_loop():
             code.writeline(f"{self.name} = {x}offset + {x}base")
@@ -585,10 +585,11 @@ class IterationRangesRoot(IterationRanges):
                 f"{self.name} = {self.ranges_code()}",
             )
         else:
+            ranges_code = f" + {self.ranges_code()}" if not no_x_dim else ""
             code.writelines(
                 [
                     f"{x}offset = {self.get_pid()} * {x.upper()}BLOCK",
-                    f"{self.name} = {x}offset + {self.ranges_code()}",
+                    f"{self.name} = {x}offset {ranges_code}",
                 ]
             )
         code.writeline(f"{x}mask = {self.name} < {x}numel")
@@ -691,6 +692,14 @@ class TritonKernel(Kernel):
         self.indirect_max_sizes_printed = {}  # Upper bounds, printed as a string
 
         self.persistent_reduction = self.should_use_persistent_reduction()
+        is_rocm = torch.version.hip is not None and torch.cuda.is_available()
+        self.no_x_dim = (
+            not is_rocm
+            and self.reduction_hint == ReductionHint.INNER
+            and self.persistent_reduction
+            and len(self.numels) == 2
+            and self.numels[-1] >= 256
+        )
         self.initialize_range_tree(pid_cache)
 
         # define this in a closure to make cache local to object
@@ -735,7 +744,7 @@ class TritonKernel(Kernel):
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
             if not tree.is_loop():
-                tree.codegen_header(self.body)
+                tree.codegen_header(self.body, self.no_x_dim)
         if self.inside_reduction and self.range_trees[-1].is_loop():
             # workaround for this issue:
             # https://gist.github.com/jansel/6527126f781559095c5531f98a4235a7
@@ -962,6 +971,7 @@ class TritonKernel(Kernel):
                 continue
             if index_vars.intersection(tree.var_list):
                 have_loop_vars = True
+            else:
                 have_dense = False
             dense_mask_vars.add(f"{tree.prefix}mask")
 
@@ -1204,6 +1214,14 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
+    def reduction_size_str(self):
+        if self.no_x_dim:
+            return ""
+        else:
+            sizes = [":" for _ in self.range_trees]
+            sizes[-1] = "None"
+            return f"[{', '.join(sizes)}]"
+
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
         default = triton_constant(ir.Reduction.default_value(reduction_type, src_dtype))
@@ -1212,8 +1230,6 @@ class TritonKernel(Kernel):
         masks = sorted(masks)
         if self._load_mask:
             masks.append(self._load_mask)
-        sizes = [":" for _ in self.range_trees]
-        sizes[-1] = "None"
         reduction_range_prefix = self.range_trees[-1].prefix
         reduction_sizes = ["None" for _ in self.range_trees]
         reduction_sizes[-1] = ":"
@@ -1225,18 +1241,20 @@ class TritonKernel(Kernel):
             use_helper = reduction_type in {"max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
             if reduction_type in {"max", "min"}:
-                return f"{module}.{reduction_type}2({value}, {dim})[{', '.join(sizes)}]"
-            return f"{module}.{reduction_type}({value}, {dim})[{', '.join(sizes)}]"
+                return f"{module}.{reduction_type}2({value}, {dim}){self.reduction_size_str()}"
+            return (
+                f"{module}.{reduction_type}({value}, {dim}){self.reduction_size_str()}"
+            )
 
         def final_argreduce(buffer, result_var, value, index):
             buffer.splice(
                 f"""\
                 _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
-                {result_var} = {result_var}_tmp[{', '.join(sizes)}]
+                {result_var} = {result_var}_tmp{self.reduction_size_str()}
                 """
             )
 
-        dim = len(self.range_trees) - 1
+        dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
         result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
         cond = " & ".join(masks)
@@ -1626,14 +1644,21 @@ class TritonKernel(Kernel):
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
     def indexing_size_str(self, i=None, x=None):
-        sizes = ["None"] * (len(self.range_trees) - int(self.numels[-1] == 1))
+        # no_x_dim is sympy.logic.boolalg.BooleanTrue
+        no_x_dim = int(bool(self.no_x_dim))
+        sizes = ["None"] * (
+            len(self.range_trees) - int(self.numels[-1] == 1) - no_x_dim
+        )
         if i is not None:
-            sizes[i] = ":"
+            idx = i - no_x_dim
+            sizes[idx] = ":"
         return f"[{', '.join(sizes)}]"
 
     def dense_size_str(self):
         sizes = []
         for tree in self.range_trees:
+            if self.no_x_dim and tree.prefix == "x":
+                continue
             if tree.prefix != "r" or self.inside_reduction:
                 sizes.append(f"{tree.prefix.upper()}BLOCK")
             elif tree.prefix == "r" and tree.numel != 1:
