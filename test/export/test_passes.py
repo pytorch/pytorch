@@ -150,7 +150,7 @@ class TestPasses(TestCase):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, r"Input arg1.shape\[0\]'s value is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, r"Input arg1.shape\[0\] is specialized at 5"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -188,7 +188,7 @@ class TestPasses(TestCase):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, r"Input arg1.shape\[0\]'s value is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, r"Input arg1.shape\[0\] is specialized at 5"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -349,7 +349,7 @@ class TestPasses(TestCase):
         y = torch.rand(3, 6)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Input arg0.shape\[1\]'s value is not equal to input arg1.shape\[1\]"
+            r"Input arg0.shape\[1\] is not equal to input arg1.shape\[1\]"
         ):
             exported(x, y)
 
