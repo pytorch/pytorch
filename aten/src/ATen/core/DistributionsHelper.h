@@ -80,7 +80,7 @@ struct uniform_int_distribution {
 
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
-    if constexpr (std::is_same<T, double>::value || std::is_same<T, int64_t>::value) {
+    if (std::is_same<T, double>::value || std::is_same<T, int64_t>::value) {
       return transformation::uniform_int<T>(generator->random64());
     } else {
       return transformation::uniform_int<T>(generator->random());
@@ -104,7 +104,7 @@ struct uniform_real_distribution {
 
   template <typename RNG>
   C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
-    if constexpr (std::is_same<T, double>::value) {
+    if(std::is_same<T, double>::value) {
       return transformation::uniform_real<T>(generator->random64(), from_, to_);
     } else {
       return transformation::uniform_real<T>(generator->random(), from_, to_);
@@ -196,7 +196,7 @@ struct normal_distribution {
   C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
     dist_acctype<T> ret;
     // return cached values if available
-    if constexpr (std::is_same<T, double>::value) {
+    if (std::is_same<T, double>::value) {
       if (maybe_get_next_double_normal_sample(generator, &ret)) {
         return transformation::normal(ret, mean, stdv);
       }
@@ -211,7 +211,7 @@ struct normal_distribution {
     const dist_acctype<T> u2 = uniform(generator);
     const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log1p(-u2));
     const dist_acctype<T> theta = static_cast<T>(2.0) * c10::pi<T> * u1;
-    if constexpr (std::is_same<T, double>::value) {
+    if (std::is_same<T, double>::value) {
       maybe_set_next_double_normal_sample(generator, r * ::sin(theta));
     } else {
       maybe_set_next_float_normal_sample(generator, r * ::sin(theta));
