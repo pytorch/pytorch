@@ -701,6 +701,7 @@ inline DispatchKey computeDispatchKey(
               " layout: ",
               device_.type());
       }
+    case Layout::SemiStructuredSparse:
     default:
       TORCH_CHECK(false, "Unsupported layout: ", layout_);
   }
