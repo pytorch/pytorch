@@ -745,6 +745,7 @@ def load(
     pickle_module: Any = None,
     *,
     weights_only: bool = False,
+    _mmap: bool = True,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -877,7 +878,9 @@ def load(
                         return _load(opened_zipfile, map_location, _weights_only_unpickler, **pickle_load_args)
                     except RuntimeError as e:
                         raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
-                return _load(opened_zipfile, map_location, pickle_module, **pickle_load_args)
+                size = os.path.getsize(f)
+                overall_storage = torch.UntypedStorage.from_file(f, False, size)
+                return _load(opened_zipfile, map_location, pickle_module, 'data.pkl', _mmap, overall_storage, **pickle_load_args)
         if weights_only:
             try:
                 return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
@@ -1172,7 +1175,7 @@ class StorageType():
         return f'StorageType(dtype={self.dtype})'
 
 
-def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickle_load_args):
+def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', _mmap=False, overall_storage=None, **pickle_load_args):
     restore_location = _get_restore_location(map_location)
 
     loaded_storages = {}
@@ -1187,8 +1190,12 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
-
-        storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)._typed_storage()._untyped_storage
+        if _mmap:
+            # TODO: Error out if need to byteswap
+            storage_offset = zip_file.get_record_offset(name)
+            storage = overall_storage[storage_offset:storage_offset + numel]
+        else:
+            storage = zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)._typed_storage()._untyped_storage
         # swap here if byteswapping is needed
         if byteorderdata is not None:
             if byteorderdata.decode() != sys.byteorder:

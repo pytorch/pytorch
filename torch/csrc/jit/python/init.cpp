@@ -1477,6 +1477,11 @@ void initJITBindings(PyObject* module) {
       .def("serialization_id", &PyTorchStreamReader::serializationId)
       .def("get_all_records", [](PyTorchStreamReader& self) {
         return self.getAllRecords();
+      })
+      .def(
+          "get_record_offset",
+          [](PyTorchStreamReader& self, const std::string& key) {
+            return self.getRecordOffset(key);
       });
 
   // Used by torch.Package to coordinate deserialization of storages across
