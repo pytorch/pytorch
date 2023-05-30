@@ -243,7 +243,6 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                     expr = val.node._expr
                     if expr in self.inline_constraints:
                         constraint = self.inline_constraints[expr]
-                        print("CONSTRAINT", constraint)
                         lower = _convert_to_int(constraint.lower)
                         upper = _convert_to_int(constraint.upper)
                         assert_msg = f" is outside of inline constraint [{lower}, {upper}]."
