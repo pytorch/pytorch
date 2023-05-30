@@ -19,7 +19,8 @@ from torchgen.executorch.api.custom_ops import (
 )
 from torchgen.executorch.api.types import contextArg, ExecutorchCppSignature
 from torchgen.executorch.api.unboxing import Unboxing
-from torchgen.executorch.model import ETKernelIndex, ETParsedYaml
+from torchgen.executorch.model import ETKernelIndex, ETKernelKey, ETParsedYaml
+from torchgen.executorch.parse import parse_et_yaml
 from torchgen.gen import (
     get_custom_build_selector,
     get_native_function_declarations,
@@ -530,16 +531,31 @@ def translate_native_yaml(
         with open(aten_yaml_path, "r") as aten_yaml:
             out_file.writelines(aten_yaml.readlines())
         return
-    aten_parsed_yaml = parse_native_yaml(
+
+    et_parsed_yaml = parse_et_yaml(
         aten_yaml_path,
         tags_yaml_path,
         None,
         skip_native_fns_gen=False,
     )
-    aten_native_functions = aten_parsed_yaml.native_functions
-    schema_dict = {
-        f"{f.namespace}::{f.func.name}": str(f.func) for f in aten_native_functions
+
+    native_functions: NativeFunction = et_parsed_yaml.native_functions
+    et_kernel_indices: ETKernelIndex = et_parsed_yaml.et_kernel_indices
+
+    func_to_scoped_name: Dict[FunctionSchema, str] = {
+        f.func : f"{f.namespace}::{f.func.name}" for f in native_functions
     }
+    op_to_scoped_name: Dict[OperatorName, str] = {
+        func.name : name for func, name in func_to_scoped_name.items()
+    }
+
+    schema_dict = {
+        name : str(func) for func, name in func_to_scoped_name.items()
+    }
+    kernel_dict: Dict[str, Dict[str, str]] = prepare_kernel_indices(
+        et_kernel_indices, op_to_scoped_name
+    )
+
     if (
         not native_yaml_path
         or not os.path.exists(native_yaml_path)
@@ -564,7 +580,29 @@ def translate_native_yaml(
                     opname = "aten::" + opname
                 assert opname in schema_dict
                 e["func"] = schema_dict.get(opname)
+
+                # Write out kernel information
+                if opname in kernel_dict:
+                    e["kernels"] = kernel_dict.get(opname)
+
         yaml.dump(native_es, out_file, width=1000)
+
+
+# Given a operator indexed list of kernel indices, prepare the dict for writing
+# to a native_functions YAML format
+def prepare_kernel_indices(
+    kernel_indices: ETKernelIndex, opname_indices: Dict[OperatorName, str],
+) -> Dict[str, Dict[str, str]]:
+    # Convert kernel index entries to native function string format
+    #   i.e. { OperatorName : { key       : BackendMetadata } } ==>
+    #        { opname (str) : { key (str) : kernel (str)    } }
+    operator_kernel_entries: Dict[str, Dict[str, str]] = defaultdict(dict)
+    for op, kernel_index in kernel_indices.index.items():
+        opname = opname_indices.get(op)
+        for kernel_key, kernel_meta in kernel_index.items():
+            operator_kernel_entries[opname][kernel_key.to_native_string()] = kernel_meta.kernel
+
+    return operator_kernel_entries
 
 
 def parse_yaml(

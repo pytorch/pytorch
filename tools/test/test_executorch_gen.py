@@ -34,6 +34,25 @@ TEST_YAML = """
     SparseCsrCUDA: add_out_sparse_csr_cuda
     MkldnnCPU: mkldnn_add_out
     MPS: add_out_mps
+  type_alias:
+    T0: [Float, Double]
+    T1: [Double, Int]
+  dim_order_alias:
+    D0: [0, 1, 2, 3]
+    D1: [0, 3, 2, 1]
+  kernels:
+    - arg_meta: null
+      kernel_name: default_impl
+    - arg_meta:
+        self: [T0, D0]
+        other: [T1, D0]
+        out: [T0, D0]
+      kernel_name: test_impl
+    - arg_meta:
+        self: [T1, D0]
+        other: [T1, D1]
+        out: [T0, D1]
+      kernel_name: test_impl_2
 
 - func: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -119,6 +138,30 @@ class TestParseNativeYaml(unittest.TestCase):
             es = yaml.load(out_file, Loader=LineLoader)
         self.assertTrue(all("func" in e for e in es))
         self.assertTrue(all(e.get("variants") == "function" for e in es))
+
+        # Check validity of kernels in yaml
+        kernel_func = "add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)"
+        kernel_func_present = False
+        for e in es:
+            if e['func'] == kernel_func:
+                kernel_func_present = True
+                self.assertTrue("kernels" in e)
+                expected_kernels = {
+                    'default': 'default_impl',
+                    'v1/6;0,1,2,3|3;0,1,2,3|6;0,1,2,3': 'test_impl',
+                    'v1/6;0,1,2,3|7;0,1,2,3|6;0,1,2,3': 'test_impl',
+                    'v1/7;0,1,2,3|3;0,1,2,3|7;0,1,2,3': 'test_impl',
+                    'v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3': 'test_impl',
+                    'v1/3;0,1,2,3|3;0,3,2,1|6;0,3,2,1': 'test_impl_2',
+                    'v1/3;0,1,2,3|3;0,3,2,1|7;0,3,2,1': 'test_impl_2',
+                    'v1/7;0,1,2,3|7;0,3,2,1|6;0,3,2,1': 'test_impl_2',
+                    'v1/7;0,1,2,3|7;0,3,2,1|7;0,3,2,1': 'test_impl_2',
+                }
+                self.assertTrue(expected_kernels.items() <= e["kernels"].items())
+            else:
+                self.assertFalse("kernels" in e)
+
+        self.assertTrue(kernel_func_present)
 
     def tearDown(self) -> None:
         import shutil
