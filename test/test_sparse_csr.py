@@ -12,7 +12,8 @@ from torch.testing._internal.common_utils import \
      load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm, IS_FBCODE, IS_REMOTE_GPU)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan)
+     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan,
+     largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUDA
@@ -931,9 +932,9 @@ class TestSparseCSR(TestCase):
             a.is_contiguous()
 
     @onlyCPU
+    @largeTensorTest("20GB", "cpu")
     def test_csr_nnz(self):
         # Tests the limits of the number of specified elements in CSR tensors, see gh-102520.
-        # Warning: this test will allocate a large chunk of memory of at least 18 GB
         for nnz in [0, 2**31]:
             rows, cols = 1, max(nnz, 1)
             crow_indices = torch.tensor([0, nnz], dtype=torch.int64)
