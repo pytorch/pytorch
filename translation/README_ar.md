@@ -9,10 +9,10 @@
 <kbd>[<img title="Türkçe" alt="Türkçe" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/tr.svg" width="30">](README_tr.md)</kbd>
 <kbd>[<img title="Deutsch" alt="Deutsch" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/de.svg" width="30">](README_de.md)</kbd>
 
-مكتبة PyTorch:
+PyTorch:
 هي حزمة برمجية في لغة Python توفر ميزتين على مستوى عالٍ:
-- حساب التنسورات (مثل Numpy) بتسارع قوي باستخدام وحدة المعالجة الرسومية (GPU)
-- شبكات عصبية عميقة مبنية على نظام تلقائي للتفاضل يعتمد على تقنية الشريط (autograd system)، وهي تقنية تساعد على تحسين أداء الشبكة وتعلمها
+- حساب التنسورات (مثل Numpy) بتسارع قوي باستخدام وحدة المعالجة الرسومية (GPU).
+- شبكات عصبية عميقة مبنية على نظام تلقائي للتفاضل يعتمد على تقنية الشريط (autograd system)، وهي تقنية تساعد على تحسين أداء الشبكة وتعلمها.
  
 
 You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
