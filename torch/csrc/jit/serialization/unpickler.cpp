@@ -188,9 +188,7 @@ bool is(const Type& type) {
 }
 } // namespace
 
-static void restoreContainerTypeTags(
-    const IValue& ivalue,
-    const TypePtr& type) {
+void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
   if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(type->containedType(0));
@@ -582,7 +580,7 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
-          device.is_hpu() || device.is_privateuseone()) {
+          device.is_hpu() || device.is_mps() || device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
