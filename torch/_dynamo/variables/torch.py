@@ -20,6 +20,7 @@ from torch.utils import _pytree as pytree
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import ArgsMismatchError, unimplemented, UserError, UserErrorType
+from ..guards import GuardBuilder
 from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
@@ -789,20 +790,30 @@ def speculate_subgraph(
             args = []
             # One argument to graph per sub_args
             for a in sub_args:
-                if a is None:
-                    new_arg = ConstantVariable(None)
                 assert not isinstance(
                     a, torch.Tensor
                 ), "Tensors should already be tracked?"
+                if a is None:
+                    a = ConstantVariable(None)
+
                 if isinstance(a, ConstantVariable):
-                    proxy = tracer.create_graph_input("const")
+                    # This arg is not used in the body of the higher order op.
+                    # Currently, this new input is added to make the calls
+                    # happy, which expect a fixed number of arguments. In
+                    # future, we can clean this up.
+                    tracer.create_graph_input("const")
+                    # Ensures that we recompile when the constant value changes
+                    a.add_guard(GuardBuilder.CONSTANT_MATCH)
                     new_arg = a
-                elif isinstance(a, (TensorVariable, AutogradFunctionContextVariable)):
+                elif isinstance(a, TensorVariable):
                     new_proxy = tracer.create_graph_input(a.as_proxy().node.name)
                     example_value = a.as_proxy().node.meta["example_value"]
                     new_arg = wrap_fx_proxy(
                         tx=tx, proxy=new_proxy, example_value=example_value
                     )
+                elif isinstance(a, AutogradFunctionContextVariable):
+                    tracer.create_graph_input(a.as_proxy().node.name)
+                    new_arg = a
                 else:
                     raise unimplemented(
                         "HigherOrderOperator with body that accepts non-Tensors as input"
