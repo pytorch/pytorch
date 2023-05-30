@@ -9716,7 +9716,7 @@ class DistributedTest:
                 (out1.sum() + out2.sum()).backward()
 
             if self.rank == 0:
-                with self.assertRaisesRegex(RuntimeError, "Reducer has not been finalized!"):
+                with self.assertRaisesRegex(RuntimeError, "Expected to have finished reduction in the prior iteration"):
                     ddp._check_reducer_finalized()
 
                 with self.assertRaisesRegex(RuntimeError, "Expected to have finished reduction in the prior iteration"):

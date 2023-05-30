@@ -2249,8 +2249,4 @@ class DistributedDataParallel(Module, Joinable):
         in order to avoid subsequent hard to debug errors down the road due to the
         reducer not finalizing backward.
         """
-        if not self.reducer._has_finalized():
-            raise RuntimeError(
-                "Reducer has not been finalized! You can run DDP "
-                "forward again right before this check to get a detailed error message."
-            )
+        self.reducer._check_reducer_finalized()

@@ -182,7 +182,7 @@ class TORCH_API Reducer {
   void remove_autograd_hooks();
 
   // Checks whether or not the reducer has finalized the current backward iteration.
-  bool has_finalized();
+  void check_finalized();
 
  protected:
   // Forward declaration.

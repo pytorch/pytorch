@@ -583,8 +583,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           [](::c10d::Reducer& reducer) { reducer.remove_autograd_hooks(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_has_finalized",
-          [](::c10d::Reducer& reducer) { return reducer.has_finalized(); },
+          "_check_reducer_finalized",
+          [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
