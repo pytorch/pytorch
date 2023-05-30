@@ -380,6 +380,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         "autocast_cpu_enabled",
         "autocast_gpu_dtype",
         "autocast_cpu_dtype",
+        "autocast_cache_enabled",
     }
 
     def __init__(self):

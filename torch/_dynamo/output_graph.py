@@ -388,6 +388,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             torch.set_autocast_cpu_dtype,
             torch.get_autocast_cpu_dtype(),
         )
+        global_state["autocast_cache_enabled"] = (
+            torch.set_autocast_cache_enabled,
+            torch.is_autocast_cache_enabled(),
+        )
 
     def push_tx(self, tx):
         self._current_tx.append(tx)
