@@ -9,54 +9,54 @@
 <kbd>[<img title="Türkçe" alt="Türkçe" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/tr.svg" width="30">](README_tr.md)</kbd>
 <kbd>[<img title="Deutsch" alt="Deutsch" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/de.svg" width="30">](README_de.md)</kbd>
 
-PyTorch is a Python package that provides two high-level features:
-- Tensor computation (like NumPy) with strong GPU acceleration
-- Deep neural networks built on a tape-based autograd system
+PyTorch, iki yüksek düzeyli özellik sağlayan bir Python paketidir.:
+- Güçlü GPU hızlandırma ile Tensör hesaplama (NumPy gibi)
+- Bant tabanlı bir otograd sistemi üzerine inşa edilmiş derin sinir ağları
 
-You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
+İhtiyaç duyduğunuzda, NumPy, SciPy ve Cython gibi favori Python paketlerinizi PyTorch'u genişletmek için yeniden kullanabilirsiniz.
 
-Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.org](https://hud.pytorch.org/ci/pytorch/pytorch/main).
+Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorch.org adresinde bulabilirsiniz..
 
 <!-- toc -->
 
-- [More About PyTorch](#more-about-pytorch)
-  - [A GPU-Ready Tensor Library](#a-gpu-ready-tensor-library)
-  - [Dynamic Neural Networks: Tape-Based Autograd](#dynamic-neural-networks-tape-based-autograd)
+- [PyTorch Hakkında Daha Fazlası](#more-about-pytorch)
+  - [GPU'ya Hazır Bir Python Kütüphanesi](#a-gpu-ready-tensor-library)
+  - [Dinamik Sinir Ağları: Bant Tabanlı Otograd(#dynamic-neural-networks-tape-based-autograd)
   - [Python First](#python-first)
   - [Imperative Experiences](#imperative-experiences)
-  - [Fast and Lean](#fast-and-lean)
-  - [Extensions Without Pain](#extensions-without-pain)
-- [Installation](#installation)
+  - [Hızlı ve Verimli](#fast-and-lean)
+  - [Sorunsuz Uzantılar](#extensions-without-pain)
+- [Kurulum](#installation)
   - [Binaries](#binaries)
-    - [NVIDIA Jetson Platforms](#nvidia-jetson-platforms)
-  - [From Source](#from-source)
-    - [Prerequisites](#prerequisites)
-    - [Install Dependencies](#install-dependencies)
-    - [Get the PyTorch Source](#get-the-pytorch-source)
-    - [Install PyTorch](#install-pytorch)
-      - [Adjust Build Options (Optional)](#adjust-build-options-optional)
+    - [NVIDIA Jetson Platformları](#nvidia-jetson-platforms)
+  - [Kaynak Kodundan](#from-source)
+    - [Ön Koşullar](#prerequisites)
+    - [Bağımlılıkları Kurun](#install-dependencies)
+    - [PyTorch Kaynak Kodunu Edinin](#get-the-pytorch-source)
+    - [PyTorch'u Kurun](#install-pytorch)
+      - [Yapılandırma Seçeneklerini Ayarlama (İsteğe Bağlı)](#adjust-build-options-optional)
   - [Docker Image](#docker-image)
-    - [Using pre-built images](#using-pre-built-images)
-    - [Building the image yourself](#building-the-image-yourself)
-  - [Building the Documentation](#building-the-documentation)
-  - [Previous Versions](#previous-versions)
-- [Getting Started](#getting-started)
-- [Resources](#resources)
-- [Communication](#communication)
+    - [Önceden oluşturulmuş görüntüleri kullanma](#using-pre-built-images)
+    - [Görüntüyü kendiniz oluşturma](#building-the-image-yourself)
+  - [Dokümantasyonu Oluşturma](#building-the-documentation)
+  - [Önceki Sürümler](#previous-versions)
+- [Buradan Başlayın](#getting-started)
+- [Kaynaklar](#resources)
+- [İletişim](#communication)
 - [Releases and Contributing](#releases-and-contributing)
-- [The Team](#the-team)
-- [License](#license)
+- [Takım](#the-team)
+- [Lisans](#license)
 
 <!-- tocstop -->
 
-## More About PyTorch
+## PyTorch Hakkında Daha Fazlası
 
-At a granular level, PyTorch is a library that consists of the following components:
+Ayrıntılı bir düzeyde, PyTorch aşağıdaki bileşenlerden oluşan bir kütüphanedir:
 
-| Component | Description |
+| Bileşen | Tanımlama |
 | ---- | --- |
-| [**torch**](https://pytorch.org/docs/stable/torch.html) | A Tensor library like NumPy, with strong GPU support |
-| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | A tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
+| [**torch**](https://pytorch.org/docs/stable/torch.html) | Güçlü GPU desteğine sahip NumPy gibi bir Tensör kütüphanesi |
+| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | Torch'taki tüm farklılaştırılabilir Tensör işlemlerini destekleyen bant tabanlı otomatik farklılaştırma kütüphanesi |
 | [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | A compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
 | [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | A neural networks library deeply integrated with autograd designed for maximum flexibility |
 | [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
