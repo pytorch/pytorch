@@ -1554,11 +1554,11 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
 
   static Vectorized<T> C10_ALWAYS_INLINE
   loadu(const void* ptr, int count = size()) {
-    return Vectorized<T>{vinner_type::loadu(ptr)};
+    return Vectorized<T>{vinner_type::loadu(ptr, count)};
   }
 
   void C10_ALWAYS_INLINE store(void* ptr, int count = size()) const {
-    _vec.store(ptr);
+    _vec.store(ptr, count);
   }
 
   Vectorized<T> relu(Vectorized<T> zero_point) const {
