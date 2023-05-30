@@ -708,13 +708,18 @@ def compile_fx(
             # For inference
             #   len(orig_model_outputs) == len(model_outputs)
             # For training
-            #   len(orig_model_outputs) < len(model_outputs)
-            # and the model_outputs starts with orignal model's outputs followed
-            # by saved activations.
+            #   len(orig_model_outputs) <= len(model_outputs)
+            # During training, most of the time the model_outputs starts with
+            # orignal module's outputs followed by saved activations.
+            # But this can be not true if the model have inplace updated tensors.
+            # AOTAutograd will make those tensors being returned before the orignal
+            # module's output.
+            # To make things safe, we'll use original_output_start_index field
+            # set by AOTAutograd to decide where the original module outputs start.
 
-            user_visible_outputs = {n.name for n in model_outputs[:len(orig_model_outputs)]}
+            original_output_start_index = model.meta.get("original_output_start_index", 0)
+            user_visible_outputs = {n.name for n in model_outputs[original_output_start_index : original_output_start_index + len(orig_model_outputs)]}
 
-        # breakpoint() # TODO
         return inner_compile(
             model,
             example_inputs,

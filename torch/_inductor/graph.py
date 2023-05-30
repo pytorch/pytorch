@@ -153,10 +153,6 @@ class GraphLowering(torch.fx.Interpreter):
     ):
         super().__init__(gm)
 
-        # TODO remove before merging
-        import colorama
-        print(f"{colorama.Fore.GREEN}Got graph:\n{gm.print_readable(False)}{colorama.Fore.RESET}")
-
         self.layout_opt = self.decide_layout_opt()
         self.num_channels_last_conv = 0
 
@@ -390,9 +386,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     @dynamo_timed
     def run(self, *args):
-        print(f"graph id is {self.graph_id}") # TODO
-        for t in args:
-            print(f"- {t.size()} {t.stride()}")
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
