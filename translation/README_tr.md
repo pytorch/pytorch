@@ -21,7 +21,7 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
 
 - [PyTorch Hakkında Daha Fazlası](#more-about-pytorch)
   - [GPU'ya Hazır Bir Python Kütüphanesi](#a-gpu-ready-tensor-library)
-  - [Dinamik Sinir Ağları: Bant Tabanlı Otograd(#dynamic-neural-networks-tape-based-autograd)
+  - [Dinamik Sinir Ağları: Bant Tabanlı Otograd](#dynamic-neural-networks-tape-based-autograd)
   - [Python First](#python-first)
   - [Imperative Experiences](#imperative-experiences)
   - [Hızlı ve Verimli](#fast-and-lean)
@@ -67,19 +67,18 @@ Usually, PyTorch is used either as:
 - A replacement for NumPy to use the power of GPUs.
 - A deep learning research platform that provides maximum flexibility and speed.
 
-Elaborating Further:
+Daha Fazla Detaylandırma:
 
 ### A GPU-Ready Tensor Library
 
-If you use NumPy, then you have used Tensors (a.k.a. ndarray).
+NumPy kullanıyorsanız, Tensörleri kullanmışsınızdır (a.k.a. ndarray).
 
-![Tensor illustration](../docs/source/_static/img/tensor_illustration.png)
+![Tensor gösterimi](../docs/source/_static/img/tensor_illustration.png)
 
-PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
-computation by a huge amount.
+PyTorch, CPU veya GPU üzerinde yaşayabilen Tensörler sağlar ve büyük miktarda hesaplama.
 
 Birçok tensor rutini sunarak bilimsel hesaplama ihtiyaçlarınızı hızlandırmak ve uyumlu hale getirmek için çeşitli seçenekler sunarız.
-Bu rutinler arasında dilimleme (slicing), indeksleme, matematiksel operasyonlar, lineer cebir ve azaltma (reduction) gibi işlemler bulunur.
+Bu rutinler arasında dilimleme, indeksleme, matematiksel operasyonlar, lineer cebir ve azaltma gibi işlemler bulunur.
 Ve hızlılardır!
 
 ### Dinamik Sinir Ağları: Bant Tabanlı Otograd
