@@ -39,7 +39,7 @@ pass_patterns = [
 ]
 
 
-def post_grad_passes(gm: torch.fx.GraphModule):
+def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -50,8 +50,7 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if config.reordering:
-        # has some issues with mutation in inference mode
+    if locality_reorder:
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
@@ -61,6 +60,7 @@ def post_grad_passes(gm: torch.fx.GraphModule):
             patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
+    gm.recompile()
     gm.graph.lint()
 
 
@@ -83,8 +83,27 @@ def reorder_for_locality(graph: torch.fx.Graph):
             node.prepend(other_node)
 
     seen_nodes = set()
+
+    # only reorder nodes before the first copy_ in the graph.
+    # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
+    # and this reordering doesnt work well with mutation
+    first_copy = next(
+        (
+            node
+            for node in graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.aten.copy_.default
+        ),
+        None,
+    )
+    past_mutating_epilogue = True if first_copy is None else False
+
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
+        if not past_mutating_epilogue:
+            past_mutating_epilogue = node is first_copy
+            continue
+
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
@@ -269,7 +288,9 @@ def cat_slice_cat(match, cat_input, size, dim=1):
     """
     first, *rest = cat_input
     # Optimization is optional, because we can just not fold the cat
-    if V.graph.sizevars.statically_known_leq(size, first.get_size()[dim]):
+    # size should be within first.get_size()[dim] such that the optimization is valid.
+    # For negative `end`, we currently fallback to not optimizing.
+    if size >= 0 and V.graph.sizevars.statically_known_leq(size, first.get_size()[dim]):
         # fold 2 cats into 1 cat
         return L[aten.cat](
             [

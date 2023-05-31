@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import itertools
 import traceback
 import types
 import unittest
@@ -1386,6 +1387,16 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check parameteres and buffers
         for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
+        for b1, b2 in zip(mod.buffers(), opt_mod.buffers()):
+            self.assertTrue(id(b1) == id(b2))
+
+        def get_parameter_dtype(mod: torch.nn.Module):
+            parameters_and_buffers = itertools.chain(mod.parameters(), mod.buffers())
+            return next(parameters_and_buffers).dtype
+
+        opt_mod = torch._dynamo.optimize("eager")(get_parameter_dtype)
+        out_dtype = opt_mod(mod)
+        self.assertEqual(out_dtype, torch.float32)
 
     def test_recursion(self):
         mod = MockModule()
@@ -1817,6 +1828,19 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_unspecialized_seq(self):
+        models = torch.nn.Sequential(torch.nn.Linear(3, 3))
+
+        def fn(x):
+            models[0].training = False
+            return models(x)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        x = torch.randn(1, 3)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

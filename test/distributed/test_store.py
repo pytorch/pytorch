@@ -122,6 +122,41 @@ class StoreTestBase:
     def test_simple_wait(self):
         self._test_simple_wait(self._create_store())
 
+    def _test_append(self, store):
+        if not store.has_extended_api():
+            self.skipTest("Store doesn't support extended APIs")
+        store.set("foo", "po")
+        store.append("foo", "tato")
+        store.append("bar", "po")
+        store.append("bar", "tato")
+        self.assertEqual(b"potato", store.get("foo"))
+        self.assertEqual(b"potato", store.get("bar"))
+
+    def test_append(self):
+        self._test_append(self._create_store())
+
+    def _test_multi_set(self, store):
+        if not store.has_extended_api():
+            self.skipTest("Store doesn't support extended APIs")
+        store.multi_set(["foo", "bar"], ["po", "tato"])
+        self.assertEqual(b"po", store.get("foo"))
+        self.assertEqual(b"tato", store.get("bar"))
+
+    def test_multi_set(self):
+        self._test_multi_set(self._create_store())
+
+    def _test_multi_get(self, store):
+        if not store.has_extended_api():
+            self.skipTest("Store doesn't support extended APIs")
+        store.set("foo", "po")
+        store.set("bar", "tato")
+        v0, v1 = store.multi_get(["foo", "bar"])
+        self.assertEqual(b"po", v0)
+        self.assertEqual(b"tato", v1)
+
+    def test_multi_get(self):
+        self._test_multi_get(self._create_store())
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -327,6 +362,28 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(None)
 
+    def test_append(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.append("foo", "tato")
+        store.append("bar", "po")
+        store.append("bar", "tato")
+        self.assertEqual(b"potato", store.get("foo"))
+        self.assertEqual(b"potato", store.get("bar"))
+
+    def test_multi_set(self):
+        store = self._create_store()
+        store.multi_set(["foo", "bar"], ["po", "tato"])
+        self.assertEqual(b"po", store.get("foo"))
+        self.assertEqual(b"tato", store.get("bar"))
+
+    def test_multi_get(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.set("bar", "tato")
+        v0, v1 = store.multi_get(["foo", "bar"])
+        self.assertEqual(b"po", v0)
+        self.assertEqual(b"tato", v1)
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -344,7 +401,6 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
     @property
     def num_keys_total(self):
         return 6
-
 
 class MyPythonStore(dist.Store):
     def __init__(self):
