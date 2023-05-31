@@ -1,18 +1,20 @@
-import torch
 from typing import Dict, List
 
-from .base import VariableTracker, MutableLocal
+import torch
+from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
+from ..utils import global_key_name
+
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+from .dicts import ConstDictVariable
+from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
-from .lists import ListVariable
-from .dicts import ConstDictVariable
-from ..utils import global_key_name
-from ..source import GetItemSource, AttrSource, GlobalWeakRefSource, GlobalSource
 
 
 class ArgMappingException(Exception):
     pass
+
 
 class OptimizerVariable(UserDefinedObjectVariable):
     def call_method(
@@ -44,12 +46,15 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     def get_python_args(self, *args, **kwargs):
         """Get python values equivalent to the variable tracker args"""
+
         def map_arg(arg):
             if isinstance(arg, ConstantVariable):
                 return arg.as_python_constant()
             elif isinstance(arg, ListVariable) and not arg.items:
                 return []
-            elif isinstance(arg, ConstDictVariable) and isinstance(arg.source, GetItemSource):
+            elif isinstance(arg, ConstDictVariable) and isinstance(
+                arg.source, GetItemSource
+            ):
                 return self.value.param_groups[arg.source.index]
 
             raise ArgMappingException()
@@ -61,10 +66,15 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     def install_guards(self, tx):
         from .builder import VariableBuilder
-        state_dict_var = VariableBuilder(tx, AttrSource(self.source, "state"))(self.value.state)
+
+        state_dict_var = VariableBuilder(tx, AttrSource(self.source, "state"))(
+            self.value.state
+        )
         tx.output.guards.update(state_dict_var.guards)
 
-        group_guards = VariableBuilder(tx, AttrSource(self.source, "param_groups"))(self.value.param_groups)
+        group_guards = VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
+            self.value.param_groups
+        )
         tx.output.guards.update(group_guards.guards)
 
     def wrap_tensor(self, tx, tensor_value):
@@ -72,11 +82,18 @@ class OptimizerVariable(UserDefinedObjectVariable):
         from .builder import VariableBuilder
 
         tx.store_dict_key(global_key_name(tensor_value), tensor_value)
-        return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(tensor_value)))(tensor_value)
+        return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(tensor_value)))(
+            tensor_value
+        )
 
     def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
         """Update the args and kwargs to the traced optimizer call"""
         for arg, py_arg in zip(args, py_args):
-            if isinstance(arg, ListVariable) and all(isinstance(t, torch.Tensor) for t in py_arg):
-                tensor_vars = ListVariable([self.wrap_tensor(tx, t) for t in py_arg], mutable_local=MutableLocal())
+            if isinstance(arg, ListVariable) and all(
+                isinstance(t, torch.Tensor) for t in py_arg
+            ):
+                tensor_vars = ListVariable(
+                    [self.wrap_tensor(tx, t) for t in py_arg],
+                    mutable_local=MutableLocal(),
+                )
                 arg.call_method(tx, "extend", (tensor_vars,), {})
