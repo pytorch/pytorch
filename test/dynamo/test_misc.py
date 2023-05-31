@@ -3808,7 +3808,7 @@ def fn():
                 self.x = x
 
             def __bool__(self):
-                self.x = 1
+                self.x = 1.2
                 return self.x
 
         def fn(a, obj):
@@ -3824,7 +3824,7 @@ def fn():
             opt_fn(x, obj)
             self.assertFalse(True)
         except TypeError as e:
-            self.assertIn("__bool__ should return bool, returned int", str(e))
+            self.assertIn("__bool__ should return bool, returned float", str(e))
 
     def test_if_cond_user_defined_object3(self):
         # obj.__bool__ is not existed, but obj.__len__ exists

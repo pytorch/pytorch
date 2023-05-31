@@ -336,11 +336,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if isinstance(x, UserMethodVariable):
                 state = self.copy_graphstate()
                 result = x.call_function(self, [], {})
-                if isinstance(result, ConstantVariable) and (
-                    x.fn.__name__ == "__bool__"
-                    and isinstance(result.value, bool)
-                    or x.fn.__name__ == "__len__"
-                    and isinstance(result.value, int)
+                if isinstance(result, ConstantVariable) and isinstance(
+                    result.value, (bool, int)
                 ):
                     self.output.guards.update(result.guards)
                     if truth_fn(result.value):
