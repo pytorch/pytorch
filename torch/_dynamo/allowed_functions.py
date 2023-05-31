@@ -152,6 +152,8 @@ def _allowed_function_ids():
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = (
             "torch.optim.",
+            "torch.nn.parallel.",  # Allow Dynamo to trace DataParallel innards
+            "torch.ao.nn.",  # ao modules should be traced by Dynamo
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
