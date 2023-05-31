@@ -727,6 +727,11 @@ test_torch_function_benchmark() {
 }
 
 build_xla() {
+  # xla test needs pytorch headers in torch/include
+  pushd ..
+  python -c "import os, torch, shutil; shutil.copytree(os.path.join(os.path.dirname(torch.__file__), 'include'), 'workspace/torch/include', dirs_exist_ok=True)"
+  popd
+
   # xla test needs sccache setup.
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
