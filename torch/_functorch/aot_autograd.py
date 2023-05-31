@@ -1522,14 +1522,12 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
-        adjusted_flat_args = flat_args
         if config.functionalize_rng_ops:
             # Add the seed and offset as example inputs to pass to the compiler
             fake_mode = detect_fake_mode()
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
-            adjusted_flat_args = [seed, offset, *flat_args]
-            flat_args.clear()  # Don't hold extra reference
-        compiled_fw = compiler(fw_module, adjusted_flat_args)
+            flat_args.extend([seed, offset])
+        compiled_fw = compiler(fw_module, flat_args)
 
     # This boxed_call handling happens inside create_runtime_wrapper as well.
     # However, create_runtime_wrapper does not expect the rng offsets in the
@@ -1545,11 +1543,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-            new_args = [seed, offset, *args]
-            args.clear()  # Remove the reference of inputs from the args itself
-
-            out = compiled_fw(new_args)
-
+            args.extend([seed, offset])
+            out = compiled_fw(args)
             out = functionalized_rng_runtime_epilogue(fw_metadata, out)
             return out
         else:
@@ -2608,13 +2603,14 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
             return (*args, PhiloxStateTracker.get_updated_fwd_offset())
 
 
-    def traced_joint(fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset, primals, tangents):
+    def traced_joint(primals, tangents, fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset):
         with patch("torch.cuda.get_rng_state", override_get_rng_state), patch("torch.cuda.set_rng_state", override_set_rng_state):
             return append_rng_offsets(func(primals, tangents))
 
-    def traced_forward(fwd_seed, fwd_base_offset, *primals):
+    def traced_forward(*primals_fwd_seed_fwd_base_offset):
+        # The signature is (*primals, seed, offset)
         with patch("torch.cuda.get_rng_state", override_get_rng_state), patch("torch.cuda.set_rng_state", override_set_rng_state):
-            return append_rng_offsets(func(*primals))
+            return append_rng_offsets(func(*primals_fwd_seed_fwd_base_offset[:-2]))
 
     if trace_joint:
         # Get the current seed and offset to setup tracing.
@@ -2622,12 +2618,12 @@ def create_functionalized_rng_ops_wrapper(func, args, trace_joint=True):
         bwd_seed, bwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
         PhiloxStateTracker.record_state(bwd_seed, bwd_base_offset, "backward")
-        return traced_joint, (fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset, *args)
+        return traced_joint, (*args, fwd_seed, fwd_base_offset, bwd_seed, bwd_base_offset)
     else:
         # Get the current seed and offset to setup tracing.
         fwd_seed, fwd_base_offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
         PhiloxStateTracker.record_state(fwd_seed, fwd_base_offset, "forward")
-        return traced_forward, (fwd_seed, fwd_base_offset, *args)
+        return traced_forward, (*args, fwd_seed, fwd_base_offset)
 
 # Has the precondition that there
 # are no duplicate arguments in flat_args (e.g., the same Tensor
@@ -2777,7 +2773,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # Update example inputs for the fw_compiler
                 fake_mode = detect_fake_mode()
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
-                adjusted_flat_args = [seed, offset, *flat_args]
+                adjusted_flat_args.extend([seed, offset])
                 # We are not clearing flat_args here because
                 # 1) There is a check in the the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
@@ -2800,7 +2796,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             if CompiledFunction.metadata.is_rng_op_functionalized:
                 # Add the seed and offset to args
                 seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-                args = (seed, offset, *args)
+                args = (*args, seed, offset)
             # There is a pretty complicated calling convention around what the compiled fw returns.
             # The full list of outputs and their relative order is:
             # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
@@ -2988,7 +2984,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 rng_args = CUDARngStateHelper.get_torch_state_as_tuple()
 
             all_args = (
-                list(rng_args) + list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
+                list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args) + list(rng_args)
             )
 
             del contiguous_args
