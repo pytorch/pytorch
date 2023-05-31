@@ -44,6 +44,7 @@ try:
         calculate_shards,
         get_reordered_tests,
         get_test_case_configs,
+        log_time_savings,
         NUM_PROCS,
         ShardedTest,
         THRESHOLD,
@@ -597,7 +598,7 @@ def run_test(
     should_file_rerun = (
         "--subprocess" not in command
         and not RERUN_DISABLED_TESTS
-        and not options.continue_on_error
+        and not options.continue_through_error
     )
     timeout = (
         THRESHOLD * 3
@@ -1610,6 +1611,13 @@ def main():
     remaining_tests = selected_tests
     if IS_CI:
         (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
+        log_time_savings(
+            selected_tests,
+            prioritized_tests,
+            is_serial_test_fn=must_serial,
+            num_procs=NUM_PROCS,
+        )
+
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
