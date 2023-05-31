@@ -66,7 +66,7 @@ class ExportGraphSignature:
     inputs_to_parameters: Dict[GraphInputName, FQN]
     inputs_to_buffers: Dict[GraphInputName, FQN]
 
-    buffers_to_mutate: Dict[FQN, GraphOutputName]
+    buffers_to_mutate: Dict[GraphOutputName, FQN]
 
     backward_signature: Optional[ExportBackwardSignature]
 
