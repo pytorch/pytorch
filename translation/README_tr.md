@@ -38,7 +38,7 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
   - [Docker Image](#docker-image)
     - [Önceden oluşturulmuş görüntüleri kullanma](#using-pre-built-images)
     - [Görüntüyü kendiniz oluşturma](#building-the-image-yourself)
-  - [Dokümantasyonu Oluşturma](#building-the-documentation)
+  - [Dokümantasyon Oluşturma](#building-the-documentation)
   - [Önceki Sürümler](#previous-versions)
 - [Buradan Başlayın](#getting-started)
 - [Kaynaklar](#resources)
@@ -287,32 +287,32 @@ PyTorch'un CUDA desteğiyle derlemek için [NVTX](https://docs.nvidia.com/gamewo
 NVTX, CUDA dağıtımının bir parçasıdır ve "Nsight Compute" olarak adlandırılır. Mevcut bir CUDA yüklemesine NVTX'i yüklemek için CUDA kurulumunu tekrar çalıştırın ve ilgili onay kutusunu işaretleyin.
 Visual Studio'dan sonra Nsight Compute ile CUDA'nın yüklendiğinden emin olun.
 
-Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
-<br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
+Şu anda CMake'in üreticisi olarak VS 2017 / 2019 ve Ninja desteklenmektedir. PATH` içinde `ninja.exe` tespit edilirse, Ninja varsayılan oluşturucu olarak kullanılacaktır, aksi takdirde VS 2017 / 2019'u kullanacaktır.
+<br/> Eğer Ninja üretici olarak seçilirse, en son MSVC sürümü temel araç seti olarak seçilecektir.
 
-Additional libraries such as
-[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
+Genellikle
+[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN veya DNNL](https://github.com/oneapi-src/oneDNN), ve [Sccache](https://github.com/mozilla/sccache) gibi ek kütüphanelere ihtiyaç duyulabilir. Bunları yüklemek için lütfen [kurulum-yardımcısı](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) adresine bakın.
 
-You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
+Diğer bazı ortam değişkenleri yapılandırmaları için  [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) betiğine başvurabilirsiniz.
 
 
 ```cmd
 cmd
 
-:: Set the environment variables after you have downloaded and unzipped the mkl package,
-:: else CMake would throw an error as `Could NOT find OpenMP`.
+:: mkl paketini indirdikten ve açtıktan sonra ortam değişkenlerini ayarlayın,
+:: Aksi takdirde CMake `AçıkMP bulunamadı` şeklinde bir hata verir.
 set CMAKE_INCLUDE_PATH={Your directory}\mkl\include
 set LIB={Your directory}\mkl\lib;%LIB%
 
-:: Read the content in the previous section carefully before you proceed.
-:: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
-:: "Visual Studio 2019 Developer Command Prompt" will be run automatically.
-:: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
+:: Devam etmeden önce bir önceki bölümdeki içeriği dikkatlice okuyun.
+:: [İsteğe bağlı] Ninja ve Visual Studio tarafından kullanılan temel araç setini CUDA ile geçersiz kılmak istiyorsanız, lütfen aşağıdaki kod bloğunu çalıştırın.
+:: "Visual Studio 2019 Geliştirici Komut İstemi" otomatik olarak çalıştırılacaktır.
+:: Visual Studio oluşturucusunu kullanmadan önce CMake >= 3.12'ye sahip olduğunuzdan emin olun.
 set CMAKE_GENERATOR_TOOLSET_VERSION=14.27
 set DISTUTILS_USE_SDK=1
 for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,17^] -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
 
-:: [Optional] If you want to override the CUDA host compiler
+:: [İsteğe bağlı] CUDA host derleyicisini geçersiz kılmak istiyorsanız
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
 python setup.py develop
@@ -321,114 +321,107 @@ python setup.py develop
 
 ##### Yapılandırma Seçenekleri Ayarlama (İsteğe bağlı)
 
-You can adjust the configuration of cmake variables optionally (without building first), by doing
-the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
-with such a step.
+Tercihinize bağlı olarak, cmake değişkenlerinin yapılandırmasını (derleme yapmadan önce) aşağıdaki adımları izleyerek ayarlayabilirsiniz. Örneğin, CuDNN veya BLAS için önceden tespit edilen dizinleri ayarlamak bu şekilde yapılabilir.
 
-On Linux
+Linux için
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
-On macOS
+macOS için
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
-### Docker Image
+### Docker Görüntüsü
 
-#### Using pre-built images
+#### Önceden oluşturulmuş görüntüleri kullanma
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+Docker Hub'dan önce oluşturulmuş bir docker görüntüsünü çekebilir ve docker v19.03+ ile çalıştırabilirsiniz
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 ```
 
-Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
-for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
-should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
+PyTorch'un süreçler arasında veri paylaşmak için paylaşılan bellek kullandığını lütfen unutmayın, bu nedenle torch çoklu işlem kullanılıyorsa (örn. çoklu iş parçacıklı veri yükleyicileri için) kapsayıcıların birlikte çalıştığı varsayılan paylaşılan bellek segmenti boyutu yeterli değildir ve paylaşılan bellek boyutunu `nvidia-docker run` komut satırındaki `--ipc=host` veya `--shm-size` seçenekleriyle artırmalıdır.
 
-#### Building the image yourself
+#### Görüntüyü kendiniz oluşturma
 
-**NOTE:** Must be built with a docker version > 18.06
+**NOT:** Docker sürümü > 18.06 olmalıdır.
 
-The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
-You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
-unset to use the default.
+`Dockerfile` dosyası, CUDA 11.1 ve cuDNN v8 desteği olan görüntülerin oluşturulması için sağlanır.
+Miniconda tarafından hangi Python sürümünün kullanılacağını belirtmek için `PYTHON_VERSION=x.y` değişkeni yapılır veya varsayılanı kullanmak için ayarlanmamış olarak bırakabilirsiniz.
 
 ```bash
 make -f docker.Makefile
-# images are tagged as docker.io/${your_docker_username}/pytorch
+# Görüntüler docker.io/${your_docker_username}/pytorch olarak etiketlenir.
 ```
 
-You can also pass the `CMAKE_VARS="..."` environment variable to specify additional CMake variables to be passed to CMake during the build.
-See [setup.py](../setup.py) for the list of available variables.
+Ayrıca derleme sırasında CMake'e aktarılacak ek CMake değişkenlerini belirtmek için `CMAKE_VARS="..."` ortam değişkenini de aktarabilirsiniz.
+Kullanılabilir değişkenlerin listesi için [setup.py](../setup.py) dosyasına bakabilirsiniz.
 
 ```bash
 CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
 ```
 
-### Building the Documentation
+### Dökümantasyon Oluşturma
 
-To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
-readthedocs theme.
+Çeşitli formatlarda dokümantasyon oluşturmak için [Sphinx](http://www.sphinx-doc.org) ve readthedocs temasına ihtiyacınız olacaktır.
 
 ```bash
 cd docs/
 pip install -r requirements.txt
 ```
-You can then build the documentation by running `make <format>` from the
-`docs/` folder. Run `make` to get a list of all available output formats.
+Ardından, belgelendirmeyi `docs/` klasöründen `make <format>` komutunu çalıştırarak oluşturabilirsiniz. Tüm mevcut çıktı formatlarının listesini almak için `make` komutunu çalıştırın.
 
-If you get a katex error run `npm install katex`.  If it persists, try
+Eğer bir katex hatası alırsanız `npm install katex`.  komutunu çalıştırın.  Eğer hata devam ederse, şu komutu deneyin
 `npm install -g katex`
 
-> Note: if you installed `nodejs` with a different package manager (e.g.,
-`conda`) then `npm` will probably install a version of `katex` that is not
-compatible with your version of `nodejs` and doc builds will fail.
-A combination of versions that is known to work is `node@6.13.1` and
-`katex@0.13.18`. To install the latter with `npm` you can run
+> Not: Eğer `nodejs` i farklı bir paket yöneticisiyle (örneğin,
+`conda`) yüklediyseniz `npm` muhtemelen `nodejs` ürümünüzle uyumlu
+olmayan bir `katex` sürümü yükler ve belge derlemesi başarısız olur.
+Bilinen çalışan bir kombinasyon, `node@6.13.1` ve `katex@0.13.18` sürümleridir.
+`npm` ile bunları yüklemek için aşağıdaki komutu çalıştırabilirsiniz:
 ```npm install -g katex@0.13.18```
 
-### Previous Versions
+### Önceki Sürümler
 
-Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](https://pytorch.org/previous-versions).
+Eski PyTorch sürümlerinin kurulum talimatları ve binary dosyaları
+[website'mizde](https://pytorch.org/previous-versions) bulunabilir.
 
 
-## Getting Started
+## Buradan Başlayın
 
-Three-pointers to get you started:
-- [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
-- [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
-- [The API Reference](https://pytorch.org/docs/)
-- [Glossary](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
+Başlamanız için üç ipucu:
+- [Öğreticiler: PyTorch'u anlamaya ve kullanmaya başlamanızı sağlar](https://pytorch.org/tutorials/)
+- [Örnekler: tüm alanlarda(domainlerde) anlaşılması kolay PyTorch kodu](https://github.com/pytorch/examples)
+- [API Referansı](https://pytorch.org/docs/)
+- [Sözlük](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
 
-## Resources
+## Kaynaklar
 
 * [PyTorch.org](https://pytorch.org/)
-* [PyTorch Tutorials](https://pytorch.org/tutorials/)
-* [PyTorch Examples](https://github.com/pytorch/examples)
-* [PyTorch Models](https://pytorch.org/hub/)
-* [Intro to Deep Learning with PyTorch from Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
-* [Intro to Machine Learning with PyTorch from Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
-* [Deep Neural Networks with PyTorch from Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
+* [PyTorch Öğreticileri](https://pytorch.org/tutorials/)
+* [PyTorch Örnekleri](https://github.com/pytorch/examples)
+* [PyTorch Modelleri](https://pytorch.org/hub/)
+* [Udacity'den PyTorch ile Derin Öğrenmeye Giriş](https://www.udacity.com/course/deep-learning-pytorch--ud188)
+* [Udacity'den PyTorch ile Makine Öğrenimine Giriş](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
+* [Coursera'dan PyTorch ile Derin Sinir Ağları](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
 * [PyTorch Twitter](https://twitter.com/PyTorch)
 * [PyTorch Blog](https://pytorch.org/blog/)
 * [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
-## Communication
-* Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
-* GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
-* Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
-* For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
+## İletişim
+* Forumlar: Uygulamaları, araştırmaları vb. konuları tartışın https://discuss.pytorch.org
+* GitHub Sorunları: Hata raporları, özellik talepleri, kurulum sorunları, RFC'ler, düşünceler, vb.
+* Slack: [PyTorch Slack](https://pytorch.slack.com/) genel sohbet, çevrimiçi tartışmalar, işbirliği vb. için orta ve deneyimli PyTorch kullanıcıları ve geliştiricilerinden oluşan birincil kitleye ev sahipliği yapmaktadır. [PyTorch Forumlar](https://discuss.pytorch.org). Eğer bir Slack davetiyesine ihtiyacınız varsa, lütfen bu formu doldurun: https://goo.gl/forms/PP1AGvNHpSaJP8to1
+* Haber Bülteni: Gereksiz bilgiler olmadan, PyTorch hakkında önemli duyurular içeren tek yönlü bir e-posta bülteni. Buradan kayıt olabilirsiniz: https://eepurl.com/cbG0rv
+* Facebook Sayfası: Important announcements about PyTorch. https://www.facebook.com/pytorch
+* Marka yönergeleri için lütfen web sitemizi ziyaret edin [pytorch.org](https://pytorch.org/)
 
 ## Releases and Contributing
 
