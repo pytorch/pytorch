@@ -527,6 +527,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
 fi
 
 test_libtorch() {
+  local SHARD="$1"
+
   # The slow test config corresponds to a default test config that should run
   # the libtorch tests instead.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$TEST_CONFIG" != "slow" ]]; then
@@ -541,61 +543,60 @@ test_libtorch() {
 
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
 
-    # Start background download
-    MNIST_DIR="${PWD}/test/cpp/api/mnist"
-    python tools/download_mnist.py --quiet -d "${MNIST_DIR}" &
-
-    # Prepare the model used by test_jit, the model needs to be in the test directory
-    # to get picked up by run_test
-    pushd test
-    python cpp/jit/tests_setup.py setup
-    popd
-
-    # Run JIT cpp tests
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests
-    else
-      # CUDA tests have already been skipped when CUDA is not available
-      python test/run_test.py --cpp --verbose -i cpp/test_jit -k "not CUDA"
+    if [[ -z "${SHARD}" || "${SHARD}" == "1" ]]; then
+      test_libtorch_api
     fi
 
-    # Run Lazy Tensor cpp tests
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
-      LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_lazy
-    else
-      python test/run_test.py --cpp --verbose -i cpp/test_lazy
-    fi
-
-    # Cleaning up test artifacts in the test folder
-    pushd test
-    python cpp/jit/tests_setup.py shutdown
-    popd
-
-    # Wait for background download to finish
-    wait
-
-    if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
-        TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
-        mkdir -p $TEST_REPORTS_DIR
-
-        # TODO: Not quite sure why these tests time out on ASAN and SLOW, probably
-        # this is due to the fact that a python executable is used or some logic
-        # inside run_test. This test usually takes only minutes to run
-        OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
-        "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
-    else
-        # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
-        OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
-        python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
-    fi
-
-    if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
-      # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
-      export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
-      python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
+    if [[ -z "${SHARD}" || "${SHARD}" == "2" ]]; then
+      test_libtorch_jit
     fi
 
     assert_git_not_dirty
+  fi
+}
+
+test_libtorch_jit() {
+  # Prepare the model used by test_jit, the model needs to be in the test directory
+  # to get picked up by run_test
+  pushd test
+  python cpp/jit/tests_setup.py setup
+  popd
+
+  # Run jit and lazy tensor cpp tests together to finish them faster
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
+    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests cpp/test_lazy
+  else
+    # CUDA tests have already been skipped when CUDA is not available
+    python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy -k "not CUDA"
+  fi
+
+  # Cleaning up test artifacts in the test folder
+  pushd test
+  python cpp/jit/tests_setup.py shutdown
+  popd
+}
+
+test_libtorch_api() {
+  # Start background download
+  MNIST_DIR="${PWD}/test/cpp/api/mnist"
+  python tools/download_mnist.py --quiet -d "${MNIST_DIR}"
+
+  if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
+    TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
+    mkdir -p $TEST_REPORTS_DIR
+
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
+    "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+  else
+    # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
+    python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
+  fi
+
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+    # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
+    export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
+    python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
   fi
 }
 
@@ -1009,10 +1010,11 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
+  test_libtorch 1
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 2
-  test_libtorch
+  test_libtorch 2
   test_aot_compilation
   test_custom_script_ops
   test_custom_backend
