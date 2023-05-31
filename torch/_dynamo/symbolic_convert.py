@@ -330,13 +330,18 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, UserDefinedObjectVariable):
             x = value.var_getattr(self, "__bool__")
             # if __bool__ is missing, trying __len__ to infer a truth value.
-            if x.is_python_constant() and not x.as_python_constant():
+            if x.is_python_constant() and x.as_python_constant() is None:
                 x = value.var_getattr(self, "__len__")
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
                 state = self.copy_graphstate()
                 result = x.call_function(self, [], {})
-                if isinstance(result, ConstantVariable):
+                if isinstance(result, ConstantVariable) and (
+                    x.fn.__name__ == "__bool__"
+                    and isinstance(result.value, bool)
+                    or x.fn.__name__ == "__len__"
+                    and isinstance(result.value, int)
+                ):
                     self.output.guards.update(result.guards)
                     if truth_fn(result.value):
                         push and self.push(value)
