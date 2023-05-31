@@ -10051,7 +10051,11 @@ op_db: List[OpInfo] = [
                    ref=np.arcsinh,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),
+                               DecorateInfo(
+                                   toleranceOverride({torch.complex64: tol(atol=4e-05, rtol=1e-05)}),
+                                   'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                   device_type='cuda'),),
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -13701,6 +13705,9 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                         device_type='cuda'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
@@ -14795,6 +14802,10 @@ op_db: List[OpInfo] = [
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   decorators=(DecorateInfo(
+                               toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
+                               'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                               device_type='cuda'),),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -14826,7 +14837,11 @@ op_db: List[OpInfo] = [
                    ref=np.tanh,
                    aten_backward_name='tanh_backward',
                    aliases=('nn.functional.tanh',),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),
+                               DecorateInfo(
+                                   toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
+                                   'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                   device_type='cuda'),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
