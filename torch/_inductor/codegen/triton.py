@@ -302,11 +302,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def logical_and(a, b):
-        return f"{a} && {b}"
+        return f"{a} & {b}"  # {a} && {b} is not recognized by Triton
 
     @staticmethod
     def logical_or(a, b):
-        return f"{a} || {b}"
+        return f"{a} | {b}"  # {a} || {b} is not recognized by Triton
 
     @staticmethod
     def logical_xor(a, b):
