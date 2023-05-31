@@ -1386,6 +1386,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
         inner_fn=inner_fn,
         ranges=[*size],
     )
+    result.realize()
     return result
 
 
@@ -1498,7 +1499,6 @@ make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.erfinv, warn=False)
 make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -3621,6 +3621,9 @@ def _validate_reduction_axis(x, axis):
         axis = [axis]
     elif not axis:
         axis = range(len(size))
+    if len(size) == 0:
+        assert tuple(axis) in [(), (0,), (-1,)], f"invalid axis: {axis}"
+        return []
     axis = list(axis)
     for i in range(len(axis)):
         if axis[i] < 0:
@@ -4101,6 +4104,7 @@ register_pointwise_numeric(aten.atan)
 register_pointwise_numeric(aten.atanh)
 register_pointwise_numeric(aten.copysign)
 register_pointwise_numeric(aten.erfc)
+register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)

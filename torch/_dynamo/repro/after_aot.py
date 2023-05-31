@@ -201,6 +201,7 @@ from torch import tensor, device
 import torch.fx as fx
 from torch._dynamo.testing import rand_strided
 from math import inf
+import torch._inductor.inductor_prims
 
 {generate_config_string(stable_output=stable_output)}
 
