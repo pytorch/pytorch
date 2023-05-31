@@ -24,7 +24,7 @@ from ..utils import (
     sympy_product,
 )
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
+from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 
 
 pexpr = PythonPrinter().doprint
@@ -219,7 +219,9 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
-        assert self.node.get_name() not in V.graph.removed_buffers
+        if self.node.get_name() in V.graph.removed_buffers:
+            assert self.reused_as.get_name() in V.graph.removed_buffers
+            return NullLine(self.wrapper)
         assert self.reused_as.get_name() not in V.graph.removed_buffers
         return self
 
@@ -251,6 +253,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.src_to_kernel = {}
         self.kernel_to_hash = {}
+        self.kenel_numel_expr = set()
         self.lines = []
         self.declare = ""
         self.ending = ""
@@ -358,10 +361,6 @@ class WrapperCodeGen(CodeGen):
                 self.prefix.writeline(f"{lhs} = args")
                 self.prefix.writeline("args.clear()")
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
-
-    def append_precomputed_sizes_to_prefix(self):
-        with self.prefix.indent():
-            self.codegen_precomputed_sizes(self.prefix)
 
     def write_get_cuda_stream(self, index):
         self.write_triton_header_once()
@@ -544,9 +543,12 @@ class WrapperCodeGen(CodeGen):
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
 
-    def codegen_precomputed_sizes(self, code: IndentedBuffer):
-        for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
-            code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")
+    def append_precomputed_sizes_to_prefix(self):
+        with self.prefix.indent():
+            for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
+                self.prefix.writeline(
+                    f"{self.declare}{sym} = {pexpr(expr)}{self.ending}"
+                )
 
     def codegen_python_sizevar(self, x: Expr) -> str:
         return pexpr(V.graph.sizevars.simplify(x))
@@ -663,14 +665,6 @@ class WrapperCodeGen(CodeGen):
             )
         else:
             self.writeline(self.wrap_kernel_call(name, call_args))
-
-    def call_kernel(self, name: str, kernel: Kernel):
-        tmp = IndentedBuffer()
-        kernel.call_kernel(self, tmp, name)
-        for line in tmp.getvalue().split("\n"):
-            line = line.strip()
-            if line:
-                self.writeline(line)
 
     def writeline(self, line):
         self.lines.append(line)
@@ -873,7 +867,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.prefix.splice(
             f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& args) {{"""
         )
-        with self.wrapper_call.indent():
+        with self.prefix.indent():
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
                     # unwrap input tensor back to scalar
@@ -888,15 +882,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
                             dtype is not None
                         ), "Fails to get the dtype of the sympy.Expr"
                         cpp_dtype = DTYPE_TO_CPP[dtype]
-                        self.wrapper_call.writeline(f"{cpp_dtype} {input_key};")
-                        self.wrapper_call.writeline(
-                            f"{input_key} = args[{idx}].item<{cpp_dtype}>();"
+                        self.prefix.writeline(
+                            f"{cpp_dtype} {input_key} = args[{idx}].item<{cpp_dtype}>();"
                         )
                     else:
-                        self.wrapper_call.writeline(f"at::Tensor {input_key};")
-                        self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
+                        self.prefix.writeline(f"at::Tensor {input_key} = args[{idx}];")
 
-            self.codegen_inputs(self.wrapper_call, V.graph.graph_inputs)
+            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+
+            self.wrapper_call.splice(
+                """
+                c10::optional<at::Scalar> optional_scalar;
+                c10::optional<c10::string_view> optional_string;
+                torch::List<c10::optional<at::Scalar>> optional_list;
+                """
+            )
 
     def generate(self):
         self.write_wrapper_decl()
@@ -1096,7 +1096,8 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.arg_var_id = count()
         self.cuda = True
 
-    def write_prefix(self):
+    def write_header(self):
+        super().write_header()
         self.prefix.splice(
             """
             #include <c10/util/Exception.h>
