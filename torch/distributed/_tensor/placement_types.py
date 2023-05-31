@@ -42,7 +42,7 @@ class Shard(Placement):
     ) -> Tuple[List[torch.Tensor], List[int]]:
         # NOTE: When with_padding=True, we pad the tensor on the last few ranks
         # before calling the collectives (i.e. scatter/all_gather, etc.). This is
-        # because collectives usually requires even size tensor inputs
+        # because collectives usually requires equal size tensor inputs
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
