@@ -11,9 +11,11 @@ from weakref import ReferenceType
 
 import torch
 import torch._custom_op
+import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
+    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -26,7 +28,10 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode_stack,
+    TorchDispatchMode,
+)
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map, tree_map_only
 from torch.utils._stats import count, count_label
@@ -35,6 +40,7 @@ from torch.utils.weak import WeakIdRef
 DimList = List
 
 log = logging.getLogger(__name__)
+not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
@@ -551,6 +557,7 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten.index_put.default)
+@register_op_impl(aten._unsafe_index_put.default)
 def index_put(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
@@ -818,6 +825,13 @@ def get_fast_op_impls():
     return FAST_OP_IMPLEMENTATIONS
 
 
+@functools.lru_cache(None)
+def init_cuda_context():
+    # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
+    if torch.cuda.is_available():
+        torch.empty(1, device="cuda")
+
+
 @contextlib.contextmanager
 def in_kernel_invocation_manager(fake_mode):
     # See: note [Fake Tensor Dispatch Keys]
@@ -921,8 +935,10 @@ class FakeTensor(torch.Tensor):
         if not fake_mode.allow_meta:
             assert device.type != "meta"
         # normalize cuda device.
-        if device.type == "cuda" and device.index is None:
-            device = torch.device(f"cuda:{torch.cuda.current_device()}")
+        if device.type == "cuda":
+            init_cuda_context()
+            if device.index is None:
+                device = torch.device(f"cuda:{torch.cuda.current_device()}")
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
@@ -977,7 +993,13 @@ class FakeTensor(torch.Tensor):
         # because the next dispatch after a fake mode will attempt to use
         # subclasses of tensors to dispatch, and any FakeTensor arguments
         # will be considered eligible.
-        if any(not issubclass(t, FakeTensor) and t is not torch.Tensor for t in types):
+        unrecognized_types = [
+            t for t in types if not issubclass(t, FakeTensor) and t is not torch.Tensor
+        ]
+        if unrecognized_types:
+            not_implemented_log.debug(
+                "FakeTensor unrecognized subclass(es): %s", unrecognized_types
+            )
             return NotImplemented
 
         fake_mode = None
@@ -987,6 +1009,21 @@ class FakeTensor(torch.Tensor):
                 break
 
         assert fake_mode is not None
+
+        # If the fake mode is already active, don't try to reapply it!
+        # NotImplemented is the right thing to return here, because the
+        # typical situation this can occur is if ProxyTensorMode returned a
+        # NotImplemented because of a not implemented subclass; we may have
+        # unluckily attempted to hit FakeTensor's dispatch first,
+        # NotImplemented lets us keep chaining until we find the actual
+        # subclass
+        cur_stack = _get_current_dispatch_mode_stack()
+        if fake_mode in cur_stack:
+            not_implemented_log.debug(
+                "FakeTensor mode already active: %s in %s", fake_mode, cur_stack
+            )
+            return NotImplemented
+
         with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
@@ -1073,7 +1110,7 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
     ):
-        log.info("create_mode 0x%x", id(self))
+        log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
 
@@ -1097,15 +1134,36 @@ class FakeTensorMode(TorchDispatchMode):
         # the device property
         self.in_kernel_invocation = False
 
+        # True if we enter'ed and actually enabled fake tensor mode,
+        # false if it was a no-op.  Not thread safe but neither is
+        # in_kernel_invocation
+        self.enter_stack: List[bool] = []
+
         self.shape_env = shape_env
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        assert self not in _get_current_dispatch_mode_stack(), func
         try:
             return self.dispatch(func, types, args, kwargs)
         except TypeError:
             log.exception("fake tensor raised TypeError")
             raise
+
+    # No-op if FakeTensorMode is already on the stack
+    def __enter__(self):
+        if self not in _get_current_dispatch_mode_stack():
+            self.enter_stack.append(True)
+            return super().__enter__()
+        else:
+            # no-op
+            self.enter_stack.append(False)
+            return self
+
+    def __exit__(self, a, b, c):
+        live = self.enter_stack.pop()
+        if live:
+            return super().__exit__(a, b, c)
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -1172,7 +1230,11 @@ class FakeTensorMode(TorchDispatchMode):
         # tensor, it might be related to this line.  Though I'm not sure
         # how you'll know to read this comment, as this line won't show up
         # in the stack trace.
-        if self.check_for_subclass(args, kwargs):
+        unrecognized_types = self.check_for_subclass(args, kwargs)
+        if unrecognized_types:
+            not_implemented_log.debug(
+                "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
+            )
             return NotImplemented
 
         # if we are in the dispatch mode, we will enter this function even if the inputs
@@ -1290,12 +1352,12 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        if func.name() in torch._custom_op.global_registry:
-            custom_op = torch._custom_op.global_registry[func.name()]
-            if custom_op is not None and custom_op._abstract_impl is not None:
-                ctx = torch._custom_op.AbstractImplCtx(self.shape_env, func)
-                with torch._custom_op.set_ctx_getter(lambda: ctx), self:
-                    result = custom_op._abstract_impl.func(*args, **kwargs)
+        if func.name() in torch._custom_op.impl.global_registry:
+            custom_op = torch._custom_op.impl.global_registry[func.name()]
+            if custom_op is not None and custom_op._has_impl("abstract"):
+                ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
+                with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
+                    result = custom_op._get_impl("abstract").func(*args, **kwargs)
                     return result
 
         # special handling for funcs registered through `register_op_impl`,
@@ -1338,7 +1400,9 @@ class FakeTensorMode(TorchDispatchMode):
                 and type(x) is not torch.nn.Parameter
             )
 
-        return any(check(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs)))
+        return [
+            type(x) for x in tree_flatten_only(torch.Tensor, (args, kwargs)) if check(x)
+        ]
 
     def validate_and_convert_non_fake_tensors(self, func, converter, args, kwargs):
         """
@@ -1394,17 +1458,24 @@ class FakeTensorMode(TorchDispatchMode):
         def wrap(e, device=None):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
+
+            if common_device is None:
+                (
+                    common_device,
+                    has_scalar_only_inputs,
+                ) = FakeTensor._find_common_device(func, args, kwargs)
+
+            if isinstance(e, FakeTensor):
+                check(
+                    e.device == common_device,
+                    lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
+                )
+
             if (
                 isinstance(e, torch.Tensor)
                 and not isinstance(e, FakeTensor)
                 and converter is not None
             ):
-                if common_device is None:
-                    (
-                        common_device,
-                        has_scalar_only_inputs,
-                    ) = FakeTensor._find_common_device(func, args, kwargs)
-
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.

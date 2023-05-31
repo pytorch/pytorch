@@ -30,7 +30,7 @@ __all__ = [
 
 # switch the DTensor propagator to use the caching propagator to speed up
 # the TP eager execution time.
-DTensor._propagator = _CachingPropagator(DTensor._propagator.op_to_rules)
+DTensor._propagator = _CachingPropagator(DTensor._propagator)
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
@@ -79,6 +79,8 @@ def parallelize_module(  # type: ignore[return]
         ``PairwiseParallel`` comes with constraints for now. If you need finer
         granularity, you need to pass in a dict of module FQN and parallel style instead.
     """
+
+    torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
 
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)

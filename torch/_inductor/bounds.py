@@ -3,6 +3,7 @@ from typing import Dict, Optional
 
 import sympy
 
+import torch
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
 from .utils import cache_on_self, dominated_nodes, sympy_subs
