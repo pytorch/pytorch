@@ -26,6 +26,7 @@
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -1660,26 +1661,6 @@ PyObject* THPVariable_pynew(
       c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED,
       /*allow_preexisting_pyobj=*/true);
   END_HANDLE_TH_ERRORS
-}
-
-static void clear_slots(PyTypeObject* type, PyObject* self) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t i, n;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyMemberDef* mp;
-
-  n = Py_SIZE(type);
-  mp = type->tp_members;
-  for (i = 0; i < n; i++, mp++) {
-    if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
-      char* addr = (char*)self + mp->offset;
-      PyObject* obj = *(PyObject**)addr;
-      if (obj != nullptr) {
-        *(PyObject**)addr = nullptr;
-        Py_DECREF(obj);
-      }
-    }
-  }
 }
 
 // NB: this is not the tp_dealloc on THPVariable; instead, its the dealloc
