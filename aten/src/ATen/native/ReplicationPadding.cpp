@@ -119,9 +119,7 @@ TORCH_META_FUNC(replication_pad2d) (
   if (input.dim() == 3) {
     set_output_raw_strided(0, {nslices, oheight, owidth}, {}, input.options());
   } else {
-    const auto memory_format = input.suggest_memory_format();
-    set_output_raw_strided(0, {nbatch, nslices, oheight, owidth}, {},
-        input.options().memory_format(memory_format));
+    set_output_raw_strided(0, {nbatch, nslices, oheight, owidth}, {}, input.options());
   }
 }
 
@@ -165,12 +163,10 @@ TORCH_META_FUNC(replication_pad3d) (
       " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
 
   /* resize output */
-  const auto memory_format = input.suggest_memory_format();
-  const auto options = input.options().memory_format(memory_format);
   if (input.dim() == 4) {
-    set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, options);
+    set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, input.options());
   } else {
-    set_output_raw_strided(0, {nbatch, nslices, odepth, oheight, owidth}, {}, options);
+    set_output_raw_strided(0, {nbatch, nslices, odepth, oheight, owidth}, {}, input.options());
   }
 }
 
@@ -295,6 +291,9 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cpu) (
 TORCH_IMPL_FUNC(replication_pad2d_out_cpu) (
   const Tensor& input, IntArrayRef paddingSize, const Tensor& output
 ) {
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  output.resize_(output.sizes(), input.suggest_memory_format());
+
   replication_pad2d_kernel(kCPU, output, input, paddingSize);
 }
 
@@ -322,6 +321,9 @@ Tensor replication_pad2d_backward_cpu(
 TORCH_IMPL_FUNC(replication_pad3d_out_cpu) (
   const Tensor& input, IntArrayRef paddingSize, const Tensor& output
 ) {
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  output.resize_(output.sizes(), input.suggest_memory_format());
+
   replication_pad3d_kernel(kCPU, output, input, paddingSize);
 }
 
