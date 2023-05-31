@@ -432,9 +432,9 @@ Genellikle, PyTorch yılda üç büyük sürüm çıkarır. Eğer bir hata ile k
 Eğer yeni özellikler, yardımcı fonksiyonlar veya çekirdeğe uzantılar eklemeyi planlıyorsanız, lütfen önce bir konu açın ve özelliği bizimle tartışın.
 Tartışma yapmadan bir PR göndermek, çekirdeği farklı bir yöne taşıyor olabileceğimiz için reddedilen bir PR ile sonuçlanabilir, çünkü sizin farkında olabileceğinizden farklı bir yol izliyor olabiliriz.
 
-PyTorch'a katkıda bulunmak hakkında daha fazla bilgi edinmek için [Katkı Sayfası'na](../CONTRIBUTING.md) göz atabilirsiniz. PyTorch sürümleri hakkında daha fazla bilgi için [Sürüm Sayfası'n](../RELEASE.md) ziyaret edebilirsiniz..
+PyTorch'a katkıda bulunmak hakkında daha fazla bilgi edinmek için [Katkı Sayfası'na](../CONTRIBUTING.md) göz atabilirsiniz. PyTorch sürümleri hakkında daha fazla bilgi için [Sürüm Sayfası'n](../RELEASE.md) ziyaret edebilirsiniz.
 
-## The Team
+## Takım
 
 PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
 
@@ -443,6 +443,6 @@ A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chila
 
 Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 
-## License
+## Lisans
 
-PyTorch has a BSD-style license, as found in the [LICENSE](../LICENSE) file.
+PyTorch'un lisansı BSD tarzında bir lisanstır ve [Lisans](../LICENSE) dosyasında bulunur.
