@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import copy
 import math
 import operator
@@ -15,15 +16,16 @@ from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._subclasses.fake_tensor import FakeTensor
 
 
-__all__ = ["_AddRuntimeAssertionsForConstraintsPass", "NodeDim", "RangeConstraint"]
+__all__ = ["_AddRuntimeAssertionsForConstraintsPass", "InputDim", "RangeConstraint"]
 
 
-class NodeDim(NamedTuple):
-    node_name: str
+class InputDim(NamedTuple):
+    input_name: str
     dim: int
 
 
-class RangeConstraint(NamedTuple):
+@dataclass
+class RangeConstraint:
     min_val: int
     max_val: int
 
@@ -51,12 +53,12 @@ def _convert_range_to_int(range: RangeConstraint):
 class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def __init__(
         self,
-        symbol_to_range: Dict[sympy.Symbol, RangeConstraint],
-        equality_constraints: Dict[NodeDim, List[NodeDim]],
+        range_constraints: Dict[sympy.Symbol, RangeConstraint],
+        equality_constraints: Dict[InputDim, List[InputDim]],
     ):
         super().__init__()
-        self.symbol_to_range: Dict[sympy.Symbol, RangeConstraint] = symbol_to_range
-        self.equality_constraints: Dict[NodeDim, List[NodeDim]] = equality_constraints
+        self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
+        self.equality_constraints: Dict[InputDim, List[InputDim]] = equality_constraints
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         graph_module = copy.deepcopy(graph_module)
@@ -82,11 +84,11 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 if isinstance(shape, SymInt):
                     # If the shape is dynamic, add range assertions
                     symbol = shape.node._expr
-                    assert symbol in self.symbol_to_range
+                    assert symbol in self.range_constraints
 
                     with graph.inserting_after(node):
                         self._insert_range_assert_inplace(
-                            graph, node, dim, self.symbol_to_range[symbol]
+                            graph, node, dim, self.range_constraints[symbol]
                         )
                 else:
                     # If no dynamism is specified, we assume all dimensions #
@@ -153,20 +155,20 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         graph: torch.fx.Graph,
         placeholder_nodes: Dict[str, torch.fx.Node],
     ):
-        for (name, dim), equalities in self.equality_constraints.items():
-            node = placeholder_nodes[name]
+        for input_dim, equalities in self.equality_constraints.items():
+            node = placeholder_nodes[input_dim.input_name]
             dim_node = graph.call_function(
-                torch.ops.aten.sym_size, (node, dim),
+                torch.ops.aten.sym_size, (node, input_dim.dim),
             )
             with graph.inserting_after(dim_node):
-                for other_name, other_dim in equalities:
+                for other_input_dim in equalities:
                     assert_msg = (
-                        f"Input {name}.shape[{dim}] is "
-                        f"not equal to input {other_name}.shape[{other_dim}]"
+                        f"Input {input_dim.input_name}.shape[{input_dim.dim}] is "
+                        f"not equal to input {other_input_dim.input_name}.shape[{other_input_dim.dim}]"
                     )
-                    other_node = placeholder_nodes[other_name]
+                    other_node = placeholder_nodes[other_input_dim.input_name]
                     other_dim_node = graph.call_function(
-                        torch.ops.aten.sym_size, (other_node, other_dim),
+                        torch.ops.aten.sym_size, (other_node, other_input_dim.dim),
                     )
 
                     with graph.inserting_after(other_dim_node):
@@ -217,7 +219,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 if symbol.name.startswith("i"):
                     # We only care about unbacked symints for these inline
                     # constraints, which are prefixed with 'i'
-                    constraint = self.symbol_to_range[symbol]
+                    constraint = self.range_constraints[symbol]
                     min_val, max_val = _convert_range_to_int(constraint)
                     assert_msg = f" is outside of inline constraint [{min_val}, {max_val}]."
                     call_backs.append(

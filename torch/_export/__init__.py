@@ -147,14 +147,14 @@ def export(
         backward_signature=None,
     )
 
-    symbol_to_range, equality_constraints = _process_constraints(gm, flat_args)
+    range_constraints, equality_constraints = _process_constraints(gm, flat_args)
     exported_program = ExportedProgram(
         gm,
         gm.graph,
         graph_signature,
         CallSpec(in_spec, out_spec),
         {},
-        symbol_to_range,
+        range_constraints,
         equality_constraints,
     )
 

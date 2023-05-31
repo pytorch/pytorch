@@ -15,7 +15,7 @@ from . import error
 from .pass_base import PassType
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForConstraintsPass,
-    NodeDim,
+    InputDim,
     RangeConstraint,
 )
 
@@ -76,8 +76,8 @@ class ExportedProgram:
         graph_signature: ExportGraphSignature,
         call_spec: CallSpec,
         state_dict: Dict[str, Any],
-        symbol_to_range: Dict[sympy.Symbol, RangeConstraint],
-        equality_constraints: Dict[NodeDim, List[NodeDim]],
+        range_constraints: Dict[sympy.Symbol, RangeConstraint],
+        equality_constraints: Dict[InputDim, List[InputDim]],
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -86,8 +86,8 @@ class ExportedProgram:
         self.graph_signature: ExportGraphSignature = graph_signature
         self.call_spec: CallSpec = call_spec
         self.state_dict: Dict[str, Any] = state_dict
-        self.symbol_to_range: Dict[sympy.Symbol, RangeConstraint] = symbol_to_range
-        self.equality_constraints: Dict[NodeDim, List[NodeDim]] = equality_constraints
+        self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
+        self.equality_constraints: Dict[InputDim, List[InputDim]] = equality_constraints
 
     def __call__(self, *args: Any) -> Any:
         if self.call_spec.in_spec is not None:
@@ -127,7 +127,7 @@ class ExportedProgram:
             "ExportedProgram:\n"
             f"    {graph_module}\n"
             f"Graph Signature: {self.graph_signature}\n"
-            f"Symbol to range: {self.symbol_to_range}\n"
+            f"Symbol to range: {self.range_constraints}\n"
         )
         return string
 
@@ -146,21 +146,21 @@ class ExportedProgram:
             copy.deepcopy(self.graph_signature),
             copy.deepcopy(self.call_spec),
             self.state_dict,
-            copy.deepcopy(self.symbol_to_range),
+            copy.deepcopy(self.range_constraints),
             copy.deepcopy(self.equality_constraints),
         )
         return transformed_ep
 
     def add_runtime_assertions(self) -> "ExportedProgram":
         return self.transform(
-            _AddRuntimeAssertionsForConstraintsPass(self.symbol_to_range, self.equality_constraints)
+            _AddRuntimeAssertionsForConstraintsPass(self.range_constraints, self.equality_constraints)
         )
 
 
 def _process_constraints(
     graph_module: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
-) -> Tuple[Dict[sympy.Symbol, RangeConstraint], Dict[NodeDim, List[NodeDim]]]:
+) -> Tuple[Dict[sympy.Symbol, RangeConstraint], Dict[InputDim, List[InputDim]]]:
     """
     Process the constraints stored in the graph module to return something more readable.
 
@@ -172,12 +172,12 @@ def _process_constraints(
         example_inputs: Flattened list of example inputs used to export the graph module
 
     Returns:
-        symbol_to_range (Dict[sympy.Symbol, RangeConstraints]): Mapping of
+        range_constraints (Dict[sympy.Symbol, RangeConstraints]): Mapping of
             symbols (from SymInts) appearing in the fake tensors in
             node.meta["val"] to their range constraints, which are a tuple
             containing (lower, upper) constraints.
 
-        equality_constraints (Dict[NodeDim, List[NodeDim]]): Mapping of (node,
+        equality_constraints (Dict[InputDim, List[InputDim]]): Mapping of (node,
             dim) to a list of other (node, dim) tuples to mark that these
             dimensions are equal.
     """
@@ -199,47 +199,48 @@ def _process_constraints(
 
     # Create dict mapping (node name, dim) to a list of other (node name, dim)
     # to mark that they are equal
-    equality_constraints: Dict[NodeDim, List[NodeDim]] = defaultdict(list)
+    equality_constraints: Dict[InputDim, List[InputDim]] = defaultdict(list)
     # Create dict mapping (node name, dim) a list of range (lower, upper)
     # constraints
-    range_constraints: Dict[NodeDim, List[RangeConstraint]] = defaultdict(list)
+    multi_range_constraints: Dict[InputDim, List[RangeConstraint]] = defaultdict(list)
     for constraint in input_shape_constraints:
         for node in tensor_id_to_nodes[constraint["t_id"]]:
-            node_dim = NodeDim(node, constraint["dim"])
+            node_dim = InputDim(node, constraint["dim"])
 
             # Accumulate range constraints
-            range_constraints[node_dim].append(
+            multi_range_constraints[node_dim].append(
                 RangeConstraint(constraint["min"], constraint["max"])
             )
 
             # Accumulate equality constraints
             if shared := constraint.get("shared", None):
                 for other_node in tensor_id_to_nodes[shared["t_id"]]:
-                    other_node_dim = NodeDim(other_node, shared["dim"])
+                    other_node_dim = InputDim(other_node, shared["dim"])
                     equality_constraints[node_dim].append(other_node_dim)
 
     # Create dict mapping symbol to a singular range (lower, upper)
-    symbol_to_range: Dict[sympy.Symbol, RangeConstraint] = {}
+    range_constraints: Dict[sympy.Symbol, RangeConstraint] = {}
 
-    # Add inline constraints to symbol_to_range
+    # Add inline constraints to range_constraints
     for symbol, (min_val, max_val) in inline_constraints.items():
-        symbol_to_range[symbol] = RangeConstraint(min_val, max_val)
+        range_constraints[symbol] = RangeConstraint(min_val, max_val)
 
-    # Add input range constraints to symbol_to_ranges
-    for (node_name, dim), range_constraints in range_constraints.items():  # type: ignore[assignment]
+    # Add input range constraints to range_constraintss
+    for input_dim, multi_range_constraint in multi_range_constraints.items():  # type: ignore[assignment]
         # Simplify the range constraints into a single range constraint
         # Ex. ranges [2, 10] and [3, 11] would get merged to [3, 10]
-        min_vals, max_vals = zip(*range_constraints)
+        min_vals = [rc.min_val for rc in multi_range_constraint]
+        max_vals = [rc.max_val for rc in multi_range_constraint]
         min_val = max(min_vals)
         max_val = min(max_vals)
         assert min_val <= max_val
 
         # Add input node range constraints
-        val = placeholder_nodes[node_name].meta["val"]
+        val = placeholder_nodes[input_dim.input_name].meta["val"]
         assert isinstance(val, FakeTensor)
-        symint = val.shape[dim]
+        symint = val.shape[input_dim.dim]
         assert isinstance(symint, SymInt)
         symbol = symint.node._expr
-        symbol_to_range[symbol] = RangeConstraint(min_val, max_val)
+        range_constraints[symbol] = RangeConstraint(min_val, max_val)
 
-    return symbol_to_range, equality_constraints
+    return range_constraints, equality_constraints
