@@ -32,7 +32,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 if config.is_fbcode():
@@ -51,6 +51,7 @@ else:
 
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 ALIGNMENT = 16
 
 
@@ -351,16 +352,16 @@ def compile_fx_inner(
                     return compiled_fn_inner(new_inputs)
 
             if len(set(graph.device_types)) > 1:
-                developer_warning("skipping cudagraphs due to multiple devices")
+                perf_hint_log.warning("skipping cudagraphs due to multiple devices")
             elif set(graph.device_types) == {"cuda"}:
                 if graph.mutated_inputs:
-                    developer_warning("skipping cudagraphs due to input mutation")
+                    perf_hint_log.warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    developer_warning(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to complex input striding"
                     )
                 elif len(graph.device_idxs) > 1 and config.triton.cudagraph_trees:
-                    developer_warning(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to multiple device indexes"
                     )
 
