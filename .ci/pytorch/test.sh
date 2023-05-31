@@ -544,11 +544,11 @@ test_libtorch() {
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
 
     if [[ -z "${SHARD}" || "${SHARD}" == "1" ]]; then
-      test_libtorch_jit
+      test_libtorch_api
     fi
 
     if [[ -z "${SHARD}" || "${SHARD}" == "2" ]]; then
-      test_libtorch_api
+      test_libtorch_jit
     fi
 
     assert_git_not_dirty
@@ -562,19 +562,12 @@ test_libtorch_jit() {
   python cpp/jit/tests_setup.py setup
   popd
 
-  # Run JIT cpp tests
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests
+  # Run jit and lazy tensor cpp tests together to finish them faster
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
+    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests cpp/test_lazy
   else
     # CUDA tests have already been skipped when CUDA is not available
-    python test/run_test.py --cpp --verbose -i cpp/test_jit -k "not CUDA"
-  fi
-
-  # Run Lazy Tensor cpp tests
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
-    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_lazy
-  else
-    python test/run_test.py --cpp --verbose -i cpp/test_lazy
+    python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy -k "not CUDA"
   fi
 
   # Cleaning up test artifacts in the test folder
@@ -592,9 +585,6 @@ test_libtorch_api() {
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
-    # TODO: Not quite sure why these tests time out on ASAN and SLOW, probably
-    # this is due to the fact that a python executable is used or some logic
-    # inside run_test. This test usually takes only minutes to run
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
   else
