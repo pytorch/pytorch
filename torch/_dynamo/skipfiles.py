@@ -177,7 +177,7 @@ def check(filename, allow_torch=False):
     if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
         return True
     # Hack! (need to allow this file to be able to look at `grad_impl`)
-    if "torch/_functorch/eager_transforms.py" in filename:
+    if "torch/_functorch/apis.py" in filename:
         return False
     return bool(SKIP_DIRS_RE.match(filename))
 

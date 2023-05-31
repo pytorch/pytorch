@@ -201,6 +201,7 @@ class TorchVariable(VariableTracker):
         )
 
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+        # print(self.value)
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -213,8 +214,7 @@ class TorchVariable(VariableTracker):
             return TorchHigherOrderOperatorVariable(
                 self.value,
                 source=self.source,
-                value_args_kwargs={"args": args, "kwargs": kwargs},
-            )
+            ).call_function(tx, args, kwargs)
         elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
@@ -833,12 +833,14 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         value,
         source: Optional[Source] = None,
         value_args_kwargs: Optional[Dict] = None,
+        base = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.value = value
         self.source = source
         self.value_args_kwargs = value_args_kwargs
+        self.base = base
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -1310,8 +1312,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph
             pre_side_effects = tx.output.side_effects.clone()
-            grad_args = self.value_args_kwargs["args"]
-            grad_kwargs = self.value_args_kwargs["kwargs"]
+            grad_args = (args[0], args[1], args[2])
 
             # get arguments
             func, argnums, has_aux = grad_args
@@ -1320,7 +1321,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
                 func,
-                args,
+                args[3].items,
                 graph_checkpoint,
                 checkpoint,
             )
@@ -1343,25 +1344,26 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 *(arg.as_proxy() for arg in grad_args[1:]),
             )
 
-            grad_proxy_kwargs = {k: v.as_proxy() for k, v in grad_kwargs.items()}
-
             # Model `grad_fn = grad(fn, *grad_args, **grad_kwargs)`
             grad_fn = tx.output.create_proxy(
                 "call_function",
-                self.value,
+                torch.func.grad,
                 args=tuple(grad_proxy_args),
-                kwargs=grad_proxy_kwargs,
+                kwargs={},
                 name="grad_proxy",
             )
 
             # Pass lifted freevars to the call to `grad_fn`
+            args = args[3].items
             grad_fn_args = tuple(arg.as_proxy() for arg in args) + tuple(
                 body_lifted_freevars
             )
-            grad_fn_kwargs = {k: v.as_proxy() for k, v in kwargs.items()}
+            # TODO: kwargs
+            # grad_fn_kwargs = {k: v.as_proxy() for k, v in args[4].items.items()}
 
             # Call grad_fn with inputs.
-            grad_output = grad_fn(*grad_fn_args, **grad_fn_kwargs)
+            # grad_output = grad_fn(*grad_fn_args, **grad_fn_kwargs)
+            grad_output = grad_fn(*grad_fn_args)
 
             # `grad_fn(*grad_fn_args, **grad_fn_kwargs)`
             # Output of grad_fn is

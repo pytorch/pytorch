@@ -109,7 +109,7 @@ def combine_state_for_ensemble(models):
     return _nn_impl.combine_state_for_ensemble(models)
 
 setup_docs(vmap, _vmap_impl.vmap, 'torch.vmap')
-setup_docs(grad)
+# setup_docs(grad)
 setup_docs(grad_and_value)
 setup_docs(vjp)
 setup_docs(jvp)
