@@ -56,7 +56,7 @@ def _gather_state_dict(
     pg: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
-    Given a state_dict, this API gathers all the ShardedTensors in the state_dict.
+    Given a state_dict, this API gathers all the ShardedTensors or DTensors in the state_dict.
     """
     new_state_dict = {}
     for key, tensor in state_dict.items():
@@ -71,21 +71,10 @@ def _gather_state_dict(
                 tensor = output_tensor.to(local_shard_device)
             else:
                 tensor = output_tensor
-        new_state_dict[key] = tensor
-    return new_state_dict
-
-
-def _gather_dtensor_state_dict(
-    state_dict: Dict[str, Any],
-    device_mesh: DeviceMesh,
-) -> Dict[str, Any]:
-    """
-    Given a state_dict, this API gathers all the DTensors in the state_dict.
-    """
-    new_state_dict = {}
-    for key, tensor in state_dict.items():
-        if isinstance(tensor, DTensor):
-            tensor = device_mesh.all_gather(tensor.to_local(), mesh_dim=0, gather_dim=0)
+        elif isinstance(tensor, DTensor):
+            tensor = tensor.device_mesh.all_gather(
+                tensor.to_local(), mesh_dim=0, gather_dim=0
+            )
         new_state_dict[key] = tensor
     return new_state_dict
 
@@ -153,16 +142,10 @@ def _create_chunk_dtensor(
     corresponding chunk as the local tensor to create a DTensor.
     """
     shard_placement = DShard(0)
-    tensor_padded_list, pad_sizes = shard_placement._split_tensor(
+    tensor_padded_list, _ = shard_placement._split_tensor(
         tensor,
         device_mesh.size(dim=0),
-        with_padding=True,
+        with_padding=False,
         contiguous=True,
     )
-    unpadded_list = [
-        shard_placement._unpad_tensor(tensor, pad_sizes[i])
-        if pad_sizes[i] > 0
-        else tensor
-        for i, tensor in enumerate(tensor_padded_list)
-    ]
-    return DTensor.from_local(unpadded_list[rank], device_mesh, [shard_placement])
+    return DTensor.from_local(tensor_padded_list[rank], device_mesh, [shard_placement])

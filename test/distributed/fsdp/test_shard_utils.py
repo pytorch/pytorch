@@ -9,7 +9,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._shard_utils import (
     _create_chunk_dtensor,
     _create_chunk_sharded_tensor,
-    _gather_dtensor_state_dict,
+    _gather_state_dict,
 )
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
@@ -51,7 +51,7 @@ class TestShardUtilsDistributed(FSDPTest):
 class TestShardUtilsDistributedDTensor(DTensorTestBase):
     @property
     def world_size(self):
-        return 2
+        return 4
 
     def _create_tensor(self, *size):
         # Keep everything deterministic.
@@ -85,9 +85,7 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
         dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
         state_dict = {"dtensor": dist_tensor}
 
-        gathered_state_dict = _gather_dtensor_state_dict(
-            state_dict, device_mesh=device_mesh
-        )
+        gathered_state_dict = _gather_state_dict(state_dict)
         expected_gathered_dtensor = device_mesh.all_gather(
             dist_tensor.to_local(), mesh_dim=0, gather_dim=0
         )
