@@ -7360,7 +7360,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoCusolver
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
     def test_ldl_factor(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
