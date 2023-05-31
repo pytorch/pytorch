@@ -5728,6 +5728,25 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(len(get_cudagraph_segments(pool)), 0)
 
 
+    def test_no_triton_on_import(self):
+        script = """import sys; import torch; torch.rand(2, device='cuda'); exit(2 if "triton" in sys.modules else 0)
+                 """
+
+        try:
+            subprocess.check_output(
+                [sys.executable, '-c', script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)))
+        except subprocess.CalledProcessError as e:
+            if e.returncode > 0:
+                if e.returncode == 2:
+                    self.assertTrue(False, "Triton was imported when importing torch!")
+                else:
+                    raise e
+
+
 instantiate_parametrized_tests(TestCuda)
 
 if __name__ == '__main__':
