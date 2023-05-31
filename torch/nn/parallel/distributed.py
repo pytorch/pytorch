@@ -1430,13 +1430,13 @@ class DistributedDataParallel(Module, Joinable):
             self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
         if self.device_ids:
-            inputs, kwargs = _to_kwargs(
+            moved_inputs, moved_kwargs = _to_kwargs(
                 inputs,
                 kwargs,
                 torch.device(self.device_type, self.device_ids[0]),
                 self.use_side_stream_for_tensor_copies,
             )
-            args, kwargs = inputs[0], kwargs[0]  # type: ignore[index]
+            args, kwargs = moved_inputs[0], moved_kwargs[0]
             # Cast inputs to reduced precision if needed.
             if self.mixed_precision is not None:
                 args, kwargs = _cast_forward_inputs(
