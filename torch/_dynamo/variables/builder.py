@@ -53,6 +53,7 @@ from ..utils import (
     np,
     odict_values,
     preserve_rng_state,
+    requires_higher_order_op,
     tensor_always_has_static_shape,
     torch_np,
     tuple_iterator,
@@ -71,7 +72,11 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
-from .functions import UserFunctionVariable, UserMethodVariable
+from .functions import (
+    CollectiveFunctionRewriteVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .lists import (
     ListVariable,
     NamedTupleVariable,
@@ -103,10 +108,14 @@ from .tensor import (
 from .torch import (
     tensor_dunder_fns,
     torch_special_class_types,
-    TorchHigherOrderOperator,
+    TorchHigherOrderOperatorVariable,
     TorchVariable,
 )
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .user_defined import (
+    ProcessGroupVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 
 log = logging.getLogger(__name__)
@@ -372,7 +381,10 @@ class VariableBuilder:
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
-                    result, type(value), value.default_factory, guards=guards
+                    result,
+                    type(value),
+                    self._wrap(value.default_factory),
+                    guards=guards,
                 )
             else:
                 result = ConstDictVariable(result, type(value), guards=guards)
@@ -431,6 +443,7 @@ class VariableBuilder:
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+            and not requires_higher_order_op(value)
         ):
             return SkipFilesVariable(
                 value,
@@ -438,6 +451,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later
+        elif CollectiveFunctionRewriteVariable.can_rewrite(value):
+            return CollectiveFunctionRewriteVariable(
+                CollectiveFunctionRewriteVariable.rewrite(value),
+                orig_fn=value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,
@@ -495,7 +515,7 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
         elif isinstance(value, HigherOrderOperator):
-            return TorchHigherOrderOperator(
+            return TorchHigherOrderOperatorVariable(
                 value,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
@@ -509,12 +529,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.cuda.streams.Stream):
-            return CUDAStreamVariable(
-                None,
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.ID_MATCH),
-            )
+            unimplemented("CUDAStreamVariable does not currently work soundly.")
+            # return CUDAStreamVariable(
+            #     None,
+            #     value,
+            #     source=self.source,
+            #     guards=self.make_guards(GuardBuilder.ID_MATCH),
+            # )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
@@ -556,6 +577,12 @@ class VariableBuilder:
             return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif ProcessGroupVariable.is_process_group(value):
+            return ProcessGroupVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(
