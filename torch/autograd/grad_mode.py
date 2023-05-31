@@ -293,7 +293,7 @@ class _force_original_view_tracking(_DecoratorContextManager):
         self._force_original_view_tracking_context.__enter__()
 
     def __exit__(self, *args) -> None:
-        self._force_original_view_tracking_context.__exit__(self, *args)
+        self._force_original_view_tracking_context.__exit__(*args)
 
     def clone(self):
         return self.__class__(self.mode)
