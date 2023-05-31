@@ -6289,6 +6289,7 @@ class CommonTemplate:
     def test_neg_index(self):
         def fn(x):
             return x[:, [-1], :]
+
         self.common(fn, (torch.rand(1, 64, 768),))
 
 
