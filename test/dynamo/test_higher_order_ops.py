@@ -621,12 +621,21 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
-    def _grad_compile_check(self, fn, *inputs):
+    def _grad_compile_check(self, fn, *inputs, expected_graph_names=()):
+        backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
-        expected = torch.compile(fn)(*inputs)
+        expected = torch.compile(fn, backend=backend, fullgraph=True)(*inputs)
 
         self.assertEqual(actual, expected)
-        self.assertEqual(counters["stats"]["unique_graphs"], 1)
+
+        wrap_gm = backend.graphs[0]
+        actual_names = set()
+        for mod_name, _ in wrap_gm.named_modules():
+            actual_names.add(mod_name)
+
+        # make sure that all expected names were present.
+        for name in expected_graph_names:
+            self.assertTrue(name in actual_names)
 
     def test_grad(self):
         counters.clear()
@@ -638,7 +647,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x)
+        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
 
     def test_grad_freevar_tensor(self):
         counters.clear()
@@ -651,7 +660,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x)
+        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
 
     def test_grad_freevar_python_scalar(self):
         counters.clear()
@@ -664,7 +673,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x)
+        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
 
     def test_grad_closure_tensor(self):
         counters.clear()
@@ -680,7 +689,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x)
+        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
 
     def test_grad_closure_scalar(self):
         counters.clear()
@@ -694,7 +703,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x)
+        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
 
     def test_grad_has_aux(self):
         counters.clear()
@@ -708,7 +717,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn, has_aux=True)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x)
+        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
 
     def test_grad_two_tensor_has_aux(self):
         counters.clear()
@@ -721,7 +730,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x, y)
+        self._grad_compile_check(
+            wrapper_fn, x, y, expected_graph_names=("grad_body_0",)
+        )
 
     def test_grad_two_tensor_all_grad_has_aux(self):
         counters.clear()
@@ -734,7 +745,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x, y)
+        self._grad_compile_check(
+            wrapper_fn, x, y, expected_graph_names=("grad_body_0",)
+        )
 
     def test_grad_over_grad(self):
         counters.clear()
@@ -746,7 +759,11 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(lambda x: torch.func.grad(fn)(x).sum())(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x)
+        self._grad_compile_check(
+            wrapper_fn,
+            x,
+            expected_graph_names=("grad_body_1.grad_body_0", "grad_body_1"),
+        )
 
     def test_grad_with_graph_break(self):
         counters.clear()
@@ -760,14 +777,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3, 3, 3)
         actual = wrapper_fn(x)
-        expected = torch.compile(wrapper_fn)(x)
-
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(TypeError):
             # TODO(kshitij12345):
-            # Something weird is happening on graph break,
-            # torch.compile(wrapper_fn)(x) returns `torch.func.grad` function
-            # and hence we get an error here.
-            self.assertEqual(actual, expected)
+            # Something weird is happening on graph break
+            expected = torch.compile(wrapper_fn)(x)
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
