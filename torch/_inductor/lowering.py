@@ -3867,9 +3867,11 @@ def floordiv(a, b):
 def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
+
 @make_pointwise
 def bitwise_and(a, b):
     return ops.bitwise_and(a, b)
+
 
 @make_pointwise
 def bitwise_or(a, b):

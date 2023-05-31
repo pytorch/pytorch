@@ -155,6 +155,7 @@ def fill_tensor(self, value: Tensor):
     )
     return torch.full_like(self, value.item())
 
+
 @register_decomposition(aten.hardsigmoid)
 @pw_cast_for_opmath
 def hardsigmoid(self: Tensor) -> Tensor:
@@ -3432,17 +3433,21 @@ def arange_start(
         start, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
 
+
 @register_decomposition(aten.__and__)
 def dunder_and(self, value):
     return torch.bitwise_and(self, value)
+
 
 @register_decomposition(aten.__or__)
 def dunder_or(self, value):
     return torch.bitwise_or(self, value)
 
+
 @register_decomposition(aten.__lshift__)
 def dunder_lshift(self, value):
     return torch.bitwise_left_shift(self, value)
+
 
 @register_decomposition(aten.__rshift__)
 def dunder_rshift(self, value):
