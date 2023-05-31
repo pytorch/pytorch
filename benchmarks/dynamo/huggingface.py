@@ -460,7 +460,11 @@ class HuggingfaceRunner(BenchmarkRunner):
             if "drop" in attr and isinstance(getattr(config, attr), float):
                 setattr(config, attr, 1e-30)
 
-        if is_training and model_name not in ONLY_EVAL_MODE and not use_eval_mode:
+        if (
+            is_training
+            and not use_eval_mode
+            and not (self.args.accuracy and model_name in ONLY_EVAL_MODE)
+        ):
             model.train()
         else:
             model.eval()
