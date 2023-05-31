@@ -208,7 +208,7 @@ def register_optimizer_step_post_hook(hook: OptimizerPostHook) -> RemovableHandl
     return handle
 
 
-P = ParamSpec("P")
+_P = ParamSpec("_P")
 R = TypeVar("R")
 
 
@@ -329,10 +329,10 @@ class Optimizer:
         pass
 
     @staticmethod
-    def profile_hook_step(func: Callable[P, R]) -> Callable[P, R]:
+    def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:
 
         @functools.wraps(func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> R:
             self = args[0]
             assert isinstance(self, Optimizer)
             profile_name = "Optimizer.step#{}.step".format(self.__class__.__name__)
