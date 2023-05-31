@@ -401,7 +401,7 @@ void launch_masked_scatter_kernel(
               }
               return a;
             });
-        cudaGetLastError();
+        AT_CUDA_CHECK(cudaGetLastError());
       });
 }
 

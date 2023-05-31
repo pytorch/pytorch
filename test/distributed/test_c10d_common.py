@@ -1601,6 +1601,15 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             PythonProcessGroupExtensionTest.create_dummy
         )
 
+    def test_is_backend_available(self):
+        self.assertEqual(dist.is_ucc_available(), dist.is_backend_available("ucc"))
+        self.assertFalse(dist.is_backend_available("dummy"))
+        dist.Backend.register_backend(
+            "dummy",
+            PythonProcessGroupExtensionTest.create_dummy
+        )
+        self.assertTrue(dist.is_backend_available("dummy"))
+
     def test_backend_config(self):
         dist.Backend.register_backend(
             "dummy",
@@ -1610,8 +1619,8 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
-            (dist.Backend.NCCL, "cpu:nccl,cuda:nccl"),
-            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
+            (dist.Backend.NCCL, "cuda:nccl"),
+            (dist.Backend.MPI, "cpu:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
             (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
             ("DUMMY", "cpu:dummy,cuda:dummy"),
@@ -1620,7 +1629,6 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
-            ("cPu:gLoO,cuDa:NcCl", "cpu:gloo,cuda:nccl")
         ]
 
         for config_str, expected_value in backend_config_strings_and_expected_values:

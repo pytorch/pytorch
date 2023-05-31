@@ -19,6 +19,7 @@
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_raii.h>
 
 #include <iostream>
 
@@ -645,11 +646,18 @@ void initDispatchBindings(PyObject* module) {
       [](c10::DispatchKey a, c10::DispatchKey b) {
         return c10::isIncludedInAlias(a, b);
       });
-  py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
-      .def(py::init<c10::DispatchKeySet>());
 
-  py::class_<at::AutoDispatchBelowAutograd>(m, "_AutoDispatchBelowAutograd")
-      .def(py::init<>());
+  // DEPRECATED, please don't use this. Instead use
+  // torch._C._ExcludeDispatchKeyGuard
+  py_context_manager_DEPRECATED<
+      c10::impl::ExcludeDispatchKeyGuard,
+      c10::DispatchKeySet>(m, "ExcludeDispatchKeyGuard");
+
+  py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
+      m, "_ExcludeDispatchKeyGuard");
+
+  py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
+      m, "_AutoDispatchBelowAutograd");
 
   // Prints out the name of every operator that has a kernel registered to the
   // Dispatcher under [dispatch_key]. If no arguments are specified, it'll print
@@ -688,6 +696,14 @@ void initDispatchBindings(PyObject* module) {
         return names;
       },
       py::arg("dispatch_key") = static_cast<const char*>(""));
+  m.def(
+      "_dispatch_set_report_error_callback",
+      [](c10::OperatorHandle& handle, py::object callback) {
+        auto obj = callback.release().ptr();
+        auto callback_obj =
+            std::make_unique<c10::SafePyObject>(obj, getPyInterpreter());
+        handle.setReportErrorCallback_(std::move(callback_obj));
+      });
 
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });

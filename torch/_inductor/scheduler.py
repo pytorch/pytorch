@@ -49,6 +49,14 @@ class OutputNode:
     __repr__ = get_name
 
 
+def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
+    if node1.is_foreach():
+        assert node2.is_foreach()
+        return ForeachKernelSchedulerNode.fuse(node1, node2)
+    else:
+        return FusedSchedulerNode.fuse(node1, node2)
+
+
 class BaseSchedulerNode:
     def __init__(self, scheduler: "Scheduler", node: ir.Buffer):
         self.scheduler: "Scheduler" = scheduler
@@ -208,6 +216,9 @@ class BaseSchedulerNode:
         return False
 
     def is_extern(self):
+        return False
+
+    def is_foreach(self):
         return False
 
     def can_inplace(self, read_dep: dependencies.MemoryDep):
@@ -538,6 +549,9 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
 
+    def is_foreach(self):
+        return False
+
     def get_device(self):
         return self.group[0]
 
@@ -577,6 +591,51 @@ class FusedSchedulerNode(BaseSchedulerNode):
 
     def can_free(self):
         raise NotImplementedError
+
+
+class ForeachKernelSchedulerNode(FusedSchedulerNode):
+    """Scheduler node which consists of a list of scheduler nodes that each operate on a
+    distinct tensor in a list of tensors."""
+
+    @classmethod
+    def fuse(cls, node1, node2):
+        fused_nodes = [
+            FusedSchedulerNode.fuse(l, r) for l, r in zip(node1.snodes, node2.snodes)
+        ]
+        return cls(node1.scheduler, fused_nodes)
+
+    def __init__(self, scheduler: "Scheduler", nodes: List[SchedulerNode]):
+        super().__init__(scheduler, nodes)
+        # TODO: ensure all buffers are on the same device in lowerings
+        self.group = (nodes[0].get_device(), 0)
+        self.snodes = nodes
+        self.origins = set()
+
+    def mark_run(self):
+        raise NotImplementedError
+
+    def codegen(self):
+        self.node.get_store_function()(self.node.make_loader()())
+
+    def can_free(self):
+        return NotImplementedError
+
+    def is_foreach(self):
+        return True
+
+    def get_subkernel_nodes(self):
+        """Returns a list of nodes which comprise the foreach kernel, operating on corresponding elements of our input lists.
+        These nodes may be vertically fused."""
+        return list(self.snodes)
+
+    def get_nodes(self):
+        """Returns all nodes contained in this kernel, unpacking fused nodes into their constituent scheduler nodes."""
+        return list(itertools.chain(*[x.get_nodes() for x in self.snodes]))
+
+    def can_fuse(self, other: "ForeachKernelSchedulerNode"):
+        return len(self.snodes) == len(other.snodes) and all(
+            self.scheduler.can_fuse(l, r) for l, r in zip(self.snodes, other.snodes)
+        )
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -639,25 +698,15 @@ class Scheduler:
             *V.graph.graph_inputs.keys(),
             *V.graph.constants.keys(),
         }
-        for node in nodes:
-            assert (
-                node.origins is not None
-            ), "All nodes passed to scheduling must have an origin"
-            if node.is_no_op():
-                self.nodes.append(NopKernelSchedulerNode(self, node))
-            elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
-                group_fn = self.get_backend(node.get_device()).group_fn
-                self.nodes.append(SchedulerNode(self, node, group_fn))
-            elif isinstance(node, ir.ExternKernel):
-                self.nodes.append(ExternKernelSchedulerNode(self, node))
-            else:
-                raise NotImplementedError(node)
+
+        self.nodes = [self.create_scheduler_node(n) for n in nodes]
+
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
         for node in self.nodes:
             node.prune_deps()
 
-        self.name_to_node = {node.get_name(): node for node in self.nodes}
+        self.name_to_node = {n.get_name(): n for n in self.nodes}
         self.name_to_fused_node = None  # set in fuse_nods()
 
         # we handle mutation by renaming modified versions of the same
@@ -677,6 +726,7 @@ class Scheduler:
         V.debug.ir_pre_fusion(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
+        self.create_foreach_nodes()
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -704,6 +754,38 @@ class Scheduler:
             log.info("%s:", label)
             for node in self.nodes:
                 node.log_details()
+
+    def create_scheduler_node(self, node):
+        assert (
+            node.origins is not None
+        ), "All nodes passed to scheduling must have an origin"
+        if node.is_no_op():
+            return NopKernelSchedulerNode(self, node)
+        elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
+            group_fn = self.get_backend(node.get_device()).group_fn
+            return SchedulerNode(self, node, group_fn)
+        elif isinstance(node, ir.ExternKernel):
+            return ExternKernelSchedulerNode(self, node)
+        else:
+            raise NotImplementedError(node)
+
+    def create_foreach_nodes(self):
+        removed_node_names = set()
+        fe_nodes = []
+        for names in V.graph.lists.values():
+            removed_node_names.update(names)
+            fe_node = ForeachKernelSchedulerNode(
+                self, [self.name_to_node[name] for name in names]
+            )
+
+            fe_nodes.append(fe_node)
+
+            for name in names:
+                self.name_to_fused_node[name] = fe_node
+
+        self.nodes = [
+            node for node in self.nodes if node.get_name() not in removed_node_names
+        ] + fe_nodes
 
     def compute_dependencies(self):
         """
@@ -885,7 +967,7 @@ class Scheduler:
             if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
                 node1, node2
             ):
-                node3 = FusedSchedulerNode.fuse(node1, node2)
+                node3 = fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
                 fused_nodes.add(node3)
@@ -986,6 +1068,11 @@ class Scheduler:
         ):
             return False
 
+        node1_is_foreach = isinstance(node1, ForeachKernelSchedulerNode)
+        node2_is_foreach = isinstance(node2, ForeachKernelSchedulerNode)
+        if node1_is_foreach is not node2_is_foreach:
+            return False
+
         device = node1.get_device()
         if device != node2.get_device():
             return False  # wrong device
@@ -1004,6 +1091,8 @@ class Scheduler:
             if not self.can_fuse_vertical(node1, node2):
                 return False
             return self.get_backend(device).can_fuse_vertical(node1, node2)
+        elif node1_is_foreach and node2_is_foreach:
+            return False
         else:  # nodes don't depend on each other, but may have common reads
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
@@ -1119,23 +1208,30 @@ class Scheduler:
         Any buffers that are both created and have a last use in the
         same kernel can be removed.
         """
-        for name in V.kernel.store_buffer_names & self.buffer_names_no_longer_needed:
-            if (
-                name not in V.kernel.must_keep_buffers
-                and name not in V.kernel.args.input_buffers
-                and name not in self.mutation_renames
-                and name not in self.mutation_real_name
-            ):
-                # For inplace buffers subject to remove, we don't actually
-                # remove them but put them in a dedicated set. This simplifies
-                # the life cycle management of inplace buffers.
-                # This set is used to
-                # 1) avoid unnecessary store in DeferredLine.
-                # 2) avoid alias var definitions in kernel.
-                if name in V.kernel.args.inplace_buffers:
-                    V.graph.inplaced_to_remove.add(name)
-                else:
-                    self.remove_buffer(name)
+
+        names_to_remove = (
+            V.kernel.store_buffer_names & self.buffer_names_no_longer_needed
+        )
+
+        def remove_filter(n):
+            return (
+                n not in V.kernel.must_keep_buffers
+                and n not in V.kernel.args.input_buffers
+                and n not in self.mutation_renames
+                and n not in self.mutation_real_name
+            )
+
+        names_to_remove = list(filter(remove_filter, names_to_remove))
+
+        for name in names_to_remove:
+            if name in V.kernel.args.inplace_buffers:
+                buf = V.kernel.args.inplace_buffers[name]
+                remove = all(n in names_to_remove for n in buf.other_names)
+                if remove:
+                    self.remove_inplace_buffer(name)
+                V.graph.inplaced_to_remove.add(name)
+            else:
+                self.remove_buffer(name)
 
     def remove_buffer(self, name):
         # Assign a special value instead of deleting the entry
@@ -1143,6 +1239,11 @@ class Scheduler:
         # generate unique arg name.
         log.debug("remove_buffer(%r)", name)
         V.kernel.args.output_buffers[name] = "REMOVED"
+        V.graph.removed_buffers.add(name)
+
+    def remove_inplace_buffer(self, name):
+        log.debug("removing_inplace_buffer(%r)", name)
+        V.kernel.args.inplace_buffers[name] = "REMOVED"
         V.graph.removed_buffers.add(name)
 
     def flush(self):
@@ -1234,15 +1335,10 @@ class Scheduler:
                 self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
                 self.codegen_extern_call(node)
+            elif node.is_foreach():
+                self.get_backend(device).codegen_foreach(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                with config.patch(
-                    inplace_buffers=(
-                        config.inplace_buffers
-                        # workaround https://github.com/openai/triton/issues/1615
-                        and not (ir.is_triton(device) and node.is_reduction())
-                    )
-                ):
-                    self.get_backend(device).codegen_nodes(node.get_nodes())
+                self.get_backend(device).codegen_nodes(node.get_nodes())
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
