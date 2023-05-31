@@ -172,6 +172,7 @@ class ExportedProgram:
 
 def _process_constraints(
     graph_module: torch.fx.GraphModule,
+    graph_signature: ExportGraphSignature,
     example_inputs: List[torch.Tensor],
 ) -> Tuple[Dict[sympy.Symbol, RangeConstraint], Dict[InputDim, List[InputDim]]]:
     """
@@ -196,6 +197,7 @@ def _process_constraints(
     """
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
     inline_constraints = graph_module.meta.get("inline_constraints", [])
+    num_params_buffer = len(graph_signature.buffers) + len(graph_signature.parameters)
 
     # Create dict mapping tensor_id to node names
     tensor_id_to_nodes: Dict[int, List[str]] = defaultdict(list)
@@ -206,9 +208,10 @@ def _process_constraints(
             # All placeholder nodes should be together in the beginning of the
             # graph
             break
-        example_input = example_inputs[i]
-        tensor_id_to_nodes[id(example_input)].append(node.name)
-        placeholder_nodes[node.name] = node
+        if i >= num_params_buffer:
+            example_input = example_inputs[i - num_params_buffer]
+            tensor_id_to_nodes[id(example_input)].append(node.name)
+            placeholder_nodes[node.name] = node
 
     # Create dict mapping (node name, dim) to a list of other (node name, dim)
     # to mark that they are equal
@@ -235,8 +238,8 @@ def _process_constraints(
     range_constraints: Dict[sympy.Symbol, RangeConstraint] = {}
 
     # Add inline constraints to range_constraints
-    for symbol, (min_val, max_val) in inline_constraints.items():
-        range_constraints[symbol] = RangeConstraint(min_val, max_val)
+    for symbol, value_range in inline_constraints.items():
+        range_constraints[symbol] = RangeConstraint(value_range.lower, value_range.upper)
 
     # Add input range constraints to range_constraintss
     for input_dim, multi_range_constraint in multi_range_constraints.items():  # type: ignore[assignment]

@@ -196,7 +196,11 @@ def export(
                 if re.match(r"^[if]\d+$", str(k))
             }
 
-            range_constraints, equality_constraints = _process_constraints(gm, flat_args)
+            range_constraints, equality_constraints = _process_constraints(
+                gm,
+                export_graph_signature,
+                flat_args,
+            )
             exported_program = ExportedProgram(
                 gm,
                 gm.graph,
