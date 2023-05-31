@@ -188,7 +188,7 @@ conda install cmake ninja
 pip install -r requirements.txt
 ```
 
-**On Linux**
+**Linux için**
 
 ```bash
 conda install mkl mkl-include
@@ -200,7 +200,7 @@ conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your C
 make triton
 ```
 
-**On MacOS**
+**MacOS için**
 
 ```bash
 # Bu paketi yalnızca Intel x86 işlemcili makinelerde ekleyin.
@@ -209,7 +209,7 @@ conda install mkl mkl-include
 conda install pkg-config libuv
 ```
 
-**On Windows**
+**Windows için**
 
 ```bash
 conda install mkl mkl-include
@@ -228,7 +228,7 @@ git submodule update --init --recursive
 ```
 
 #### Pytorch'u Kurma
-**On Linux**
+**Linux için**
 
 Eğer AMD ROCm için derleme yapıyorsanız, önce bu komutu çalıştırın.:
 ```bash
@@ -250,43 +250,42 @@ python setup.py develop
 > error: command 'g++' failed with exit status 1
 > ```
 >
-> This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
+> Bu, Conda ortamından `ld`'nin sistem `ld`'yi gölgelemesinden kaynaklanır. Bu sorunu düzeltmek için daha yeni bir Python sürümü kullanmalısınız. Önerilen Python sürümü 3.8.1 veya üzeridir.
 
-**On macOS**
+**macOS için**
 
 ```bash
 python3 setup.py develop
 ```
 
-**On Windows**
+**Windows için**
 
-Choose Correct Visual Studio Version.
+Doğru Visual Studio sürümünü seçin.
 
-PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
-Professional, or Community Editions. You can also install the build tools from
-https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
-come with Visual Studio Code by default.
 
-If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
+PyTorch CI, Visual Studio Enterprise, Professional veya Community Sürümleri ile birlikte gelen Visual C++ BuildTools'u kullanır. Derleme araçları şu adresten de yükleyebilirsiniz
+https://visualstudio.microsoft.com/visual-cpp-build-tools/. Derleme araçları *yapmaz* varsayılan olarak Visual Studio Code ile birlikte gelir.
 
-**CPU-only builds**
+Eski Python kodunu derlemek isterseniz, lütfen [Eski kod ve CUDA üzerinde oluşturma ](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
-In this mode PyTorch computations will run on your CPU, not your GPU
+**Sadece CPU Derlemeleri**
+
+Bu modda PyTorch hesaplamaları GPU'nuzda değil CPU'nuzda çalışacaktır.
 
 ```cmd
 conda activate
 python setup.py develop
 ```
 
-Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
+OpenMP hakkında not: İstenilen OpenMP uygulaması Intel OpenMP (iomp) kullanmaktır. iomp ile bağlantı kurmak için kütüphaneyi manuel olarak indirmeniz ve `CMAKE_INCLUDE_PATH` ve `LIB` ayarlarını yapılandırarak derleme ortamını ayarlamanız gerekecektir. [Burada](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) yer alan yönerge hem MKL hem de Intel OpenMP kurulumu için bir örnektir. CMake için bu yapılandırmalar olmadan, Microsoft Visual C OpenMP çalışma zamanı (vcomp) kullanılacaktır.
 
-**CUDA based build**
+**CUDA tabanlı derleme**
 
-In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching
+Bu modda PyTorch hesaplamaları, CUDA aracılığıyla GPU'nuzu kullanarak daha hızlı bir şekilde gerçekleştirilir.
 
-[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
-NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA run CUDA installation once again and check the corresponding checkbox.
-Make sure that CUDA with Nsight Compute is installed after Visual Studio.
+PyTorch'un CUDA desteğiyle derlemek için [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) gereklidir.
+NVTX, CUDA dağıtımının bir parçasıdır ve "Nsight Compute" olarak adlandırılır. Mevcut bir CUDA yüklemesine NVTX'i yüklemek için CUDA kurulumunu tekrar çalıştırın ve ilgili onay kutusunu işaretleyin.
+Visual Studio'dan sonra Nsight Compute ile CUDA'nın yüklendiğinden emin olun.
 
 Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
 <br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
