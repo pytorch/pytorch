@@ -341,6 +341,8 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_input_size_asserts(self):
         for name, buf in V.graph.graph_inputs.items():
+            if isinstance(buf, sympy.Expr):
+                continue
             size = self.codegen_shape_tuple(buf.get_size())
             stride = self.codegen_shape_tuple(buf.get_stride())
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
@@ -364,9 +366,9 @@ class WrapperCodeGen(CodeGen):
                 self.prefix.writeline(f"{lhs} = args")
                 self.prefix.writeline("args.clear()")
 
-                if config.size_asserts:
-                    self.codegen_input_size_asserts()
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            if config.size_asserts:
+                self.codegen_input_size_asserts()
 
     def append_precomputed_sizes_to_prefix(self):
         with self.prefix.indent():
