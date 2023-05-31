@@ -21,7 +21,7 @@
 #include <ATen/ops/ones.h>
 #include <ATen/ops/zeros.h>
 #endif
-#include <iostream>
+
 namespace at::native {
 namespace {
 
