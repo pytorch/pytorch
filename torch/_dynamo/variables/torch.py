@@ -1309,6 +1309,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             #   grad_output = grad_fn(x)
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph
+            pre_side_effects = tx.output.side_effects.clone()
             grad_args = self.value_args_kwargs["args"]
             grad_kwargs = self.value_args_kwargs["kwargs"]
 
@@ -1328,6 +1329,15 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 "grad_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
             )
             body_node = make_attr(body_name)
+            post_side_effects = tx.output.side_effects
+            if post_side_effects.diff(pre_side_effects):
+                diff = (
+                    post_side_effects.id_to_variable.keys()
+                    - pre_side_effects.id_to_variable.keys()
+                )
+                if len(diff) > 0:
+                    unimplemented("NYI - side effects in torch.func.grad")
+
             grad_proxy_args = (
                 body_node,
                 *(arg.as_proxy() for arg in grad_args[1:]),

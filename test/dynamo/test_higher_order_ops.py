@@ -782,6 +782,25 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             # Something weird is happening on graph break
             expected = torch.compile(wrapper_fn)(x)
 
+    def test_grad_with_side_effect(self):
+        counters.clear()
+
+        foo = [1, 2]
+
+        def fn(x):
+            foo.append(3)
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = wrapper_fn(x)
+        with self.assertRaises(TypeError):
+            # TODO(kshitij12345):
+            # Something weird is happening on graph break
+            expected = torch.compile(wrapper_fn)(x)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
