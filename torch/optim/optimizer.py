@@ -234,10 +234,10 @@ class Optimizer:
     ) -> None:
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
-        self._optimizer_step_pre_hooks: Dict[
+        self._optimizer_step_pre_hooks: Dict[  # type: ignore[valid-type]
             int, Callable[[Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]]
         ] = OrderedDict()
-        self._optimizer_step_post_hooks: Dict[
+        self._optimizer_step_post_hooks: Dict[  # type: ignore[valid-type]
             int, Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None]
         ] = OrderedDict()
 
@@ -368,7 +368,7 @@ class Optimizer:
 
     def register_step_pre_hook(
         self,
-        hook: Callable[[Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+        hook: Callable[[Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],  # type: ignore[valid-type]
     ) -> RemovableHandle:
         r"""Register an optimizer step pre hook which will be called before
         optimizer step. It should have the following signature::
@@ -393,7 +393,7 @@ class Optimizer:
 
     def register_step_post_hook(
         self,
-        hook: Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None],
+        hook: Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None],  # type: ignore[valid-type]
     ) -> RemovableHandle:
         r"""Register an optimizer step post hook which will be called after optimizer step.
         It should have the following signature::
