@@ -212,14 +212,15 @@ def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
     return len(returns) == 1 and isinstance(returns[0].real_type, torch.TensorType)
 
 
-class Serializer:
-    def __init__(self, op_version: int = 0):
+class GraphModuleSerializer:
+    def __init__(self, graph_signature: ep.GraphSignature, call_spec: ep.CallSpec):
         self.inputs: List[Argument] = []
         self.outputs: List[Argument] = []
         self.nodes: List[Node] = []
         self.tensor_values: Dict[str, TensorValue] = {}
         self.sym_int_values: Dict[str, SymInt] = {}
-        self.op_version: int = op_version
+        self.graph_signature = graph_signature
+        self.call_spec = call_spec
 
     def handle_placeholder(self, node: torch.fx.Node):
         assert node.op == "placeholder"
@@ -474,24 +475,27 @@ class Serializer:
             outputs=self.outputs,
         )
 
-        buffers = {}
-        parameters = {}
-        for name, buffer in graph_module.named_buffers():
-            buffers[name] = export_tensor_meta(buffer)
-        for name, parameter in graph_module.named_parameters():
-            parameters[name] = export_tensor_meta(parameter)
+        return GraphModule(
+            graph=graph,
+            signature=serialize_signature(self.graph_signature),
+            call_spec=serialize_call_spec(self.call_spec),
+        )
 
 
         # TODO(angelayi): Graph Module metadata?
         metadata: Dict[str, str] = {}
 
+    def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes]:
+        serialized_graph_module = (
+            GraphModuleSerializer(
+                exported_program.graph_signature, exported_program.call_spec
+            )
+            .serialize(exported_program.graph_module)
+        )
         return (
-            GraphModule(
-                graph=graph,
-                buffers=buffers,
-                parameters=parameters,
-                metadata=metadata,
-                signature=export_signature(None),
+            ExportedProgram(
+                graph_module=serialized_graph_module,
+                opset_version=self.opset_version
             ),
             export_state_dict(graph_module.state_dict()),
         )
