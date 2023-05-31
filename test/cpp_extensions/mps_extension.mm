@@ -1,11 +1,6 @@
 #include <torch/extension.h>
 #include <ATen/native/mps/OperationUtils.h>
 
-at::Tensor get_cpu_add_output(at::Tensor & cpu_input1, at::Tensor & cpu_input2) {
-  return cpu_input1 + cpu_input2;
-}
-
-
 // this sample custom kernel is taken from:
 // https://developer.apple.com/documentation/metal/performing_calculations_on_a_gpu
 static const char* CUSTOM_KERNEL = R"MPS_ADD_ARRAYS(
@@ -19,6 +14,10 @@ kernel void add_arrays(device const float* inA,
     result[index] = inA[index] + inB[index];
 }
 )MPS_ADD_ARRAYS";
+
+at::Tensor get_cpu_add_output(at::Tensor & cpu_input1, at::Tensor & cpu_input2) {
+  return cpu_input1 + cpu_input2;
+}
 
 at::Tensor get_mps_add_output(at::Tensor & mps_input1, at::Tensor & mps_input2) {
 
@@ -68,10 +67,9 @@ at::Tensor get_mps_add_output(at::Tensor & mps_input1, at::Tensor & mps_input2) 
 
     });
   }
-
-
   return mps_output;
 }
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_cpu_add_output", &get_cpu_add_output);
   m.def("get_mps_add_output", &get_mps_add_output);
