@@ -9,17 +9,10 @@
 #pragma once
 
 #if defined(__GNUC__)
-#if defined(__clang__) || (__GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 5)
 #define PYTORCH_QNNP_UNREACHABLE \
   do {                           \
     __builtin_unreachable();     \
   } while (0)
-#else
-#define PYTORCH_QNNP_UNREACHABLE \
-  do {                           \
-    __builtin_trap();            \
-  } while (0)
-#endif
 #elif defined(_MSC_VER)
 #define PYTORCH_QNNP_UNREACHABLE __assume(0)
 #else

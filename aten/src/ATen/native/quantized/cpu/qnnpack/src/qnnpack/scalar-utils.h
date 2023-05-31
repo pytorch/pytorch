@@ -26,14 +26,11 @@
 #if __GNUC__ >= 8
 #define PYTORCH_QNNP_IGNORE_SHIFT_BASE_UB \
   __attribute__((__no_sanitize__("shift-base")))
-#elif __GNUC__ == 4 && __GNUC_MINOR__ >= 9 || __GNUC__ > 4
-/* 4.9 <= gcc < 8 support ubsan, but doesn't support no_sanitize attribute */
+#else
 #define PYTORCH_QNNP_IGNORE_SHIFT_BASE_UB
 #ifndef PYTORCH_QNNP_USE_SHIFT_BASE_UB_WORKAROUND
 #define PYTORCH_QNNP_USE_SHIFT_BASE_UB_WORKAROUND 1
 #endif
-#else
-#define PYTORCH_QNNP_IGNORE_SHIFT_BASE_UB
 #endif
 #else
 #define PYTORCH_QNNP_IGNORE_SHIFT_BASE_UB
