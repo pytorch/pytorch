@@ -119,7 +119,7 @@ Tensor repeat_interleave_symint(
                 calculated_size, " but got ", *output_size);
   }
 
-  return input.clone().flatten(dim, dim + 1);
+  return input.clone(at::MemoryFormat::Contiguous).flatten(dim, dim + 1);
 }
 
 } // namespace native
