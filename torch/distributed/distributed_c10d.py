@@ -1,7 +1,6 @@
 import itertools
 import collections.abc
 import contextlib
-import functools
 import hashlib
 import io
 import logging
@@ -35,7 +34,7 @@ from torch._C._distributed_c10d import (
 )
 from torch.autograd.profiler import record_function
 from .constants import default_pg_timeout
-from .c10d_error_logger import _get_or_create_logger
+from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
 __all__ = [
@@ -57,7 +56,7 @@ __all__ = [
     'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
     'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
     'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
-    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor', 'exception_handler'
+    'reduce_op', 'all_gather_into_tensor', 'reduce_scatter_tensor',
 ]
 
 _MPI_AVAILABLE = True
@@ -122,35 +121,6 @@ except ImportError:
     _UCC_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-global _c10d_error_logger
-_c10d_error_logger = _get_or_create_logger()
-
-
-def exception_handler(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as error:
-            if is_initialized():
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "backend": f"{get_backend(kwargs.get('group'))}",
-                    "world_size": f"{get_world_size(kwargs.get('group'))}",
-                    "global_rank": f"{get_rank()}",
-                    "local_rank": f"{get_rank(kwargs.get('group'))}",
-                    "error": f"{error}",
-                }
-            else:
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "error": f"{error}",
-                }
-            _c10d_error_logger.debug(error_msg_dict)
-            raise
-    return wrapper
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
 
@@ -640,13 +610,7 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None):
     return _world.pg_default_device[group]
 
 
-# Environment variable to control whether we do a barrier after process group
-# init. Default value is 1 for now to stay the same with previous behavior.
-# Users can change it to 0 if such behavior is undesired. We reserve the right
-# to change the default value to 0 if small rollout is successful.
-_barrier_after_init = int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
-
-
+@_time_logger
 def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, logging_interval=timedelta(seconds=10)):
     """
     Barrier based on store which is used for synchronizing processes after
@@ -915,6 +879,14 @@ def is_torchelastic_launched() -> bool:
     return os.getenv("TORCHELASTIC_RUN_ID") is not None
 
 
+def _is_barrier_after_init() -> int:
+    # Environment variable to control whether we do a barrier after process group
+    # init. Default value is 1 for now to stay the same with previous behavior.
+    # Users can change it to 0 if such behavior is undesired. We reserve the right
+    # to change the default value to 0 if small rollout is successful.
+    return int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
+
+
 def _get_default_group():
     """
     Getting the default process group created by init_process_group
@@ -978,7 +950,9 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
     assert pg_store is not None
     return pg_store[0]
 
-@exception_handler
+
+_exception_logger
+@_time_logger
 def init_process_group(
     backend: Union[str, Backend] = None,
     init_method: Optional[str] = None,
@@ -1142,7 +1116,7 @@ def init_process_group(
     _backend = _world.pg_map[GroupMember.WORLD][0]  # type: ignore[index]
     _default_pg_init_method = init_method
 
-    if _barrier_after_init == 1:
+    if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
         # process groups including global variables are updated correctly on all
         # ranks.
@@ -1538,7 +1512,7 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
             group_src_rank = get_group_rank(pg, src)
             return pg.recv([tensor], group_src_rank, tag)
 
-@exception_handler
+@_exception_logger
 def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> None:
     """
     Sends a tensor synchronously.
@@ -1570,7 +1544,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         group_dst_rank = get_group_rank(group, dst)
         group.send([tensor], group_dst_rank, tag).wait()
 
-@exception_handler
+@_exception_logger
 def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
@@ -1674,48 +1648,43 @@ def _coalescing_manager(
     if device:
         group._start_coalescing(device)
     cm = _CoalescingManager()
-    try:
-        yield cm
-    except Exception:
-        # Re-throw exception caught by code inside the context manager
-        raise
-    else:
-        op_list = _world.pg_coalesce_state.pop(group)
-        if op_list:
-            # Collectives supporting "Fast Path" coalescing are captured.
-            # See implementation in corresponding collective APIs.
-            # Currently supported:
-            # - coalesced `all_reduce`
-            # - coalesced `all_gather_into_tensor`
-            op0 = op_list[0].op
-            if op0 == all_reduce:
-                tensors = []
-                for op in op_list:
-                    tensors.append(op.tensor)
-                opts = AllreduceCoalescedOptions()
-                opts.reduceOp = op_list[0].redop
-                work = group.allreduce_coalesced(tensors, opts)
-            elif op0 == all_gather_into_tensor:
-                inputs = []
-                outputs = []
-                for op in op_list:
-                    inputs.append(op.tensor)
-                    outputs.append(op.dst_tensor)
-                work = group.allgather_into_tensor_coalesced(outputs, inputs)
-            else:
-                raise AssertionError(
-                    f"Coalescing manager does not support fast-path coalescing of {op0}, "
-                    f"yet {op0} is still recorded in op list. This is an internal error of c10d."
-                )
-
-        if device:
-            # Old style of letting each coll inside the context manager to call into C++ counterpart via python binding
-            work = group._end_coalescing(device)
-
-        if async_ops:
-            cm.append(work)
+    yield cm
+    op_list = _world.pg_coalesce_state.pop(group)
+    if op_list:
+        # Collectives supporting "Fast Path" coalescing are captured.
+        # See implementation in corresponding collective APIs.
+        # Currently supported:
+        # - coalesced `all_reduce`
+        # - coalesced `all_gather_into_tensor`
+        op0 = op_list[0].op
+        if op0 == all_reduce:
+            tensors = []
+            for op in op_list:
+                tensors.append(op.tensor)
+            opts = AllreduceCoalescedOptions()
+            opts.reduceOp = op_list[0].redop
+            work = group.allreduce_coalesced(tensors, opts)
+        elif op0 == all_gather_into_tensor:
+            inputs = []
+            outputs = []
+            for op in op_list:
+                inputs.append(op.tensor)
+                outputs.append(op.dst_tensor)
+            work = group.allgather_into_tensor_coalesced(outputs, inputs)
         else:
-            work.wait()
+            raise AssertionError(
+                f"Coalescing manager does not support fast-path coalescing of {op0}, "
+                f"yet {op0} is still recorded in op list. This is an internal error of c10d."
+            )
+
+    if device:
+        # Old style of letting each coll inside the context manager to call into C++ counterpart via python binding
+        work = group._end_coalescing(device)
+
+    if async_ops:
+        cm.append(work)
+    else:
+        work.wait()
 
 
 def batch_isend_irecv(p2p_op_list):
@@ -1777,7 +1746,7 @@ def batch_isend_irecv(p2p_op_list):
         return reqs
 
 
-@exception_handler
+@_exception_logger
 def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=0):
     """
     Broadcasts the tensor to the whole group with multiple GPU tensors
@@ -1837,7 +1806,7 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
         work.wait()
 
 
-@exception_handler
+@_exception_logger
 def broadcast(tensor, src, group=None, async_op=False):
     """
     Broadcasts the tensor to the whole group.
@@ -1879,7 +1848,7 @@ def broadcast(tensor, src, group=None, async_op=False):
     else:
         work.wait()
 
-@exception_handler
+@_exception_logger
 def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False):
     r"""
     Reduces the tensor data across all machines in such a way that all get
@@ -1940,7 +1909,7 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
     else:
         work.wait()
 
-@exception_handler
+@_exception_logger
 def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces the tensor data across all machines in such a way that all get
@@ -2020,7 +1989,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
-@exception_handler
+@_exception_logger
 def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     """
     WARNING: at this time individual shape checking is not implemented across nodes.
@@ -2083,7 +2052,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
-@exception_handler
+@_exception_logger
 def reduce_multigpu(
     tensor_list, dst, op=ReduceOp.SUM, group=None, async_op=False, dst_tensor=0
 ):
@@ -2145,7 +2114,7 @@ def reduce_multigpu(
     else:
         work.wait()
 
-@exception_handler
+@_exception_logger
 def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces the tensor data across all machines.
@@ -2190,7 +2159,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
     else:
         work.wait()
 
-@exception_handler
+@_exception_logger
 def all_gather_multigpu(
     output_tensor_lists, input_tensor_list, group=None, async_op=False
 ):
@@ -2299,7 +2268,7 @@ def _check_for_nccl_backend(group):
     )
 
 
-@exception_handler
+@_exception_logger
 def all_gather_object(object_list, obj, group=None):
     """
     Gathers picklable objects from the whole group into a list. Similar to
@@ -2391,7 +2360,7 @@ def all_gather_object(object_list, obj, group=None):
         object_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-@exception_handler
+@_exception_logger
 def gather_object(obj, object_gather_list=None, dst=0, group=None):
     """
     Gathers picklable objects from the whole group in a single process.
@@ -2501,7 +2470,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-@exception_handler
+@_exception_logger
 def broadcast_object_list(object_list, src=0, group=None, device=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
@@ -2606,7 +2575,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
 
-@exception_handler
+@_exception_logger
 def scatter_object_list(
     scatter_object_output_list, scatter_object_input_list, src=0, group=None
 ):
@@ -2715,7 +2684,7 @@ def scatter_object_list(
     scatter_object_output_list[0] = _tensor_to_object(output_tensor, obj_tensor_size)
 
 
-@exception_handler
+@_exception_logger
 def all_gather(tensor_list, tensor, group=None, async_op=False):
     """
     Gathers tensors from the whole group in a list.
@@ -2789,7 +2758,7 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         work.wait()
 
 
-@exception_handler
+@_exception_logger
 def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
     """
     Gather tensors from all ranks and put them in a single output tensor.
@@ -2878,7 +2847,7 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
         work.wait()
 
 
-@exception_handler
+@_exception_logger
 def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     """
     Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
@@ -2908,7 +2877,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     return all_gather_into_tensor(output_tensor, input_tensor, group, async_op)
 
 
-@exception_handler
+@_exception_logger
 def all_gather_coalesced(
     output_tensor_lists, input_tensor_list, group=None, async_op=False
 ):
@@ -3008,7 +2977,7 @@ def _validate_output_list_for_rank(my_rank, dst, gather_list):
         )
 
 
-@exception_handler
+@_exception_logger
 def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
     """
     Gathers a list of tensors in a single process.
@@ -3063,7 +3032,7 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
         work.wait()
 
 
-@exception_handler
+@_exception_logger
 def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
     """
     Scatters a list of tensors to all processes in a group.
@@ -3159,7 +3128,7 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         work.wait()
 
 
-@exception_handler
+@_exception_logger
 def reduce_scatter_multigpu(
     output_tensor_list, input_tensor_lists, op=ReduceOp.SUM, group=None, async_op=False
 ):
@@ -3229,7 +3198,7 @@ def reduce_scatter_multigpu(
         work.wait()
 
 
-@exception_handler
+@_exception_logger
 def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces, then scatters a list of tensors to all processes in a group.
@@ -3271,7 +3240,7 @@ def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=Fal
         work.wait()
 
 
-@exception_handler
+@_exception_logger
 def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces, then scatters a tensor to all ranks in a group.
@@ -3376,7 +3345,7 @@ def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=Fa
     return reduce_scatter_tensor(output, input, op, group, async_op)
 
 
-@exception_handler
+@_exception_logger
 def all_to_all_single(
     output,
     input,
@@ -3507,7 +3476,7 @@ def all_to_all_single(
         work.wait()
 
 
-@exception_handler
+@_exception_logger
 def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False):
     """
     Each process scatters list of input tensors to all processes in a group and
@@ -3626,7 +3595,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     else:
         work.wait()
 
-@exception_handler
+@_exception_logger
 def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
 
     """
@@ -3773,7 +3742,7 @@ def _get_backend_from_str(backend: Optional[str] = None) -> Backend:
     return Backend(backend)
 
 
-
+@_time_logger
 def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=None, use_local_synchronization=False):
     """
     Creates a new distributed group.
@@ -3927,7 +3896,7 @@ def _new_group_with_tag(
         global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
     }
 
-    if _barrier_after_init == 1:
+    if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
         # process groups including global variables are updated correctly on all
         # ranks.
