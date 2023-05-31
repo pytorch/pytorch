@@ -1,4 +1,3 @@
-import abc
 import math
 import functools
 import warnings
@@ -6,7 +5,23 @@ from collections import OrderedDict, defaultdict
 from copy import deepcopy
 from itertools import chain
 from typing import (
-    Any, Callable, DefaultDict, Dict, Hashable, Iterable, Iterator, List, Optional, Set, Tuple, TypeVar, Union, overload
+    Any,
+    Callable,
+    DefaultDict,
+    Dict,
+    Generic,
+    Hashable,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Protocol,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+    overload,
+    runtime_checkable,
 )
 
 from typing_extensions import ParamSpec, Self, TypeAlias
@@ -26,22 +41,22 @@ _global_optimizer_pre_hooks: Dict[int, OptimizerPreHook] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, OptimizerPostHook] = OrderedDict()
 _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
-T_co = TypeVar('T_co', covariant=True)
-
-class _ConstructableIterable(Iterable[T_co]):
-    def __init__(self, __iterable: Iterable[T_co]) -> None:
-        ...
-
-    @abc.abstractmethod
-    def __iter__(self) -> Iterator[T_co]:
-        ...
-
 class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
     def __repr__(self) -> str:
         return "<required parameter>"
 
 required = _RequiredParameter()
+
+T_co = TypeVar("T_co", covariant=True)
+
+@runtime_checkable
+class _ConstructableIterable(Generic[T_co], Protocol):
+    def __init__(self, __iterable: Iterable[T_co]) -> None:
+        ...
+
+    def __iter__(self) -> Iterator[T_co]:
+        ...
 
 S = TypeVar("S")
 
