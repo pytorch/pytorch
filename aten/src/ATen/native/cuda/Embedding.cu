@@ -248,6 +248,12 @@ void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
 Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices_,
                                int64_t num_weights, int64_t padding_idx,
                                bool scale_grad_by_freq) {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because cub device scan is not deterministic
+  // https://github.com/NVIDIA/cub/issues/471
+  // https://github.com/NVIDIA/cub/issues/454
+  globalContext().alertNotDeterministic("embedding_dense_backward_cuda");
+
   auto grad_arg = TensorArg(grad_, "grad", 1);
   auto indices_arg = TensorArg(indices_, "indices", 1);
   checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
