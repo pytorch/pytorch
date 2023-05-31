@@ -704,6 +704,23 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_dropout_inductor(self):
+        def gn(x, y):
+            return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        backend = "inductor"
+        self._validate(
+            fn, backend, x, y, skip_check=True
+        )  # dropout decomp is known to diverge with eager
+
+    @requires_cuda()
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_fallback(self):
         def gn(x, y):
             torch._dynamo.graph_break()

@@ -54,7 +54,7 @@ CompilationOptions getOptionsFromGlobal() {
   return compilation_options;
 }
 
-static IValue to_tuple(std::initializer_list<IValue> ivalues) {
+IValue to_tuple(std::initializer_list<IValue> ivalues) {
   return c10::ivalue::Tuple::create(ivalues);
 }
 
