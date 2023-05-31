@@ -57,27 +57,10 @@ query ($query: String!) {
 }
 """
 
-REPO_OWNER = "pytorch"
-PYTORCH_REPO_NAME = "pytorch"
-TEST_INFRA_REPO_NAME = "test-infra"
-PYTORCH_ALERT_LABEL = "pytorch-alert"
-FLAKY_TESTS_LABEL = "module: flaky-tests"
-NO_FLAKY_TESTS_LABEL = "no-flaky-tests-alert"
-FLAKY_TESTS_SEARCH_PERIOD_DAYS = 14
 DISABLED_ALERTS = [
     "rerun_disabled_tests",
     "unstable",
 ]
-
-headers = {"Authorization": f"token {os.environ.get('GITHUB_TOKEN')}"}
-CREATE_ISSUE_URL = (
-    f"https://api.github.com/repos/{REPO_OWNER}/{TEST_INFRA_REPO_NAME}/issues"
-)
-UPDATE_ISSUE_URL = (
-    f"https://api.github.com/repos/{REPO_OWNER}/{TEST_INFRA_REPO_NAME}/issues/"
-)
-
-GRAPHQL_URL = "https://api.github.com/graphql"
 
 
 class JobStatus:
