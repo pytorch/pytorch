@@ -349,7 +349,7 @@ cmake_dependent_option(
     BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
-# Enable third party mallic library to improve memory allocation performance on Windows.
+# Enable third party mimalloc library to improve memory allocation performance on Windows.
 if(WIN32)
   set(USE_MIMALLOC ON)
 endif()
