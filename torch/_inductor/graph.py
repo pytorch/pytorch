@@ -204,6 +204,12 @@ class GraphLowering(torch.fx.Interpreter):
         if not config.layout_optimization:
             return False
 
+        if dynamo_config.dynamic_shapes:
+            log.debug(
+                "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
+            )
+            return False
+
         gm = self.module
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
