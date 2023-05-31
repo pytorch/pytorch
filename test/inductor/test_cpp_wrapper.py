@@ -202,7 +202,7 @@ if RUN_CUDA:
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_linear1"),
-        # BaseTest("test_linear2"),
+        BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
         BaseTest("test_profiler_mark_wrapper_call"),
