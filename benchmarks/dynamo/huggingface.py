@@ -117,7 +117,7 @@ BATCH_SIZE_DIVISORS = {
     "DebertaForMaskedLM": 4,
     "DebertaForQuestionAnswering": 2,
     "DebertaV2ForMaskedLM": 4,
-    "DebertaV2ForQuestionAnswering": 4,
+    "DebertaV2ForQuestionAnswering": 8,
     "DistilBertForMaskedLM": 2,
     "DistilBertForQuestionAnswering": 2,
     "DistillGPT2": 2,
@@ -429,6 +429,8 @@ class HuggingfaceRunner(BenchmarkRunner):
         model_cls, config = self._get_model_cls_and_config(model_name)
         model = self._download_model(model_name)
         model = model.to(device, dtype=dtype)
+        if self.args.enable_activation_checkpointing:
+            model.gradient_checkpointing_enable()
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
