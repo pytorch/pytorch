@@ -420,19 +420,19 @@ Başlamanız için üç ipucu:
 * GitHub Sorunları: Hata raporları, özellik talepleri, kurulum sorunları, RFC'ler, düşünceler, vb.
 * Slack: [PyTorch Slack](https://pytorch.slack.com/) genel sohbet, çevrimiçi tartışmalar, işbirliği vb. için orta ve deneyimli PyTorch kullanıcıları ve geliştiricilerinden oluşan birincil kitleye ev sahipliği yapmaktadır. [PyTorch Forumlar](https://discuss.pytorch.org). Eğer bir Slack davetiyesine ihtiyacınız varsa, lütfen bu formu doldurun: https://goo.gl/forms/PP1AGvNHpSaJP8to1
 * Haber Bülteni: Gereksiz bilgiler olmadan, PyTorch hakkında önemli duyurular içeren tek yönlü bir e-posta bülteni. Buradan kayıt olabilirsiniz: https://eepurl.com/cbG0rv
-* Facebook Sayfası: Important announcements about PyTorch. https://www.facebook.com/pytorch
+* Facebook Sayfası: PyTorch hakkında önemli duyurular için https://www.facebook.com/pytorch
 * Marka yönergeleri için lütfen web sitemizi ziyaret edin [pytorch.org](https://pytorch.org/)
 
 ## Releases and Contributing
 
-Typically, PyTorch has three major releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+Genellikle, PyTorch yılda üç büyük sürüm çıkarır. Eğer bir hata ile karşılaşırsanız lütfen [sorun bildirerek](https://github.com/pytorch/pytorch/issues).
 
-We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
+ Tüm katkılarınızı takdir ediyoruz. Eğer hata düzeltmeleriyle katkıda bulunmayı planlıyorsanız, lütfen başka bir tartışma olmaksızın bunu yapın.
 
-If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
-Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
+Eğer yeni özellikler, yardımcı fonksiyonlar veya çekirdeğe uzantılar eklemeyi planlıyorsanız, lütfen önce bir konu açın ve özelliği bizimle tartışın.
+Tartışma yapmadan bir PR göndermek, çekirdeği farklı bir yöne taşıyor olabileceğimiz için reddedilen bir PR ile sonuçlanabilir, çünkü sizin farkında olabileceğinizden farklı bir yol izliyor olabiliriz.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](../CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](../RELEASE.md).
+PyTorch'a katkıda bulunmak hakkında daha fazla bilgi edinmek için [Katkı Sayfası'na](../CONTRIBUTING.md) göz atabilirsiniz. PyTorch sürümleri hakkında daha fazla bilgi için [Sürüm Sayfası'n](../RELEASE.md) ziyaret edebilirsiniz..
 
 ## The Team
 
