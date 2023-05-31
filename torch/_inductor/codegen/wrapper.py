@@ -24,7 +24,7 @@ from ..utils import (
     sympy_product,
 )
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
+from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 
 
 pexpr = PythonPrinter().doprint
@@ -253,6 +253,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.src_to_kernel = {}
         self.kernel_to_hash = {}
+        self.kenel_numel_expr = set()
         self.lines = []
         self.declare = ""
         self.ending = ""
@@ -665,14 +666,6 @@ class WrapperCodeGen(CodeGen):
         else:
             self.writeline(self.wrap_kernel_call(name, call_args))
 
-    def call_kernel(self, name: str, kernel: Kernel):
-        tmp = IndentedBuffer()
-        kernel.call_kernel(self, tmp, name)
-        for line in tmp.getvalue().split("\n"):
-            line = line.strip()
-            if line:
-                self.writeline(line)
-
     def writeline(self, line):
         self.lines.append(line)
 
@@ -896,6 +889,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         self.prefix.writeline(f"at::Tensor {input_key} = args[{idx}];")
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+
+            self.wrapper_call.splice(
+                """
+                c10::optional<at::Scalar> optional_scalar;
+                c10::optional<c10::string_view> optional_string;
+                torch::List<c10::optional<at::Scalar>> optional_list;
+                """
+            )
 
     def generate(self):
         self.write_wrapper_decl()
