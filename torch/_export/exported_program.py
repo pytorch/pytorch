@@ -3,6 +3,7 @@ import copy
 import dataclasses
 import sympy
 from typing import Any, Dict, List, Optional, Tuple, Union
+from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 
 
 import torch
@@ -55,15 +56,15 @@ class ExportBackwardSignature:
 
 @dataclasses.dataclass
 class ExportGraphSignature:
-    parameters: List[str]
-    buffers: List[str]
+    parameters: List[FQN]
+    buffers: List[FQN]
 
-    user_inputs: List[str]
-    user_outputs: List[str]
-    inputs_to_parameters: Dict[str, str]
-    inputs_to_buffers: Dict[str, str]
+    user_inputs: List[GraphInputName]
+    user_outputs: List[GraphOutputName]
+    inputs_to_parameters: Dict[GraphInputName, FQN]
+    inputs_to_buffers: Dict[GraphInputName, FQN]
 
-    buffers_to_mutate: Dict[str, str]
+    buffers_to_mutate: Dict[GraphOutputName, FQN]
 
     backward_signature: Optional[ExportBackwardSignature]
 
@@ -75,7 +76,7 @@ class ExportedProgram:
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
         call_spec: CallSpec,
-        state_dict: Dict[str, Any],
+        state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: Dict[sympy.Symbol, RangeConstraint],
         equality_constraints: Dict[InputDim, List[InputDim]],
     ):
@@ -102,12 +103,19 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
+        param_buffer_values = (value for _, value in self.state_dict.items())
+
         with torch.no_grad():
-            res = torch.fx.Interpreter(self.graph_module).run(*args, enable_io_processing=False)
+            res = torch.fx.Interpreter(self.graph_module).run(
+                *param_buffer_values,
+                *args,
+                enable_io_processing=False
+            )
 
         if self.call_spec.out_spec is not None:
             mutation = self.graph_signature.buffers_to_mutate
             num_mutated = len(mutation)
+            mutated_buffers = res[:num_mutated]
             res = res[num_mutated:]
             try:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
@@ -119,6 +127,11 @@ class ExportedProgram:
                     "but actually got outputs with tree spec of: \n"
                     f"{received_spec}"
                 )
+            finally:
+                ix = 0
+                for _, buffer in self.graph_signature.buffers_to_mutate.items():
+                    self.state_dict[buffer] = mutated_buffers[ix]
+                    ix += 1
         return res
 
     def __str__(self) -> str:
