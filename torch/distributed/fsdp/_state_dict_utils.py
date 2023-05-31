@@ -25,6 +25,7 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
+from torch.distributed._tensor import DTensor, Shard as DShard
 
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
@@ -49,7 +50,11 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.utils import _replace_by_prefix
 
-from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
+from ._fsdp_extensions import (
+    _ext_chunk_dtensor,
+    _ext_chunk_tensor,
+    _ext_pre_load_state_dict_transform,
+)
 from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
 
 
@@ -436,6 +441,7 @@ def _local_post_state_dict_hook(
     sharded_tensor = init_from_local_shards(
         local_shards, full_numel, process_group=fsdp_state.process_group
     )  # type: ignore[assignment]
+    #TODO: Add DTensor state_dict support for LOCAL_STATE_DICT.
     if fsdp_state._state_dict_config.offload_to_cpu:
         sharded_tensor = sharded_tensor.cpu()
     state_dict[f"{prefix}{FLAT_PARAM}"] = sharded_tensor
@@ -492,6 +498,7 @@ def _local_pre_load_state_dict_hook(
             load_tensor = F.pad(load_tensor, [0, flat_param._shard_numel_padded])
     else:
         load_tensor = flat_param
+    #TODO: Add DTensor state_dict support for LOCAL_STATE_DICT.
     state_dict[fqn] = load_tensor
 
 
@@ -538,13 +545,20 @@ def _sharded_post_state_dict_hook(
 
     def param_hook(state_dict: Dict[str, Any], prefix: str, fqn: str):
         param = state_dict[fqn]
-        sharded_tensor = _ext_chunk_tensor(
-            tensor=param,
-            rank=fsdp_state.rank,
-            world_size=fsdp_state.world_size,
-            num_devices_per_node=fsdp_state._device_handle.device_count(),
-            pg=fsdp_state.process_group,
-        )
+        if not fsdp_state._state_dict_config.use_dtensor:
+            sharded_tensor = _ext_chunk_tensor(
+                tensor=param,
+                rank=fsdp_state.rank,
+                world_size=fsdp_state.world_size,
+                num_devices_per_node=fsdp_state._device_handle.device_count(),
+                pg=fsdp_state.process_group,
+            )
+        else:
+            sharded_tensor = _ext_chunk_dtensor(
+                tensor=param,
+                rank=fsdp_state.rank,
+                device_mesh=fsdp_state._device_mesh,
+            )
         if fsdp_state._state_dict_config.offload_to_cpu:
             sharded_tensor = sharded_tensor.cpu()
         state_dict[fqn] = sharded_tensor
@@ -562,6 +576,7 @@ def _sharded_post_load_state_dict_hook(
         _exit_unshard_params_ctx(module, fsdp_state)
 
 
+#here 
 @no_type_check
 def _sharded_pre_load_state_dict_hook(
     module: nn.Module,
@@ -598,36 +613,61 @@ def _sharded_pre_load_state_dict_hook(
         else:
             fqn_from_global_root = f"{prefix}{fqn}"
         param = state_dict.pop(fqn_from_global_root)
-        # All-gather the param (ShardedTensor)
-        param, shards = _ext_pre_load_state_dict_transform(param)
 
-        loaded_shapes.append(param.size())
-        assert len(shards) < 2, (
-            "Expects 0 or 1 shard per rank "
-            f"but got {len(shards)} shards on rank {fsdp_state.rank}."
-        )
-        param_numel = param.size().numel()
-        dim_0_size = param.size()[0]
-        chunk_size = (
-            math.ceil(dim_0_size / fsdp_state.world_size) * param_numel // dim_0_size
-        )
-        if len(shards) == 1:
-            local_tensor = shards[0].tensor.flatten()
-            pg_device = _get_pg_default_device(fsdp_state.process_group)
-            if local_tensor.device.type != pg_device.type:
-                local_tensor = local_tensor.to(pg_device)
-            num_padding = chunk_size - local_tensor.numel()
-            if num_padding > 0:
-                local_tensor = F.pad(local_tensor, [0, num_padding])
+        if not fsdp_state._state_dict_config.use_dtensor:
+            # All-gather the param (ShardedTensor)
+            param, shards = _ext_pre_load_state_dict_transform(param)
+
+            loaded_shapes.append(param.size())
+            assert len(shards) < 2, (
+                "Expects 0 or 1 shard per rank "
+                f"but got {len(shards)} shards on rank {fsdp_state.rank}."
+            )
+            param_numel = param.size().numel()
+            dim_0_size = param.size()[0]
+            chunk_size = (
+                math.ceil(dim_0_size / fsdp_state.world_size) * param_numel // dim_0_size
+            )
+            if len(shards) == 1:
+                local_tensor = shards[0].tensor.flatten()
+                pg_device = _get_pg_default_device(fsdp_state.process_group)
+                if local_tensor.device.type != pg_device.type:
+                    local_tensor = local_tensor.to(pg_device)
+                num_padding = chunk_size - local_tensor.numel()
+                if num_padding > 0:
+                    local_tensor = F.pad(local_tensor, [0, num_padding])
+            else:
+                local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
+            tensor = torch.empty(
+                chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
+            )
+            dist.all_gather_into_tensor(
+                tensor, local_tensor, group=fsdp_state.process_group
+            )
+            tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
         else:
-            local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
-        tensor = torch.empty(
-            chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
-        )
-        dist.all_gather_into_tensor(
-            tensor, local_tensor, group=fsdp_state.process_group
-        )
-        tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
+            param_numel = param.numel()
+            dim_0_size = param.size(0)
+            chunk_size = (
+                math.ceil(dim_0_size / fsdp_state.world_size) * param_numel // dim_0_size
+            )
+            if not param_numel == 0:
+                local_tensor = param.to_local().flatten()
+                # pg_device = _get_pg_default_device(fsdp_state.process_group)
+                # if local_tensor.device.type != pg_device.type:
+                #     local_tensor = local_tensor.to(pg_device)
+                num_padding = chunk_size - local_tensor.numel()
+                #TODO: add check for device. 
+                if num_padding > 0:
+                    local_tensor = F.pad(local_tensor, [0, num_padding])
+            else:
+                local_tensor = local_tensor.new_zeros(chunk_size)
+            tensor = torch.empty(
+                chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
+            )
+            dist.all_gather_into_tensor(tensor, local_tensor)
+            tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
+            
         state_dict[fqn_from_global_root] = tensor
 
     _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
