@@ -4,6 +4,7 @@ import sympy
 from collections import defaultdict
 
 from typing import Any, Dict, List, Optional, Tuple, Union
+from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 
 from sympy.logic.boolalg import Boolean as SympyBoolean
 
@@ -57,15 +58,15 @@ class ExportBackwardSignature:
 
 @dataclasses.dataclass
 class ExportGraphSignature:
-    parameters: List[str]
-    buffers: List[str]
+    parameters: List[FQN]
+    buffers: List[FQN]
 
-    user_inputs: List[str]
-    user_outputs: List[str]
-    inputs_to_parameters: Dict[str, str]
-    inputs_to_buffers: Dict[str, str]
+    user_inputs: List[GraphInputName]
+    user_outputs: List[GraphOutputName]
+    inputs_to_parameters: Dict[GraphInputName, FQN]
+    inputs_to_buffers: Dict[GraphInputName, FQN]
 
-    buffers_to_mutate: Dict[str, str]
+    buffers_to_mutate: Dict[FQN, GraphOutputName]
 
     backward_signature: Optional[ExportBackwardSignature]
 

@@ -13,6 +13,7 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from .exported_program import (
     CallSpec,
     ExportedProgram,
+    ExportBackwardSignature,
     ExportGraphSignature,
     _set_constraints,
 )
