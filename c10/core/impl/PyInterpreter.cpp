@@ -10,7 +10,8 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     return "<unloaded interpreter>";
   }
 
-  void decref(PyObject* pyobj, bool is_tensor) const override {} // do nothing
+  void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
+  } // do nothing
 
 #define PANIC(m)              \
   TORCH_INTERNAL_ASSERT(      \
@@ -25,6 +26,10 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override {
     PANIC(dispatch);
+  }
+
+  void reportErrorCallback(PyObject* callback, DispatchKey key) const override {
+    PANIC(reportErrorCallback);
   }
 
   void python_op_registration_trampoline(

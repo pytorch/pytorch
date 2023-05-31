@@ -7,6 +7,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/PyHandleCache.h>
+#include <c10/core/SafePyObject.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
@@ -211,6 +212,7 @@ public:
   bool hasComputedKernelForDispatchKey(DispatchKey k) const;
   // Returns all the operator tags added at the time of registration
   const std::vector<at::Tag>& getTags() const;
+  void setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback);
 
   template <typename F>
   PyObject* getPythonOp(PyInterpreter* self_interpreter, F slow_accessor) const {
@@ -285,6 +287,9 @@ private:
   };
   c10::optional<CppSignatureWithDebug> cpp_signature_;
   c10::optional<CppSignatureWithDebug> sym_cpp_signature_;
+
+  // A Python custom error handler for OperatorEntry::reportError
+  std::unique_ptr<c10::SafePyObject> report_error_callback_;
 
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
