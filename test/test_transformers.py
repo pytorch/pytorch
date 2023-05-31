@@ -1743,7 +1743,6 @@ class TestSDPA(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
     def test_sdp_choice_with_determinism(self, device, warn_only):
-        # If we are only warning we still expect that efficient_attention will still be called.
         batch_size, seq_len, num_heads, head_dim = 1, 64, 8, 64
         shape = (batch_size, seq_len, num_heads, head_dim)
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float32, packed=False)
@@ -1751,8 +1750,81 @@ class TestSDPA(NNTestCase):
 
         with use_deterministic_algorithims(True, warn_only=warn_only):
             with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=True):
-                assert torch._fused_sdp_choice(query, key, value) == (
-                    SDPBackend.EFFICIENT_ATTENTION if warn_only else SDPBackend.MATH)
+                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused SDPA")
+    @parametrize("warn_only", [True, False])
+    def test_mem_eff_backwards_throws_determinism_warning(self, device, warn_only):
+        batch_size, seq_len, num_heads, head_dim = 1, 64, 8, 64
+        shape = (batch_size, seq_len, num_heads, head_dim)
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float32, packed=False, requires_grad=True)
+        query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
+
+        warning_context = (
+            self.assertWarnsRegex(
+                UserWarning,
+                "Memory Efficient attention defaults to a non-deterministic algorithm.",
+            )
+            if warn_only
+            else contextlib.nullcontext()
+        )
+        with use_deterministic_algorithims(True, warn_only=warn_only):
+            with sdp_kernel(**backend_map[SDPBackend.EFFICIENT_ATTENTION]):
+                with warning_context:
+                    torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()
+
+    @onlyCUDA
+    @unittest.skip("This test is not behaving deterministaclly non-deterministaclly on CI/CD")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Platform does not support fused SDPA")
+    def test_mem_eff_backwards_determinism(self, device):
+        # Need big seq_len to ensure that num_splits > 1
+        dtype = torch.float32
+        batch_size, seq_len, n_heads, head_dim = 1, 1024, 8, 64
+        query = torch.rand(batch_size, n_heads, seq_len, head_dim,
+                           device=device, dtype=dtype, requires_grad=True)
+        key = torch.rand(batch_size, n_heads, seq_len, head_dim, device=device,
+                         dtype=dtype, requires_grad=True)
+        value = torch.rand(batch_size, n_heads, seq_len, head_dim,
+                           device=device, dtype=dtype, requires_grad=True)
+
+        with sdp_kernel(enable_mem_efficient=True, enable_math=False, enable_flash=False):
+            # Run once to establish baseline
+            out = F.scaled_dot_product_attention(query, key, value)
+            upward_grad = torch.rand_like(out)
+            out.backward(upward_grad)
+            intial_query_grad = query.grad
+
+            # Re-run the op with the same upward grad and check that the backward is
+            # not deterministic
+            diff_anwser_once = False
+            for _ in range(100):
+                query.grad = None
+                out = F.scaled_dot_product_attention(query, key, value)
+                out.backward(upward_grad)
+                if not torch.equal(intial_query_grad, query.grad):
+                    diff_anwser_once = True
+                    break
+            self.assertTrue(diff_anwser_once)
+
+        with use_deterministic_algorithims(True, warn_only=False):
+            query.grad = None
+            out = F.scaled_dot_product_attention(query, key, value)
+            upward_grad = torch.rand_like(out)
+            out.backward(upward_grad)
+            intial_query_grad = query.grad
+
+            # Re-run the op with the same upward grad and check that the backward is
+            # deterministic now that we have enforced it
+            diff_anwser_once = False
+            for _ in range(100):
+                query.grad = None
+                out = F.scaled_dot_product_attention(query, key, value)
+                out.backward(upward_grad)
+                if not torch.equal(intial_query_grad, query.grad):
+                    diff_anwser_once = True
+                    break
+            self.assertFalse(diff_anwser_once)
 
     # verified passing successfully on H100
     @onlyCUDA
