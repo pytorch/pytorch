@@ -1118,7 +1118,7 @@ void ldl_factor_kernel(
     // By default use cusolver if available and magma otherwise.
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
     // call magma for complex inputs
-#ifdef USE_CUSOLVER
+#if defined(USE_CUSOLVER) || defined(USE_HIPSOLVER)
 #if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 254)
       if (LD.is_complex() && hermitian) {
         return ldl_factor_magma(
