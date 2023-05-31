@@ -41,6 +41,8 @@ from torch.distributed.fsdp.flat_param import (
 )
 from torch.distributed.utils import _apply_to_tensors, _p_assert, _to_kwargs
 
+log = logging.getLogger(__name__)
+
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
     "_use_orig_params",
@@ -737,9 +739,9 @@ def _post_backward_hook(
     gradient (accumulating with any existing gradient).
     """
     # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
-    # This can help debug certain cases where hooks don't fire under activation checkpoint,
-    # for example. Only enabled for use_orig_params=True use case.
-    if state._use_orig_params and dist.get_debug_level() == dist.DebugLevel.INFO:
+    # Below logging of module names this post-bwd hook fires for can help debug certain
+    # cases where hooks don't fire, such as under certain activation checkpoint configs.
+    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
         param_to_fqn = state._exec_order_data.param_to_fqn
         handle_params = handle.flat_param._params  # only populated for use_orig_params
         param_fqns = [
@@ -747,7 +749,7 @@ def _post_backward_hook(
             for param_list in [param_to_fqn[p] for p in handle_params]
             for param in param_list
         ]
-        logging.warning(f"FSDP firing hooks for parameters {param_fqns}")
+        log.warning(f"FSDP firing post-backward hooks for parameters {param_fqns}")
 
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
