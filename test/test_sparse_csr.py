@@ -1995,10 +1995,6 @@ class TestSparseCSR(TestCase):
         "cuSparse Generic API SpGEMM is not available"
     )
     def test_addmm_all_sparse_csr(self, device, dtype, layout):
-        # TODO: addmm(CSC, CSC, CSC) in Eigen
-        if no_mkl_sparse and layout == torch.sparse_csc:
-            self.skipTest("addmm(CSC, CSC, CSC) is not supported without MKL")
-
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
