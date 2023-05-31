@@ -275,6 +275,7 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # When a model contains aten._scaled_dot_product_flash_attention and we enable layout optimization,
         # the op may get channels last input and fail. Example include: twins_pcpvt_base, xcit_large_24_p8_224
+        # for _scaled_dot_product_flash_attention and xcit_large_24_p8_224 for _scaled_dot_product_efficient_attention.
         #
         # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
         #
@@ -283,9 +284,12 @@ class GraphLowering(torch.fx.Interpreter):
         # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
         # bringing perf gains.
         for n in gm.graph.nodes:
-            if n.target == torch.ops.aten._scaled_dot_product_flash_attention.default:
+            if n.target in (
+                torch.ops.aten._scaled_dot_product_flash_attention.default,
+                torch.ops.aten._scaled_dot_product_efficient_attention.default,
+            ):
                 log.debug(
-                    "Skip layout optimization because _scaled_dot_product_flash_attention is found"
+                    "Skip layout optimization because sdpa (scaled dot product attention) is found"
                 )
                 return False
 
