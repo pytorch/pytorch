@@ -426,7 +426,7 @@ class AllocationPool:
         self.name = name
         self.names_to_del = [name]
         self.creation_cache = {}
-        self.root = self.root.finalize(self, 0)
+        self.root.finalize(self, 0)
 
     def codegen_create(self, wrapper, code: IndentedBuffer):
         nbytes = self.root.get_symbolic_size()
