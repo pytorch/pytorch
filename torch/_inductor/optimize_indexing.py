@@ -68,7 +68,7 @@ def get_expr_range(expr, vars_ranges: dict):
     if len(free_symbols) == 0:
         return ValueRanges(expr, expr)
 
-    def replace_symbols_for_deriv(expr, ignore_mod=False):
+    def replace_symbols_for_deriv(expr):
         # for the purposes of finding local, minimum, maximum, assume smoothness
         def mod_indexing_rep(x, y, z):
             if z.is_constant():
@@ -89,7 +89,7 @@ def get_expr_range(expr, vars_ranges: dict):
     monotonic_decreasing = []
     other_symbols = []
 
-    expr_for_deriv = replace_symbols_for_deriv(expr, True)
+    expr_for_deriv = replace_symbols_for_deriv(expr)
     for symbol in symbols:
         diff = sympy.diff(expr_for_deriv, symbol)
         if diff.is_positive:

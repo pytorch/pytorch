@@ -2003,7 +2003,7 @@ class CppVecKernelChecker(CppVecKernel):
                         for k, v in zip(self.itervars, self.ranges)
                         if k in free_symbols
                     }
-                    if not vars_ranges:
+                    if not vars_ranges or len(vars_ranges) != len(free_symbols):
                         i32_iinfo = numpy.iinfo(numpy.int32)
                         return (
                             expr.is_number
