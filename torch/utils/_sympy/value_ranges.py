@@ -75,13 +75,26 @@ class ValueRanges:
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
         object.__setattr__(self, "is_bool", isinstance(lower, SympyBoolean))
+        assert isinstance(upper, SympyBoolean) == self.is_bool
 
     def __contains__(self, x):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
     def tighten(self, other):
-        return ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
+        # Some invariants
+        if other == ValueRanges.unknown():
+            return self
+        assert self.is_bool == other.is_bool, (self, other)
+        if self.is_bool:
+            range = ValueRanges(sympy.Or(self.lower, other.lower), sympy.And(self.upper, other.upper))
+            # Assert that it can't prove that the resulting range is invalid
+            assert not (range.lower is sympy.true and range.upper is sympy.false), (self, other)
+        else:
+            range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
+            # Assert that it can't prove that the resulting range is invalid
+            assert not ((range.lower > range.upper) is True), (self, other)
+        return range
 
     # Intersection
     def __and__(self, other):
@@ -224,25 +237,24 @@ class ValueRangeAnalysis:
     def ne(cls, a, b):
         return cls.not_(cls.eq(a, b))
 
-    @staticmethod
-    def lt(a, b):
+    @classmethod
+    def lt(cls, a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if a.upper < b.lower:
-            return ValueRanges.wrap(sympy.true)
-        elif a.lower >= b.upper:
-            return ValueRanges.wrap(sympy.false)
-        return ValueRanges(sympy.false, sympy.true)
+        assert a.is_bool == b.is_bool
+        if a.is_bool:
+            return cls.and_(cls.not_(a), b)
+        else:
+            if a.upper < b.lower:
+                return ValueRanges.wrap(sympy.true)
+            elif a.lower >= b.upper:
+                return ValueRanges.wrap(sympy.false)
+            else:
+                return ValueRanges(sympy.false, sympy.true)
 
     @classmethod
     def gt(cls, a, b):
-        a = ValueRanges.wrap(a)
-        b = ValueRanges.wrap(b)
-        if a.lower > b.upper:
-            return ValueRanges.wrap(sympy.true)
-        elif a.upper <= b.lower:
-            return ValueRanges.wrap(sympy.false)
-        return ValueRanges(sympy.false, sympy.true)
+        return cls.lt(b, a)
 
     @classmethod
     def le(cls, a, b):
@@ -268,9 +280,7 @@ class ValueRangeAnalysis:
             )
 
         x = ValueRanges.wrap(x)
-        low, up = x.lower, x.upper
-        if is_bool(low):
-            assert is_bool(up)
+        if x.is_bool:
             if dtype.is_floating_point:
                 return ValueRanges(0.0, 1.0)
             else:

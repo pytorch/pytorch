@@ -745,7 +745,9 @@ class Kernel(CodeGen):
         if not dynamo_config.dynamic_shapes:
             # These are bounds on the buffers in the FX graph
             # We will use them to determine the bounds on the CSE vars
-            self.bounds = node._body.bounds()
+            bounds = node._body.bounds()
+            bounds.get_bounds()
+            self.bounds = bounds
         try:
             yield
         finally:
@@ -798,17 +800,7 @@ class Kernel(CodeGen):
             def __getattr__(name):
                 def inner(*args, **kwargs):
                     buf_bounds = ValueRanges.unknown()
-                    if name == "constant":
-                        v = args[0]
-                        dtype = args[1]
-                        type_ = torch._prims_common.dtype_to_type(dtype)
-                        v = type_(v)
-                        is_nan = v != v
-                        if is_nan:
-                            buf_bounds = ValueRanges.unknown()
-                        else:
-                            buf_bounds = ValueRanges(lower=v, upper=v)
-                    elif self.bounds is not None:
+                    if self.bounds is not None:
                         # TODO turn this elif into an else when we support dynamic shapes
                         # Propagate bounds into the CSE variable
                         fx_node = V.interpreter.current_node
