@@ -1508,6 +1508,68 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             )
         )
 
+    def test_hooks_recompile(self):
+        # Modifying hooks should lead to a recompiation
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        def compute_output_and_grad(m, x):
+            output = m(x)
+            output.sum().backward()
+            return x.grad
+
+        def forward_pre_hook(module: torch.nn.Module, inputs: Tuple[torch.Tensor]):
+            return (2 * inputs[0] + 1,)
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ):
+            return 2 * output + 1
+
+        def backward_hook(module, grad_input, grad_output):
+            if len(grad_input) == 1:
+                return (grad_input[0] * 3,)
+            else:
+                return (grad_input[0] * 3, None)
+
+        def backward_pre_hook(module, grad_outputs):
+            return (grad_outputs[0] * 5,)
+
+        def run_test_case(hook_type, hook_func, expected_grad):
+            m = TestModule()
+            input = torch.ones(10, requires_grad=True)
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt = torch._dynamo.optimize(cnt)(compute_output_and_grad)
+
+            grad1 = opt(m, input)
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(grad1, torch.full_like(grad1, 2))
+
+            input.grad = None
+            handle = getattr(m, hook_type)(hook_func)
+            grad2 = opt(m, input)
+            frame_count2 = cnt.frame_count
+            # Some backward hooks lead to graph breaks so frame_count may be 2 or 3
+            self.assertGreaterEqual(frame_count2, 2)
+            self.assertEqual(grad2, torch.full_like(grad2, expected_grad))
+
+            # Running again should not recompile
+            opt(m, input)
+            self.assertEqual(cnt.frame_count, frame_count2)
+
+            # Removing handle should lead to original result
+            input.grad = None
+            handle.remove()
+            grad3 = opt(m, input)
+            self.assertEqual(grad1, grad3)
+
+        run_test_case("register_forward_pre_hook", forward_pre_hook, 4)
+        run_test_case("register_forward_hook", forward_hook, 4)
+        run_test_case("register_backward_hook", backward_hook, 6)
+        run_test_case("register_full_backward_hook", backward_hook, 6)
+        run_test_case("register_full_backward_pre_hook", backward_pre_hook, 10)
+
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
