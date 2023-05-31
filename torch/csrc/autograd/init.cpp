@@ -30,11 +30,14 @@
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
 #include <set>
 #include <unordered_set>
 #include <utility>
+
+using torch::impl::py_context_manager_DEPRECATED;
 
 namespace {
 
@@ -379,28 +382,25 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
 
-  py::class_<c10::InferenceMode>(_C_m, "_InferenceMode").def(py::init<bool>());
+  py_context_manager_DEPRECATED<c10::InferenceMode, bool>(
+      _C_m, "_InferenceMode");
+  py_context_manager_DEPRECATED<at::impl::RestorePythonTLSSnapshot>(
+      _C_m, "_RestorePythonTLSSnapshot");
 
-  py::class_<at::impl::RestorePythonTLSSnapshot>(
-      _C_m, "_RestorePythonTLSSnapshot")
-      .def(py::init<>());
-
-  py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
-      .def(py::init<>());
-  py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")
-      .def(py::init<>());
-  py::class_<EnablePythonDispatcher>(_C_m, "_EnablePythonDispatcher")
-      .def(py::init<>());
-  py::class_<c10::impl::DisablePythonDispatcher>(
-      _C_m, "_DisablePythonDispatcher")
-      .def(py::init<>());
-  py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
-  py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
-      .def(py::init<bool>());
-  py::class_<DisableAutocast>(std::move(_C_m), "_DisableAutocast")
-      .def(py::init<>());
-  py::class_<ViewReplayEnabled>(_C_m, "_ViewReplayEnabled")
-      .def(py::init<bool>());
+  py_context_manager_DEPRECATED<torch::DisableTorchDispatch>(
+      _C_m, "_DisableTorchDispatch");
+  py_context_manager_DEPRECATED<EnableTorchFunction>(
+      _C_m, "_EnableTorchFunction");
+  py_context_manager_DEPRECATED<EnablePythonDispatcher>(
+      _C_m, "_EnablePythonDispatcher");
+  py_context_manager_DEPRECATED<c10::impl::DisablePythonDispatcher>(
+      _C_m, "_DisablePythonDispatcher");
+  py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
+  py_context_manager_DEPRECATED<MultithreadingEnabled, bool>(
+      _C_m, "_MultithreadingEnabled");
+  py_context_manager_DEPRECATED<DisableAutocast>(_C_m, "_DisableAutocast");
+  py_context_manager_DEPRECATED<ViewReplayEnabled, bool>(
+      _C_m, "_ViewReplayEnabled");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
