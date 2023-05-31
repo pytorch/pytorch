@@ -3867,56 +3867,6 @@ def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
 
-@make_pointwise
-def logical_and(a, b):
-    return ops.logical_and(a, b)
-
-
-@make_pointwise
-def logical_not(a, b):
-    return ops.logical_not(a)
-
-
-@make_pointwise
-def logical_or(a, b):
-    return ops.logical_or(a, b)
-
-
-@make_pointwise
-def logical_xor(a, b):
-    return ops.logical_xor(a, b)
-
-
-@make_pointwise
-def bitwise_and(a, b):
-    return ops.bitwise_and(a, b)
-
-
-@make_pointwise
-def bitwise_not(a):
-    return ops.bitwise_not(a)
-
-
-@make_pointwise
-def bitwise_or(a, b):
-    return ops.bitwise_or(a, b)
-
-
-@make_pointwise
-def bitwise_xor(a, b):
-    return ops.bitwise_xor(a, b)
-
-
-@make_pointwise
-def bitwise_left_shift(a, b):
-    return ops.bitwise_left_shift(a, b)
-
-
-@make_pointwise
-def bitwise_right_shift(a, b):
-    return ops.bitwise_right_shift(a, b)
-
-
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
     both_integer = is_integer_type(a) and is_integer_type(b)
@@ -4084,12 +4034,14 @@ sub = register_pointwise(aten.sub, allow_alpha=True)
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
 register_pointwise(aten.abs)
-register_pointwise(aten.bitwise_and)
-register_pointwise(aten.bitwise_not)
-register_pointwise(aten.bitwise_or)
-register_pointwise(aten.bitwise_xor)
-register_pointwise(aten.bitwise_left_shift)
-register_pointwise(aten.bitwise_right_shift)
+bitwise_and = register_pointwise(aten.bitwise_and)
+bitwise_left_shift = register_pointwise(aten.bitwise_left_shift)
+bitwise_not = register_pointwise(
+    aten.bitwise_not, override_fn_when_input_bool="logical_not"
+)
+bitwise_or = register_pointwise(aten.bitwise_or)
+bitwise_right_shift = register_pointwise(aten.bitwise_right_shift)
+bitwise_xor = register_pointwise(aten.bitwise_xor)
 register_pointwise_numeric(aten.lgamma)
 erf = register_pointwise_numeric(aten.erf)
 register_lowering(
@@ -4100,10 +4052,10 @@ register_pointwise_numeric(aten.log1p)
 register_pointwise_numeric(aten.tan)
 register_pointwise_numeric(aten.tanh)
 register_pointwise_numeric_ldf64(aten.log)
-register_pointwise(aten.logical_and, convert_input_to_bool=True)
-register_pointwise(aten.logical_or, convert_input_to_bool=True)
-register_pointwise(aten.logical_xor, convert_input_to_bool=True)
-register_pointwise(aten.logical_not, convert_input_to_bool=True)
+logical_and = register_pointwise(aten.logical_and, convert_input_to_bool=True)
+logical_or = register_pointwise(aten.logical_or, convert_input_to_bool=True)
+logical_xor = register_pointwise(aten.logical_xor, convert_input_to_bool=True)
+logical_not = register_pointwise(aten.logical_not, convert_input_to_bool=True)
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
@@ -4153,11 +4105,11 @@ def register_inplace(aten_op, outplace_op):
 
 register_inplace(aten.add_, add)
 register_inplace(aten.bitwise_and_, bitwise_and)
+register_inplace(aten.bitwise_left_shift_, bitwise_left_shift)
 register_inplace(aten.bitwise_not_, bitwise_not)
 register_inplace(aten.bitwise_or_, bitwise_or)
-register_inplace(aten.bitwise_xor_, bitwise_xor)
-register_inplace(aten.bitwise_left_shift_, bitwise_left_shift)
 register_inplace(aten.bitwise_right_shift_, bitwise_right_shift)
+register_inplace(aten.bitwise_xor_, bitwise_xor)
 register_inplace(aten.mul_, mul)
 register_inplace(aten.div_.Tensor, div)
 register_inplace(aten.div_.Tensor_mode, div_mode)

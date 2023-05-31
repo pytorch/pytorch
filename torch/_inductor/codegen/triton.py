@@ -298,7 +298,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def logical_not(a):
-        return f"!{a}"
+        return f"{a} ^ 1"  # !{a} is not recognized by Triton
 
     @staticmethod
     def logical_and(a, b):
