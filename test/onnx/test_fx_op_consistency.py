@@ -517,6 +517,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Celu", "non-float32"),
     ),
     skip(
+        "nn.functional.elu",  # see https://github.com/pytorch/pytorch/issues/101947
+        matcher=lambda sample: sample.input.dtype != torch.float32,
+        reason=onnx_test_common.reason_onnx_does_not_support("elu", "non-float32"),
+    ),
+    skip(
         "nn.functional.conv1d",
         matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
         reason="String padding is not accepted by aten::conv1d",

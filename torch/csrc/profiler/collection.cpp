@@ -1318,6 +1318,25 @@ void set_record_concrete_inputs_enabled_val(bool val) {
   record_concrete_inputs_enabled_fn() = [val]() { return val; };
 }
 
+namespace {
+std::function<bool()>& fwd_bwd_enabled_fn() {
+  static std::function<bool()> fn = []() { return true; };
+  return fn;
+}
+} // namespace
+
+bool get_fwd_bwd_enabled() {
+  return fwd_bwd_enabled_fn()();
+}
+
+void set_fwd_bwd_enabled_fn(std::function<bool()> fn) {
+  fwd_bwd_enabled_fn() = std::move(fn);
+}
+
+void set_fwd_bwd_enabled_val(bool val) {
+  fwd_bwd_enabled_fn() = [val]() { return val; };
+}
+
 } // namespace impl
 } // namespace profiler
 } // namespace torch
