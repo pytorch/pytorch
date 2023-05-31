@@ -2777,6 +2777,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # We are not clearing flat_args here because
                 # 1) There is a check in the the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
+
+            # the compiler need to use this field to find the original modol outputs
+            # from the AOTAutograd fwd module's outputs. Thus compiler can make sure
+            # optimizations like layout optimization does not change those tensors'
+            # layout.
+            fw_module.meta["original_output_start_index"] = fw_metadata.num_mutated_inputs
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, adjusted_flat_args
             )

@@ -21,6 +21,7 @@ from torch._dynamo.utils import defake, detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -234,6 +235,7 @@ def compile_fx_inner(
     aot_mode=False,
     is_inference=False,
     boxed_forward_device_index=None,
+    user_visible_outputs=frozenset(),
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -303,6 +305,7 @@ def compile_fx_inner(
             graph_id=graph_id,
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
+            user_visible_outputs=user_visible_outputs,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
@@ -699,6 +702,14 @@ def compile_fx(
 
     graph_id = next(_graph_counter)
 
+    orig_model = model_
+    if config.keep_output_stride:
+        # we need know the number of outputs of the original model.
+        # should do a make_fx if orig_model is not a GraphModule yet.
+        # This happens if people call inductor without dynamo.
+        if not isinstance(orig_model, torch.fx.GraphModule):
+            orig_model = make_fx(orig_model)(*example_inputs_)
+
     @dynamo_utils.dynamo_timed
     def fw_compiler_base(model: torch.fx.GraphModule, example_inputs, is_inference):
         if is_inference:
@@ -707,6 +718,41 @@ def compile_fx(
 
         num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
         fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
+        user_visible_outputs = set()
+
+        if config.keep_output_stride:
+            *_, orig_model_outputs_node = orig_model.graph.nodes
+            *_, model_outputs_node = model.graph.nodes
+            assert orig_model_outputs_node.op == "output"
+            assert model_outputs_node.op == "output"
+            orig_model_outputs, _ = pytree.tree_flatten(orig_model_outputs_node.args)
+            model_outputs, _ = pytree.tree_flatten(model_outputs_node.args)
+            assert len(orig_model_outputs) <= len(model_outputs)
+
+            # We makes the following assumption
+            # For inference
+            #   len(orig_model_outputs) == len(model_outputs)
+            # For training
+            #   len(orig_model_outputs) <= len(model_outputs)
+            # During training, most of the time the model_outputs starts with
+            # orignal module's outputs followed by saved activations.
+            # But this can be not true if the model have inplace updated tensors.
+            # AOTAutograd will make those tensors being returned before the orignal
+            # module's output.
+            # To make things safe, we'll use original_output_start_index field
+            # set by AOTAutograd to decide where the original module outputs start.
+
+            original_output_start_index = model.meta.get(
+                "original_output_start_index", 0
+            )
+            user_visible_outputs = {
+                n.name
+                for n in model_outputs[
+                    original_output_start_index : original_output_start_index
+                    + len(orig_model_outputs)
+                ]
+            }
+
         return inner_compile(
             model,
             example_inputs,
@@ -715,6 +761,7 @@ def compile_fx(
             graph_id=graph_id,
             is_inference=is_inference,
             boxed_forward_device_index=forward_device,
+            user_visible_outputs=user_visible_outputs,
         )
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)

@@ -150,6 +150,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
+        user_visible_outputs=frozenset(),
     ):
         super().__init__(gm)
 
@@ -193,6 +194,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
         self._warned_fallback = {"aten.convolution_backward"}
+        self.user_visible_outputs = user_visible_outputs
 
     def decide_layout_opt(self) -> bool:
         """
@@ -667,6 +669,7 @@ class GraphLowering(torch.fx.Interpreter):
                     if (
                         len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
+                        and n.name not in self.user_visible_outputs
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
 
@@ -866,7 +869,8 @@ class GraphLowering(torch.fx.Interpreter):
         output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
-        if config.benchmark_kernel:
+        # TODO: restore before merging
+        if config.benchmark_kernel or True:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
