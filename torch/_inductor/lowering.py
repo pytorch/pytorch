@@ -1291,7 +1291,6 @@ def bernoulli_(x, *args):
         "cpu"
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
-    V.graph.realize_users_of(x.get_name())
     ir.InplaceBernoulliFallback(x, *args)
     return x
 
@@ -1387,6 +1386,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
         inner_fn=inner_fn,
         ranges=[*size],
     )
+    result.realize()
     return result
 
 
@@ -1499,7 +1499,6 @@ make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.erfinv, warn=False)
 make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -2286,7 +2285,6 @@ def index_put_impl_(self, indices, values, accumulate, check):
 
     assert isinstance(self, TensorBox)
     self.realize()
-    V.graph.realize_users_of(self.get_name())
 
     # self is an scalar Tensor
     if x_ndim == 0:
@@ -2431,7 +2429,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     dim = _validate_dim(self, dim)
 
     self.realize()
-    V.graph.realize_users_of(self.get_name())
     index_loader = index.make_loader()
     src_loader = src.make_loader() if isinstance(src, TensorBox) else None
 
@@ -4107,6 +4104,7 @@ register_pointwise_numeric(aten.atan)
 register_pointwise_numeric(aten.atanh)
 register_pointwise_numeric(aten.copysign)
 register_pointwise_numeric(aten.erfc)
+register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
