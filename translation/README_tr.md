@@ -184,7 +184,7 @@ Diğer potansiyel olarak yararlı ortam değişkenleri şurada bulunabilir `setu
 
 ```bash
 conda install cmake ninja
-# Aşağıdaki "Get the PyTorch Source" bölümünü kullanarak kaynak kodu klonladıktan sonra PyTorch dizininden bu komutu çalıştırın
+# Aşağıdaki "PyTorch Kaynak Kodunu Edinin" bölümünü kullanarak kaynak kodu klonladıktan sonra PyTorch dizininden bu komutu çalıştırın
 pip install -r requirements.txt
 ```
 
@@ -192,20 +192,20 @@ pip install -r requirements.txt
 
 ```bash
 conda install mkl mkl-include
-# CUDA only: Add LAPACK support for the GPU if needed
+# Sadece CUDA için: Gerekirse GPU için LAPACK desteğini ekleyin.
 conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 
-# (optional) If using torch.compile with inductor/triton, install the matching version of triton
-# Run from the pytorch directory after cloning
+# (isteğe bağlı) Eğer inductor/triton ile torch.compile kullanıyorsanız, uyumlu triton sürümünü yükleyin.
+# Klonlamadan sonra pytorch dizininden çalıştırın.
 make triton
 ```
 
 **On MacOS**
 
 ```bash
-# Add this package on intel x86 processor machines only
+# Bu paketi yalnızca Intel x86 işlemcili makinelerde ekleyin.
 conda install mkl mkl-include
-# Add these packages if torch.distributed is needed
+# Eğer torch.distributed gerekiyorsa, bu paketleri ekleyin.
 conda install pkg-config libuv
 ```
 
@@ -213,16 +213,16 @@ conda install pkg-config libuv
 
 ```bash
 conda install mkl mkl-include
-# Add these packages if torch.distributed is needed.
-# Distributed package support on Windows is a prototype feature and is subject to changes.
+# Eğer torch.distributed gerekiyorsa, aşağıdaki paketleri ekleyin.
+# Windows üzerinde dağıtılmış paket desteği prototip bir özelliktir ve değişikliklere tabidir.
 conda install -c conda-forge libuv=1.39
 ```
 
-#### Get the PyTorch Source
+#### PyTorch Kaynak Kodunu Edinin
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
-# if you are updating an existing checkout
+# Mevcut bir kontrol dışı güncelleme yapıyorsanız.
 git submodule sync
 git submodule update --init --recursive
 ```
@@ -230,13 +230,13 @@ git submodule update --init --recursive
 #### Pytorch'u Kurma
 **On Linux**
 
-If you're compiling for AMD ROCm then first run this command:
+Eğer AMD ROCm için derleme yapıyorsanız, önce bu komutu çalıştırın.:
 ```bash
-# Only run this if you're compiling for ROCm
+# Bunu sadece ROCm için derleme yapıyorsanız çalıştırın.
 python tools/amd_build/build_amd.py
 ```
 
-Install PyTorch
+Pytorchu Kurma
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py develop
