@@ -255,10 +255,9 @@ class BackendConfig:
         if backend == Backend.UNDEFINED:
             # default config when backend is not specified
             # supported since PyTorch 2.0
-            self.device_backend_map = {
-                "cpu": Backend.GLOO,
-                "cuda": Backend.NCCL,
-            }
+            self.device_backend_map = {"cpu": Backend.GLOO}
+            if is_nccl_available():
+                self.device_backend_map["cuda"] = Backend.NCCL
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
