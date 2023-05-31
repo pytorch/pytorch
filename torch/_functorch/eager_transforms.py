@@ -1279,6 +1279,17 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
             _grad_decrement_nesting()
     return wrapper
 
+def grad_impl(func: Callable, argnums: argnums_t, has_aux: bool):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        results = grad_and_value(func, argnums, has_aux=has_aux)(*args, **kwargs)
+        if has_aux:
+            grad, (_, aux) = results
+            return grad, aux
+        grad, _ = results
+        return grad
+
+    return wrapper
 
 @exposed_in("torch.func")
 def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
@@ -1375,15 +1386,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         should not depend on the result of a context manager outside of ``f``.
 
     """
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        results = grad_and_value(func, argnums, has_aux=has_aux)(*args, **kwargs)
-        if has_aux:
-            grad, (_, aux) = results
-            return grad, aux
-        grad, _ = results
-        return grad
-    return wrapper
+    return grad_impl(func, argnums, has_aux)
 
 
 def _maybe_wrap_functional_tensor(maybe_tensor, level):

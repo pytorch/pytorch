@@ -209,7 +209,7 @@ class TorchVariable(VariableTracker):
         if self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
-        elif self.value is torch.func.grad:
+        elif self.value is torch._functorch.eager_transforms.grad_impl:
             return TorchHigherOrderOperatorVariable(
                 self.value,
                 source=self.source,
@@ -1302,8 +1302,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             )
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
-        elif self.value is torch.func.grad:
-            # [NOTE] Here we are modelling the following
+        elif self.value is torch._functorch.eager_transforms.grad_impl:
+            # [NOTE] Here we are (roughly) modelling the following
             #
             #   grad_fn = torch.func.grad(fn, argnums=.., has_aux=..)
             #   grad_output = grad_fn(x)
@@ -1311,22 +1311,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             graph_checkpoint = tx.output.graph
             grad_args = self.value_args_kwargs["args"]
             grad_kwargs = self.value_args_kwargs["kwargs"]
-            # first arg of `grad` is function
-            func = grad_args[0] if len(grad_args) >= 1 else grad_kwargs["func"]
 
-            # second arg of `grad` is argnums
-            argnums: Optional[ConstantVariable] = (
-                grad_args[1]
-                if len(grad_args) >= 2
-                else grad_kwargs.get("argnums", None)
-            )
-
-            # third arg of `grad` is argnums
-            has_aux: Optional[ConstantVariable] = (
-                grad_args[2]
-                if len(grad_args) >= 3
-                else grad_kwargs.get("has_aux", None)
-            )
+            # get arguments
+            func, argnums, has_aux = grad_args
 
             # Trace through the `func`
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
@@ -1366,24 +1353,23 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             # Call grad_fn with inputs.
             grad_output = grad_fn(*grad_fn_args, **grad_fn_kwargs)
 
-            # NOTE: example_value should match the output of calling the
             # `grad_fn(*grad_fn_args, **grad_fn_kwargs)`
             # Output of grad_fn is
             # For has_aux=False, Tuple[gradients of inputs indicated by argnums].
             # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
-            example_value = args[0].as_proxy().node.meta["example_value"]
-            if argnums is not None:
-                if isinstance(argnums.value, int):
-                    example_value = (
-                        args[argnums.value].as_proxy().node.meta["example_value"]
-                    )
-                else:
-                    example_value = tuple(
-                        args[idx].as_proxy().node.meta["example_value"]
-                        for idx in argnums.value
-                    )
+            # NOTE: example_value should match the output of calling the
+            # TODO(kshitij12345): Add contiguous to the actual output.
+            if isinstance(argnums.value, int):
+                example_value = (
+                    args[argnums.value].as_proxy().node.meta["example_value"].contiguous()
+                )
+            else:
+                example_value = tuple(
+                    args[idx].as_proxy().node.meta["example_value"].contiguous()
+                    for idx in argnums.value
+                )
 
-            if has_aux is not None and has_aux.value:
+            if has_aux.value:
                 # case : has_aux = True
                 # NOTE: Currently speculate subgraph allows body_r to be
                 # Tensor or Tuple/List of Tensor.
