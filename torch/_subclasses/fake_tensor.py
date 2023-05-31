@@ -939,6 +939,10 @@ class FakeTensor(torch.Tensor):
             init_cuda_context()
             if device.index is None:
                 device = torch.device(f"cuda:{torch.cuda.current_device()}")
+
+        # normalize hpu device.
+        if device.type == "hpu" and device.index is None:
+            device = torch.device(f"hpu:{torch.hpu.current_device()}")
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]

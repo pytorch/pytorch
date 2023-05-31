@@ -354,9 +354,9 @@ class TestFSDPIgnoredModules(FSDPTest):
             {"ignored_modules": layer1_ignored_modules}
             if ignore_modules
             else {
-                "ignored_states": {
+                "ignored_states": (
                     p for m in layer1_ignored_modules for p in m.parameters()
-                }
+                )
             }
         )
         model.layer1 = wrap_cls(model.layer1, **ignore_kwargs)
