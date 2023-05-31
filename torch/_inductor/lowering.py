@@ -2174,7 +2174,7 @@ def index_impl(x, indices, check):
         new_index = [
             ops.indirect_indexing(
                 loader(idx[start_offset:end_offset]), size, check=check
-            )
+            ) % size
             for loader, size in zip(indices_loaders, indexed_size)
         ]
         new_index = [*idx[:start_offset], *new_index, *idx[end_offset:]]

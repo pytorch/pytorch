@@ -6286,6 +6286,11 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(26),))
 
+    def test_neg_index(self):
+        def fn(x):
+            return x[:, [-1], :]
+        self.common(fn, (torch.rand(1, 64, 768),))
+
 
 @dataclasses.dataclass
 class TestFailure:
