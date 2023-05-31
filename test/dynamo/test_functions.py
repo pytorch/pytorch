@@ -111,6 +111,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return v
 
     @make_test
+    def test_itertools_combinations(a, b):
+        combs = []
+        for size in itertools.combinations((1, 2, 3, 4), 2):
+            combs.append(torch.ones(size))
+        return combs
+
+    @make_test
     def test_constant1(a, b, c):
         return a - b * c + 1.0
 
