@@ -3325,29 +3325,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(sp_matrix.data), pt_matrix.values())
 
 
-class _TritonLibrary(object):
-    lib = torch.library.Library("triton", "DEF")
-    ops = {}
-
-    @classmethod
-    def probablyRegisterOp(cls, op_key, full_schema, op_impl, dispatch_key):
-        if op_key not in cls.ops:
-            cls.lib.define(full_schema)
-            cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
-            cls.ops[op_key] = op_impl
-
-        return cls.ops[op_key]
-
-class _WrappedKernel(object):
-    def __init__(self, kernel):
-        self.kernel = kernel
-        self.kernel_invoked = False
-
-    def __call__(self, *args, **kwargs):
-        res = self.kernel(*args, **kwargs)
-        self.kernel_invoked = True
-        return res
-
 def skipIfNoTriton(cls):
     from torch._inductor.utils import has_triton
 
@@ -3372,17 +3349,25 @@ class TestSparseCompressedTritonKernels(TestCase):
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU or torch._running_with_deploy(),
+                     "Skipped for deploy and internal with remote GPUs")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         from functools import partial
         from torch.sparse._triton_ops import bsr_dense_mm
 
-        kernel = _TritonLibrary.probablyRegisterOp(
+        def kernel_impl(*args, **kwargs):
+            return bsr_dense_mm(*args, skip_checks=True, **kwargs)
+
+        kernel = torch._TritonLibrary.registerOp(
             "_triton_bsr_dense_mm_out",
             "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
-            _WrappedKernel(lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs)),
+            kernel_impl,
             "SparseCsrCUDA"
         )
+
+        # kernel != kernel_impl means dispatch was already registered.
+        # This is exactly what we need!
+        self.assertTrue(kernel is not kernel_impl)
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
@@ -3440,7 +3425,8 @@ class TestSparseCompressedTritonKernels(TestCase):
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half)
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU or torch._running_with_deploy(),
+                     "Skipped for deploy and internal with remote GPUs")
     def test_triton_bsr_dense_bmm_error_messages(self, device, dtype):
         from torch.sparse._triton_ops import bsr_dense_mm
 
