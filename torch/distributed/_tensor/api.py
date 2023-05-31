@@ -245,6 +245,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         local_tensor: torch.Tensor,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
+        *,
         run_check: bool = True,
     ) -> "DTensor":
         """
@@ -261,6 +262,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 have the same number of elements as `device_mesh.ndim`. If not
                 specified, we will by default replicate the tensor across the
                 `device_mesh` from the first rank of each dimension of the `device_mesh`.
+
+        Keyword args:
             run_check (bool, optional): indicate whether to run check across ranks
                 to check meta information and data. if have :class:`Replicate` in
                 `placements`, the data on first rank of the device mesh dimension
