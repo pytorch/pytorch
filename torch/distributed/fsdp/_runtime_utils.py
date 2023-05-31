@@ -749,7 +749,7 @@ def _post_backward_hook(
             for param_list in [param_to_fqn[p] for p in handle_params]
             for param in param_list
         ]
-        log.warning(f"FSDP firing post-backward hooks for parameters %s", param_fqns)
+        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
 
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
