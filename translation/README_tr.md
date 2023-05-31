@@ -157,7 +157,7 @@ Eğer kaynaktan kurulum yapıyorsanız, şunlara ihtiyacınız olacaktır:
 - Python 3.8 veya üstü (Linux için Python 3.8.1+ gereklidir)
 - Clang gibi C++17 uyumlu bir derleyici
 
-[Anaconda](https://www.anaconda.com/distribution/#download-section)ortamını kurmanızı şiddetle öneririz. Yüksek kaliteli bir BLAS kütüphanesi (MKL) alırsınız ve Linux dağıtımınız ne olursa olsun kontrol edilen bağımlılık sürümleri elde edersiniz.
+[Anaconda](https://www.anaconda.com/distribution/#download-section) ortamını kurmanızı şiddetle öneririz. Yüksek kaliteli bir BLAS kütüphanesi (MKL) alırsınız ve Linux dağıtımınız ne olursa olsun kontrol edilen bağımlılık sürümleri elde edersiniz.
 
 CUDA desteği ile derlemek istiyorsanız, aşağıdakileri yükleyin. (CUDA'nın macOS'ta desteklenmediğini unutmayın.)
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 11.0 veya üzeri
@@ -180,11 +180,11 @@ Diğer potansiyel olarak yararlı ortam değişkenleri şurada bulunabilir `setu
 
 #### Bağımlılıkları Kurun
 
-**Common**
+**Yaygın**
 
 ```bash
 conda install cmake ninja
-# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
+# Aşağıdaki "Get the PyTorch Source" bölümünü kullanarak kaynak kodu klonladıktan sonra PyTorch dizininden bu komutu çalıştırın
 pip install -r requirements.txt
 ```
 
