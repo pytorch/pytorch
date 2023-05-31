@@ -5,15 +5,13 @@ import torch
 from torch import Tensor
 from torch.autograd.grad_mode import no_grad
 
-__all__ = ["get_foreach_kernels_supported_devices", "get_fused_kernels_supported_devices"]
-
-def get_foreach_kernels_supported_devices() -> List[str]:
+def _get_foreach_kernels_supported_devices() -> List[str]:
     r"""
     Return the device type list that supports foreach kernels.
     """
     return ["cuda", torch._C._get_privateuse1_backend_name()]
 
-def get_fused_kernels_supported_devices() -> List[str]:
+def _get_fused_kernels_supported_devices() -> List[str]:
     r"""
     Return the device type list that supports fused kernels in optimizer.
     """
@@ -50,20 +48,6 @@ def _group_tensors_by_device_and_dtype(tensorlistlist: List[List[Tensor]],
     return per_device_and_dtype_tensors
 
 def _has_foreach_support(tensors: List[Tensor], device: torch.device) -> bool:
-    if device.type not in ["cpu", "cuda", torch._C._get_privateuse1_backend_name()] or torch.jit.is_scripting():
+    if device.type not in set(_get_foreach_kernels_supported_devices() + ["cpu"]) or torch.jit.is_scripting():
         return False
     return all(t is None or type(t) == torch.Tensor for t in tensors)
-
-def _check_same_device(params: List[Tensor]) -> bool:
-    r"""
-    Checks that all Tensors in params have the same device.
-    """
-    device_type = ""
-    for p in params:
-        if p is None:
-            continue
-        if device_type == "":
-            device_type = p.device.type
-        if device_type != p.device.type:
-            return False
-    return True
