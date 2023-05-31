@@ -23,8 +23,8 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
   - [GPU'ya Hazır Bir Python Kütüphanesi](#a-gpu-ready-tensor-library)
   - [Dinamik Sinir Ağları: Bant Tabanlı Otograd](#dynamic-neural-networks-tape-based-autograd)
   - [Python First](#python-first)
-  - [Imperative Experiences](#imperative-experiences)
-  - [Hızlı ve Verimli](#fast-and-lean)
+  - [Zorunlu Deneyimler](#imperative-experiences)
+  - [Hızlı ve Yalın](#fast-and-lean)
   - [Sorunsuz Uzantılar](#extensions-without-pain)
 - [Kurulum](#installation)
   - [Binaries](#binaries)
@@ -107,24 +107,22 @@ Kullandığınız gibi, doğal bir şekilde kullanabilirsiniz [NumPy](https://ww
 Yeni sinir ağı katmanlarınızı Python'da yazabilir, favori kütüphanelerinizi kullanabilir ve şu gibi paketleri kullanabilirsiniz [Cython](https://cython.org/) ve [Numba](http://numba.pydata.org/).
 Amacımız, uygun olduğu yerlerde tekerleği yeniden icat etmemektir.
 
-### Imperative Experiences
+### Zorunlu Deneyimler
 
-PyTorch is designed to be intuitive, linear in thought, and easy to use.
-When you execute a line of code, it gets executed. There isn't an asynchronous view of the world.
-When you drop into a debugger or receive error messages and stack traces, understanding them is straightforward.
-The stack trace points to exactly where your code was defined.
+PyTorch, sezgisel, düşünce açısından doğrusal ve kullanımı kolay olacak şekilde tasarlanmıştır.
+Bir kod satırını çalıştırdığınızda, o satır hemen çalışır. Asenkron bir görünüm yoktur.
+Bir hata ayıklayıcıya girdiğinizde veya hata mesajları ve yığın izleri aldığınızda, bunları anlamak kolaydır.
+Yığın izi, kodunuzun tam olarak nerede tanımlandığını işaret eder.
 We hope you never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
 
-### Fast and Lean
+### Hızlı ve Yalın
 
-PyTorch has minimal framework overhead. We integrate acceleration libraries
-such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) to maximize speed.
-At the core, its CPU and GPU Tensor and neural network backends
-are mature and have been tested for years.
+PyTorch minimum çerçeve ek yüküne sahiptir. Hızlandırma kütüphanelerini entegre ediyoruz örneğin  [Intel MKL](https://software.intel.com/mkl) ve NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl))  hızı en üst düzeye çıkarmak için.
+Çekirdekte, CPU ve GPU Tensör ve sinir ağı arka uçları (backend) olgunlaşmıştır ve yıllardır test edilmektedir.
 
-Hence, PyTorch is quite fast — whether you run small or large neural networks.
+Bu nedenle, PyTorch oldukça hızlıdır - küçük veya büyük sinir ağları bile çalıştırsanız.
 
-The memory usage in PyTorch is extremely efficient compared to Torch or some of the alternatives.
+PyTorch'ta bellek kullanımı, Torch veya diğer bazı alternatiflere göre son derece verimlidir.
 We've written custom memory allocators for the GPU to make sure that
 your deep learning models are maximally memory efficient.
 This enables you to train bigger deep learning models than before.
