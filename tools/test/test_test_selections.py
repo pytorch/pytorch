@@ -438,7 +438,6 @@ class TestParsePrevTests(unittest.TestCase):
         self.assertEqual(
             time_savings, expected_time_savings, "Received an unexpected time savings"
         )
-        pass
 
     def test_compute_prioritization_time_savings_with_multiple_threads_and_many_prioritized_tests(
         self,
