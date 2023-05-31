@@ -1348,7 +1348,9 @@ class TritonKernel(Kernel):
                 )
                 self.suffix.splice(
                     f"""\
-                _, {result_var}_tmp, _ = triton_helpers.welford({mean}, {m2}, {weight}, {dim})
+                _, {result_var}_tmp, _ = triton_helpers.welford(
+                    {accumulator}, {accumulator_m2}, {accumulator_weight}, {dim}
+                )
                 {result_var} = {result_var}_tmp{self.reduction_size_str()}
                 """
                 )
