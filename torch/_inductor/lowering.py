@@ -3621,6 +3621,9 @@ def _validate_reduction_axis(x, axis):
         axis = [axis]
     elif not axis:
         axis = range(len(size))
+    if len(size) == 0:
+        assert tuple(axis) in [(), (0,), (-1,)], f"invalid axis: {axis}"
+        return []
     axis = list(axis)
     for i in range(len(axis)):
         if axis[i] < 0:
@@ -3864,6 +3867,14 @@ def floordiv(a, b):
 def truncdiv(a, b):
     return ops.truncdiv(a, b)
 
+@make_pointwise
+def bitwise_and(a, b):
+    return ops.bitwise_and(a, b)
+
+@make_pointwise
+def bitwise_or(a, b):
+    return ops.bitwise_or(a, b)
+
 
 @register_lowering(aten.div, broadcast=True)
 def div_mode(a, b, rounding_mode=None):
@@ -4066,21 +4077,6 @@ register_pointwise(aten.ge, override_return_dtype=torch.bool)
 gt = register_pointwise(aten.gt, override_return_dtype=torch.bool)
 register_pointwise(aten.eq, override_return_dtype=torch.bool)
 register_pointwise(aten.ne, override_return_dtype=torch.bool)
-logical_and = register_pointwise(
-    aten.logical_and,
-    type_promotion_kind=None,
-    convert_input_to_bool=True,
-    override_return_dtype=torch.bool,
-)
-register_lowering(aten.__and__, type_promotion_kind=None)(logical_and)
-register_lowering(aten.__or__, type_promotion_kind=None)(
-    register_pointwise(
-        aten.logical_or,
-        type_promotion_kind=None,
-        convert_input_to_bool=True,
-        override_return_dtype=torch.bool,
-    )
-)
 logical_xor = register_pointwise(
     aten.logical_xor,
     name="bitwise_xor",

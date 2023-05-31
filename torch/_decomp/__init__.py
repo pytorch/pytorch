@@ -179,6 +179,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
     aten = torch.ops.aten
     return get_decompositions(
         [
+            aten.__and__,
             aten._adaptive_avg_pool2d_backward,
             aten.addcdiv,
             aten.addcdiv_,
@@ -255,8 +256,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten._log_softmax_backward_data,
             aten.logspace,
             aten.logsumexp.default,
-            aten.__lshift__.Scalar,
-            aten.__lshift__.Tensor,
+            aten.__lshift__,
             aten.masked_fill,
             aten.masked_fill_,
             aten.max_pool2d_with_indices_backward,
@@ -287,11 +287,13 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.norm,
             aten.ones,
             aten.ones_like,
+            aten.__or__,
             aten._prelu_kernel,
             aten._prelu_kernel_backward,
             aten._reshape_alias,
             aten.rad2deg,
             aten.rot90,
+            aten.__rshift__,
             aten.rsub.Scalar,
             aten.rsub.Tensor,
             aten.select_backward,

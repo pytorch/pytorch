@@ -2033,6 +2033,11 @@ def parse_args(args=None):
         want to verify the numerical correctness of graidents. But that may
         cause time measurement not accurate""",
     )
+    parser.add_argument(
+        "--enable-activation-checkpointing",
+        action="store_true",
+        help="Enables activation checkpointing for HF models",
+    )
     parser.add_argument("--timing", action="store_true", help="Emits phase timing")
 
     parser.add_argument(
