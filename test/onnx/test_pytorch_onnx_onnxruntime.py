@@ -650,15 +650,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(model, (x, y, z), input_names=("x", "y", "z"))
         self.run_test(model, (x,), {"y": y, "z": z}, input_names=("x", "y", "z"))
-
-        # Requires input_names to be set so that we can feed the inputs properly into ORT.
-        # TODO: Export default values as ONNX initializers, then this should not raise.
-        # https://msdata.visualstudio.com/Vienna/_workitems/edit/969268
-        # Default values are accessible via FunctionSchema.
-        with self.assertRaisesRegex(
-            ValueError, "Model requires 3 inputs. Input Feed contains 2"
-        ):
-            self.run_test(model, (x,), {"y": y}, input_names=("x", "y"))
+        self.run_test(model, (x,), {"y": y}, input_names=("x", "y"))
 
         for example_inputs, example_kwargs in (
             ((x, y, None), {}),
@@ -742,14 +734,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(2, 3)
         model = torch.jit.script(Model())
 
-        # TODO: Export default values as ONNX initializers, then this should not raise.
-        # https://msdata.visualstudio.com/Vienna/_workitems/edit/969268
-        # Default values are accessible via FunctionSchema.
-        with self.assertRaisesRegex(
-            ValueError, "Model requires 2 inputs. Input Feed contains 1"
-        ):
-            self.run_test(model, (x,))
-            self.run_test(model, (), {"y": y})
+        # Optional supports None inputs
+        self.run_test(model, (x,))
+        # NOTE: default value is not supported on ONNX, so torch and ONNX has
+        # different behavior
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
+            self.run_test(model, (), {"y": y}, input_names=["y"])
+
         self.run_test(model, (x, y))
         self.run_test(model, (), {"x": x, "y": y}, input_names=("x", "y"))
 
@@ -4004,6 +3995,49 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=["input", "indices", "src"],
             dynamic_axes={"indices": {0: "a", 1: "b"}, "src": {0: "c", 1: "d"}},
         )
+
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_scatter_reduce(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x, index, input):
+                y_max = input.scatter_reduce(0, index, x, reduce="amax")
+                y_sum = input.scatter_reduce(0, index, x, reduce="sum")
+                y_min = input.scatter_reduce(0, index, x, reduce="amin")
+                y_mul = input.scatter_reduce(0, index, x, reduce="prod")
+                return y_max, y_sum, y_min, y_mul
+
+        model = Model()
+        model.eval()
+
+        src = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        index = torch.tensor([0, 1, 0, 1, 2, 1])
+        input = torch.tensor([1.0, 2.0, 3.0, 8.0])
+
+        self.run_test(model, (src, index, input))
+
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_scatter_reduce_self_rank_zero(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x, index, input):
+                y_max = input.scatter_reduce(0, index, x, reduce="amax")
+                y_sum = input.scatter_reduce(0, index, x, reduce="sum")
+                y_min = input.scatter_reduce(0, index, x, reduce="amin")
+                y_mul = input.scatter_reduce(0, index, x, reduce="prod")
+                return y_max, y_sum, y_min, y_mul
+
+        model = Model()
+        model.eval()
+
+        empty_tensor = torch.tensor([])
+        empty_idx = torch.tensor([], dtype=torch.int64)
+
+        self.run_test(model, (empty_tensor, empty_idx, empty_tensor))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_bucketize(self):
