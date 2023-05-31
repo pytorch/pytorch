@@ -3144,21 +3144,21 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, OptionalIntAr
   }
 
   // result_shape is self_.sizes[-(an-other.dim):]
-  std::vector<c10::SymInt> result_shape = self_.sym_sizes().slice(other.dim(), ndim - other.dim()).vec();
+  std::vector<int64_t> result_shape = self_.sizes().slice(other.dim(), ndim - other.dim()).vec();
 
-  c10::SymInt result_product = c10::multiply_integers(result_shape.begin(), result_shape.end());
-  c10::SymInt other_product = c10::multiply_integers(other.sym_sizes().begin(), other.sym_sizes().end());
+  int64_t result_product = c10::multiply_integers(result_shape.begin(), result_shape.end());
+  int64_t other_product = c10::multiply_integers(other.sizes().begin(), other.sizes().end());
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(result_product == other_product,
     "Expected self to satisfy the requirement prod(self.shape[other.ndim:]) == prod(self.shape[:other.ndim]), but got ",
     result_product, " != ", other_product);
 
-  self_ = self_.reshape_symint({result_product, result_product});
+  self_ = self_.reshape({result_product, result_product});
 
   // normally `other` would be flattened by at::linalg_solve expects 2D input
   Tensor result = at::linalg_solve(self_, other.flatten());
-  return result.reshape_symint(result_shape);
+  return result.reshape(result_shape);
 }
 
 Tensor& linalg_tensorsolve_out(const Tensor& self, const Tensor& other, OptionalIntArrayRef dims, Tensor& result) {
