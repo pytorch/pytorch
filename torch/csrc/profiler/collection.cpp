@@ -664,6 +664,118 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
+// Assumption: Total threads number will not exceed 2^16-1, and total ops will
+// not exceed 2^48 -1.
+static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
+  return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
+}
+
+#ifdef USE_KINETO
+void generateForwardBackwardLink(
+    const Result& profiler_result,
+    uint64_t& fwd_bwd_link_id,
+    libkineto::GenericTraceActivity& activity,
+    std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>&
+        tidSeq2activity) {
+  const ExtraFields<EventType::TorchOp>& extra_fields =
+      c10::get<ExtraFields<EventType::TorchOp>>(profiler_result.extra_fields_);
+  if (extra_fields.forward_tid_ > 0) {
+    // act is backward op.
+    uint64_t key = getForwardThreadKey(
+        extra_fields.forward_tid_, extra_fields.sequence_number_);
+    auto iter = tidSeq2activity.find(key);
+    if (iter != tidSeq2activity.end()) {
+      libkineto::GenericTraceActivity* fwd = iter->second;
+      fwd->flow.start = true;
+      activity.flow.id = fwd->flow.id = fwd_bwd_link_id;
+      activity.flow.type = fwd->flow.type = libkineto::kLinkFwdBwd;
+      ++fwd_bwd_link_id;
+
+      // If there are multiple events that match this sequence/tid pair, we
+      // should delete this entry in the map to avoid inserting multiple "end"
+      // flow events.
+      tidSeq2activity.erase(iter);
+    }
+  } else if (profiler_result.start_tid_ != 0) {
+    // act is forward op.
+    uint64_t key = getForwardThreadKey(
+        profiler_result.start_tid_, extra_fields.sequence_number_);
+    // Assumption: Among all ops with same sequence number,
+    // the one with biggest start time is most likely launching backward op.
+    auto iter = tidSeq2activity.find(key);
+    if (iter == tidSeq2activity.end()) {
+      tidSeq2activity[key] = &activity;
+    } else {
+      // Now the sequence number is only incremented on creating a "Node"
+      // object for backward pass, by calling
+      // "at::sequence_number::get_and_increment()". Among all ops with same
+      // sequence number, the one with biggest startTime is the one launching
+      // backward op.
+      if (activity.startTime >= iter->second->startTime) {
+        tidSeq2activity[key] = &activity;
+      }
+    }
+  }
+}
+#endif // USE_KINETO
+
+void generateForwardBackwardLinks(
+    std::unique_ptr<torch::profiler::impl::kineto::trace_t>& cpu_trace,
+    const std::vector<std::shared_ptr<Result>>& results) {
+#ifndef USE_KINETO
+}
+#else // USE_KINETO
+  TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == results.size());
+
+  // startThreadId_seqNum to pointer of activity.
+  // Low-16bits of startThreadId and low-48bits seqNum are concatenated into
+  // one uint64_t variable as key.
+
+  std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
+      tidSeq2activity;
+  uint64_t fwd_bwd_link_id = 1;
+
+  using result_activity_t =
+      std::pair<Result*, libkineto::GenericTraceActivity*>;
+  std::vector<result_activity_t> torch_events;
+
+  for (const auto idx : c10::irange(cpu_trace->activities.size())) {
+    auto& profiler_result = results[idx];
+    auto& activity = cpu_trace->activities[idx];
+
+    // add information about an associated forward op, if a sequence number
+    // is available (e.g. during training)
+
+    profiler_result->visit_if_base<ExtraFields<EventType::TorchOp>>(
+        [&](const auto& e) {
+          if (e.sequence_number_ >= 0) {
+            torch_events.emplace_back(profiler_result.get(), activity.get());
+          }
+        });
+  }
+
+  // We need to visit the events in chronological order.
+  // So we sort them by end_time_ns_ before processing.
+  std::sort(
+      torch_events.begin(),
+      torch_events.end(),
+      [](const result_activity_t& left, const result_activity_t& right) {
+        auto left_end_time =
+            c10::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
+                .end_time_ns_;
+        auto right_end_time = c10::get<ExtraFields<EventType::TorchOp>>(
+                                  right.first->extra_fields_)
+                                  .end_time_ns_;
+        return left_end_time < right_end_time;
+      });
+
+  for (auto& [profiler_result, activity] : torch_events) {
+    generateForwardBackwardLink(
+        *profiler_result, fwd_bwd_link_id, *activity, tidSeq2activity);
+  }
+}
+#endif // USE_KINETO
+
 static constexpr const char* indexKey = "Ev Idx";
 
 void passEventsToKineto(
@@ -699,6 +811,10 @@ void passEventsToKineto(
         e->kineto_activity_ = activity;
       }
     }
+  }
+
+  if (get_fwd_bwd_enabled()) {
+    generateForwardBackwardLinks(cpu_trace.get(), results);
   }
 
   // Kineto adds the events that it collected.
