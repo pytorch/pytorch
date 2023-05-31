@@ -478,7 +478,7 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
     LOG(ERROR) << exceptionMsg;
     C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleException");
 
-    if (errorHandling == TearDown) {
+    if (SHOULD_TEAR_DOWN(errorHandling)) {
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
       LOG(ERROR) << tearDownMsg;
@@ -632,23 +632,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       (dist_debug_level_ >= DebugLevel::Detail);
   avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
 
-  if (blockingWait_) {
-    if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
-      LOG(INFO) << "[Rank " << rank_ << "] NCCL_BLOCKING_WAIT and "
-                << "NCCL_ASYNC_ERROR_HANDLING|NCCL_DESYNC_DEBUG"
-                << "should not both be enabled. "
-                << "Only NCCL_BLOCKING_WAIT is being used in this process.";
-      asyncErrorHandling_ = NoHandling;
-      desyncDebug_ = false;
-    }
-  } else {
-    if (desyncDebug_ && asyncErrorHandling_ == NoHandling) {
-      LOG(INFO) << "[Rank " << rank_
-                << "] NCCL_DESYNC_DEBUG and NCCL_ASYNC_ERROR_HANDLING "
-                << "must both be enabled. "
-                << "Enabling NCCL_ASYNC_ERROR_HANDLING.";
-      asyncErrorHandling_ = TearDown;
-    }
+  if (blockingWait_ && desyncDebug_) {
+    LOG(INFO) << "[Rank " << rank_ << "] NCCL_BLOCKING_WAIT and "
+              << "NCCL_DESYNC_DEBUG should not both be enabled. "
+              << "Only NCCL_BLOCKING_WAIT is being used in this process.";
+    desyncDebug_ = false;
   }
 
   if (parseEnvVarFlag(ENABLE_NCCL_HEALTH_CHECK)) {
@@ -892,11 +880,13 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
-        // Abort work and corresponding communicators
-        work.abort();
-        // PG level abort, which would abort all other communicators on this
-        // rank
-        abort();
+        if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
+          // Abort work and corresponding communicators
+          work.abort();
+          // PG level abort, which would abort all other communicators on this
+          // rank
+          abort();
+        }
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
           try {
