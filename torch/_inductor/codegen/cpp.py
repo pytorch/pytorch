@@ -34,12 +34,13 @@ from .common import (
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
-    data_type_propagation,
+    DataTypePropagation,
     DeferredLine,
     ExprPrinter,
     IndentedBuffer,
     Kernel,
     KernelArgs,
+    OpDtypeClassifier,
     OpOverrides,
     OptimizationContext,
 )
@@ -107,7 +108,7 @@ RTYPE_TO_CPP = {
     "argmin": "argmin",
     "argmax": "argmax",
     "any": "||",
-    "var": "var",
+    "var_unnormalized": "welford",
 }
 
 PYTHON_TO_CPP = {
@@ -138,7 +139,7 @@ def reduction_init(reduction_type, dtype):
             if is_float_dtype(dtype)
             else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
         )
-    if reduction_type == "var":
+    if reduction_type == "var_unnormalized":
         return f"Welford<{DTYPE_TO_CPP[dtype]}>()"
     raise AssertionError(reduction_type)
 
@@ -147,7 +148,7 @@ def reduction_init_vec(reduction_type, dtype):
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     vec_type = f"at::vec::Vectorized<{scalar_type}>"
 
-    if reduction_type == "var":
+    if reduction_type == "var_unnormalized":
         return f"Welford<{vec_type}>()"
 
     scalar_init = reduction_init(reduction_type, dtype)
@@ -157,7 +158,7 @@ def reduction_init_vec(reduction_type, dtype):
 def reduction_acc_type(reduction_type, dtype):
     assert reduction_type not in {"argmin", "argmax"}
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
-    if reduction_type == "var":
+    if reduction_type == "var_unnormalized":
         return f"Welford<{scalar_type}>"
 
     return scalar_type
@@ -167,7 +168,7 @@ def reduction_acc_type_vec(reduction_type, dtype):
     assert reduction_type not in {"argmin", "argmax"}
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     vec_type = f"at::vec::Vectorized<{scalar_type}>"
-    if reduction_type == "var":
+    if reduction_type == "var_unnormalized":
         return f"Welford<{vec_type}>"
 
     return vec_type
@@ -184,7 +185,7 @@ def reduction_combine(reduction_type, var, next_value):
         return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
-    if reduction_type == "var":
+    if reduction_type == "var_unnormalized":
         return f"welford_combine({var}, {next_value})"
     raise AssertionError(reduction_type)
 
@@ -200,15 +201,15 @@ def reduction_combine_vec(reduction_type, var, next_value):
         return f"{var} * {next_value}"
     elif reduction_type == "xor_sum":
         return f"{var} ^ {next_value}"
-    elif reduction_type == "var":
+    elif reduction_type == "var_unnormalized":
         return f"welford_combine({var}, {next_value})"
     else:
         raise NotImplementedError()
 
 
 def reduction_project(reduction_type, acc):
-    if reduction_type == "var":
-        return f"({acc}.m2 / {acc}.weight)"
+    if reduction_type == "var_unnormalized":
+        return f"{acc}.m2"
     elif reduction_type in {"argmin", "argmax"}:
         return f"{acc}.index"
     return acc
@@ -433,6 +434,10 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def erfc(x):
         return f"{x}.erfc()"
+
+    @staticmethod
+    def erfinv(x):
+        return f"{x}.erfinv()"
 
     @staticmethod
     def sqrt(x):
@@ -799,6 +804,10 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def erfc(x):
         return f"std::erfc({x})"
+
+    @staticmethod
+    def erfinv(x):
+        return f"calc_erfinv({x})"
 
     @staticmethod
     def sqrt(x):
@@ -1312,11 +1321,18 @@ class CppKernel(Kernel):
 class CppVecKernel(CppKernel):
     overrides = CppVecOverrides
 
-    def __init__(self, args, num_threads, tiling_factor=0, tiling_idx=-1):
+    def __init__(
+        self,
+        args,
+        num_threads,
+        tiling_factor=0,
+        tiling_idx=-1,
+        tiling_dtype=torch.float,
+    ):
         super().__init__(args, num_threads)
         assert codecache.pick_vec_isa()
         if tiling_factor == 0:
-            tiling_factor = codecache.pick_vec_isa().nelements()
+            tiling_factor = codecache.pick_vec_isa().nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
         self.reduction_omp_dec: Dict[str, str] = {}
@@ -1353,6 +1369,7 @@ class CppVecKernel(CppKernel):
             if opt_ctx.is_load_bf16_as_fp32:
                 line = f"load_bf16_as_float({loadbuf})"
             else:
+                # Fast path for the loop body that can support bf16 fully
                 assert opt_ctx.is_bf16_mem_copy
                 line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
         else:
@@ -1422,7 +1439,14 @@ class CppVecKernel(CppKernel):
         self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        assert reduction_type in {"max", "min", "sum", "prod", "xor_sum", "var"}
+        assert reduction_type in {
+            "max",
+            "min",
+            "sum",
+            "prod",
+            "xor_sum",
+            "var_unnormalized",
+        }
         assert dtype == torch.float
         assert src_dtype == torch.float
 
@@ -1471,7 +1495,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
 
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            if reduction_type == "var":
+            if reduction_type == "var_unnormalized":
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
@@ -1483,7 +1507,7 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                 next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {acc_vec})"
 
             self.reduction_suffix.writeline(
-                f"{reduction_combine(reduction_type, acc, next_value)};"
+                f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
             )
             tmpvar = self.cse.generate(
                 self.reduction_suffix, reduction_project(reduction_type, acc)
@@ -1540,8 +1564,10 @@ class CppTile2DKernel(CppVecKernel):
             ...
     """
 
-    def __init__(self, args, num_threads, tiling_factor, tiling_indices):
-        super().__init__(args, num_threads, tiling_factor, tiling_indices[1])
+    def __init__(self, args, num_threads, tiling_factor, tiling_indices, tiling_dtype):
+        super().__init__(
+            args, num_threads, tiling_factor, tiling_indices[1], tiling_dtype
+        )
         self.tiling_indices = tiling_indices
 
     def inner_itervar(self):
@@ -1894,7 +1920,8 @@ class CppVecKernelChecker(CppVecKernel):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type in ["max", "min", "sum", "prod", "xor_sum", "var"]
+            and reduction_type
+            in ["max", "min", "sum", "prod", "xor_sum", "var_unnormalized"]
         ):
             pass
         else:
@@ -2193,7 +2220,51 @@ class CppKernelProxy(CppKernel):
     def data_type_propagation(self, nodes):
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
-            data_type_propagation(_node)
+            DataTypePropagation.propagate_scheduler_node(_node)
+
+    # Check if all the nodes of a given fx graph can support BF16
+    def is_bf16_scheduler(self, scheduler_node: SchedulerNode):
+        if not isinstance(scheduler_node._body, ir.LoopBody):
+            return True
+
+        scheduler_node.is_bf16 = False
+
+        # Propagate the dtype to check if all the fx node is bf16
+        DataTypePropagation.propagate_scheduler_node(scheduler_node)
+
+        sub_blocks = [scheduler_node._body.root_block] + list(
+            scheduler_node._body.subblocks.values()
+        )
+        for sub_block in sub_blocks:
+            for _node in sub_block.graph.nodes:
+                # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
+                # the data type as well.
+                if (
+                    _node.op in OpDtypeClassifier.io_ops()
+                    or _node.target in OpDtypeClassifier.index_ops()
+                ):
+                    continue
+
+                # Fast path if all operations can support bf16 without converting to fp32
+                if _node.target not in [
+                    "load",
+                    "constant",
+                    "store",
+                    "abs",
+                    "neg",
+                ]:
+                    return False
+
+                if hasattr(_node, "meta") and _node.meta:
+                    assert OptimizationContext.key in _node.meta
+                    opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
+                    if not opt_ctx.dtype or opt_ctx.dtype is not torch.bfloat16:
+                        return False
+                else:
+                    return False
+
+        scheduler_node.is_bf16 = True
+        return True
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
@@ -2331,6 +2402,29 @@ class CppKernelProxy(CppKernel):
             for sub_block in sub_blocks:
                 add_to_dtype(sub_block.graph)
 
+        if all(
+            isinstance(_node, SchedulerNode) and self.is_bf16_scheduler(_node)
+            for _node in nodes
+        ):
+            # Mark the load node to load bf16
+            for _node in nodes:
+                sub_blocks = [_node._body.root_block] + list(
+                    _node._body.subblocks.values()
+                )
+                for sub_block in sub_blocks:
+                    for fx_node in sub_block.graph.nodes:
+                        if fx_node.target in ["load", "constant", "store"]:
+                            assert fx_node.meta
+                            assert OptimizationContext.key in fx_node.meta
+                            opt_ctx: OptimizationContext = fx_node.meta[
+                                OptimizationContext.key
+                            ]
+                            assert opt_ctx.dtype is torch.bfloat16
+                            opt_ctx.is_bf16_mem_copy = True
+
+            # Bypass the legalization as the kernel can run with bf16 directly
+            return
+
         for _node in nodes:
             assert isinstance(_node, SchedulerNode)
             node: SchedulerNode = _node
@@ -2342,6 +2436,12 @@ class CppKernelProxy(CppKernel):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_bf16(nodes)
         self.data_type_propagation(nodes)
+
+        vec_dtype = (
+            torch.bfloat16
+            if all(hasattr(_node, "is_bf16") and _node.is_bf16 for _node in nodes)
+            else torch.float
+        )
 
         kernel_group = self.kernel_group
         _, (group, reduction_group) = max(
@@ -2429,9 +2529,9 @@ class CppKernelProxy(CppKernel):
                 -1:
             ]
 
-        def select_tiling():
+        def select_tiling(dtype: torch.dtype = torch.float):
             # TODO(jgong5): support alternative tiling factors and data types
-            tiling_factor = self.picked_vec_isa.nelements(dtype=torch.float)
+            tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices()
             if tiling_indices:
                 with CppVecKernelChecker(
@@ -2453,14 +2553,16 @@ class CppKernelProxy(CppKernel):
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-            tiling_factors, tiling_indices = select_tiling()
+            tiling_factors, tiling_indices = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 main_loop.set_kernel(
-                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
+                    codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
                 )
                 tail_loop.set_kernel(scalar_kernel)
                 main_loop.simd_vec = True
@@ -2484,10 +2586,14 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
                 inner_main_loop.set_kernel(
-                    codegen_kernel(CppTile2DKernel, tiling_factors[0], tiling_indices)
+                    codegen_kernel(
+                        CppTile2DKernel, tiling_factors[0], tiling_indices, vec_dtype
+                    )
                 )
                 inner_tail_loop.set_kernel(
-                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
+                    codegen_kernel(
+                        CppVecKernel, tiling_factors[0], tiling_indices[0], vec_dtype
+                    )
                 )
 
     def codegen_loops(self, code, worksharing):
@@ -2510,8 +2616,7 @@ class CppScheduling:
         else:
             self.kernel_group = KernelGroup()
 
-    @staticmethod
-    def can_fuse_horizontal(node1, node2):
+    def _can_fuse_horizontal_impl(self, node1, node2):
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
         if vars1 == vars2 and reduce1 == reduce2:
@@ -2521,9 +2626,17 @@ class CppScheduling:
         # TODO(jansel): allow fusion pointwise (vars1, ()) suffix?
         return False
 
-    @classmethod
-    def can_fuse_vertical(cls, node1, node2):
-        return cls.can_fuse_horizontal(node1, node2) and not node1.is_reduction()
+    def can_fuse_horizontal(self, node1, node2):
+        if (
+            len(node1.get_nodes()) + len(node2.get_nodes())
+            > config.cpp.max_horizontal_fusion_size
+        ):
+            return False
+
+        return self._can_fuse_horizontal_impl(node1, node2)
+
+    def can_fuse_vertical(self, node1, node2):
+        return self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
 
     def codegen_nodes(self, nodes):
         """

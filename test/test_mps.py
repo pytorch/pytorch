@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: mps"]
 
+import io
 import platform
 import sys
 import math
@@ -672,6 +673,7 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout': [torch.float32],
         'nn.functional.dropout2d': [torch.float32],
         'nn.functional.dropout3d': [torch.float32],
+        'nn.functional.multi_head_attention_forward': [torch.float32],
 
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
@@ -6185,8 +6187,8 @@ class TestNLLLoss(TestCaseMPS):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape, beta=1, threshold=20):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+        def helper(shape, beta, threshold, dtype):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             softplus_result = torch.nn.Softplus(beta=beta, threshold=threshold)(x)
@@ -6202,10 +6204,13 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too
-        for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
-            for beta in [0.5, 1, 2, 3, 4]:
-                for threshold in [0.5, 20, 30, 40, 50]:
-                    helper(shape, beta, threshold)
+        for shape, beta, threshold, dtype in product(
+            [(), (2, 3), (10, 10), (2, 3, 4, 5)],
+            [0.5, 1, 2, 3, 4],
+            [0.5, 20, 30, 40, 50],
+            [torch.float16, torch.float32]
+        ):
+            helper(shape, beta, threshold, dtype)
 
     # Test silu
 
@@ -7345,6 +7350,15 @@ class TestNLLLoss(TestCaseMPS):
         x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
         x = net1(x)
         torch.mps.profiler.stop()
+
+    def test_jit_save_load(self):
+        m = torch.nn.Module()
+        m.x = torch.rand(3, 3, device='mps')
+        buffer = io.BytesIO()
+        torch.jit.save(torch.jit.script(m), buffer)
+        buffer.seek(0)
+        n = torch.jit.load(buffer)
+        self.assertEqual(n.x, m.x)
 
     # Test random_, random_.to and random_.from
     def test_random(self):
@@ -10562,6 +10576,10 @@ class TestConsistency(TestCaseMPS):
             # allow_unused is needed in those cases.
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
+
+            if op.name in ["nn.functional.gelu", "nn.functional.glu"] and dtype == torch.float16:
+                atol = 1e-3
+                rtol = 1e-3
 
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 

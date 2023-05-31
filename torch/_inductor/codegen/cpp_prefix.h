@@ -10,6 +10,8 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/Math.h>
+
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 

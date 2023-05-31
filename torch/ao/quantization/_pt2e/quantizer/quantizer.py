@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from torch.fx import Node
-from typing import Callable, List, NamedTuple, Optional, Dict, Any
+from typing import Callable, List, NamedTuple, Optional, Dict, Any, Union, Tuple
+from torch.ao.quantization import ObserverOrFakeQuantize
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
+from torch import Tensor
 
 import torch
 
@@ -24,6 +26,9 @@ SUPPORTED_QSCHEMES = [
 
 @dataclass(eq=True, frozen=True)
 class QuantizationSpec:
+    """ Quantization spec for common operators that allows user to specify how to
+    quantize a Tensor, this includes dtype, quant_min, quant_max etc.
+    """
     dtype: torch.dtype
     # observer or fake_quantize constructor such as
     # MinMaxObserver, PerChannelHistogramObserver etc.
@@ -60,6 +65,39 @@ class QuantizationSpec:
         if self.ch_axis is not None and self.ch_axis < 0:
             raise ValueError("Ch_axis is < 0.")
 
+@dataclass(eq=True, frozen=True)
+class FixedQParamsQuantizationSpec:
+    dtype: torch.dtype
+    scale: float
+    zero_point: int
+    quant_min: Optional[int] = None
+    quant_max: Optional[int] = None
+    qscheme: Optional[torch.qscheme] = None
+
+EdgeOrNode = Union[Tuple[Node, Node], Node]
+
+@dataclass(eq=True, frozen=True)
+class SharedQuantizationSpec:
+    """
+    Quantization spec for the Tensors whose quantization parameters are shared with other Tensors
+
+    The way we refer to other points of quantization in the graph will be either
+    an input edge or an output value
+    input edge is the connection between input node and the node consuming the input, so it's a Tuple[Node, Node]
+    output value is an fx Node
+    """
+    edge_or_node: EdgeOrNode
+
+@dataclass(eq=True, frozen=True)
+class DerivedQuantizationSpec:
+    """ quantization spec for the Tensors whose quantization parameters are derived from other Tensors
+    """
+    derived_from: List[EdgeOrNode]
+    derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]]
+    dtype: torch.dtype
+    quant_min: Optional[int] = None
+    quant_max: Optional[int] = None
+    qscheme: Optional[torch.qscheme] = None
 
 # In the absence of better name, just winging it with QuantizationConfig
 @dataclass(eq=True, frozen=True)
