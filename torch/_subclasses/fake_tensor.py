@@ -575,6 +575,24 @@ def index_put_(fake_mode, func, *args, **kwargs):
     return new_kwargs["input"]
 
 
+# copy.default/copy.out is the same as index_put/index_put_
+@register_op_impl(aten.copy.default)
+def copy_default(fake_mode, func, *args, **kwargs):
+    return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
+
+
+@register_op_impl(aten.copy.out)
+def copy_out(fake_mode, func, *args, **kwargs):
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(*args, **kwargs)
+
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    return new_kwargs["input"]
+
+
 @register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
 def nyi(fake_mode, func, *args, **kwargs):
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"
