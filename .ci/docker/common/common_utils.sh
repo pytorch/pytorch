@@ -32,7 +32,7 @@ pip_install() {
 }
 
 pip_uninstall() {
-  as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip uninstall $*
+  as_jenkins conda run -n py_$ANACONDA_PYTHON_VERSION pip -y uninstall $*
 }
 
 get_pinned_commit() {
