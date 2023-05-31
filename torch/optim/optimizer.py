@@ -48,14 +48,14 @@ class _RequiredParameter:
 
 required = _RequiredParameter()
 
-T_co = TypeVar("T_co", covariant=True)
+T = TypeVar("T")
 
 @runtime_checkable
-class _ConstructableIterable(Generic[T_co], Protocol):
-    def __init__(self, __iterable: Iterable[T_co]) -> None:
+class _ConstructableIterable(Generic[T], Protocol):  # type: ignore[misc]
+    def __init__(self, __iterable: Iterable[T]) -> None:
         ...
 
-    def __iter__(self) -> Iterator[T_co]:
+    def __iter__(self) -> Iterator[T]:
         ...
 
 S = TypeVar("S")
