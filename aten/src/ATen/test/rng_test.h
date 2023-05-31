@@ -72,7 +72,7 @@ void test_random_from_to(const at::Device& device) {
 
   std::vector<int64_t> froms;
   std::vector<c10::optional<int64_t>> tos;
-  if constexpr (::std::is_same<T, bool>::value) {
+  if constexpr (::std::is_same_v<T, bool>) {
     froms = {
       0L
     };
@@ -150,7 +150,7 @@ void test_random_from_to(const at::Device& device) {
             ASSERT_TRUE(static_cast<int64_t>(exp) < *to);
           }
           const auto expected = torch::full_like(actual, exp);
-          if constexpr (::std::is_same<T, bool>::value) {
+          if constexpr (::std::is_same_v<T, bool>) {
             ASSERT_TRUE(torch::allclose(actual.toType(torch::kInt), expected.toType(torch::kInt)));
           } else {
             ASSERT_TRUE(torch::allclose(actual, expected));
@@ -159,7 +159,7 @@ void test_random_from_to(const at::Device& device) {
       }
     }
   }
-  if constexpr (::std::is_same<T, int64_t>::value) {
+  if constexpr (::std::is_same_v<T, int64_t>) {
     ASSERT_TRUE(full_64_bit_range_case_covered);
   }
   ASSERT_TRUE(from_to_case_covered);
@@ -188,13 +188,13 @@ void test_random(const at::Device& device) {
     uint64_t range;
     if constexpr (::std::is_floating_point<T>::value) {
       range = static_cast<uint64_t>((1ULL << ::std::numeric_limits<T>::digits) + 1);
-    } else if constexpr (::std::is_same<T, bool>::value) {
+    } else if constexpr (::std::is_same_v<T, bool>) {
       range = 2;
     } else {
       range = static_cast<uint64_t>(::std::numeric_limits<T>::max()) + 1;
     }
     T exp;
-    if constexpr (::std::is_same<T, double>::value || ::std::is_same<T, int64_t>::value) {
+    if constexpr (::std::is_same_v<T, double> || ::std::is_same_v<T, int64_t>) {
       exp = val % range;
     } else {
       exp = static_cast<uint32_t>(val) % range;
@@ -204,7 +204,7 @@ void test_random(const at::Device& device) {
     ASSERT_TRUE(static_cast<uint64_t>(exp) < range);
 
     const auto expected = torch::full_like(actual, exp);
-    if constexpr (::std::is_same<T, bool>::value) {
+    if constexpr (::std::is_same_v<T, bool>) {
       ASSERT_TRUE(torch::allclose(actual.toType(torch::kInt), expected.toType(torch::kInt)));
     } else {
       ASSERT_TRUE(torch::allclose(actual, expected));

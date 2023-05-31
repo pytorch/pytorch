@@ -211,7 +211,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
 
-    constexpr bool is_low_precision = !std::is_same<opmath_t, scalar_t>::value;
+    constexpr bool is_low_precision = !std::is_same_v<opmath_t, scalar_t>;
     std::vector<opmath_t> sum;
     if constexpr (is_low_precision) {
       sum.resize(m);
