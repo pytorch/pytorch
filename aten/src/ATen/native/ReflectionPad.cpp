@@ -154,12 +154,10 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
       ") is too small."
       " Calculated output D: ", output_d, " H: ", output_h, " W: ", output_w);
 
-  const auto memory_format = input.suggest_memory_format();
-  const auto options = input.options().memory_format(memory_format);
   if (batch_mode) {
-    set_output_raw_strided(0, {input.size(0), nplane, output_d, output_h, output_w}, {}, options);
+    set_output_raw_strided(0, {input.size(0), nplane, output_d, output_h, output_w}, {}, input.options());
   } else {
-    set_output_raw_strided(0, {nplane, output_d, output_h, output_w}, {}, options);
+    set_output_raw_strided(0, {nplane, output_d, output_h, output_w}, {}, input.options());
   }
 }
 
@@ -203,8 +201,7 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
   TORCH_CHECK(output_d == grad_output.size(dim_d), "grad_output depth unexpected."
     " Expected: ", output_h, ", Got: ", grad_output.size(dim_d));
 
-  const auto memory_format = input.suggest_memory_format();
-  set_output_raw_strided(0, input.sizes(), {}, input.options().memory_format(memory_format));
+  set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
 } // namespace meta
 
@@ -385,6 +382,9 @@ Tensor reflection_pad2d_backward_cpu(
 
 TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  output.resize_(output.sizes(), input.suggest_memory_format());
+
   reflection_pad3d_kernel(kCPU, output, input, padding);
 }
 
@@ -395,6 +395,9 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
   if (grad_output.numel() == 0) {
     return;
   }
+
+  // TODO: move this to TORCH_META_FUNC when CUDA has channels last support
+  grad_input.resize_(input.sizes(), input.suggest_memory_format());
 
   grad_input.zero_();
   reflection_pad3d_backward_kernel(kCPU, grad_input, grad_output, padding);
