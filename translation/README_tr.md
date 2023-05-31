@@ -33,7 +33,7 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
     - [Ön Koşullar](#prerequisites)
     - [Bağımlılıkları Kurun](#install-dependencies)
     - [PyTorch Kaynak Kodunu Edinin](#get-the-pytorch-source)
-    - [PyTorch'u Kurun](#install-pytorch)
+    - [PyTorch'u Kurma](#install-pytorch)
       - [Yapılandırma Seçeneklerini Ayarlama (İsteğe Bağlı)](#adjust-build-options-optional)
   - [Docker Image](#docker-image)
     - [Önceden oluşturulmuş görüntüleri kullanma](#using-pre-built-images)
@@ -113,7 +113,7 @@ PyTorch, sezgisel, düşünce açısından doğrusal ve kullanımı kolay olacak
 Bir kod satırını çalıştırdığınızda, o satır hemen çalışır. Asenkron bir görünüm yoktur.
 Bir hata ayıklayıcıya girdiğinizde veya hata mesajları ve yığın izleri aldığınızda, bunları anlamak kolaydır.
 Yığın izi, kodunuzun tam olarak nerede tanımlandığını işaret eder.
-We hope you never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
+Kötü yığın izleri veya asenkron ve anlaşılması zor yürütme motorları nedeniyle saatlerce kod hata ayıklama yapmanıza gerek kalmayacağını umuyoruz.
 
 ### Hızlı ve Yalın
 
@@ -123,64 +123,62 @@ PyTorch minimum çerçeve ek yüküne sahiptir. Hızlandırma kütüphanelerini 
 Bu nedenle, PyTorch oldukça hızlıdır - küçük veya büyük sinir ağları bile çalıştırsanız.
 
 PyTorch'ta bellek kullanımı, Torch veya diğer bazı alternatiflere göre son derece verimlidir.
-We've written custom memory allocators for the GPU to make sure that
-your deep learning models are maximally memory efficient.
-This enables you to train bigger deep learning models than before.
+Derin öğrenme modellerinizin maksimum bellek verimliliği sağlanması için GPU için özel bellek ayırıcıları yazdık.
+Bu, daha öncekinden daha büyük derin öğrenme modellerini eğitebilmenizi sağlar.
 
-### Extensions Without Pain
+### Sorunsuz Uzantılar
 
-Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
-and with minimal abstractions.
+Yeni sinir ağı modülleri yazmak veya PyTorch'un Tensor API'si ile arayüz oluşturmak basit ve minimum soyutlama ile olacak şekilde tasarlanmıştır.
 
-You can write new neural network layers in Python using the torch API
-[or your favorite NumPy-based libraries such as SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
+Torch API'sini kullanarak Python'da yeni sinir ağı katmanları yazabilirsiniz
+[veya SciPy gibi favori NumPy tabanlı kütüphanelerini](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
-If you want to write your layers in C/C++, we provide a convenient extension API that is efficient and with minimal boilerplate.
-No wrapper code needs to be written. You can see [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
+Katmanlarınızı C/C++ dilinde yazmak istiyorsanız, verimli ve minimum şablon içeren kullanışlı bir uzantı API'si sunuyoruz.
+Sarmalayıcı kod yazılmasına gerek yoktur.Burada [bir öğretici](https://pytorch.org/tutorials/advanced/cpp_extension.html) ve [bir örnek](https://github.com/pytorch/extension-cpp) görebilirsiniz.
 
 
-## Installation
+## Kurulum
 
 ### Binaries
-Commands to install binaries via Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
+Conda veya pip wheels aracılığıyla ikili dosyaları yüklemek için komutlar web sitemizde bulunmaktadır. [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
 
-#### NVIDIA Jetson Platforms
+#### NVIDIA Jetson Platformları
 
-Python wheels for NVIDIA's Jetson Nano, Jetson TX1/TX2, Jetson Xavier NX/AGX, and Jetson AGX Orin are provided [here](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) and the L4T container is published [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
+Conda veya pip wheels aracılığıyla ikili dosyaları yüklemek için komutlar web sitemizde bulunmaktadır. [burada](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) ve L4T kapsayıcıları yayınlanmıştır. [burada](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
 
-They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv) and [@ptrblck](https://github.com/ptrblck) are maintaining them.
+JetPack 4.2 ve üstünü gerektirirler ve[@dusty-nv](https://github.com/dusty-nv) ve [@ptrblck](https://github.com/ptrblck) bunları sürdürmektedir.
 
 
-### From Source
+### Kaynak Kodundan
 
-#### Prerequisites
-If you are installing from source, you will need:
-- Python 3.8 or later (for Linux, Python 3.8.1+ is needed)
-- A C++17 compatible compiler, such as clang
+#### Ön Koşullar
+Eğer kaynaktan kurulum yapıyorsanız, şunlara ihtiyacınız olacaktır:
+- Python 3.8 veya üstü (Linux için Python 3.8.1+ gereklidir)
+- Clang gibi C++17 uyumlu bir derleyici
 
-We highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
+[Anaconda](https://www.anaconda.com/distribution/#download-section)ortamını kurmanızı şiddetle öneririz. Yüksek kaliteli bir BLAS kütüphanesi (MKL) alırsınız ve Linux dağıtımınız ne olursa olsun kontrol edilen bağımlılık sürümleri elde edersiniz.
 
-If you want to compile with CUDA support, install the following (note that CUDA is not supported on macOS)
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 11.0 or above
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
-- [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
+CUDA desteği ile derlemek istiyorsanız, aşağıdakileri yükleyin. (CUDA'nın macOS'ta desteklenmediğini unutmayın.)
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 11.0 veya üzeri
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 veya üzeri
+- [Derleyici](https://gist.github.com/ax3l/9489132) CUDA ile uyumlu
 
-Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
+Not: Desteklenen çeşitli CUDA, CUDA sürücüsü ve NVIDIA donanımına sahip cuDNN sürümleri için [cuDNN Destek Matrisine](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) başvurabilirsiniz.
 
-If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
-Other potentially useful environment variables may be found in `setup.py`.
+CUDA desteğini devre dışı bırakmak istiyorsanız, ortam değişkenini dışa aktarın `USE_CUDA=0`.
+Diğer potansiyel olarak yararlı ortam değişkenleri şurada bulunabilir `setup.py`.
 
-If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
+NVIDIA'nın Jetson platformları (Jetson Nano, TX1, TX2, AGX Xavier),için geliştirme yapıyorsanız, Jetson Nano için PyTorch yükleme talimatları [burada mevcuttur](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
-If you want to compile with ROCm support, install
-- [AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 and above installation
-- ROCm is currently supported only for Linux systems.
+ROCm desteği ile derlemek istiyorsanız
+- [AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 ve üzeri kurulum
+- ROCm şu anda yalnızca Linux sistemlerinde desteklenmektedir.
 
-If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
-Other potentially useful environment variables may be found in `setup.py`.
+ROCm desteğini devre dışı bırakmak istiyorsanız, ortam değişkenini dışa aktarın `USE_ROCM=0`.
+Diğer potansiyel olarak yararlı ortam değişkenleri şurada bulunabilir `setup.py`.
 
-#### Install Dependencies
+#### Bağımlılıkları Kurun
 
 **Common**
 
@@ -229,7 +227,7 @@ git submodule sync
 git submodule update --init --recursive
 ```
 
-#### Install PyTorch
+#### Pytorch'u Kurma
 **On Linux**
 
 If you're compiling for AMD ROCm then first run this command:
@@ -322,7 +320,7 @@ python setup.py develop
 
 ```
 
-##### Adjust Build Options (Optional)
+##### Yapılandırma Seçenekleri Ayarlama (İsteğe bağlı)
 
 You can adjust the configuration of cmake variables optionally (without building first), by doing
 the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
