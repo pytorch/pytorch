@@ -57,6 +57,7 @@ SET(INTEL_MKL_DIR "${DEFAULT_INTEL_MKL_DIR}" CACHE STRING
 SET(INTEL_OMP_DIR "${DEFAULT_INTEL_MKL_DIR}" CACHE STRING
   "Root directory of the Intel OpenMP (standalone)")
 SET(MKL_THREADING "OMP" CACHE STRING "MKL flavor: SEQ, TBB or OMP (default)")
+SET(MKL_MODEL "LP64" CACHE STRING "MKL model: ILP64 or LP64 (default)")
 
 IF (NOT "${MKL_THREADING}" STREQUAL "SEQ" AND
     NOT "${MKL_THREADING}" STREQUAL "TBB" AND
@@ -70,12 +71,24 @@ ENDIF()
 
 MESSAGE(STATUS "MKL_THREADING = ${MKL_THREADING}")
 
+IF (NOT "${MKL_MODEL}" STREQUAL "LP64" AND
+    NOT "${MKL_MODEL}" STREQUAL "ILP64")
+  MESSAGE(FATAL_ERROR "Invalid MKL_MODEL (${MKL_MODEL}), should be one of: ILP64, LP64")
+ENDIF()
+
+MESSAGE(STATUS "MKL_MODEL = ${MKL_MODEL}")
+
 # Checks
 CHECK_TYPE_SIZE("void*" SIZE_OF_VOIDP)
 IF ("${SIZE_OF_VOIDP}" EQUAL 8)
   SET(mklvers "intel64")
   SET(iccvers "intel64")
-  SET(mkl64s "_lp64")
+  IF ("${MKL_MODEL}" STREQUAL "LP64")
+    SET(mkl64s "_lp64")
+  ELSE()
+    SET(mkl64s "_ilp64")
+    add_compile_options(-DMKL_ILP64)
+  ENDIF()
 ELSE ("${SIZE_OF_VOIDP}" EQUAL 8)
   SET(mklvers "32")
   SET(iccvers "ia32")
