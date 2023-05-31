@@ -413,7 +413,7 @@ def make_pointwise(
     return inner
 
 
-def make_foreach_pointwise(aten_fn, pw_fn):
+def make_foreach_pointwise(pw_fn):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
         def is_dynamic(t):
             return any(x.free_symbols for x in t.data.get_size())
@@ -533,7 +533,7 @@ def register_foreach_pointwise(
     aten_fn,
     pointwise_lowering_fn,
 ):
-    fn = make_foreach_pointwise(aten_fn, pointwise_lowering_fn)
+    fn = make_foreach_pointwise(pointwise_lowering_fn)
     fn = _register_foreach_lowering(aten_fn, fn)
     return fn
 
