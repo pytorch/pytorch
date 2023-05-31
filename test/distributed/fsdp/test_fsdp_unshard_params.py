@@ -229,6 +229,26 @@ class TestUnshardParams(TestUnshardParamsBase):
         )
 
     @skip_if_lt_x_gpu(2)
+    def test_unshard_params_multiple_modules(self):
+        """
+        Tests that summon_full_params can be called with multiple modules
+        """
+        models = [
+            FSDP(nn.Linear(10, 10, device=self.device)),
+            FSDP(nn.Linear(10, 10, device=self.device)),
+        ]
+        expected_numel = (
+            sum(p.numel() for model in models for p in model.parameters())
+            * dist.get_world_size()
+        )
+        tot_numel = 0
+        with FSDP.summon_full_params(models):
+            for model in models:
+                numel = sum(p.numel() for p in model.parameters())
+                tot_numel += numel
+        self.assertEqual(expected_numel, tot_numel)
+
+    @skip_if_lt_x_gpu(2)
     def test_unshard_singleton_param_writeback(self):
         """
         Tests ``writeback=True`` for a singleton parameter, which includes
