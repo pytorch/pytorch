@@ -332,10 +332,17 @@ class TraceTrainStepTest(DTensorTestBase):
         mod(inp).sum().backward()
         opt.step()
         opt.zero_grad()
+        # NB: In *normal* use cases you don't need to do this, but some
+        # of the tests setup buffers which require_grad=True which is weird
+        # and so work around it
+        for buf in mod.buffers():
+            buf.grad = None
 
         ddp_mod(ddp_inp).sum().backward()
         ddp_opt.step()
         ddp_opt.zero_grad()
+        for buf in ddp_mod.buffers():
+            buf.grad = None
 
         # test parameter parity
         train_step(mod, opt, inp)
