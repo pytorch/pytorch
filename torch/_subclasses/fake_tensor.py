@@ -1417,12 +1417,12 @@ class FakeTensorMode(TorchDispatchMode):
             if not isinstance(x, FakeTensor):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
-                        f"Can't call metadata mutating ops on non-Fake Tensor inputs."
+                        f"Can't call metadata mutating ops on non-Fake Tensor inputs on.  Found in {func}."
                     )
                 if not self.allow_non_fake_inputs:
                     raise Exception(
-                        f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
-                        f"with 'allow_non_fake_inputs'."
+                        "Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
+                        f"with 'allow_non_fake_inputs' on.  Found in {func}."
                     )
 
                 x = converter(self, x)
