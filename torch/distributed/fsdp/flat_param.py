@@ -1614,7 +1614,7 @@ class FlatParamHandle:
         """
         self._check_sharded_strategy()
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        self._check_storage_allocated(unsharded_flat_param)
+        self._check_storage_allocated(unsharded_flat_param, self.flat_param._fqns)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
         _no_dispatch_record_stream(
@@ -2383,9 +2383,12 @@ class FlatParamHandle:
         )
 
     @staticmethod
-    def _check_storage_allocated(tensor: Tensor):
+    def _check_storage_allocated(tensor: Tensor, fqns: List[str]):
         storage_size: int = tensor._typed_storage()._size()
-        _p_assert(storage_size > 0, "Expects storage to be allocated")
+        _p_assert(
+            storage_size > 0,
+            f"Expects storage to be allocated for FlatParam with  original param fqns {fqns}"
+        )
 
     def _check_low_precision_shard(self):
         _p_assert(
