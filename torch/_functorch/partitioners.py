@@ -166,7 +166,12 @@ def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, mod
 
             if is_fwd:
                 if hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
-                    new_args = tuple([env[arg] for arg in node.args])
+                    new_args = []
+                    for arg in new_args:
+                        if isinstance(arg, torch.fx.node.Node):
+                            new_args.append(env[arg])
+                        else:
+                            new_args.append(arg)
                     # What should be kwargs?
                     state_and_output = new_graph.create_node("call_function", run_and_save_rng, args=(node.target, *new_args), kwargs=node.kwargs)
                     state = new_graph.create_node("call_function", operator.getitem, args=(state_and_output, 0), kwargs={})
@@ -180,7 +185,12 @@ def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, mod
                 if hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
                     assert node in modified_rand_nodes
                     fwd_state = env[modified_rand_nodes[node]]
-                    new_args = tuple([env[arg] for arg in node.args])
+                    new_args = []
+                    for arg in new_args:
+                        if isinstance(arg, torch.fx.node.Node):
+                            new_args.append(env[arg])
+                        else:
+                            new_args.append(arg)
                     # What should be kwargs?
                     output = new_graph.create_node("call_function", run_with_rng_state, args=(fwd_state, node.target, *new_args), kwargs=node.kwargs)
                     env[node] = output
