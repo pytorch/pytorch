@@ -868,8 +868,7 @@ class CheckFunctionManager:
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
-                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
-                # Force-enable NN_MODULE checks for now
+                # Force-enable NN_MODULE checks
                 and guard.create_fn is not GuardBuilder.NN_MODULE
             ):
                 continue

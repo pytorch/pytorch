@@ -2011,9 +2011,10 @@ class InstructionTranslator(InstructionTranslatorBase):
                     ]
                     self.output.guards.update(index_guards)
 
-            # Additionally, we need to add guards for self, if it is a NNModule.
-            # The outer invocation of Module.__call__ is a use of "self" that's not seen
-            # by the tracer.
+            # Additionally, we need to add guards for self, if it is a NNModule. The
+            # outer invocation of Module.__call__ is a use of "self" that's not seen
+            # by the tracer. Practically, this is useful for catching modifications
+            # to the module's hooks that would otherwise be missed.
             if "self" in self.symbolic_locals:
                 val = self.symbolic_locals["self"]
                 if isinstance(val, NNModuleVariable):

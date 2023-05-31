@@ -475,6 +475,8 @@ static const char* module_guard_attrs[] = {
     "_modules",
     "_forward_hooks",
     "_forward_pre_hooks",
+    "_backward_hooks",
+    "_backward_pre_hooks",
 };
 
 typedef struct {
