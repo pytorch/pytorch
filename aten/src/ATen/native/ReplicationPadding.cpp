@@ -119,7 +119,9 @@ TORCH_META_FUNC(replication_pad2d) (
   if (input.dim() == 3) {
     set_output_raw_strided(0, {nslices, oheight, owidth}, {}, input.options());
   } else {
-    set_output_raw_strided(0, {nbatch, nslices, oheight, owidth}, {}, input.options());
+    const auto memory_format = input.suggest_memory_format();
+    set_output_raw_strided(0, {nbatch, nslices, oheight, owidth}, {},
+        input.options().memory_format(memory_format));
   }
 }
 
@@ -163,10 +165,12 @@ TORCH_META_FUNC(replication_pad3d) (
       " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
 
   /* resize output */
+  const auto memory_format = input.suggest_memory_format();
+  const auto options = input.options().memory_format(memory_format);
   if (input.dim() == 4) {
-    set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, input.options());
+    set_output_raw_strided(0, {nslices, odepth, oheight, owidth}, {}, options);
   } else {
-    set_output_raw_strided(0, {nbatch, nslices, odepth, oheight, owidth}, {}, input.options());
+    set_output_raw_strided(0, {nbatch, nslices, odepth, oheight, owidth}, {}, options);
   }
 }
 
@@ -209,7 +213,7 @@ void replication_pad2d_backward_out_cpu_template(
       gradOutput.size(dimh));
 
   /* resize */
-  gradInput.resize_(input.sizes());
+  gradInput.resize_(input.sizes(), input.suggest_memory_format());
   if (gradInput.numel() == 0) {
     return;
   }
@@ -260,7 +264,7 @@ void replication_pad3d_backward_out_cpu_template(
       gradOutput.size(dimd));
 
   /* resize */
-  gradInput.resize_(input.sizes());
+  gradInput.resize_(input.sizes(), input.suggest_memory_format());
   if (gradInput.numel() == 0) {
     return;
   }
