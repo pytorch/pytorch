@@ -593,20 +593,14 @@ def annotate(ret, **kwargs):
 
 
 def render_call(fn, args, kwargs):
-    import torch._tensor_str
-    from torch.overrides import resolve_name
-
-    str_fn = resolve_name(fn)
+    str_fn = torch.overrides.resolve_name(fn)
     if str_fn is None:
         str_fn = str(fn)
 
-    def render_arg(t):
-        return repr(t)
-
-    str_args = []
+    str_args: List[str] = []
     with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
-        str_args.extend(render_arg(a) for a in args)
-        str_args.extend(f"{k}={render_arg(v)}" for k, v in kwargs.items())
+        str_args.extend(repr(a) for a in args)
+        str_args.extend(f"{k}={repr(v)}" for k, v in kwargs.items())
         r = f"{str_fn}({', '.join(str_args)})"
     return r
 
