@@ -2,7 +2,6 @@
 import functools
 import unittest
 
-import numpy as np
 
 import torch
 
