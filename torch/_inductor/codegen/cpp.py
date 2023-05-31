@@ -1996,38 +1996,34 @@ class CppVecKernelChecker(CppVecKernel):
                     self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
                     return self.cse.newvar()
 
-                def mod_indexing_rep(x, y, z):
-                    if z.is_constant():
-                        return x / y
-
-                    # never really happens, we'll bail on optimizing
-                    return (x / y) % z
-
-                def indexing_div_rep(x, y):
-                    return x / y
-
-                with RecordOptimizationContext(__name__) as node_ctx:
-                    assert len(self.ranges) == len(self.itervars)
-
-                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
-                    assert opt_ctx
+                def can_use_int32():
                     free_symbols = list(expr.free_symbols)
                     vars_ranges = {
                         k: ValueRanges(0, v)
                         for k, v in zip(self.itervars, self.ranges)
                         if k in free_symbols
                     }
+                    if not vars_ranges:
+                        i32_iinfo = numpy.iinfo(numpy.int32)
+                        return (
+                            expr.is_number
+                            and expr <= i32_iinfo.max
+                            and expr >= i32_iinfo.min
+                        )
                     expr_ranges = get_expr_range(expr, vars_ranges)
                     if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
-                        can_use_int32 = False
-                    else:
-                        expr_ranges_int = ValueRanges(
-                            int(expr_ranges.lower), int(expr_ranges.upper)
-                        )
-                        can_use_int32 = range_expressable_in_32_bits(expr_ranges_int)
+                        return False
+                    return range_expressable_in_32_bits(
+                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper))
+                    )
+
+                with RecordOptimizationContext(__name__) as node_ctx:
+                    assert len(self.ranges) == len(self.itervars)
+                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
+                    assert opt_ctx
                     if (
                         dtype == torch.int64
-                        and can_use_int32
+                        and can_use_int32()
                         and all(
                             user.target in VecCheckerProxy.bin_cmp_ops
                             for user in node_ctx.current_node.users
