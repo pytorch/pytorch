@@ -234,18 +234,15 @@ class DTensorTest(DTensorTestBase):
         res = sharded_tensor.to_local()
         model = torch.nn.ReLU()
         res.register_hook(lambda grad: grad.t())
-        sharded_tensor.register_hook(
-            lambda grad: self.assertEqual(grad.stride(), [1, 12])
-        )
         target = torch.randn(3, 3, device=self.device_type)
         mae_loss = torch.nn.L1Loss()
         output = mae_loss(model(res), target)
-        # The manual change to grad stride will fail the copy op afterwards.
-        # so that we need a try-catch here, but AssertionError will still fail the test.
+        # The manual change to grad stride leads to the failure of the copy op afterwards.
+        # so that we need a try-catch here.
         try:
             output.backward()
         except RuntimeError:
-            pass
+            self.assertEqual(sharded_tensor.grad.stride(), [1, 3 * self.world_size])
 
     @with_comms
     def test_from_local_then_to_local(self):
