@@ -172,8 +172,9 @@ class TestExport(TestCase):
 
     def test_if_functional(self):
         def foo(x):
-            x.add_(4)
-            y = x.view(x.shape)
+            z = x + 4
+            z.add_(4)
+            y = z.view(x.shape)
             return x.cos() + y.cos()
 
         gm = export(foo, (torch.tensor([2, 3, 5]),), constraints=None)
