@@ -160,7 +160,11 @@ class CallSpec:
 @dataclass
 class GraphModule:
     graph: Graph
+    opset_version: Dict[str, int]
+
+
+@dataclass
+class ExportedProgram:
+    graph_module: GraphModule
     signature: GraphSignature
     call_spec: CallSpec
-    # TODO(angelayi): Make this some dict mapping namespace to version later
-    opset_version: int
