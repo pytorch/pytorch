@@ -1665,7 +1665,8 @@ class TritonKernel(Kernel):
                 sizes.append("1")
         return f"[{', '.join(sizes)}]"
 
-    def call_kernel(self, code, name: str):
+    def call_kernel(self, name: str):
+        wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
@@ -1677,6 +1678,16 @@ class TritonKernel(Kernel):
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = tree.numel
             else:
+                expr = f"{name}_{tree.prefix}numel"
+                # TODO(voz): Tragic. This should at the very least be a util to slapp on declare and ending.
+                # The real fix here is to revisit our cross language calling convention.
+                if expr not in wrapper.kenel_numel_expr:
+                    wrapper.kenel_numel_expr.add(expr)
+                    wrapper.writeline(
+                        f"{wrapper.declare}{expr} = {pexpr(tree.numel)}{wrapper.ending}"
+                    )
+                else:
+                    wrapper.writeline(f"{expr} = {pexpr(tree.numel)}{wrapper.ending}")
                 # We can get symbolic expressions here, like s0*64
                 # It is fine to have them here, but we need to handle them correctly as their own type
                 # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
@@ -1684,19 +1695,14 @@ class TritonKernel(Kernel):
                 # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
                 # constant now, need type info. I agree, this needs type info, and while this is not true type info
                 # it suffices as a type hint for the purposes of producing the correct code for this type.
-                expr = SymbolicCallArg(f"{name}_{tree.prefix}numel")
-                # TODO(voz): Tragic. This should at the very least be a util to slapp on declare and ending.
-                # The real fix here is to revisit our cross language calling convention.
-                code.writeline(
-                    f"{code.declare}{expr} = {pexpr(tree.numel)}{code.ending}"
-                )
+                expr = SymbolicCallArg(expr)
 
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
 
-        code.generate_kernel_call(
+        wrapper.generate_kernel_call(
             name,
             call_args,
             grid,
@@ -1985,7 +1991,7 @@ class TritonScheduling:
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
 
-        kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+        kernel.call_kernel(kernel_name)
 
         if (
             V.graph.wrapper_code.supports_intermediate_hooks
@@ -2082,7 +2088,7 @@ class TritonScheduling:
 
         src_code = render()
         kernel_name = self.define_kernel(src_code, [template_node, *epilogue_nodes])
-        kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+        kernel.call_kernel(kernel_name)
         self.scheduler.free_buffers()
 
     def codegen_sync(self):

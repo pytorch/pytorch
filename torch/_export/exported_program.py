@@ -4,6 +4,7 @@ import sympy
 from collections import defaultdict
 
 from typing import Any, Dict, List, Optional, Tuple, Union
+from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 
 from sympy.logic.boolalg import Boolean as SympyBoolean
 
@@ -57,15 +58,15 @@ class ExportBackwardSignature:
 
 @dataclasses.dataclass
 class ExportGraphSignature:
-    parameters: List[str]
-    buffers: List[str]
+    parameters: List[FQN]
+    buffers: List[FQN]
 
-    user_inputs: List[str]
-    user_outputs: List[str]
-    inputs_to_parameters: Dict[str, str]
-    inputs_to_buffers: Dict[str, str]
+    user_inputs: List[GraphInputName]
+    user_outputs: List[GraphOutputName]
+    inputs_to_parameters: Dict[GraphInputName, FQN]
+    inputs_to_buffers: Dict[GraphInputName, FQN]
 
-    buffers_to_mutate: Dict[str, str]
+    buffers_to_mutate: Dict[GraphOutputName, FQN]
 
     backward_signature: Optional[ExportBackwardSignature]
 
@@ -77,7 +78,7 @@ class ExportedProgram:
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
         call_spec: CallSpec,
-        state_dict: Dict[str, Any],
+        state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -103,12 +104,19 @@ class ExportedProgram:
                     f"{received_spec}"
                 )
 
+        param_buffer_values = (value for _, value in self.state_dict.items())
+
         with torch.no_grad():
-            res = torch.fx.Interpreter(self.graph_module).run(*args, enable_io_processing=False)
+            res = torch.fx.Interpreter(self.graph_module).run(
+                *param_buffer_values,
+                *args,
+                enable_io_processing=False
+            )
 
         if self.call_spec.out_spec is not None:
             mutation = self.graph_signature.buffers_to_mutate
             num_mutated = len(mutation)
+            mutated_buffers = res[:num_mutated]
             res = res[num_mutated:]
             try:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
@@ -120,6 +128,11 @@ class ExportedProgram:
                     "but actually got outputs with tree spec of: \n"
                     f"{received_spec}"
                 )
+            finally:
+                ix = 0
+                for _, buffer in self.graph_signature.buffers_to_mutate.items():
+                    self.state_dict[buffer] = mutated_buffers[ix]
+                    ix += 1
         return res
 
     def __str__(self) -> str:
@@ -174,14 +187,15 @@ def _set_constraints(
 
     tensor_id_to_input_names: Dict[int, List[str]] = defaultdict(list)
     input_name_to_example_inputs: Dict[str, Any] = {}
+    num_params_buffer = len(exported_program.graph_signature.buffers) + len(exported_program.graph_signature.parameters)
     if example_inputs is not None:
         input_tracker = 0
         for node in exported_program.graph.nodes:
-            if node.op == "placeholder":
-                example_input = example_inputs[input_tracker]
+            if node.op == "placeholder" and input_tracker >= num_params_buffer:
+                example_input = example_inputs[input_tracker - num_params_buffer]
                 tensor_id_to_input_names[id(example_input)].append(node.name)
                 input_name_to_example_inputs[node.name] = example_input
-                input_tracker += 1
+            input_tracker += 1
 
     input_shape_constraints_by_src_name: Dict[str, ConstraintsContainer] = defaultdict(
         lambda: ConstraintsContainer([], [])
