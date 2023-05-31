@@ -196,7 +196,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     if (err != hipErrorNotReady) C10_HIP_CHECK(err);
     else {
       // ignore and clear the error if not ready
-      hipGetLastError();
+      (void)hipGetLastError();
     }
     return (err == hipSuccess);
   }
