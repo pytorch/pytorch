@@ -371,7 +371,27 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def save_global_state(self):
         global_state = self.tracing_context.global_context.global_state
-        global_state["is_grad_enabled"] = torch.is_grad_enabled()
+        global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
+        global_state["autocast_enabled"] = (
+            torch.set_autocast_enabled,
+            torch.is_autocast_enabled(),
+        )
+        global_state["autocast_cpu_enabled"] = (
+            torch.set_autocast_cpu_enabled,
+            torch.is_autocast_cpu_enabled(),
+        )
+        global_state["autocast_gpu_dtype"] = (
+            torch.set_autocast_gpu_dtype,
+            torch.get_autocast_gpu_dtype(),
+        )
+        global_state["autocast_cpu_dtype"] = (
+            torch.set_autocast_cpu_dtype,
+            torch.get_autocast_cpu_dtype(),
+        )
+        global_state["autocast_cache_enabled"] = (
+            torch.set_autocast_cache_enabled,
+            torch.is_autocast_cache_enabled(),
+        )
 
     def push_tx(self, tx):
         self._current_tx.append(tx)
