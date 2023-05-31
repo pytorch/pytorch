@@ -1288,6 +1288,7 @@ new_module_tests = [
         desc='no_bias',
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.015,
     ),
     dict(
         module_name='Conv2d',

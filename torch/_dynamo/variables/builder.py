@@ -72,7 +72,11 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
-from .functions import UserFunctionVariable, UserMethodVariable
+from .functions import (
+    CollectiveFunctionRewriteVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .lists import (
     ListVariable,
     NamedTupleVariable,
@@ -109,7 +113,11 @@ from .torch import (
     TorchHigherOrderOperatorVariable,
     TorchVariable,
 )
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .user_defined import (
+    ProcessGroupVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 
 log = logging.getLogger(__name__)
@@ -445,6 +453,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later
+        elif CollectiveFunctionRewriteVariable.can_rewrite(value):
+            return CollectiveFunctionRewriteVariable(
+                CollectiveFunctionRewriteVariable.rewrite(value),
+                orig_fn=value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,
@@ -570,6 +585,12 @@ class VariableBuilder:
                 value,
                 source=self.source,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            )
+        elif ProcessGroupVariable.is_process_group(value):
+            return ProcessGroupVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(

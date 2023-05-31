@@ -1350,7 +1350,7 @@ Vectorized<T> inline shift_512_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c0 = _mm512_sllv_epi16(a0, b0);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same_v<T, int8_t>)
       c0 = _mm512_srav_epi16(a0, b0);
     else
       c0 = _mm512_srlv_epi16(a0, b0);
@@ -1364,7 +1364,7 @@ Vectorized<T> inline shift_512_8(const Vectorized<T>& a, const Vectorized<T>& b)
   if (left_shift)
     c1 = _mm512_sllv_epi16(a1, b1);
   else
-    if (std::is_same<T, int8_t>::value)
+    if constexpr (std::is_same_v<T, int8_t>)
       c1 = _mm512_srav_epi16(a1, b1);
     else
       c1 = _mm512_srlv_epi16(a1, b1);
