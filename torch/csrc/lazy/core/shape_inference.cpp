@@ -124,7 +124,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
         // because of precision issues, which we dont want. the corner-case we
         // do want to take into account is int64_t, which has higher precision
         // than double NOLINTNEXTLINE(bugprone-branch-clone)
-        if (std::is_same<scalar_t, int64_t>::value) {
+        if constexpr (std::is_same_v<scalar_t, int64_t>) {
           size_d = std::ceil(
               static_cast<double>(
                   end.to<accscalar_t>() - start.to<accscalar_t>()) /
