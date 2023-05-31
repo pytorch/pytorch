@@ -163,6 +163,13 @@ def export(
 
             gm_torch_level.recompile()
             gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
+
+            export_backward_signature = ExportBackwardSignature(
+                gradients_to_parameters=graph_signature.backward_signature.gradients_to_parameters,
+                gradients_to_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs,
+                loss_output=graph_signature.backward_signature.loss_output
+            ) if graph_signature.backward_signature is not None else None
+
             export_graph_signature = ExportGraphSignature(
                 parameters=graph_signature.parameters,
                 buffers=graph_signature.buffers,
@@ -171,7 +178,7 @@ def export(
                 inputs_to_parameters=graph_signature.inputs_to_parameters,
                 inputs_to_buffers=graph_signature.inputs_to_buffers,
                 buffers_to_mutate=graph_signature.buffers_to_mutate,
-                backward_signature=graph_signature.backward_signature
+                backward_signature=export_backward_signature
             )
 
             # TODO unfortunately preserving meta at graph level is not
@@ -191,7 +198,7 @@ def export(
             exported_program = ExportedProgram(
                 gm,
                 gm.graph,
-                graph_signature,
+                export_graph_signature,
                 CallSpec(in_spec, orig_out_spec),
                 params_buffers,
             )
