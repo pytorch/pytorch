@@ -41,6 +41,7 @@ log = logging.getLogger(__name__)
 inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #                           MAIN ENTRY POINT
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -122,7 +123,6 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     repro.tar.gz.
     """
     return DebugWrapper(unconfigured_compiler_fn, compiler_name)
-
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

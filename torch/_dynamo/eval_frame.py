@@ -348,6 +348,7 @@ class _TorchDynamoContext:
 
         return _fn
 
+
 class OptimizeContext(_TorchDynamoContext):
     @staticmethod
     def _different_backend(old, new):
@@ -387,7 +388,6 @@ class OptimizeContext(_TorchDynamoContext):
         )
 
 
-
 class RunOnlyContext(_TorchDynamoContext):
     def __init__(self):
         # cudagraph trees relies on generation increment
@@ -409,6 +409,7 @@ def first_real_inst_idx(code):
         if inst.opname == "RESUME":
             return inst.offset // 2
     raise RuntimeError("RESUME instruction not found in code")
+
 
 class ErrorCatcher:
     def __init__(self, callback, hooks: Hooks):

@@ -238,7 +238,7 @@ class FrameConverterAssert:
         reset_graph_break_dup_checker()
 
     def convert_frame_assert(
-        compiler_fn: CompilerFn,
+        compiler_fn: CompilerFn,  # noqa: B902
         one_graph: bool = True,
         export: bool = False,
         export_constraints=None,
