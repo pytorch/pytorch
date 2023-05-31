@@ -52,6 +52,7 @@ from .utils import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
@@ -169,13 +170,14 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
+        self.removed_inplace_buffers: Set[str] = set()
+        self.mutated_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
         self.num_static_inputs = num_static_inputs
+        self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
-        self.randomness_offset = sympy.Integer(0)
-        self.randomness_seeds: List[str] = []
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
@@ -188,7 +190,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.info("Using FallbackKernel: %s", name)
+            perf_hint_log.warning("Using FallbackKernel: %s", name)
 
     def add_device_idx(self, idx: Optional[int]):
         if idx is not None:
@@ -231,38 +233,6 @@ class GraphLowering(torch.fx.Interpreter):
             return self.graph_inputs[buffer_name].get_numel()
         raise KeyError(f"could not find {buffer_name}")
 
-    def random_seed_buffer(self, device: torch.device):
-        """
-        Return a device-unique 1-element tensor storing our RNG seed.
-        This will get initialized at the start of each graph in
-        `wrapper.py`.
-
-        Note this is only used by cuda backends.  The CPU backend handles
-        RNG seeds as a sizevar.
-        """
-        name = f"seed_{device.type}_{device.index}"
-        if name not in self.constants:
-            self.constants[name] = torch.zeros((), device=device, dtype=torch.int64)
-            self.randomness_seeds.append(name)
-
-        return ir.RandSeedBuffer(
-            name=name,
-            layout=ir.FixedLayout(
-                device=device,
-                dtype=torch.int64,
-                size=[],
-                stride=[],
-            ),
-        )
-
-    def increment_randomness_offset(self, numel):
-        """
-        A global counter of how many random numbers we have handed out so far.
-        """
-        offset = self.randomness_offset
-        self.randomness_offset = offset + numel
-        return offset
-
     @dynamo_timed
     def run(self, *args):
         return super().run(*args)
@@ -278,12 +248,18 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer[name] = buffer
         return name
 
-    def realize_users_of(self, name: str):
+    def register_list(self, buffer_names: List[str]):
+        name = "list_" + "_".join(buffer_names)
+        self.lists[name] = buffer_names
+        return name
+
+    def mark_buffer_mutated(self, name: str):
         """
         When a buffer is mutated we need to make sure all the reads to
         the old version are realized before the mutation happens.
         """
         assert isinstance(name, str)
+        self.mutated_buffers.add(name)
 
         def visit(value):
             if isinstance(value, (list, tuple)):
@@ -297,7 +273,7 @@ class GraphLowering(torch.fx.Interpreter):
             try:
                 visit(value)
             except Exception:
-                log.warning("error in realize_users_of", exc_info=True)
+                log.warning("error in mark_buffer_mutated", exc_info=True)
 
     def add_tensor_constant(self, data):
         def allocate():
