@@ -1,5 +1,5 @@
 import enum
-from typing import Any, Callable, Dict, List, Optional, Set, Type, overload
+from typing import Any, Callable, Dict, List, Optional, overload, Set, Type
 
 import torch
 from torch.distributed.algorithms.join import Joinable, JoinHook
@@ -67,9 +67,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     def step(self, closure: None = ..., **kwargs: Any) -> None: ...
     @overload
     def step(self, closure: Callable[[], float], **kwargs: Any) -> float: ...
-    def step(  # type: ignore[override]
-        self, closure: Optional[Callable[[], float]] = ..., **kwargs: Any
-    ) -> Optional[float]: ...
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None: ...
     def state_dict(self) -> Dict[str, Any]: ...
     def _local_step(
