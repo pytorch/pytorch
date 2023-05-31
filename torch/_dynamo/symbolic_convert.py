@@ -612,7 +612,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
 
-        # log.warning("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
+        log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
 
         # 3.11 no longer uses a block stack, but we still keep track of one
         # so that we know which contexts are currently active.

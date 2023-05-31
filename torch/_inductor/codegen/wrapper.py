@@ -343,9 +343,7 @@ class WrapperCodeGen(CodeGen):
         for name, buf in V.graph.graph_inputs.items():
             size = self.codegen_shape_tuple(buf.get_size())
             stride = self.codegen_shape_tuple(buf.get_stride())
-            self.prefix.writeline(
-                f"assert_size_stride({name}, {size}, {stride})"
-            )
+            self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
     def write_prefix(self):
         self.prefix.splice(

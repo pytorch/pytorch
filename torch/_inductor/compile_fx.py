@@ -223,7 +223,7 @@ def compile_fx_inner(
     aot_mode=False,
     is_inference=False,
     boxed_forward_device_index=None,
-    user_visible_outputs=set(),
+    user_visible_outputs=frozenset(),
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -717,8 +717,16 @@ def compile_fx(
             # To make things safe, we'll use original_output_start_index field
             # set by AOTAutograd to decide where the original module outputs start.
 
-            original_output_start_index = model.meta.get("original_output_start_index", 0)
-            user_visible_outputs = {n.name for n in model_outputs[original_output_start_index : original_output_start_index + len(orig_model_outputs)]}
+            original_output_start_index = model.meta.get(
+                "original_output_start_index", 0
+            )
+            user_visible_outputs = {
+                n.name
+                for n in model_outputs[
+                    original_output_start_index : original_output_start_index
+                    + len(orig_model_outputs)
+                ]
+            }
 
         return inner_compile(
             model,

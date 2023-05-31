@@ -2521,10 +2521,16 @@ def run(runner, args, original_dir=None):
                 # TODO: remove before merging
                 if use_ddp_wrapper := int(os.environ.get("USE_DDP_WRAPPER", "0")) > 0:
                     import torch.distributed as dist
+
                     port = 10000 + use_ddp_wrapper
-                    dist.init_process_group(backend='nccl', init_method=f'tcp://localhost:{port}',
-                                    world_size=1, rank=0)
+                    dist.init_process_group(
+                        backend="nccl",
+                        init_method=f"tcp://localhost:{port}",
+                        world_size=1,
+                        rank=0,
+                    )
                     from torch.nn.parallel import DistributedDataParallel as DDP
+
                     model = DDP(model)
             else:
                 try:

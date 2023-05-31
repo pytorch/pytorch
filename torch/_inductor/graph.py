@@ -149,7 +149,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
-        user_visible_outputs=set(),
+        user_visible_outputs=frozenset(),
     ):
         super().__init__(gm)
 
@@ -859,6 +859,7 @@ class GraphLowering(torch.fx.Interpreter):
         output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
+        # TODO: restore before merging
         if config.benchmark_kernel or True:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
