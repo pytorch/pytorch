@@ -400,7 +400,8 @@ class Optimizer:
                 # Floating-point types are a bit special here. They are the only ones
                 # that are assumed to always match the type of params.
                 # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-                if (key != "step"):
+                # UNLESS it's casting to CPU https://github.com/pytorch/pytorch/pull/88015#issuecomment-1569523106
+                if key != "step" or param.device == "cpu":
                     if param.is_floating_point():
                         value = value.to(param.dtype)
                     value = value.to(param.device)
