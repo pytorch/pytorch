@@ -274,6 +274,11 @@ def cache_on_self(fn):
             setattr(self, key, fn(self))
         return getattr(self, key)
 
+    def clear_cache(self):
+        if hasattr(self, key):
+            delattr(self, key)
+
+    wrapper.clear_cache = clear_cache
     return wrapper
 
 
