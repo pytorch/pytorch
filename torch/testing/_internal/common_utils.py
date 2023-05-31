@@ -773,11 +773,13 @@ def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
         other_args = []
         if DISABLED_TESTS_FILE:
-            other_args.append('--import-disabled-tests')
+            other_args.append("--import-disabled-tests")
         if SLOW_TESTS_FILE:
-            other_args.append('--import-slow-tests')
+            other_args.append("--import-slow-tests")
         if USE_PYTEST:
             other_args.append("--use-pytest")
+        if RERUN_DISABLED_TESTS:
+            other_args.append("--rerun-disabled-tests")
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
