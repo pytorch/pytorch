@@ -2090,7 +2090,7 @@ class CppKernelProxy(CppKernel):
                 # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
                 # the data type as well.
                 if (
-                    _node.op in OpDtypeClassifier.io_ops()
+                    _node.op in OpDtypeClassifier.placeholder_ops()
                     or _node.target in OpDtypeClassifier.index_ops()
                 ):
                     continue
@@ -2102,6 +2102,7 @@ class CppKernelProxy(CppKernel):
                     "store",
                     "abs",
                     "neg",
+                    "output",
                 ]:
                     return False
 

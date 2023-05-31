@@ -48,7 +48,7 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
 class OpDtypeClassifier:
     @staticmethod
     @functools.lru_cache(None)
-    def io_ops():
+    def placeholder_ops():
         return ["placeholder"]
 
     @staticmethod
@@ -111,7 +111,8 @@ class DataTypePropagation:
         input_nodes = [
             n
             for n in inputs
-            if isinstance(n, torch.fx.Node) and n.op not in OpDtypeClassifier.io_ops()
+            if isinstance(n, torch.fx.Node)
+            and n.op not in OpDtypeClassifier.placeholder_ops()
         ]
         if len(input_nodes) == 0:
             return None
@@ -137,7 +138,7 @@ class DataTypePropagation:
         if node.target in OpDtypeClassifier.boolean_ops():
             return torch.bool
 
-        if node.op in OpDtypeClassifier.io_ops():
+        if node.op in OpDtypeClassifier.placeholder_ops():
             return None
 
         if node.target in OpDtypeClassifier.explicit_dtype_ops():
