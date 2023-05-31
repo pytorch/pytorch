@@ -7,7 +7,7 @@
 #include <c10/util/numa.h>
 
 #ifdef USE_MIMALLOC
-#include "mimalloc.h"
+#include <mimalloc.h>
 #endif
 
 // TODO: rename flags to C10
