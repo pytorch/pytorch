@@ -297,20 +297,44 @@ class TritonOverrides(OpOverrides):
         return f"tl.math.nextafter({x}, {y})"
 
     @staticmethod
+    def logical_not(a):
+        return f"!{a}"
+
+    @staticmethod
     def logical_and(a, b):
-        return f"{a} & {b}"
+        return f"{a} && {b}"
 
     @staticmethod
     def logical_or(a, b):
-        return f"{a} | {b}"
+        return f"{a} || {b}"
+
+    @staticmethod
+    def logical_xor(a, b):
+        return f"{a} ^ {b}"
 
     @staticmethod
     def bitwise_and(a, b):
         return f"{a} & {b}"
 
     @staticmethod
+    def bitwise_not(a):
+        return f"~{a}"
+
+    @staticmethod
     def bitwise_or(a, b):
         return f"{a} | {b}"
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return f"{a} ^ {b}"
+
+    @staticmethod
+    def bitwise_left_shift(a, b):
+        return f"{a} << {b}"
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return f"{a} >> {b}"
 
     @staticmethod
     def rand(seed, offset):

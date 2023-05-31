@@ -3446,6 +3446,12 @@ def dunder_or(self, value):
     return torch.bitwise_or(self, value)
 
 
+@register_decomposition(aten.__xor__)
+@out_wrapper()
+def dunder_xor(self, value):
+    return torch.bitwise_xor(self, value)
+
+
 @register_decomposition(aten.__lshift__)
 @out_wrapper()
 def dunder_lshift(self, value):
@@ -3482,6 +3488,7 @@ register_inplace(aten.index_put_, aten.index_put)
 register_inplace(aten.index_reduce_, aten.index_reduce)
 register_inplace(aten.__ior__, aten.__or__)
 register_inplace(aten.__irshift__, aten.__rshift__)
+register_inplace(aten.__ixor__, aten.__xor__)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.logit_, aten.logit)
 register_inplace(aten.relu_, aten.relu)
