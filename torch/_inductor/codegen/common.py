@@ -13,6 +13,8 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from torch.utils._sympy.value_ranges import ValueRanges
+from ..._dynamo import config as dynamo_config
 
 from .. import metrics
 from ..utils import (
@@ -584,8 +586,10 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name):
+    def __init__(self, name, bounds):
+        assert bounds is not None
         self.name = name
+        self.bounds = bounds
 
     def __str__(self):
         return self.name
@@ -655,6 +659,8 @@ class CSE:
         self,
         buffer: IndentedBuffer,
         expr: typing.Union[str, CSEVariable, OpsValue],
+        *,
+        bounds: ValueRanges = ValueRanges.unknown(),
         write=True,
         assignment=True,
     ) -> CSEVariable:
@@ -664,11 +670,15 @@ class CSE:
         assert isinstance(expr, (str, CSEVariable)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
+            # If the expressions were always created with all the information, we could
+            # assert expr.bounds == bounds, but sometimes the expression is created
+            # with the loose ValueRanges.unknown(), so we need to tighten the bounds
+            expr.bounds = expr.bounds.tighten(bounds)
             return expr
         cache_key = expr
         var = self.cache.get(cache_key, None)
         if not var:
-            var = self.newvar() if assignment else None
+            var = self.newvar(bounds) if assignment else None
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
@@ -680,12 +690,14 @@ class CSE:
                 else:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
+        else:
+            var.bounds = var.bounds.tighten(bounds)
 
         return var
 
-    def newvar(self) -> CSEVariable:
+    def newvar(self, bounds: ValueRanges = ValueRanges.unknown()) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name)
+        var = V.kernel.create_cse_var(var_name, bounds)
         self.varname_map[var_name] = var
         return var
 
@@ -721,11 +733,19 @@ class Kernel(CodeGen):
         self.must_keep_buffers = set()
         self.current_node = None
         self.store_buffer_names = set()
+        self.bounds = None
 
     @contextlib.contextmanager
     def set_current_node(self, node):
         prior = self.current_node
         self.current_node = node
+        # TODO loosen this restriction in the future
+        # At the time of this writing, the bounds analysis doesn't quite work with SymPy Expr
+        # We should be able to make it work at least for constant Expr
+        if not dynamo_config.dynamic_shapes:
+            # These are bounds on the buffers in the FX graph
+            # We will use them to determine the bounds on the CSE vars
+            self.bounds = node._body.bounds()
         try:
             yield
         finally:
@@ -777,8 +797,34 @@ class Kernel(CodeGen):
             @staticmethod
             def __getattr__(name):
                 def inner(*args, **kwargs):
+                    buf_bounds = ValueRanges.unknown()
+                    if name == "constant":
+                        v = args[0]
+                        dtype = args[1]
+                        type_ = torch._prims_common.dtype_to_type(dtype)
+                        v = type_(v)
+                        is_nan = v != v
+                        if is_nan:
+                            buf_bounds = ValueRanges.unknown()
+                        else:
+                            buf_bounds = ValueRanges(lower=v, upper=v)
+                    elif self.bounds is not None:
+                        # TODO turn this elif into an else when we support dynamic shapes
+                        # Propagate bounds into the CSE variable
+                        fx_node = V.interpreter.current_node
+                        buf_bounds = self.bounds._bounds.get(
+                            fx_node, ValueRanges.unknown()
+                        )
+                        # Sanity check: The variable either it's bounded or it's unbounded
+                        assert (
+                            buf_bounds is not None
+                            or fx_node in self.bounds.unbounded_vars
+                        ), fx_node
+
                     csevar = self.cse.generate(
-                        self.compute, getattr(parent_handler, name)(*args, **kwargs)
+                        self.compute,
+                        getattr(parent_handler, name)(*args, **kwargs),
+                        bounds=buf_bounds,
                     )
                     csevar.update_on_args(name, args, kwargs)
                     return csevar

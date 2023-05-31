@@ -15,7 +15,6 @@ __all__ = ["ValueRanges", "ValueRangeAnalysis"]
 class ValueRangeError(RuntimeError):
     pass
 
-
 # Like sympify, but supports less stuff, and also ensures that direct
 # sympy expressions don't have free variables
 def simple_sympify(e):
@@ -80,6 +79,9 @@ class ValueRanges:
     def __contains__(self, x):
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
+
+    def tighten(self, other):
+        return ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
 
     # Intersection
     def __and__(self, other):

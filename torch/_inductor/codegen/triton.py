@@ -89,8 +89,8 @@ def triton_constant(value):
 
 
 class TritonCSEVariable(CSEVariable):
-    def __init__(self, name):
-        super().__init__(name)
+    def __init__(self, name, bounds):
+        super().__init__(name, bounds)
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: Set[str] = set()
 
@@ -688,8 +688,8 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
-        self.indirect_max_sizes_expr = {}  # Upper bounds for indirect_indexing
-        self.indirect_max_sizes_printed = {}  # Upper bounds, printed as a string
+        # Upper bounds for indirect_indexing and their str representation
+        self.indirect_max_sizes: Dict[Tuple[str, str] : [sympy.Expr, str]] = {}
 
         self.persistent_reduction = self.should_use_persistent_reduction()
         is_rocm = torch.version.hip is not None and torch.cuda.is_available()
@@ -1067,9 +1067,27 @@ class TritonKernel(Kernel):
             def __call__(self):
                 # The conditions need to be in parens because of Python's operator precedence.
                 # It'd be less # error-prone to use and/or/not, which is suported by triton
-                size = self.size_map[(self.var, self.mask)]
-                cond = f"(0 <= {self.var}) & ({self.var} < {size})"
-                cond_print = f"0 <= {self.var} < {size}"
+                size, size_str = self.size_map[(self.var, self.mask)]
+
+                assert_min = var.bounds.lower < 0
+                assert_max = var.bounds.lower > size
+
+                # FooBar interview question
+                if not (assert_min or assert_max):
+                    return None
+                elif assert_min and assert_max:
+                    # The conditions need to be in parens because of Python's operator precedence.
+                    # It'd be less error-prone to use and/or/not, which is suported by triton
+                    cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
+                    cond_print = f"0 <= {self.var} < {size_str}"
+                elif assert_min:
+                    cond = f"0 <= {self.var}"
+                    cond_print = cond
+                else:
+                    assert assert_max
+                    cond = f"{self.var} < {size_str}"
+                    cond_print = cond
+
                 if self.mask:
                     cond = f"({cond}) | ~{self.mask}"
                 return self.line.format(cond=cond, cond_print=cond_print)
@@ -1095,6 +1113,9 @@ class TritonKernel(Kernel):
                     else f"({' & '.join(str(v) for v in mask_vars)})"
                 )
 
+            # TODO test here how well are we doing with the value range analysis
+            # see if we can manage to detect all the constants by looking at lower == upper
+
             # tl.device_assert doesn't work for constexpr values, and we can't
             # tell from here if a var is constexpr or not, so promote everything
             var_str = str(
@@ -1106,20 +1127,18 @@ class TritonKernel(Kernel):
             # An assertion line may have been written already, if so just
             # update the max size.
             map_key = (var_str, mask)
-            existing_size = self.indirect_max_sizes_expr.get(map_key)
+            existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
             if existing_size is not None:
                 size = sympy.Min(size, existing_size)
             else:
                 line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
                 self.compute.writeline(
-                    IndirectAssertLine(
-                        line, var_str, mask, self.indirect_max_sizes_printed
-                    )
+                    IndirectAssertLine(line, var_str, mask, self.indirect_max_sizes)
                 )
 
-            self.indirect_max_sizes_expr[map_key] = size
-            self.indirect_max_sizes_printed[map_key] = texpr(
-                self.rename_indexing(self.codegen_indexing(size))
+            self.indirect_max_sizes[map_key] = (
+                size,
+                texpr(self.rename_indexing(self.codegen_indexing(size))),
             )
 
         return sympy_symbol(str(var))
