@@ -1,3 +1,4 @@
+import collections
 import functools
 import operator
 from typing import Dict, List, Optional
@@ -208,13 +209,10 @@ class RangeVariable(BaseListVariable):
         return self.items[fields.index(name)].add_options(self)
 
 
-class ListVariable(BaseListVariable):
-    def python_type(self):
-        return list
-
-    def reconstruct(self, codegen):
-        codegen.foreach(self.items)
-        return [create_instruction("BUILD_LIST", arg=len(self.items))]
+class CommonListMethodsVariable(BaseListVariable):
+    """
+    Implement methods common to List and other List-like things
+    """
 
     def call_method(
         self,
@@ -232,7 +230,7 @@ class ListVariable(BaseListVariable):
                 new_rec_contains.add(arg.mutable_local)
             tx.replace_all(
                 self,
-                ListVariable(
+                type(self)(
                     self.items + [arg],
                     recursively_contains=new_rec_contains,
                     regen_guards=False,
@@ -250,7 +248,7 @@ class ListVariable(BaseListVariable):
             (arg,) = args
             return tx.replace_all(
                 self,
-                ListVariable(
+                type(self)(
                     list(self.items) + list(arg.unpack_var_sequence(tx)),
                     regen_guards=False,
                     **options,
@@ -263,7 +261,7 @@ class ListVariable(BaseListVariable):
             items.insert(idx.as_python_constant(), value)
             return tx.replace_all(
                 self,
-                ListVariable(items, regen_guards=False, **options),
+                type(self)(items, regen_guards=False, **options),
             )
         elif name == "pop" and self.mutable_local:
             assert not kwargs
@@ -271,14 +269,14 @@ class ListVariable(BaseListVariable):
             result = items.pop(*[a.as_python_constant() for a in args])
             tx.replace_all(
                 self,
-                ListVariable(items, regen_guards=False, **options),
+                type(self)(items, regen_guards=False, **options),
             )
             return result
         elif name == "clear" and self.mutable_local:
             assert not kwargs and not args
             return tx.replace_all(
                 self,
-                ListVariable([], regen_guards=False, **options),
+                type(self)([], regen_guards=False, **options),
             )
         elif (
             name == "__setitem__"
@@ -300,9 +298,108 @@ class ListVariable(BaseListVariable):
             assert not kwargs
             assert not args
             items = list(self.items)
-            return ListVariable(
+            return type(self)(
                 items, regen_guards=False, mutable_local=MutableLocal(), **options
             )
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+
+class ListVariable(CommonListMethodsVariable):
+    def python_type(self):
+        return list
+
+    def reconstruct(self, codegen):
+        codegen.foreach(self.items)
+        return [create_instruction("BUILD_LIST", arg=len(self.items))]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if (
+            name == "__setitem__"
+            and self.mutable_local
+            and args
+            and args[0].is_python_constant()
+        ):
+            assert not kwargs
+            key, value = args
+            items = list(self.items)
+            if isinstance(key, SliceVariable):
+                if not value.has_unpack_var_sequence(tx):
+                    unimplemented(
+                        f"Missing dynamo support for expanding {value} into a list for slice assignment."
+                    )
+                items[key.as_python_constant()] = value.unpack_var_sequence(tx)
+            else:
+                items[key.as_python_constant()] = value
+            result = ListVariable(items, regen_guards=False, **options)
+            return tx.replace_all(self, result)
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+
+class DequeVariable(CommonListMethodsVariable):
+    def python_type(self):
+        return collections.deque
+
+    def reconstruct(self, codegen):
+        assert "deque" not in codegen.tx.f_globals
+        codegen.append_output(
+            codegen.create_load_python_module(collections.deque, True)
+        )
+        codegen.foreach(self.items)
+        return create_call_function(len(self.items), False)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if (
+            name == "__setitem__"
+            and self.mutable_local
+            and args
+            and args[0].is_python_constant()
+        ):
+            assert not kwargs
+            key, value = args
+            assert key.is_python_constant() and isinstance(
+                key.as_python_constant(), int
+            )
+            items = list(self.items)
+            items[key.as_python_constant()] = value
+            result = DequeVariable(items, regen_guards=False, **options)
+            return tx.replace_all(self, result)
+        elif name == "extendleft" and self.mutable_local:
+            assert not kwargs
+            (arg,) = args
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    list(arg.unpack_var_sequence(tx)) + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
+        elif name == "popleft" and self.mutable_local:
+            assert not args
+            assert not kwargs
+            items = collections.deque(self.items)
+            result = items.popleft()
+            tx.replace_all(
+                self,
+                DequeVariable(list(items), regen_guards=False, **options),
+            )
+            return result
         else:
             return super().call_method(tx, name, args, kwargs)
 
