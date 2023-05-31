@@ -1371,7 +1371,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             # TODO(kshitij12345): Add contiguous to the actual output.
             if isinstance(argnums.value, int):
                 example_value = (
-                    args[argnums.value].as_proxy().node.meta["example_value"].contiguous()
+                    args[argnums.value]
+                    .as_proxy()
+                    .node.meta["example_value"]
+                    .contiguous()
                 )
             else:
                 example_value = tuple(
