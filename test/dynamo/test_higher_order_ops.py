@@ -256,6 +256,90 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             },
         )
 
+    def test_cond_graph_break_in_one_branch(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x):
+                def true_fn(x):
+                    self.buffer += 1
+                    return self.buffer.sum() + x.sum()
+
+                def false_fn(x):
+                    return (x - 1).sum()
+
+                return control_flow.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
+        mod_for_eager = Foo()
+
+        self.assertEqual(mod_for_compile(torch.ones(6, 4)), mod_for_eager(torch.ones(6, 4)))
+
+    def test_cond_free_variable_in_both_branches(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        z = torch.ones(4, 4)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x, y):
+                def true_fn(x):
+                    return x.sum() + self.buffer.sum() + z.sum()
+
+                def false_fn(x):
+                    return x.sum() - self.buffer.sum() - z.sum()
+
+                return control_flow.cond(y, true_fn, false_fn, [x])
+
+        mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True, fullgraph=True)
+        mod_for_eager = Foo()
+
+        self.assertEqual(mod_for_compile(torch.tensor(True), torch.tensor(5)), mod_for_eager(torch.tensor(True), torch.tensor(5)))
+
+        for node in backend.graphs[0].graph.nodes:
+            if node.op == "call_function" and node.target == control_flow.cond:
+                _, _, _, operands = node.args
+                # Each branch takes 5 inputs (x, true_buffer, true_z, false_buffer, false_z)
+                self.assertEqual(len(operands), 5)
+            if node.op == "get_attr":
+                if str(node.target) in ("cond_true_0, cond_false_0"):
+                    num_placeholders = len([node for node in getattr(backend.graphs[0], str(node.target)).graph.nodes if node.op == "placeholder"])
+                    self.assertEqual(num_placeholders, 5)
+
+    def test_cond_side_effect_in_one_branches(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        z = torch.ones(4, 4)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                def true_fn(x):
+                    z.add_(1)
+                    return x.sum() + z.sum()
+
+                def false_fn(x):
+                    return x.sum() - z.sum()
+
+                return control_flow.cond(y, true_fn, false_fn, [x])
+
+        mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True, fullgraph=True)
+        mod_for_eager = Foo()
+
+        self.assertEqual(mod_for_compile(torch.tensor(True), torch.tensor(5)), mod_for_eager(torch.tensor(True), torch.tensor(5)))
+
     def test_wrap_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -698,6 +782,23 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
         )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        self._validate(
+            fn, backend, x, y, skip_check=True
+        )  # dropout decomp is known to diverge with eager
+
+    @requires_cuda()
+    @torch._functorch.config.patch(functionalize_rng_ops=True)
+    def test_dropout_inductor(self):
+        def gn(x, y):
+            return torch.nn.functional.dropout(torch.matmul(x, y), p=0.2)
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y)
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        backend = "inductor"
         self._validate(
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager

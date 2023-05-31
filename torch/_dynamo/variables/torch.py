@@ -1,3 +1,5 @@
+import collections
+import inspect
 import logging
 
 import math
@@ -11,6 +13,7 @@ import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
 from torch._dynamo.variables import SymNodeVariable
+from torch._dynamo.variables.user_defined import ProcessGroupVariable
 from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
 
@@ -72,8 +75,23 @@ constant_fold_functions = [
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
+
+constant_processgroup_functions = []
+
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
+
+    from torch.distributed.distributed_c10d import (
+        _get_group_tag,
+        get_process_group_ranks,
+    )
+
+    constant_processgroup_functions.extend(
+        [
+            get_process_group_ranks,
+            _get_group_tag,
+        ]
+    )
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -128,9 +146,12 @@ class TorchVariable(VariableTracker):
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
-
-        if value in tensor_dunder_fns_remap:
+        if (
+            isinstance(value, collections.abc.Hashable)
+            and value in tensor_dunder_fns_remap
+        ):
             value = tensor_dunder_fns_remap[value]
+
         self.value = value
 
         # the remainder of this is just optional debug checks
@@ -494,6 +515,18 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
+        elif (
+            inspect.isfunction(self.value)
+            and self.value in constant_processgroup_functions
+        ):
+            # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
+            # ID_MATCH based on how it was constructed.
+
+            # We desugar it at trace-time into ranks by directly calling util
+            # bake the result into the trace
+            assert len(args) == 1, "Expected one arg (pg)"
+            assert isinstance(args[0], ProcessGroupVariable)
+            return ConstantVariable(self.value(args[0].as_python_constant()))
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -561,7 +594,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
                 if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")
-
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -978,6 +1010,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             true_nn_modules = state_after_true_branch.output.nn_modules
             true_cmp = get_comparable_state(state_after_true_branch)
 
+            assert tx.output.side_effects == true_cmp.output.side_effects
+
             (false_r, false_graph, false_lifted_freevars) = speculate_branch(False)
 
             state_after_false_branch = tx.copy_graphstate()
@@ -985,8 +1019,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             false_nn_modules = state_after_false_branch.output.nn_modules
             false_cmp = get_comparable_state(state_after_false_branch)
 
+            assert tx.output.side_effects == false_cmp.output.side_effects
+
             true_tracked_fakes = true_cmp.output.tracked_fakes
             false_tracked_fakes = false_cmp.output.tracked_fakes
+
             tx.output.tracked_fakes = list({*false_tracked_fakes, *true_tracked_fakes})
             true_tensor_weakref_to_sizes_strides = (
                 true_cmp.output.tensor_weakref_to_sizes_strides
@@ -1039,9 +1076,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 torch.fx.GraphModule(false_nn_modules.nn_modules, false_graph),
             )
 
-            # TODO do we need this?
-            tx.output.side_effects = true_cmp.output.side_effects
-
             true_node = make_attr(true_name)
             false_node = make_attr(false_name)
 
@@ -1088,11 +1122,12 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 checkpoint,
             )
 
-            tx.output.side_effects.prune_dead_object_new(tx)
             state_after_body = tx.copy_graphstate()
             body_guards = state_after_body.output.guards
             body_nn_modules = state_after_body.output.nn_modules
             body_cmp = get_comparable_state(state_after_body)
+
+            assert tx.output.side_effects == body_cmp.output.side_effects
 
             # We don't support side effects inside a map loop body for simplicity.
             parent_cmp = get_comparable_state(checkpoint)
