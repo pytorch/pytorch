@@ -3452,22 +3452,10 @@ def dunder_lshift(self, value):
     return torch.bitwise_left_shift(self, value)
 
 
-@register_decomposition(aten.__ilshift__)
-@out_wrapper()
-def dunder_ilshift(self, value):
-    return torch.bitwise_left_shift(self, value, out=self)
-
-
 @register_decomposition(aten.__rshift__)
 @out_wrapper()
 def dunder_rshift(self, value):
     return torch.bitwise_right_shift(self, value)
-
-
-@register_decomposition(aten.__irshift__)
-@out_wrapper()
-def dunder_irshift(self, value):
-    return torch.bitwise_right_shift(self, value, out=self)
 
 
 def register_inplace(aten_op, outplace_op):
@@ -3488,8 +3476,12 @@ register_inplace(aten.gelu_, aten.gelu)
 register_inplace(aten.hardswish_, aten.hardswish)
 register_inplace(aten.hardtanh_, aten.hardtanh)
 register_inplace(aten.hardsigmoid_, aten.hardsigmoid)
+register_inplace(aten.__iand__, aten.__and__)
+register_inplace(aten.__ilshift__, aten.__lshift__)
 register_inplace(aten.index_put_, aten.index_put)
 register_inplace(aten.index_reduce_, aten.index_reduce)
+register_inplace(aten.__ior__, aten.__or__)
+register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.logit_, aten.logit)
 register_inplace(aten.relu_, aten.relu)
