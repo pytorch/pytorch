@@ -231,6 +231,8 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.heaviside,
             aten.huber_loss,
             aten.huber_loss_backward,
+            aten.__ilshift__,
+            aten.__irshift__,
             aten.im2col,
             aten.index_add,
             aten.index_add_,

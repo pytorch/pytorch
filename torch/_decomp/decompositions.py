@@ -3452,10 +3452,22 @@ def dunder_lshift(self, value):
     return torch.bitwise_left_shift(self, value)
 
 
+@register_decomposition(aten.__ilshift__)
+@out_wrapper()
+def dunder_ilshift(self, value):
+    return torch.bitwise_left_shift(self, value, out=self)
+
+
 @register_decomposition(aten.__rshift__)
 @out_wrapper()
 def dunder_rshift(self, value):
     return torch.bitwise_right_shift(self, value)
+
+
+@register_decomposition(aten.__irshift__)
+@out_wrapper()
+def dunder_irshift(self, value):
+    return torch.bitwise_right_shift(self, value, out=self)
 
 
 def register_inplace(aten_op, outplace_op):
