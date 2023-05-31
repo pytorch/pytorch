@@ -26,6 +26,9 @@ SUPPORTED_QSCHEMES = [
 
 @dataclass(eq=True, frozen=True)
 class QuantizationSpec:
+    """ Quantization spec for common operators that allows user to specify how to
+    quantize a Tensor, this includes dtype, quant_min, quant_max etc.
+    """
     dtype: torch.dtype
     # observer or fake_quantize constructor such as
     # MinMaxObserver, PerChannelHistogramObserver etc.
@@ -62,6 +65,15 @@ class QuantizationSpec:
         if self.ch_axis is not None and self.ch_axis < 0:
             raise ValueError("Ch_axis is < 0.")
 
+@dataclass(eq=True, frozen=True)
+class FixedQParamsQuantizationSpec:
+    dtype: torch.dtype
+    scale: float
+    zero_point: int
+    quant_min: Optional[int] = None
+    quant_max: Optional[int] = None
+    qscheme: Optional[torch.qscheme] = None
+
 EdgeOrNode = Union[Tuple[Node, Node], Node]
 
 @dataclass(eq=True, frozen=True)
@@ -75,7 +87,6 @@ class SharedQuantizationSpec:
     output value is an fx Node
     """
     edge_or_node: EdgeOrNode
-
 
 @dataclass(eq=True, frozen=True)
 class DerivedQuantizationSpec:
