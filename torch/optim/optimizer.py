@@ -19,11 +19,11 @@ from torch._utils import is_compiling
 OptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]]
 ]
-OptimizerHook: TypeAlias = Callable[["Optimizer", Tuple[Any, ...], Dict[str, Any]], None]
+OptimizerPostHook: TypeAlias = Callable[["Optimizer", Tuple[Any, ...], Dict[str, Any]], None]
 
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, OptimizerPreHook] = OrderedDict()
-_global_optimizer_post_hooks: Dict[int, OptimizerHook] = OrderedDict()
+_global_optimizer_post_hooks: Dict[int, OptimizerPostHook] = OrderedDict()
 _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
 T_co = TypeVar('T_co', covariant=True)
@@ -189,7 +189,7 @@ def register_optimizer_step_pre_hook(hook: OptimizerPreHook) -> RemovableHandle:
     return handle
 
 
-def register_optimizer_step_post_hook(hook: OptimizerHook) -> RemovableHandle:
+def register_optimizer_step_post_hook(hook: OptimizerPostHook) -> RemovableHandle:
     r"""Register a post hook common to all optimizers. The hook should have the following
     signature::
 
