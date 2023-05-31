@@ -23,7 +23,7 @@ from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
 
-from . import config, ir
+from . import config, ir, metrics
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
@@ -46,11 +46,13 @@ from .utils import (
     convert_shape_to_inductor,
     gather_origins,
     get_dtype_size,
+    get_sympy_Expr_dtype,
     sympy_product,
 )
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
@@ -75,10 +77,14 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
 
 def may_get_constant_buffer_dtype(constant_buffer):
     assert isinstance(
-        constant_buffer, (sympy.Symbol, sympy.core.numbers.Integer)
-    ), "get_constant_buffer_dtype only supports input of sympy.Symbol or sympy.core.numbers.Integer"
+        constant_buffer, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
+    ), "get_constant_buffer_dtype only supports input of sympy.Symbol, sympy.Expr or sympy.core.numbers.Integer"
     if isinstance(constant_buffer, sympy.core.numbers.Integer):
         return torch.int64
+
+    if isinstance(constant_buffer, sympy.Expr):
+        return get_sympy_Expr_dtype(constant_buffer)
+
     if constant_buffer.is_integer:
         return torch.int64
     elif constant_buffer.is_float:
@@ -164,13 +170,14 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
+        self.removed_inplace_buffers: Set[str] = set()
+        self.mutated_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
         self.num_static_inputs = num_static_inputs
+        self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.unaligned_buffers: Set[str] = set()
-        self.randomness_offset = sympy.Integer(0)
-        self.randomness_seeds: List[str] = []
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.creation_time = time.time()
         self.name = "GraphLowering"
@@ -183,7 +190,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.info("Using FallbackKernel: %s", name)
+            perf_hint_log.warning("Using FallbackKernel: %s", name)
 
     def add_device_idx(self, idx: Optional[int]):
         if idx is not None:
@@ -226,43 +233,12 @@ class GraphLowering(torch.fx.Interpreter):
             return self.graph_inputs[buffer_name].get_numel()
         raise KeyError(f"could not find {buffer_name}")
 
-    def random_seed_buffer(self, device: torch.device):
-        """
-        Return a device-unique 1-element tensor storing our RNG seed.
-        This will get initialized at the start of each graph in
-        `wrapper.py`.
-
-        Note this is only used by cuda backends.  The CPU backend handles
-        RNG seeds as a sizevar.
-        """
-        name = f"seed_{device.type}_{device.index}"
-        if name not in self.constants:
-            self.constants[name] = torch.zeros((), device=device, dtype=torch.int64)
-            self.randomness_seeds.append(name)
-
-        return ir.RandSeedBuffer(
-            name=name,
-            layout=ir.FixedLayout(
-                device=device,
-                dtype=torch.int64,
-                size=[],
-                stride=[],
-            ),
-        )
-
-    def increment_randomness_offset(self, numel):
-        """
-        A global counter of how many random numbers we have handed out so far.
-        """
-        offset = self.randomness_offset
-        self.randomness_offset = offset + numel
-        return offset
-
     @dynamo_timed
     def run(self, *args):
         return super().run(*args)
 
     def disable_cpp_wrapper(self, cond):
+        metrics.disable_cpp_wrapper += 1
         self.cpp_wrapper = False
         log.debug("Set cpp_wrapper to False due to %s", cond)
 
@@ -272,12 +248,18 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer[name] = buffer
         return name
 
-    def realize_users_of(self, name: str):
+    def register_list(self, buffer_names: List[str]):
+        name = "list_" + "_".join(buffer_names)
+        self.lists[name] = buffer_names
+        return name
+
+    def mark_buffer_mutated(self, name: str):
         """
         When a buffer is mutated we need to make sure all the reads to
         the old version are realized before the mutation happens.
         """
         assert isinstance(name, str)
+        self.mutated_buffers.add(name)
 
         def visit(value):
             if isinstance(value, (list, tuple)):
@@ -291,7 +273,7 @@ class GraphLowering(torch.fx.Interpreter):
             try:
                 visit(value)
             except Exception:
-                log.warning("error in realize_users_of", exc_info=True)
+                log.warning("error in mark_buffer_mutated", exc_info=True)
 
     def add_tensor_constant(self, data):
         def allocate():
@@ -450,6 +432,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+        value: ir.IRNode
         for name, value in self.graph_inputs.items():
             assert isinstance(value, (TensorBox, sympy.Expr))
             if not isinstance(value, TensorBox):
@@ -617,7 +600,9 @@ class GraphLowering(torch.fx.Interpreter):
             dtype = None
             if isinstance(value, TensorBox):
                 dtype = value.get_dtype()
-            elif isinstance(value, (sympy.Symbol, sympy.core.numbers.Integer)):
+            elif isinstance(
+                value, (sympy.Symbol, sympy.Expr, sympy.core.numbers.Integer)
+            ):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
@@ -711,6 +696,9 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
+        # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
+        # TODO. Revisit this once the logging API is more mature
+        output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
         if config.benchmark_kernel:

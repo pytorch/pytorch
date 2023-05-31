@@ -1176,6 +1176,9 @@ if(USE_OPENMP AND NOT TARGET caffe2::openmp)
   include(${CMAKE_CURRENT_LIST_DIR}/Modules/FindOpenMP.cmake)
   if(OPENMP_FOUND)
     message(STATUS "Adding OpenMP CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
+    if(APPLE AND USE_MPS)
+      string(APPEND CMAKE_OBJCXX_FLAGS " ${OpenMP_CXX_FLAGS}")
+    endif()
     if(OpenMP_CXX_LIBRARIES)
       message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
     endif()
@@ -1306,7 +1309,7 @@ if(USE_ROCM)
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse)
+        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
     else()
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)

@@ -7,7 +7,6 @@ import torch
 from functorch.experimental import control_flow
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._export.graph_module import get_export_meta, make_export_graph_module
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
@@ -215,6 +214,9 @@ class ExportPassBase(PassBase):
 
         def run_node(self, n: torch.fx.Node) -> Argument:
             self.node = n
+            if self.callback._processing_placeholders and n.op != "placeholder":
+                self.callback._processing_placeholders = False
+                self.callback.postprocess_placeholders()
             self.callback.node_debug_str = n.format_node()
             return super().run_node(n)
 
@@ -230,6 +232,9 @@ class ExportPassBase(PassBase):
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self._initialized = True
         self.node_debug_str: typing.Optional[str] = None
+        # state that keeps track of when placeholders are still being processed
+        # (note that placeholders are always processed before other nodes)
+        self._processing_placeholders = True
 
     def _fx(
         self,
@@ -293,6 +298,12 @@ class ExportPassBase(PassBase):
         arg_proxy.node.meta = meta.data
         self.tracer.set_metadata(arg_proxy.node, arg)
         return ProxyValue(arg, arg_proxy)
+
+    def postprocess_placeholders(self):
+        """
+        Hook to post-process placeholders before they are passed to FX nodes.
+        """
+        pass
 
     def call_operator(
         self,
@@ -374,7 +385,6 @@ class ExportPassBase(PassBase):
         with fx_traceback.preserve_node_meta():
             interpreter.run(*inputs_data)
 
-        # TODO(angelayi): Update this with the exported graph module class
         new_graph_module = torch.fx.GraphModule(self.tracer.root, self.tracer.graph)
 
         self.tracer = prev_tracer
@@ -411,7 +421,4 @@ class ExportPassBase(PassBase):
         with fake_tensor_mode, dispatcher_mode:  # type: ignore[assignment, union-attr]
             result = self.call_submodule(graph_module, tuple(inputs))
 
-        gm = result.graph_module
-        meta = get_export_meta(graph_module)
-        export_graph_module = make_export_graph_module(gm, gm.graph, meta.in_spec, meta.out_spec)
-        return PassResult(export_graph_module, True)
+        return result
