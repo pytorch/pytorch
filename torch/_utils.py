@@ -592,6 +592,25 @@ def annotate(ret, **kwargs):
     return dec
 
 
+def render_call(fn, args, kwargs):
+    import torch._tensor_str
+    from torch.overrides import resolve_name
+
+    str_fn = resolve_name(fn)
+    if str_fn is None:
+        str_fn = str(fn)
+
+    def render_arg(t):
+        return repr(t)
+
+    str_args = []
+    with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
+        str_args.extend(render_arg(a) for a in args)
+        str_args.extend(f"{k}={render_arg(v)}" for k, v in kwargs.items())
+        r = f"{str_fn}({', '.join(str_args)})"
+    return r
+
+
 # NOTE [ Python Traceback Reference Cycle Problem ]
 #
 # When using sys.exc_info(), it is important to **not** store the exc_info[2],
