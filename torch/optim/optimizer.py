@@ -1,29 +1,86 @@
-from collections import OrderedDict, defaultdict, abc as container_abcs
-import torch
+import abc
+import math
+import functools
+import warnings
+from collections import OrderedDict, defaultdict
 from copy import deepcopy
 from itertools import chain
-import warnings
-import functools
-import math
+from typing import (
+    Any, Callable, DefaultDict, Dict, Hashable, Iterable, Iterator, List, Optional, Set, Tuple, TypeVar, Union, overload
+)
 
-from typing import Callable, Dict, List, Tuple
+from typing_extensions import ParamSpec, Self, TypeAlias
 
+import torch
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
 from torch._utils import is_compiling
 
+OptimizerPreHook: TypeAlias = Callable[
+    ["Optimizer", Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]]
+]
+OptimizerHook: TypeAlias = Callable[["Optimizer", Tuple[Any, ...], Dict[str, Any]], None]
+
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
-_global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
-_global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
+_global_optimizer_pre_hooks: Dict[int, OptimizerPreHook] = OrderedDict()
+_global_optimizer_post_hooks: Dict[int, OptimizerHook] = OrderedDict()
 _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
+
+T_co = TypeVar('T_co', covariant=True)
+
+class _ConstructableIterable(Iterable[T_co]):
+    def __init__(self, __iterable: Iterable[T_co]) -> None:
+        ...
+
+    @abc.abstractmethod
+    def __iter__(self) -> Iterator[T_co]:
+        ...
 
 class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "<required parameter>"
 
 required = _RequiredParameter()
 
+S = TypeVar("S")
+
+@overload
+def _cast(param: torch.Tensor, value: torch.Tensor, key: Hashable = ...) -> torch.Tensor:
+    ...
+
+@overload
+def _cast(param: torch.Tensor, value: Dict[Any, Any], key: Hashable = ...) -> Dict[Any, Any]:
+    ...
+
+@overload
+def _cast(param: torch.Tensor, value: _ConstructableIterable[Any], key: Hashable = ...) -> _ConstructableIterable[Any]:
+    ...
+
+@overload
+def _cast(param: torch.Tensor, value: S, key: Hashable = ...) -> S:
+    ...
+
+def _cast(
+    param: torch.Tensor,
+    value: Union[torch.Tensor, Dict[Any, Any], _ConstructableIterable[Any], S],
+    key: Hashable = None,
+) -> Union[torch.Tensor, Dict[Any, Any], _ConstructableIterable[Any], S]:
+    r"""Make a deep copy of value, casting all tensors to device of param."""
+    if isinstance(value, torch.Tensor):
+        # Floating-point types are a bit special here. They are the only ones
+        # that are assumed to always match the type of params.
+        # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
+        if (key != "step"):
+            if param.is_floating_point():
+                value = value.to(param.dtype)
+            value = value.to(param.device)
+        return value
+    if isinstance(value, dict):
+        return {k: _cast(param, v, key=k) for k, v in value.items()}
+    if isinstance(value, _ConstructableIterable):
+        return type(value)(_cast(param, v) for v in value)
+    return value
 
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
@@ -113,7 +170,7 @@ _maximize_doc = r"""maximize (bool, optional): maximize the params based on the
             objective, instead of minimizing (default: False)"""
 
 
-def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
+def register_optimizer_step_pre_hook(hook: OptimizerPreHook) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers. The hook should have the following
     signature::
 
@@ -123,7 +180,7 @@ def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHand
         hook (Callable): A user defined hook which is registered on all optimizers.
 
     Returns:
-        :class:`torch.utils.hooks.RemoveableHandle`:
+        :class:`torch.utils.hooks.RemovableHandle`:
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
@@ -132,7 +189,7 @@ def register_optimizer_step_pre_hook(hook: Callable[..., None]) -> RemovableHand
     return handle
 
 
-def register_optimizer_step_post_hook(hook: Callable[..., None]) -> RemovableHandle:
+def register_optimizer_step_post_hook(hook: OptimizerHook) -> RemovableHandle:
     r"""Register a post hook common to all optimizers. The hook should have the following
     signature::
 
@@ -142,13 +199,17 @@ def register_optimizer_step_post_hook(hook: Callable[..., None]) -> RemovableHan
         hook (Callable): A user defined hook which is registered on all optimizers.
 
     Returns:
-        :class:`torch.utils.hooks.RemoveableHandle`:
+        :class:`torch.utils.hooks.RemovableHandle`:
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
     handle = hooks.RemovableHandle(_global_optimizer_post_hooks)
     _global_optimizer_post_hooks[handle.id] = hook
     return handle
+
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class Optimizer:
@@ -166,11 +227,19 @@ class Optimizer:
             options (used when a parameter group doesn't specify them).
     """
 
-    def __init__(self, params, defaults):
+    def __init__(
+        self,
+        params: Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]],
+        defaults: Dict[str, Any],
+    ) -> None:
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
-        self._optimizer_step_pre_hooks: Dict[int, Callable] = OrderedDict()
-        self._optimizer_step_post_hooks: Dict[int, Callable] = OrderedDict()
+        self._optimizer_step_pre_hooks: Dict[
+            int, Callable[[Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]]
+        ] = OrderedDict()
+        self._optimizer_step_post_hooks: Dict[
+            int, Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None]
+        ] = OrderedDict()
 
         self._patch_step_function()
 
@@ -179,8 +248,8 @@ class Optimizer:
                             "an iterable of Tensors or dicts, but got " +
                             torch.typename(params))
 
-        self.state = defaultdict(dict)
-        self.param_groups = []
+        self.state: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
+        self.param_groups: List[Dict[str, Any]] = []
 
         param_groups = list(params)
         if len(param_groups) == 0:
@@ -189,6 +258,7 @@ class Optimizer:
             param_groups = [{'params': param_groups}]
 
         for param_group in param_groups:
+            assert isinstance(param_group, dict)
             self.add_param_group(param_group)
 
         # Allows _cuda_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
@@ -196,15 +266,14 @@ class Optimizer:
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
-
-    def __getstate__(self):
+    def __getstate__(self) -> Dict[str, Any]:
         return {
             'defaults': self.defaults,
             'state': self.state,
             'param_groups': self.param_groups,
         }
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
         if '_optimizer_step_pre_hooks' not in self.__dict__:
             self._optimizer_step_pre_hooks = OrderedDict()
@@ -213,7 +282,7 @@ class Optimizer:
         self._patch_step_function()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault('differentiable', False)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         format_string = self.__class__.__name__ + ' ('
         for i, group in enumerate(self.param_groups):
             format_string += '\n'
@@ -225,7 +294,7 @@ class Optimizer:
         return format_string
 
     # Currently needed by Adam and AdamW
-    def _cuda_graph_capture_health_check(self):
+    def _cuda_graph_capture_health_check(self) -> None:
         if torch.has_cuda and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
 
@@ -246,7 +315,7 @@ class Optimizer:
                 )
                 self._warned_capturable_if_run_uncaptured = True
 
-    def _optimizer_step_code(self):
+    def _optimizer_step_code(self) -> None:
         """Entry point for `torch.profile.profiler`.
 
         When python tracing is enabled the profiler will hook into this
@@ -260,11 +329,12 @@ class Optimizer:
         pass
 
     @staticmethod
-    def profile_hook_step(func):
+    def profile_hook_step(func: Callable[P, R]) -> Callable[P, R]:
 
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            self, *_ = args
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            self = args[0]
+            assert isinstance(self, Optimizer)
             profile_name = "Optimizer.step#{}.step".format(self.__class__.__name__)
             with torch.autograd.profiler.record_function(profile_name):
                 # call optimizer step pre hooks
@@ -272,10 +342,11 @@ class Optimizer:
                     result = pre_hook(self, args, kwargs)
                     if result is not None:
                         if isinstance(result, tuple) and len(result) == 2:
-                            args, kwargs = result
+                            args, kwargs = result  # type: ignore[assignment]
                         else:
-                            raise RuntimeError(f"{func} must return None or a tuple of (new_args, new_kwargs),"
-                                               f"but got {result}.")
+                            raise RuntimeError(
+                                f"{func} must return None or a tuple of (new_args, new_kwargs), but got {result}."
+                            )
 
                 out = func(*args, **kwargs)
                 self._optimizer_step_code()
@@ -288,14 +359,17 @@ class Optimizer:
 
         return wrapper
 
-    def _patch_step_function(self):
+    def _patch_step_function(self) -> None:
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
         hooked = getattr(self.__class__.step, "hooked", None)
         if not hooked:
-            self.__class__.step = self.profile_hook_step(self.__class__.step)
-            self.__class__.step.hooked = True
+            self.__class__.step = self.profile_hook_step(self.__class__.step)  # type: ignore[assignment]
+            self.__class__.step.hooked = True  # type: ignore[attr-defined]
 
-    def register_step_pre_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_step_pre_hook(
+        self,
+        hook: Callable[[Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],
+    ) -> RemovableHandle:
         r"""Register an optimizer step pre hook which will be called before
         optimizer step. It should have the following signature::
 
@@ -309,7 +383,7 @@ class Optimizer:
             hook (Callable): The user defined hook to be registered.
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -317,7 +391,10 @@ class Optimizer:
         self._optimizer_step_pre_hooks[handle.id] = hook
         return handle
 
-    def register_step_post_hook(self, hook: Callable[..., None]) -> RemovableHandle:
+    def register_step_post_hook(
+        self,
+        hook: Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None],
+    ) -> RemovableHandle:
         r"""Register an optimizer step post hook which will be called after optimizer step.
         It should have the following signature::
 
@@ -329,7 +406,7 @@ class Optimizer:
             hook (Callable): The user defined hook to be registered.
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -337,7 +414,7 @@ class Optimizer:
         self._optimizer_step_post_hooks[handle.id] = hook
         return handle
 
-    def state_dict(self):
+    def state_dict(self) -> Dict[str, Any]:
         r"""Returns the state of the optimizer as a :class:`dict`.
 
         It contains two entries:
@@ -348,10 +425,10 @@ class Optimizer:
             parameter group is a dict
         """
         # Save order indices instead of Tensors
-        param_mappings = {}
+        param_mappings: Dict[int, int] = {}
         start_index = 0
 
-        def pack_group(group):
+        def pack_group(group: Dict[str, Any]) -> Dict[str, Any]:
             nonlocal start_index
             packed = {k: v for k, v in group.items() if k != 'params'}
             param_mappings.update({id(p): i for i, p in enumerate(group['params'], start_index)
@@ -368,7 +445,7 @@ class Optimizer:
             'param_groups': param_groups,
         }
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""Loads the optimizer state.
 
         Args:
@@ -394,44 +471,26 @@ class Optimizer:
         id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
                       chain.from_iterable((g['params'] for g in groups))))
 
-        def cast(param, value, key=None):
-            r"""Make a deep copy of value, casting all tensors to device of param."""
-            if isinstance(value, torch.Tensor):
-                # Floating-point types are a bit special here. They are the only ones
-                # that are assumed to always match the type of params.
-                # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-                if (key != "step"):
-                    if param.is_floating_point():
-                        value = value.to(param.dtype)
-                    value = value.to(param.device)
-                return value
-            elif isinstance(value, dict):
-                return {k: cast(param, v, key=k) for k, v in value.items()}
-            elif isinstance(value, container_abcs.Iterable):
-                return type(value)(cast(param, v) for v in value)
-            else:
-                return value
-
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
-        state = defaultdict(dict)
+        state: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = cast(param, v)
+                state[param] = _cast(param, v)
             else:
                 state[k] = v
 
         # Update parameter groups, setting their 'params' value
-        def update_group(group, new_group):
+        def update_group(group: Dict[str, Any], new_group: Dict[str, Any]) -> Dict[str, Any]:
             new_group['params'] = group['params']
             return new_group
         param_groups = [
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-    def zero_grad(self, set_to_none: bool = True):
+    def zero_grad(self, set_to_none: bool = True) -> None:
         r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
 
         Args:
@@ -450,8 +509,11 @@ class Optimizer:
 
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()
-        if foreach:
-            per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+
+        per_device_and_dtype_grads: DefaultDict[
+            torch.device, DefaultDict[torch.dtype, List[torch.Tensor]]
+        ] = defaultdict(lambda: defaultdict(list))
+
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
                 for p in group['params']:
@@ -472,7 +534,15 @@ class Optimizer:
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)
 
-    def step(self, closure):
+    @overload
+    def step(self, closure: None = ...) -> None:
+        ...
+
+    @overload
+    def step(self, closure: Callable[[], float]) -> float:
+        ...
+
+    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
         r"""Performs a single optimization step (parameter update).
 
         Args:
@@ -485,7 +555,7 @@ class Optimizer:
         """
         raise NotImplementedError
 
-    def add_param_group(self, param_group):
+    def add_param_group(self, param_group: Dict[str, Any]) -> None:
         r"""Add a param group to the :class:`Optimizer` s `param_groups`.
 
         This can be useful when fine tuning a pre-trained network as frozen layers can be made
@@ -495,7 +565,8 @@ class Optimizer:
             param_group (dict): Specifies what Tensors should be optimized along with group
                 specific optimization options.
         """
-        assert isinstance(param_group, dict), "param group must be a dict"
+        if not isinstance(param_group, dict):
+            raise TypeError(f"param_group must be a dict, but got {type(param_group)}")
 
         params = param_group['params']
         if isinstance(params, torch.Tensor):
@@ -510,13 +581,13 @@ class Optimizer:
             if not isinstance(param, torch.Tensor):
                 raise TypeError("optimizer can only optimize Tensors, "
                                 "but one of the params is " + torch.typename(param))
-            if not self.defaults.get('differentiable', None) and not (param.is_leaf or param.retains_grad):
+            # TODO: https://github.com/pytorch/pytorch/issues/30788
+            if not self.defaults.get('differentiable', None) and not (param.is_leaf or param.retains_grad):  # type: ignore[attr-defined]
                 raise ValueError("can't optimize a non-leaf Tensor")
 
         for name, default in self.defaults.items():
             if default is required and name not in param_group:
-                raise ValueError("parameter group didn't specify a value of required optimization parameter " +
-                                 name)
+                raise ValueError(f"parameter group didn't specify a value of required optimization parameter {name}")
             else:
                 param_group.setdefault(name, default)
 
@@ -526,7 +597,7 @@ class Optimizer:
                           "in future, this will cause an error; "
                           "see github.com/pytorch/pytorch/issues/40967 for more information", stacklevel=3)
 
-        param_set = set()
+        param_set: Set[torch.Tensor] = set()
         for group in self.param_groups:
             param_set.update(set(group['params']))
 

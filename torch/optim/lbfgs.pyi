@@ -1,6 +1,7 @@
 from typing import Optional
 
-from .optimizer import _params_t, Optimizer
+from .common_types import _params_t
+from .optimizer import Optimizer
 
 class LBFGS(Optimizer):
     def __init__(

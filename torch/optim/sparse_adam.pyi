@@ -1,6 +1,7 @@
 from typing import Tuple
 
-from .optimizer import _params_t, Optimizer
+from .common_types import _params_t
+from .optimizer import Optimizer
 
 class SparseAdam(Optimizer):
     def __init__(
