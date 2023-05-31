@@ -5408,6 +5408,25 @@ def ___make_guard_fn():
             )
         self.assertEqual(expected, pycode)
 
+    def test_dynamo_compiling_fake_tensor_to_vararg_int(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                # use numpy int so it's wrapped as fake tensor in dynamo
+                shape = np.int_(16)
+                # test shape as fake tensor, which param type is
+                # Sequence[Union[_int, SymInt]]
+                return x.reshape(shape)
+
+        x = torch.rand([4, 4])
+        model = MyModule()
+        orig_out = model(x)
+        opt_model = torch._dynamo.optimize("eager")(MyModule())
+        opt_out = opt_model(x)
+        self.assertTrue(same(orig_out, opt_out))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
