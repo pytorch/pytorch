@@ -429,7 +429,7 @@ class GraphModuleSerializer:
 
             return [Argument.create(as_tensor=arg) for arg in arg_list]
 
-    def serialize(self, graph_module: torch.fx.GraphModule) -> Tuple[GraphModule, bytes]:
+    def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
         for node in graph_module.graph.nodes:
             try:
                 self.node = node
@@ -451,7 +451,7 @@ class GraphModuleSerializer:
         )
 
 
-class ExportedProgramSerializer():
+class ExportedProgramSerializer:
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
         self.opset_version: Dict[str, int] = (
             {} if opset_version is None else opset_version
@@ -482,4 +482,3 @@ def serialize(
     json_program = json.dumps(serialized_exported_program.__dict__)
     json_bytes = json_program.encode('utf-8')
     return json_bytes, serialized_state_dict
-
