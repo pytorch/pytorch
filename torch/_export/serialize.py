@@ -213,7 +213,7 @@ def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
 
 
 class GraphModuleSerializer:
-    def __init__(self, graph_signature: ep.GraphSignature, call_spec: ep.CallSpec):
+    def __init__(self, graph_signature: ep.ExportGraphSignature, call_spec: ep.CallSpec):
         self.inputs: List[Argument] = []
         self.outputs: List[Argument] = []
         self.nodes: List[Node] = []
