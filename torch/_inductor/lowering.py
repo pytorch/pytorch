@@ -4112,6 +4112,7 @@ register_pointwise_numeric(aten.nextafter)
 
 register_foreach_pointwise(aten._foreach_add.List, add)
 
+
 def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promotion_kind=None)
     def fn(*args, **kwargs):

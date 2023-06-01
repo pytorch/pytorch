@@ -444,6 +444,22 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.lgamma()"
 
     @staticmethod
+    def logical_and(a, b):
+        return f"({a} != 0) & ({b} != 0)"
+
+    @staticmethod
+    def logical_not(a):
+        return f"{a} == 0"
+
+    @staticmethod
+    def logical_or(a, b):
+        return f"({a} != 0) | ({b} != 0)"
+
+    @staticmethod
+    def logical_xor(a, b):
+        return f"({a} != 0) ^ ({b} != 0)"
+
+    @staticmethod
     def tan(a):
         return f"{a}.tan()"
 
@@ -957,19 +973,19 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def logical_and(a, b):
-        return f"({a} != 0) && ({b} != 0)"
+        return f"{a} && {b}"
 
     @staticmethod
     def logical_not(a):
-        return f"!({a} != 0)"
+        return f"!{a} != 0"
 
     @staticmethod
     def logical_or(a, b):
-        return f"({a} != 0) || ({b} != 0)"
+        return f"{a} || {b}"
 
     @staticmethod
     def logical_xor(a, b):
-        return f"({a} != 0) != ({b} != 0)"
+        return f"{a} != {b}"
 
     @staticmethod
     def bitwise_and(a, b):
