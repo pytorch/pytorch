@@ -53,40 +53,40 @@
 
 ## المزيد عن PyTorch
 
-على المستوى التفصيلي، تعد PyTorch مكتبة تتكون من المكونات التالية:
+على المستوى التفصيلي، تعد PyTorch مكتبة تتكون من العناصر التالية:
 
 | العنصر | الوصف |
+
 | ---- | --- |
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | GPU مع دعم قوي لوحدات المعالجة الرسومية ،NumPy  مكتبة تينسور مشابهة لـ  |
 | [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | torch مع عمليات التينسور القابلة للتفاضل في بيئة (tape) مكتبة تفاضل تلقائية قائمة على الشريط |
 | [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | PyTorch لإنشاء نماذج قابلة للتسلسل والتحسين من رمز (TorchScript) مجموعة تراكيب  |
 | [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | مصممة لتوفير أقصى قدر من المرونة autograd مكتبة شبكات عصبية متكاملة بشكل عميق مع |
-| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Hogwild وهي مفيدة لتحميل البيانات وتدريب torch ولكن مع مشاركة ذاكرة سحرية لتوزيع التينسورات في multiprocessing من نظام Python تعد مكتبة|
+
+| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Hogwild وهي مفيدة لتحميل البيانات وتدريب torch ولكن مع مشاركة ذاكرة سحرية لتوزيع التينسورات في multiprocessing من نظام Python تعد مكتبة |
 | [**torch.utils**](https://pytorch.org/docs/stable/data.html) | ووظائف أخرى للراحة والاستخدام الملائم (DataLoader) تحميل البيانات |
 
-Usually, PyTorch is used either as:
+عادةً يتم استخدام PyTorch إما كـ:
 
-- A replacement for NumPy to use the power of GPUs.
-- A deep learning research platform that provides maximum flexibility and speed.
+- بديل لـ NumPy للاستفادة من قوة وحدات المعالجة الرسومية (GPUs).
+- منصة بحث التعلم العميق (Deeb lerning)التي توفر أقصى قدر من المرونة والسرعة.
 
-Elaborating Further:
+مزيد من التفصيل:
 
 ### مكتبة Tensor
 
-If you use NumPy, then you have used Tensors (a.k.a. ndarray).
+إذا كنت تستخدم NumPy ، فهذا يعني أنك استخدمت Tensors (المعروف أيضًا باسم ndarray).
 
 ![Tensor illustration](../docs/source/_static/img/tensor_illustration.png)
 
-PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
-computation by a huge amount.
+توفر PyTorch تينسورات (Tensors) التي يمكن أن تعيش إما على وحدة المعالجة المركزية أو وحدة معالجة الرسومات (GPU) وتسريع الحساب بمقدار ضخم.
 
-We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
-such as slicing, indexing, mathematical operations, linear algebra, reductions.
-And they are fast!
+نحن نقدم مجموعة متنوعة من إجراءات التينسور لتسريع وتناسب احتياجاتك الحسابية العلمية مثل التقطيع والفهرسة والعمليات الحسابية والجبر الخطي والتخفيضات.
+وهم سريعون!
 
 ### شبكات عصبية ديناميكية
 
-PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
+تمتلك PyTorch طريقة فريدة لبناء الشبكات العصبية: استخدام مسجل شرائط وإعادة تشغيله.
 
 Most frameworks such as TensorFlow, Theano, Caffe, and CNTK have a static view of the world.
 One has to build a neural network and reuse the same structure again and again.
