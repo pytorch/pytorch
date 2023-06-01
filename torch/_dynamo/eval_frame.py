@@ -7,7 +7,6 @@ import functools
 import inspect
 import logging
 import os
-import re
 import sys
 import textwrap
 import threading
@@ -986,14 +985,13 @@ def export(
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
+    # NB: This is mostly hitting the cache; Dynamo already converted these
+    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
     assert graph_captured_result is not None
     flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
-
-    # NB: This is mostly hitting the cache; Dynamo already converted these
-    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
         memo: Dict[torch.Tensor, torch.Tensor] = {}
@@ -1058,14 +1056,6 @@ def export(
         if constraints
         else []
     )
-
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        # Inline constraints added by users correspond to unbacked symbols in shape_env,
-        new_graph.meta["inline_constraints"] = {
-            k: (v.lower, v.upper)
-            for k, v in shape_env.var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
