@@ -161,16 +161,12 @@ class AsyncCollectiveTensor(torch.Tensor):
 
     __slots__ = ['elem']
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @staticmethod
     def __new__(cls, elem: torch.Tensor):
-
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-            cls, elem.size(),
-            strides=elem.stride(), storage_offset=elem.storage_offset(),
-            dtype=elem.dtype, layout=elem.layout,
-            device=elem.device, requires_grad=False
+        r = torch.Tensor._make_subclass(  # type: ignore[attr-defined]
+            cls,
+            elem,
+            require_grad=elem.requires_grad
         )
         r.elem = elem
         return r
@@ -183,12 +179,11 @@ class AsyncCollectiveTensor(torch.Tensor):
         return self
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_function__(cls, func, types, args=(), kwargs={}):
         def unwrap(e: AsyncCollectiveTensor):
-            # wait_tensor is idepotent and will do stream sync only once
+            # wait_tensor is idempotent and will do stream sync only once
             wait_tensor(e.elem)
             return e.elem
-
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
         unwrapped_kwargs = tree_map_only(AsyncCollectiveTensor, unwrap, kwargs)
 
