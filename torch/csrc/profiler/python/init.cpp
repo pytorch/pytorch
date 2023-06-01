@@ -297,6 +297,9 @@ void initPythonBindings(PyObject* module) {
   m.def(
       "_set_record_concrete_inputs_enabled_val",
       &torch::profiler::impl::set_record_concrete_inputs_enabled_val);
+  m.def(
+      "_set_fwd_bwd_enabled_val",
+      &torch::profiler::impl::set_fwd_bwd_enabled_val);
 
   py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
       m, "CapturedTraceback");

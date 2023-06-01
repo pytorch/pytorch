@@ -43,13 +43,9 @@ class TestDispatcherPythonBindings(TestCase):
 class TestPythonRegistration(TestCase):
     test_ns = '_test_python_registration'
 
-    def setUp(self):
-        self.keep_alive_len = len(torch._custom_op.functional.keep_alive)
-
     def tearDown(self):
         if hasattr(torch.ops, self.test_ns):
             del torch.ops._test_python_registration
-        del torch._custom_op.functional.keep_alive[self.keep_alive_len:]
 
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
@@ -107,7 +103,7 @@ class TestPythonRegistration(TestCase):
 
     def test_finalizer(self):
         impls_refcnt = sys.getrefcount(torch.library._impls)
-        lib = Library(f"{self.test_ns}", "FRAGMENT")
+        lib = Library(self.test_ns, "FRAGMENT")
         lib.define("foo123(Tensor x) -> Tensor")
 
         # 1 for `lib`, 1 for sys.getrefcount
@@ -299,7 +295,7 @@ class TestPythonRegistration(TestCase):
         del my_lib1
 
     def test_create_new_library(self) -> None:
-        my_lib1 = Library(f"{self.test_ns}", "DEF")
+        my_lib1 = Library(self.test_ns, "DEF")
 
         my_lib1.define("sum(Tensor self) -> Tensor")
 
@@ -312,7 +308,7 @@ class TestPythonRegistration(TestCase):
         op = getattr(torch.ops, self.test_ns).sum
         self.assertEqual(op(x), x)
 
-        my_lib2 = Library(f"{self.test_ns}", "IMPL")
+        my_lib2 = Library(self.test_ns, "IMPL")
 
         # Example 2
         @torch.library.impl(my_lib2, op.default, "ZeroTensor")
@@ -330,7 +326,7 @@ class TestPythonRegistration(TestCase):
         del my_lib1
 
     def test_create_new_library_fragment_no_existing(self):
-        my_lib = Library(f"{self.test_ns}", "FRAGMENT")
+        my_lib = Library(self.test_ns, "FRAGMENT")
 
         my_lib.define("sum2(Tensor self) -> Tensor")
 
@@ -344,10 +340,10 @@ class TestPythonRegistration(TestCase):
         del my_lib
 
     def test_create_new_library_fragment_with_existing(self):
-        my_lib1 = Library(f"{self.test_ns}", "DEF")
+        my_lib1 = Library(self.test_ns, "DEF")
 
         # Create a fragment
-        my_lib2 = Library(f"{self.test_ns}", "FRAGMENT")
+        my_lib2 = Library(self.test_ns, "FRAGMENT")
 
         my_lib2.define("sum4(Tensor self) -> Tensor")
 
@@ -359,7 +355,7 @@ class TestPythonRegistration(TestCase):
         self.assertEqual(getattr(torch.ops, self.test_ns).sum4(x), x)
 
         # Create another fragment
-        my_lib3 = Library(f"{self.test_ns}", "FRAGMENT")
+        my_lib3 = Library(self.test_ns, "FRAGMENT")
 
         my_lib3.define("sum3(Tensor self) -> Tensor")
 
@@ -377,7 +373,7 @@ class TestPythonRegistration(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     def test_alias_analysis(self):
         def test_helper(alias_analysis=""):
-            my_lib1 = Library(f"{self.test_ns}", "DEF")
+            my_lib1 = Library(self.test_ns, "DEF")
 
             called = [0]
 
@@ -412,7 +408,7 @@ class TestPythonRegistration(TestCase):
 
         s0, s1 = ft.shape
 
-        tlib = Library(f"{self.test_ns}", "DEF")
+        tlib = Library(self.test_ns, "DEF")
         tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
 
         @impl(tlib, "sqsum", "CompositeExplicitAutograd")
@@ -424,12 +420,13 @@ class TestPythonRegistration(TestCase):
         self.assertEquals(out_val, 13)
 
     def test_register_functional_op_error_cases(self):
+        lib = Library(self.test_ns, "FRAGMENT")
         with self.assertRaisesRegex(TypeError, "instance of OpOverload"):
-            register_functional_op(f"{self.test_ns}::abs", torch.ops.aten.abs_)
+            register_functional_op(lib, "abs", torch.ops.aten.abs_)
         with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
-            register_functional_op(f"{self.test_ns}::abs", torch.ops.aten.abs_.default)
+            register_functional_op(lib, "abs", torch.ops.aten.abs_.default)
         with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
-            register_functional_op(f"{self.test_ns}::abs", torch.ops.aten.abs.out)
+            register_functional_op(lib, "abs", torch.ops.aten.abs.out)
 
         schemas = [
             'foo(Tensor x, Tensor(a!)? y) -> ()',
@@ -437,14 +434,16 @@ class TestPythonRegistration(TestCase):
             'foo(Tensor x, Tensor(a!) y, Tensor(b) z) -> Tensor(b)',
             'foo(Tensor x, Tensor(a!) y) -> (Tensor, Tensor(a))',
         ]
+        del lib
 
         for schema in schemas:
-            lib = Library(f'{self.test_ns}', 'FRAGMENT')
-            lib.define(schema)
+            lib = Library(self.test_ns, "FRAGMENT")
             try:
+                lib.define(schema)
                 with self.assertRaisesRegex(RuntimeError, "NYI"):
                     register_functional_op(
-                        f"{self.test_ns}::foo_functional",
+                        lib,
+                        "foo_functional",
                         getattr(torch.ops, self.test_ns).foo.default)
             finally:
                 del lib
@@ -486,7 +485,7 @@ class TestPythonRegistration(TestCase):
         self.assertTrue(has_functional_op)
 
     def test_register_functional_op_no_returns(self):
-        lib = Library(f'{self.test_ns}', 'FRAGMENT')
+        lib = Library(self.test_ns, 'FRAGMENT')
         lib.define('foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> ()')
 
         def foo_impl(x, y, z, w):
@@ -495,7 +494,8 @@ class TestPythonRegistration(TestCase):
 
         lib.impl('foo', foo_impl, 'CPU')
         register_functional_op(
-            f'{self.test_ns}::foo_functional',
+            lib,
+            'foo_functional',
             getattr(torch.ops, self.test_ns).foo.default)
         x = torch.randn([])
         y = torch.randn([])
@@ -506,7 +506,7 @@ class TestPythonRegistration(TestCase):
             getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
 
     def test_register_functional_op_one_return(self):
-        lib = Library(f'{self.test_ns}', 'FRAGMENT')
+        lib = Library(self.test_ns, 'FRAGMENT')
         lib.define('foo(Tensor x, Tensor(a!) y, Tensor(c!) z, Tensor(b!) w) -> Tensor')
 
         def foo_impl(x, y, z, w):
@@ -517,7 +517,8 @@ class TestPythonRegistration(TestCase):
 
         lib.impl('foo', foo_impl, 'CPU')
         register_functional_op(
-            f'{self.test_ns}::foo_functional',
+            lib,
+            "foo_functional",
             getattr(torch.ops, self.test_ns).foo.default)
         x = torch.randn([])
         y = torch.randn([])
@@ -528,7 +529,7 @@ class TestPythonRegistration(TestCase):
             getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
 
     def test_register_functional_op_multiple_returns(self):
-        lib = Library(f'{self.test_ns}', 'FRAGMENT')
+        lib = Library(self.test_ns, 'FRAGMENT')
         lib.define('foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> (Tensor, Tensor)')
 
         def foo_impl(x, y, z, w):
@@ -538,7 +539,8 @@ class TestPythonRegistration(TestCase):
 
         lib.impl('foo', foo_impl, 'CPU')
         register_functional_op(
-            f'{self.test_ns}::foo_functional',
+            lib,
+            'foo_functional',
             getattr(torch.ops, self.test_ns).foo.default)
 
         x = torch.randn([])

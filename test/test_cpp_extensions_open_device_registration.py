@@ -340,6 +340,39 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Overflow'):
                 foo_storage.resize_(8**29)
 
+        def test_open_device_storage_type():
+            torch.utils.rename_privateuse1_backend('foo')
+            # test cpu float storage
+            cpu_tensor = torch.randn([8]).float()
+            cpu_storage = cpu_tensor.storage()
+            self.assertEqual(cpu_storage.type(), "torch.FloatStorage")
+
+            # test custom float storage before defining FloatStorage
+            foo_tensor = cpu_tensor.foo()
+            foo_storage = foo_tensor.storage()
+            self.assertEqual(foo_storage.type(), "torch.storage.TypedStorage")
+
+            class CustomFloatStorage():
+                @property
+                def __module__(self):
+                    return "torch." + torch._C._get_privateuse1_backend_name()
+
+                @property
+                def __name__(self):
+                    return "FloatStorage"
+
+            # test custom float storage after defining FloatStorage
+            try:
+                torch.foo.FloatStorage = CustomFloatStorage()
+                self.assertEqual(foo_storage.type(), "torch.foo.FloatStorage")
+
+                # test custom int storage after defining FloatStorage
+                foo_tensor2 = torch.randn([8]).int().foo()
+                foo_storage2 = foo_tensor2.storage()
+                self.assertEqual(foo_storage2.type(), "torch.storage.TypedStorage")
+            finally:
+                torch.foo.FloatStorage = None
+
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
@@ -352,6 +385,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_pin_memory()
         test_open_device_serialization()
         test_open_device_storage_resize()
+        test_open_device_storage_type()
 
 
 if __name__ == "__main__":

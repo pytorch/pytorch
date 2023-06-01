@@ -7,10 +7,9 @@ from .autograd import autograd_not_implemented
 import torch.utils._pytree as pytree
 import weakref
 
-keep_alive = []
-
 
 def register_functional_op(
+    lib: Library,
     new_op_name: str,
     mutable_op: OpOverload,
 ) -> None:
@@ -19,36 +18,38 @@ def register_functional_op(
     This API also correctly links the functional variant with the mutable
     operator for the purposes of functionalization.
 
-    The lifetime of the new functional variant is that it will live forever.
+    All of the new registrations are performed on the ``lib`` passed in.
 
     Arguments:
-        new_op_name (str): Should be a string that looks like
-            "namespace::operator_name". The new functional variant will be
-            accessible under torch.ops.namespace.operator_name.
+        lib (Library): Should be a torch.library.Library object that has
+            the same namespace as ``mutable_op``'s namespace.
+            lib will be used to register the new functional op as well
+            as a functionalization kernel for the ``mutable_op``
+            If you don't have a library handy, use
+            ``torch.library.Library(ns, 'FRAGMENT')`` to construct one.
+        new_op_name (str): The name of the functional operator (without the
+            namespace). If no namespace, the new functional variant will be
+            accessible under ``torch.ops.{lib.ns}.new_op_name``.
         mutable_op (OpOverload): The mutable custom operator. Note
             that you may need to add a `.default` to it, like
             `torch.ops.aten.abs_.default`.
 
     """
     validate(mutable_op)
-    namespace, name = new_op_name.split("::")
-    lib = Library(namespace, "FRAGMENT")
-    keep_alive.append(lib)
-
     schema = functional_schema(new_op_name, mutable_op)
     lib.define(schema)
 
     functional_impl = construct_functional_impl(mutable_op)
-    lib.impl(name, functional_impl, 'CompositeExplicitAutograd')
+    lib.impl(new_op_name, functional_impl, 'CompositeExplicitAutograd')
 
-    functional_op = getattr(getattr(torch.ops, namespace), name).default
+    functional_op = getattr(getattr(torch.ops, lib.ns), new_op_name).default
 
     # There's no easy way for us to generate the autograd kernel, so we
     # use autograd_not_implemented. Also, this makes it so that the user
     # is unable to register an autograd formula themselves. This shouldn't
     # be a problem if the user doesn't use the functional op direclty
     # in their program, but we may need to revist this in the future.
-    lib.impl(name, autograd_not_implemented(functional_op), 'Autograd')
+    lib.impl(new_op_name, autograd_not_implemented(functional_op), 'Autograd')
 
     f_kernel = construct_functionalization_kernel(weakref.proxy(mutable_op), functional_op)
 
