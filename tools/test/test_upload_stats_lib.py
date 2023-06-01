@@ -8,8 +8,8 @@ from tools.stats.upload_stats_lib import emit_metric
 REPO = "some/repo"
 WORKFLOW = "some-workflow"
 JOB = "some-job"
-WORKFLOW_RUN_NUMBER = 123
-WORKFLOW_RUN_ATTEMPT = 3
+WORKFLOW_RUN_NUMBER = "123"
+WORKFLOW_RUN_ATTEMPT = "3"
 
 
 class TestUploadStats(unittest.TestCase):
@@ -33,6 +33,9 @@ class TestUploadStats(unittest.TestCase):
         expected_emit = {
             "dynamo_key": f"{REPO}/metric_name/{WORKFLOW}/{JOB}/{WORKFLOW_RUN_NUMBER}/{WORKFLOW_RUN_ATTEMPT}",
             "metric_name": "metric_name",
+            "calling_file": "test_upload_stats_lib.py",
+            "calling_module": "__main__",
+            "calling_function": "test_emit_metric",
             "repo": REPO,
             "workflow": WORKFLOW,
             "job": JOB,

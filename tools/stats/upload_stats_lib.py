@@ -1,7 +1,9 @@
 import gzip
+import inspect
 import io
 import json
 import os
+import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -133,8 +135,9 @@ def emit_metric(
 
     Parameters:
         metric_name:
-            Name of the metric. Every unique metric must have a different name
-            and must be emitted just once per run attempt.
+            Name of the metric. Every unique metric should have a different name
+            and be emitted just once per run attempt.
+            Metrics are namespaced by their module and the function that emitted them.
         metrics: The actual data to record.
 
     Some default values are populated from environment variables, which must be set
@@ -166,16 +169,19 @@ def emit_metric(
     reserved_metric_keys = [
         "dynamo_key",
         "metric_name",
+        "calling_file",
+        "calling_module",
+        "calling_function",
         *input_via_env_vars.keys(),
     ]
 
     # Ensure the metrics dict doesn't contain these reserved keys
     for key in reserved_metric_keys:
         used_reserved_keys = [k for k in metrics.keys() if k == key]
-        if used_reserved_keys in metrics:
+        if used_reserved_keys:
             raise ValueError(f"Metrics dict contains reserved keys [{', '.join(key)}]")
 
-    reserved_env_metrics = []
+    reserved_env_metrics = {}
     # Ensure we have a value for all the required env var based metrics
     for var, env_var in input_via_env_vars.items():
         reserved_env_metrics[var] = os.environ[env_var]
@@ -185,20 +191,32 @@ def emit_metric(
             )
             return
 
-    dynamo_key = "/".join([
-        reserved_env_metrics["repo"],
-        metric_name,
-        reserved_env_metrics["workflow"],
-        reserved_env_metrics["job"],
-        reserved_env_metrics["workflow_run_number"],
-        reserved_env_metrics["workflow_run_attempt"],
-    ])
+    dynamo_key = "/".join(
+        [
+            reserved_env_metrics["repo"],
+            metric_name,
+            reserved_env_metrics["workflow"],
+            reserved_env_metrics["job"],
+            reserved_env_metrics["workflow_run_number"],
+            reserved_env_metrics["workflow_run_attempt"],
+        ]
+    )
+
+    # Use info about the function that invoked this one as a namespace and a way to filter metrics.
+    calling_frame = sys._getframe(1)
+    calling_frame_info = inspect.getframeinfo(calling_frame)
+    calling_file = os.path.basename(calling_frame_info.filename)
+    calling_module = inspect.getmodule(calling_frame).__name__
+    calling_function = calling_frame_info.function
 
     try:
         boto3.resource("dynamodb").Table("torchci-metrics").put_item(
             Item={
                 "dynamo_key": dynamo_key,
                 "metric_name": metric_name,
+                "calling_file": calling_file,
+                "calling_module": calling_module,
+                "calling_function": calling_function,
                 **reserved_env_metrics,
                 **metrics,
             }
