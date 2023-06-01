@@ -288,7 +288,9 @@ class ShardedGradScaler(GradScaler):
         if future_handles:
             torch.futures.wait_all(future_handles)
 
-    def step(self, optimizer: torch.optim.Optimizer, *args, **kwargs) -> Optional[float]:
+    def step(
+        self, optimizer: torch.optim.Optimizer, *args, **kwargs
+    ) -> Optional[float]:
         return super().step(optimizer, *args, **kwargs)
 
     def _amp_update_scale_cpu_(self, found_inf) -> None:
