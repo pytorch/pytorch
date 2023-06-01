@@ -4,8 +4,7 @@ from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _di
                         _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
                         _fused_doc, _maximize_doc, _default_to_fused_or_foreach)
 from typing import List, Optional
-from torch.utils._foreach_utils import (_group_tensors_by_device_and_dtype,
-                                        _get_fused_kernels_supported_devices)
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ["AdamW", "adamw"]
 
@@ -58,14 +57,11 @@ class AdamW(Optimizer):
             # Suppor AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
-            fused_supported_devices = _get_fused_kernels_supported_devices()
             if not all(
-                p.device.type in fused_supported_devices and
-                torch.is_floating_point(p)
+                p.is_cuda and torch.is_floating_point(p)
                 for pg in self.param_groups for p in pg['params']
             ):
-                raise RuntimeError("`fused=True` requires all the params to be floating point Tensors of "
-                                   f"supported devices: {fused_supported_devices}.")
+                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
