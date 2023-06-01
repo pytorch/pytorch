@@ -222,10 +222,10 @@ class TestDeserialize(TestCase):
         """Export a graph, serialize it, deserialize it, and compare the results."""
         exported_module = export(fn, inputs, {})
         serialized_struct, state_dict = serialize(exported_module)
-        loaded_graph = deserialize(serialized_struct, state_dict)
+        deserialized_ep = deserialize(serialized_struct, state_dict)
 
         orig_outputs = exported_module(*inputs)
-        loaded_outputs = loaded_graph(*inputs)
+        loaded_outputs = deserialized_ep(*inputs)
 
         flat_orig_outputs, _ = pytree.tree_flatten(orig_outputs)
         flat_loaded_outputs, _ = pytree.tree_flatten(loaded_outputs)
