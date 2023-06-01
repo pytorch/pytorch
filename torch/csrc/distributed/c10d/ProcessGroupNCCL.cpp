@@ -291,29 +291,19 @@ std::ostream& operator<<(
     std::ostream& output,
     const ProcessGroupNCCL::WorkNCCL& workNCCL) {
   std::string workInfo;
-  if (workNCCL.outputs_) {
-    workInfo = c10::str(
-        "WorkNCCL(",
-        "SeqNum=",
-        workNCCL.seq_,
-        ", OpType=",
-        opTypeToString(workNCCL.opType_),
-        ", TensorShape=",
-        (*workNCCL.outputs_)[0].sizes(),
-        ", Timeout(ms)=",
-        workNCCL.opTimeout_.count(),
-        ")");
-  } else {
-    workInfo = c10::str(
-        "WorkNCCL(",
-        "SeqNum=",
-        workNCCL.seq_,
-        ", OpType=",
-        opTypeToString(workNCCL.opType_),
-        ", Timeout(ms)=",
-        workNCCL.opTimeout_.count(),
-        ")");
-  }
+  workInfo = c10::str(
+      "WorkNCCL(",
+      "SeqNum=",
+      workNCCL.seq_,
+      ", OpType=",
+      opTypeToString(workNCCL.opType_),
+      ", NumelIn=",
+      workNCCL.numelIn_,
+      ", NumelOut=",
+      workNCCL.numelOut_,
+      ", Timeout(ms)=",
+      workNCCL.opTimeout_.count(),
+      ")");
   return output << workInfo;
 }
 
@@ -353,6 +343,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
       workStartTime_(w.workStartTime_),
       seq_(w.seq_),
       startTraceUpdated_(w.startTraceUpdated_),
+      numelIn_(w.numelIn_),
+      numelOut_(w.numelOut_),
       store_(w.store_) {
   exception_ = w.exception_;
 }
@@ -1604,6 +1596,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   work->avoidRecordStreams_ = avoidRecordStreams_;
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
+  // Record size info for debug. We only record the size on the first device as
+  // multi-device per process is deprecated
+  work->numelIn_ = inputs[0].numel();
+  work->numelOut_ = outputs[0].numel();
 
   if (!coalescing_state_) {
     workEnqueue(work);
@@ -1749,6 +1745,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     work->opTimeout_ = options_->timeout;
     work->store_ = store_;
   }
+
+  // Record size info for debug. We only record the size on the first device as
+  // multi-device per process is deprecated
+  work->numelIn_ = work->numelOut_ = tensors[0].numel();
 
   // Future only needs to be created and marked completed with outputs for
   // recv(), but still create future for use cases such as profiling even for
