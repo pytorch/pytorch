@@ -166,12 +166,8 @@ def set_pre_op_offset(spec: DTensorSpec) -> None:
     # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
     coordinate = mesh.get_coordinate()
     assert coordinate is not None
-    shard_coord = [
-        coordinate[mesh_dim] if mesh_dim >= 0 else 0 for mesh_dim in spec.dim_map
-    ]
-    shard_size = [
-        mesh.size(mesh_dim) if mesh_dim >= 0 else 1 for mesh_dim in spec.dim_map
-    ]
+    shard_coord = [coordinate[mesh_dim] if mesh_dim >= 0 else 0 for mesh_dim in dim_map]
+    shard_size = [mesh.size(mesh_dim) if mesh_dim >= 0 else 1 for mesh_dim in dim_map]
 
     # compute shard linear index
     shard_linear_idx = _calc_shard_linear_idx(shard_coord, shard_size)
