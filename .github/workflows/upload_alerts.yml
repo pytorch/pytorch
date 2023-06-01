@@ -23,14 +23,14 @@ jobs:
 
       - name: Create alerts
         run: |
-          output=$(.github/scripts/create_alerts.py)
+          output=$(tools/alerts/create_alerts.py)
           echo "output is the following"
           echo $output
           ehco "end of output"
           echo "::set-output name=script_output::$output"
         id: alert_creation_step
       - name: Upload alerts
-        uses: pytorch/test-infra/.github/actions/upload-alerts@08208e8a3895ef3dbf47e2aeaaabaaade4342ead
+        uses: pytorch/test-infra/.github/actions/upload-alerts@main
         with:
           alerts: ${{ steps.alert_creation_step.outputs.script_output }}
           organization: "pytorch"
