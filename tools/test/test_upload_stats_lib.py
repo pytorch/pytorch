@@ -28,7 +28,7 @@ class TestUploadStats(unittest.TestCase):
             },
         ).start()
 
-    @mock.patch("boto3.resource")
+    @mock.patch("boto3.Session.resource")
     def test_emit_metric(self, mock_resource: Any) -> None:
         metric = {"some_number": 123}
 

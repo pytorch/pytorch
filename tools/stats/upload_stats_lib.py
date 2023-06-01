@@ -205,7 +205,8 @@ def emit_metric(
     calling_function = calling_frame_info.function
 
     try:
-        boto3.resource("dynamodb").Table("torchci-metrics").put_item(
+        session = boto3.Session(region_name='us-east-1')
+        session.resource("dynamodb").Table("torchci-metrics").put_item(
             Item={
                 "dynamo_key": dynamo_key,
                 "metric_name": metric_name,
