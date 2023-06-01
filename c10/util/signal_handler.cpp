@@ -1,18 +1,16 @@
 #include <c10/util/Backtrace.h>
+#include <c10/util/Logging.h>
 #include <c10/util/signal_handler.h>
 
 #if defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
 // Normal signal handler implementation.
-#include <cxxabi.h>
 #include <dirent.h>
-#include <dlfcn.h>
-#include <fmt/format.h>
+#include <fmt/core.h>
 #include <sys/syscall.h>
-#include <sys/types.h>
 #include <unistd.h>
-#include <unwind.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>

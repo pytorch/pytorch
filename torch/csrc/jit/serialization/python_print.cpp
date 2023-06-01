@@ -1679,7 +1679,7 @@ uint64_t PythonPrint::minVersion() const {
 
 PythonPrint::~PythonPrint() = default;
 
-static std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
+std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
   std::vector<IValue> result;
   std::vector<IValue> stack;
   stack.emplace_back(ivalue);
@@ -1716,7 +1716,7 @@ static std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
   return result;
 }
 
-static c10::optional<std::string> printType(
+c10::optional<std::string> printType(
     const c10::Type& type,
     torch::jit::TypeNameUniquer& type_name_uniquer) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {
