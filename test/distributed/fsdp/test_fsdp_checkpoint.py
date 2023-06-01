@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import itertools
 import sys
 from copy import deepcopy
 from functools import partial
@@ -357,7 +358,7 @@ class TestFSDPACInterleaving(FSDPTest):
     def test_fsdp_ac_interleave(self):
         # Works for non-reentrant, fails for reentrant
         indices = [[0], [0, 1], [0, 1, 2], [1], [1, 2], [2], [0, 2]]
-        for index in indices:
+        for index, use_orig_params in itertools.product(indices, [True, False]):
             model = FSDP(
                 BlockHolder(
                     rank=self.rank, checkpoint_indices=[], reentrant=False
@@ -368,7 +369,7 @@ class TestFSDPACInterleaving(FSDPTest):
                 BlockHolder(
                     rank=self.rank, checkpoint_indices=index, reentrant=False
                 ).cuda(),
-                use_orig_params=True,
+                use_orig_params=use_orig_params,
             )
             for i in range(6):
                 inp = torch.randn(2, 10, device="cuda")
