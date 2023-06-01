@@ -4,7 +4,6 @@ from typing import List, Dict, Tuple, Optional, Union
 import torch
 from torch import Tensor
 from torch.autograd.grad_mode import no_grad
-from torch._utils import is_compiling
 
 
 # This util function splits tensors into groups by device and dtype, which is useful before sending
@@ -22,14 +21,6 @@ from torch._utils import is_compiling
 def _group_tensors_by_device_and_dtype(tensorlistlist: List[List[Tensor]],
                                        with_indices: Optional[bool] = False) -> \
         Dict[Tuple[torch.device, torch.dtype], List[List[Union[Tensor, int]]]]:
-
-    if is_compiling():
-        if with_indices:
-            indices = list(range(len(tensorlistlist[0])))
-            tensorlistlist.append(indices)
-
-        return {(None, None): tensorlistlist}
-
     assert all(not x or len(x) == len(tensorlistlist[0]) for x in tensorlistlist), (
            "all specified tensorlists must match in length")
     per_device_and_dtype_tensors: Dict[Tuple[torch.device, torch.dtype], List[List[Union[Tensor, int]]]] = defaultdict(
