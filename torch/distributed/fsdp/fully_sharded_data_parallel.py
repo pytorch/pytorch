@@ -2065,7 +2065,7 @@ def _get_grad_norm(
             )
 
     grad_norm = torch.linalg.vector_norm(
-        torch.stack([norm.to(first_device) for norm in norms]),
+        torch.stack([grad_norm.to(first_device) for grad_norm in grad_norms]),
         norm_type,
         dtype=torch.float32,
     )
