@@ -37,7 +37,8 @@ def reset() -> None:
 def allow_in_graph(fn):
     """
     Customize which functions compilation will include in the generated graph.
-    Similar to `torch.fx.wrap()` it can be used as an escape hatch from graph breaks
+    It bypasses all introspection of the symbolic python code in favor of
+    directly writing it to the graph.
 
     Arguments:
     - fn: A callable representing the function to be included in the graph.
