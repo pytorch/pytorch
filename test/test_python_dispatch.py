@@ -16,6 +16,8 @@ from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorR
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.impl import custom_op, CustomOp
+from torch._custom_op.functional import register_functional_op
+import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 import typing
 import collections
@@ -416,6 +418,138 @@ class TestPythonRegistration(TestCase):
         out = getattr(torch.ops, self.test_ns).sqsum.default(s0, s1)
         out_val = shape_env.evaluate_expr(out.node.expr)
         self.assertEquals(out_val, 13)
+
+    def test_register_functional_op_error_cases(self):
+        lib = Library(self.test_ns, "FRAGMENT")
+        with self.assertRaisesRegex(TypeError, "instance of OpOverload"):
+            register_functional_op(lib, "abs", torch.ops.aten.abs_)
+        with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
+            register_functional_op(lib, "abs", torch.ops.aten.abs_.default)
+        with self.assertRaisesRegex(RuntimeError, "Expected op to be mutable"):
+            register_functional_op(lib, "abs", torch.ops.aten.abs.out)
+
+        schemas = [
+            'foo(Tensor x, Tensor(a!)? y) -> ()',
+            'foo(Tensor x, Tensor(a!)[] y) -> ()',
+            'foo(Tensor x, Tensor(a!) y, Tensor(b) z) -> Tensor(b)',
+            'foo(Tensor x, Tensor(a!) y) -> (Tensor, Tensor(a))',
+        ]
+        del lib
+
+        for schema in schemas:
+            lib = Library(self.test_ns, "FRAGMENT")
+            try:
+                lib.define(schema)
+                with self.assertRaisesRegex(RuntimeError, "NYI"):
+                    register_functional_op(
+                        lib,
+                        "foo_functional",
+                        getattr(torch.ops, self.test_ns).foo.default)
+            finally:
+                del lib
+                delattr(torch.ops, self.test_ns)
+
+    def _check_is_functional_variant(self, mutable_op, functional_op, args):
+        # functional op should not mutate
+        cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+        functional_result = functional_op(*cloned_args)
+        self.assertEqual(cloned_args, args)
+
+        # check functional_result includes mutable_result
+        mutable_result = mutable_op(*cloned_args)
+        if mutable_result is None:
+            flat_mutable_result = []
+        else:
+            flat_mutable_result, _ = pytree.tree_flatten(mutable_result)
+        flat_functional_result, _ = pytree.tree_flatten(functional_result)
+        assert len(flat_functional_result) > len(flat_mutable_result)
+        self.assertEqual(flat_functional_result[:len(flat_mutable_result)], flat_mutable_result)
+
+        # check rest of functional_result is the mutated args
+        mutated_args = [maybe_mutated_arg for maybe_mutated_arg, arg in zip(cloned_args, args)
+                        if not torch.allclose(maybe_mutated_arg, arg)]
+        self.assertEqual(flat_functional_result[len(flat_mutable_result):], mutated_args)
+
+        # check that functionalization kernel was indeed registered
+        def fn(*args):
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mutable_op(*cloned_args)
+            return cloned_args
+
+        gm = make_fx(torch.func.functionalize(fn))(*args)
+        has_functional_op = False
+        for node in gm.graph.nodes:
+            self.assertFalse(node.target is mutable_op)
+            if node.target is functional_op:
+                has_functional_op = True
+        self.assertTrue(has_functional_op)
+
+    def test_register_functional_op_no_returns(self):
+        lib = Library(self.test_ns, 'FRAGMENT')
+        lib.define('foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> ()')
+
+        def foo_impl(x, y, z, w):
+            y.fill_(3.14)
+            w.fill_(2.71)
+
+        lib.impl('foo', foo_impl, 'CPU')
+        register_functional_op(
+            lib,
+            'foo_functional',
+            getattr(torch.ops, self.test_ns).foo.default)
+        x = torch.randn([])
+        y = torch.randn([])
+        z = torch.randn([])
+        w = torch.randn([])
+        self._check_is_functional_variant(
+            getattr(torch.ops, self.test_ns).foo.default,
+            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+
+    def test_register_functional_op_one_return(self):
+        lib = Library(self.test_ns, 'FRAGMENT')
+        lib.define('foo(Tensor x, Tensor(a!) y, Tensor(c!) z, Tensor(b!) w) -> Tensor')
+
+        def foo_impl(x, y, z, w):
+            y.fill_(3.14)
+            w.fill_(2.71)
+            z.fill_(0.99)
+            return x.clone()
+
+        lib.impl('foo', foo_impl, 'CPU')
+        register_functional_op(
+            lib,
+            "foo_functional",
+            getattr(torch.ops, self.test_ns).foo.default)
+        x = torch.randn([])
+        y = torch.randn([])
+        z = torch.randn([])
+        w = torch.randn([])
+        self._check_is_functional_variant(
+            getattr(torch.ops, self.test_ns).foo.default,
+            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
+
+    def test_register_functional_op_multiple_returns(self):
+        lib = Library(self.test_ns, 'FRAGMENT')
+        lib.define('foo(Tensor x, Tensor(a!) y, Tensor z, Tensor(b!) w) -> (Tensor, Tensor)')
+
+        def foo_impl(x, y, z, w):
+            y.fill_(3.14)
+            w.fill_(2.71)
+            return x.clone(), z.clone()
+
+        lib.impl('foo', foo_impl, 'CPU')
+        register_functional_op(
+            lib,
+            'foo_functional',
+            getattr(torch.ops, self.test_ns).foo.default)
+
+        x = torch.randn([])
+        y = torch.randn([])
+        z = torch.randn([])
+        w = torch.randn([])
+        self._check_is_functional_variant(
+            getattr(torch.ops, self.test_ns).foo.default,
+            getattr(torch.ops, self.test_ns).foo_functional.default, (x, y, z, w))
 
 
 class TestCustomOp(TestCase):
