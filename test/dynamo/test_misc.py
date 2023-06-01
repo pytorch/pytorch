@@ -4339,6 +4339,50 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    def test_assigning_function_to_object_attribute(self):
+        # user-defined functions which are object's attributes are not converted to bound methods
+        def my_add(*args):
+            a, b = args
+            return a + b
+
+        class MyClass:
+            def __init__(self, func):
+                self.add = func
+
+        obj = MyClass(my_add)
+
+        def fn(x):
+            return obj.add(x, 2)
+
+        x = torch.rand(2, 3)
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_assigning_function_to_class_attribute(self):
+        # user-defined functions which are class's attributes are converted to bound methods
+        def my_add(*args):
+            obj, a, b = args
+            return obj.x + a + b
+
+        class MyClass:
+            add = my_add
+
+            def __init__(self, x):
+                self.x = x
+
+        obj = MyClass(0.5)
+
+        def fn(x):
+            return obj.add(x, 2)
+
+        x = torch.rand(2, 3)
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_tagging_tensors_simple(self):
         def foo(x, y):
             return x * y, x, y
