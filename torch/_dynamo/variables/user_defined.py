@@ -405,18 +405,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 subobj.__func__, self, source=source, **options
             )
         elif isinstance(subobj, types.FunctionType):
-            # Check `__dict__` to bypass the function descriptor protocol to
-            # accurately check for static method
-            is_staticmethod = name in type(self.value).__dict__ and isinstance(
-                type(self.value).__dict__[name], staticmethod
-            )
-            if is_staticmethod:
-                # Use `UserFunctionVariable` to avoid doubly passing in `self`
-                # as an argument, which happens if using `UserMethodVariable`
-                return variables.UserFunctionVariable(
-                    subobj, name, source=source, **options
+            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
+            # Static lookup can't tell us it's a method or function correctly,
+            # so we trigger dynamic lookup here to get the correct type.
+            dynamic_subobj = getattr(self.value, name)
+            if inspect.ismethod(dynamic_subobj):
+                return variables.UserMethodVariable(
+                    subobj, self, source=source, **options
                 )
-            return variables.UserMethodVariable(subobj, self, source=source, **options)
+            elif inspect.isfunction(dynamic_subobj):
+                return variables.UserFunctionVariable(subobj, source=source, **options)
 
         if (
             name in getattr(value, "__dict__", {})
