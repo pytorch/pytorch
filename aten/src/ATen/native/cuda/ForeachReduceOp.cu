@@ -117,7 +117,8 @@ __global__ void lpnorm_cleanup(
 // support functions whose inputs dtypes and output dtype are different.
 std::vector<Tensor> foreach_tensor_norm_cuda(
     TensorList tensors,
-    const Scalar& ord) {
+    const Scalar& ord,
+    c10::optional<ScalarType> dtype) {
   double p;
   if (ord.isIntegral(false)) {
     p = ord.to<int64_t>();
@@ -134,9 +135,16 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
         return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
             at::isComplexType(scalar_type);
       });
-  if (!can_use_fast_route(tensors) || has_int_or_complex ||
+  const bool is_same_dtype =
+      dtype.has_value
+      ? std::any_of(tensors.begin(), tensors.end(), [](const auto & t) {
+          const auto scalar_type = t.scalar_type();
+          return scalar_type ==  *dtype
+      })
+      : true
+  if (!can_use_fast_route(tensors) || !is_same_dtype || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2))) {
-    return foreach_tensor_norm_slow(tensors, ord);
+    return foreach_tensor_norm_slow(tensors, ord, dtype);
   }
 
   const int ntensors = tensors.size();
