@@ -407,7 +407,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             elif 0 not in x:
                 return ValueRanges.wrap(sympy.true)
             else:
-                return ValueRanges.ValueRanges(sympy.false, sympy.true)
+                return ValueRanges(sympy.false, sympy.true)
         # If we want to do this properly, we'd need to track the type of the variables
         return x
 
