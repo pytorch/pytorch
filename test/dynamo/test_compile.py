@@ -97,9 +97,7 @@ class PublicTorchCompilerTests(unittest.TestCase):
             "reset",
             "allow_in_graph",
             "list_backends",
-            "explain",
             "assume_constant_result",
-            "is_compiling",
             "disable",
         ]
 

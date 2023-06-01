@@ -9,7 +9,6 @@ __all__ = [
     "reset",
     "allow_in_graph",
     "list_backends",
-    "explain",
     "disable",
 ]
 
@@ -87,52 +86,6 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
     """
 
     return torch._dynamo.list_backends(exclude_tags)
-
-def explain(f, *args, **kwargs):
-    """
-    Run the function `f` with compilation and provide an explanation of the optimization process.
-
-    This function runs the specified function `f` with compilations optimization process enabled.
-    It captures information about the optimization process, including the number of graphs produced,
-    the reasons for graph breaks, the operations per graph, and the output guards.
-
-    Arguments:
-    - `f`: The function to be optimized and analyzed.
-    - `*args`, `**kwargs`: Arguments and keyword arguments to be passed to the function `f`.
-
-    Returns:
-    A tuple containing the following information:
-    - explanation: A summary of the optimization process, including the number of graphs produced,
-    the number of graph breaks, and the total number of operations.
-    - out_guards: A list of output guards captured during the optimization process.
-    - graphs: A list of TorchFX GraphModule objects representing the produced graphs.
-    - ops_per_graph: A list of lists, where each inner list contains the operations (node targets)
-    present in a graph.
-    - break_reasons: A list of graph break reasons encountered during the optimization process.
-    - explanation_verbose: A detailed explanation including the break reasons with formatted stack traces.
-
-    Note:
-    - The function imports and uses the `reset()` function from the same module to reset
-    compilations internal state before running `f`.
-    - The function internally defines several helper functions to accumulate graphs, count operations,
-    export guards, and format explanations.
-    - The function temporarily patches the `most_recent_backend` attribute to None using the `patch()` function
-    from the `unittest.mock` module.
-
-    Example:
-    To run a function `my_function()` with compilation and obtain an explanation of the optimization process,
-    we can call the `explain()` function as follows:
-
-    ::
-        explanation, out_guards, graphs, ops_per_graph, break_reasons, explanation_verbose =
-        explain(my_function, arg1, arg2, keyword_arg=value)
-
-    In this example, `my_function()` will be optimized using compilation, and the results and information
-    about the optimization process will be stored in the respective variables.
-
-    """
-
-    return torch._dynamo.explain(f, *args, **kwargs)
 
 def assume_constant_result(fn):
     """

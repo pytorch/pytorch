@@ -16,5 +16,4 @@ torch.compiler API reference
      allow_in_graph
      assume_constant_result
      list_backends
-     explain
      disable
