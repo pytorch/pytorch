@@ -38,7 +38,7 @@ elif [ -n "${CLANG_VERSION}" ]; then
 else
   pip_install "git+${TRITON_REPO}@${TRITON_PINNED_COMMIT}#subdirectory=python"
 fi
-
+pip_uninstall "torch"
 # if [ -n "${CONDA_CMAKE}" ]; then
 #   # TODO: This is to make sure that the same cmake and numpy version from install conda
 #   # script is used. Without this step, the newer cmake version (3.25.2) downloaded by
