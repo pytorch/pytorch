@@ -153,7 +153,7 @@ def emit_metric(
         raise ValueError("You didn't ask to upload any metrics!")
 
     # Env vars that we use to determine basic info about the workflow run.
-    # This also helps ensure that we only emit metrics during CI
+    # This also helps ensure that we only emit metrics during CI.
     input_via_env_vars = {
         "repo": "GITHUB_REPOSITORY",
         "workflow": "GITHUB_WORKFLOW",
