@@ -2878,7 +2878,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             def forward(self, x):
                 return self.relu(self.linear(x))
 
-        mod = torch.compile(MyModule(), backend='eager')
+        mod = torch.compile(MyModule(), backend="eager")
         mod.is_compiled = True
         self.assertTrue("is_compiled" in dir(mod))
 
