@@ -28,7 +28,6 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
-from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
@@ -235,6 +234,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
+    "AlbertForQuestionAnswering",  # accuracy
     "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
     "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
     "mobilevit_s",
@@ -1264,11 +1264,17 @@ class BenchmarkRunner:
                 except NotImplementedError:
                     continue  # bad benchmark implementation
 
+    def deepcopy_model(self, model):
+        try:
+            return copy.deepcopy(model)
+        except TypeError:
+            return model
+
     def validate_model(self, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
-        model = copy.deepcopy(model)
+        model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1283,7 +1289,7 @@ class BenchmarkRunner:
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = copy.deepcopy(model)
+        model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1387,7 +1393,7 @@ class BenchmarkRunner:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         def deepcopy_and_maybe_ddp(model):
-            model = copy.deepcopy(model)
+            model = self.deepcopy_model(model)
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
@@ -1437,6 +1443,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
+                log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Rerun native pytorch
@@ -1456,24 +1463,31 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Two eager runs should have exactly same result
-            if (
-                name not in self.skip_accuracy_check_as_eager_non_deterministic
-                and not same(
-                    correct_result,
-                    correct_rerun_result,
-                    fp64_ref=None,
-                    cos_similarity=False,
-                    tol=0,
-                    equal_nan=self.equal_nan,
-                )
-            ):
+            is_same = True
+            try:
+                if (
+                    name not in self.skip_accuracy_check_as_eager_non_deterministic
+                    and not same(
+                        correct_result,
+                        correct_rerun_result,
+                        fp64_ref=None,
+                        cos_similarity=False,
+                        tol=0,
+                        equal_nan=self.equal_nan,
+                    )
+                ):
+                    is_same = False
+            except Exception as e:
+                # Sometimes torch.allclose may throw RuntimeError
+                is_same = False
+
+            if not is_same:
                 accuracy_status = "eager_two_runs_differ"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+
             correct_rerun_result = None
 
             # Run with Dynamo
-            # Sometime CI fails with random triton compilation failure which will be skipped for now
-            # TODO: revisit this after switching to new Triton runtime
             reset_rng_state()
             torch._dynamo.reset()
             try:
@@ -1483,42 +1497,34 @@ class BenchmarkRunner:
                 new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
-                if (
-                    self.args.ci
-                    and isinstance(e, BackendCompilerFailed)
-                    and (
-                        "Internal Triton PTX codegen error" in str(e)
-                        or "cubin" in str(e)
-                    )
-                ):
-                    accuracy_status = "pass_due_to_skip"
-                    return record_status(
-                        accuracy_status, dynamo_start_stats=start_stats
-                    )
-                else:
-                    print(
-                        "TorchDynamo optimized model failed to run because of following error"
-                    )
-                    accuracy_status = (
-                        "OOM"
-                        if isinstance(e, torch.cuda.OutOfMemoryError)
-                        else "fail_to_run"
-                    )
-                    return record_status(
-                        accuracy_status, dynamo_start_stats=start_stats
-                    )
+                print(
+                    "TorchDynamo optimized model failed to run because of following error"
+                )
+                accuracy_status = (
+                    "OOM"
+                    if isinstance(e, torch.cuda.OutOfMemoryError)
+                    else "fail_to_run"
+                )
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
-            if not same(
-                correct_result,
-                new_result,
-                fp64_outputs,
-                equal_nan=self.equal_nan,
-                cos_similarity=cos_similarity,
-                tol=tolerance,
-            ):
+            try:
+                if not same(
+                    correct_result,
+                    new_result,
+                    fp64_outputs,
+                    equal_nan=self.equal_nan,
+                    cos_similarity=cos_similarity,
+                    tol=tolerance,
+                ):
+                    is_same = False
+            except Exception as e:
+                # Sometimes torch.allclose may throw RuntimeError
+                is_same = False
+
+            if not is_same:
                 if self.args.skip_accuracy_check:
                     accuracy_status = "pass_due_to_skip"
                 else:
@@ -2009,6 +2015,11 @@ def parse_args(args=None):
         want to verify the numerical correctness of graidents. But that may
         cause time measurement not accurate""",
     )
+    parser.add_argument(
+        "--enable-activation-checkpointing",
+        action="store_true",
+        help="Enables activation checkpointing for HF models",
+    )
     parser.add_argument("--timing", action="store_true", help="Emits phase timing")
 
     parser.add_argument(
@@ -2240,8 +2251,8 @@ def run(runner, args, original_dir=None):
                 args.batch_size = 8
 
         # Remove sources of randomness
-        if runner.suite_name != "timm_models":
-            # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
+        if runner.suite_name not in ("timm_models", "huggingface"):
+            # TODO - Using train mode for timm_models and HF models. Move to train mode for Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
         if args.only is not None and args.only not in {

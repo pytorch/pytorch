@@ -3469,6 +3469,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
         xfail('unique', ''),  # dynamic op
@@ -3656,6 +3657,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('count_nonzero'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
