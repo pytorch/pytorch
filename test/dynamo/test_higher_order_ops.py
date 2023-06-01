@@ -783,25 +783,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
 
-    # def test_without_functionalization_turned_on(self):
-    #     def gn(x, y):
-    #         return torch.sigmoid(torch.matmul(x, y))
-
-    #     def fn(x, y):
-    #         return torch.cos(torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y))
-
-    #     x = torch.randn(4, 4, requires_grad=True)
-    #     y = torch.randn(4, 4, requires_grad=True)
-    #     args = (x, y)
-
-    #     backend = EagerAndRecordGraphs()
-    #     cnt = CompileCounterWithBackend(backend)
-
-    #     expected = fn(*args)
-    #     result = torch.compile(fn, backend=cnt)(*args)
-
-    #     self.assertEqual(result, expected)
-
     @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_module(self):
