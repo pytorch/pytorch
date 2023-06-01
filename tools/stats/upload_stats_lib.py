@@ -1,3 +1,4 @@
+import decimal
 import gzip
 import inspect
 import io
@@ -5,7 +6,6 @@ import json
 import os
 import xml.etree.ElementTree as ET
 import zipfile
-import decimal
 
 from pathlib import Path
 from typing import Any, Dict, List
@@ -124,11 +124,13 @@ def upload_to_rockset(
     )
     print("Done!")
 
+
 def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in data.items():
         if isinstance(value, float):
-            data[key] = decimal.Decimal(str(value)) # str() preserves the precision
+            data[key] = decimal.Decimal(str(value))  # str() preserves the precision
     return data
+
 
 def emit_metric(
     metric_name: str,
