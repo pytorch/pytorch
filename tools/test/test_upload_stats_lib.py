@@ -10,8 +10,8 @@ from tools.stats.upload_stats_lib import emit_metric
 REPO = "some/repo"
 WORKFLOW = "some-workflow"
 JOB = "some-job"
-WORKFLOW_RUN_NUMBER = "123"
-WORKFLOW_RUN_ATTEMPT = "3"
+WORKFLOW_RUN_NUMBER = 123
+WORKFLOW_RUN_ATTEMPT = 3
 
 
 class TestUploadStats(unittest.TestCase):

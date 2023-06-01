@@ -206,6 +206,10 @@ def emit_metric(
         ]
     )
 
+    # These are ints, even though the env vars were read as strings. Lets emit them that way
+    reserved_env_metrics["workflow_run_number"] = int(reserved_env_metrics["workflow_run_number"])
+    reserved_env_metrics["workflow_run_attempt"] = int(reserved_env_metrics["workflow_run_attempt"])
+
     # Use info about the function that invoked this one as a namespace and a way to filter metrics.
     calling_frame = inspect.currentframe().f_back  # type: ignore[union-attr]
     calling_frame_info = inspect.getframeinfo(calling_frame)  # type: ignore[arg-type]
