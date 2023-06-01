@@ -14,8 +14,6 @@ import boto3  # type: ignore[import]
 import requests
 import rockset  # type: ignore[import]
 
-from torch.testing._internal.common_utils import IS_CI
-
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
 TARGET_WORKFLOW = "--rerun-disabled-tests"
@@ -151,13 +149,11 @@ def emit_metric(
         GITHUB_RUN_ATTEMPT: The workflow run attempt
     """
 
-    if not IS_CI:
-        return  # Don't emit metrics if we're not running in CI
-
     if metrics is None:
         raise ValueError("You didn't ask to upload any metrics!")
 
-    # Env vars that we use to determine basic info about the workflow run
+    # Env vars that we use to determine basic info about the workflow run.
+    # This also helps ensure that we only emit metrics during CI
     input_via_env_vars = {
         "repo": "GITHUB_REPOSITORY",
         "workflow": "GITHUB_WORKFLOW",

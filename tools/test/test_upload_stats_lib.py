@@ -18,6 +18,7 @@ class TestUploadStats(unittest.TestCase):
         mock.patch.dict(
             "os.environ",
             {
+                "CI": "true",
                 "GITHUB_REPOSITORY": REPO,
                 "GITHUB_WORKFLOW": WORKFLOW,
                 "GITHUB_JOB": JOB,
@@ -56,6 +57,21 @@ class TestUploadStats(unittest.TestCase):
         with self.assertRaises(ValueError):
             emit_metric("metric_name", metric)
 
+    @mock.patch("boto3.resource")
+    def test_no_metrics_emitted_if_env_var_not_set(self, mock_resource: Any) -> None:
+        metric = {"some_number": 123}
+
+        mock.patch.dict(
+            "os.environ",
+            {
+                "GITHUB_REPOSITORY": "", # unset this env var
+            },
+        ).start()
+
+        emit_metric("metric_name", metric)
+
+        mock_table = mock_resource.return_value.Table.return_value
+        mock_table.put_item.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()
