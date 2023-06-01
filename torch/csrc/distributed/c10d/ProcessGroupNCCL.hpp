@@ -151,7 +151,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Helper function that returns True if the WorkNCCL object has timed out
     // and False otherwise.
     // In case of timeout, set exception on the WorkNCCL object.
-    bool checkTimeout();
+    bool checkTimeout(c10::optional<std::chrono::milliseconds> timeout = c10::nullopt);
 
     std::vector<at::Tensor> result() override;
 
@@ -192,6 +192,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Indicates if the nccl start event has been updated to the store trace.
     // This will be used by desync debug.
     bool startTraceUpdated_{false};
+
+    // Record collective sizes for debug. We only record the size on the first
+    // device as multi-device per process is deprecated
+    size_t numelIn_ = -1;
+    size_t numelOut_ = -1;
 
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.
@@ -279,6 +284,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
+
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+    // Configure ranks
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#endif
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -366,6 +376,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   c10::intrusive_ptr<Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override;
+
+  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
   c10::intrusive_ptr<Work> reduce_scatter(

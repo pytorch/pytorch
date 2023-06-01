@@ -350,9 +350,6 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s0.pin_memory()
 
-        with self.assertRaisesRegex(RuntimeError, r'got unexpected device type'):
-            s0.resize_(10)
-
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
             s0.share_memory_()
 
@@ -368,6 +365,14 @@ class TestTorchDeviceType(TestCase):
 
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s1.copy_(s0)
+
+    @onlyCPU
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_storage_meta_ok(self, device, dtype):
+        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
+
+        # This is OK, it changes the meta storage size without allocating
+        s0.resize_(10)
 
     @onlyCUDA
     def test_module_share_memory(self):
@@ -1438,6 +1443,24 @@ else:
             lambda: res.backward(grad),
             'upsample_bilinear2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
+
+    @skipIfTorchInductor("aot-autograd issue")
+    def test_deterministic_interpolate_bilinear(self, device):
+        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
+        grad = None
+        with DeterministicGuard(True):
+            for _ in range(5):
+                res = torch.nn.functional.interpolate(
+                    input,
+                    size=12,
+                    mode='bilinear',
+                    align_corners=False)
+                res.backward(torch.ones_like(res))
+                if grad is None:
+                    grad = input.grad
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+                input.grad = None
 
     @skipIfMps
     @skipIfTorchInductor("aot-autograd issue")
@@ -2975,6 +2998,17 @@ else:
             self.assertEqual(x, y)
 
     @onlyCPU
+    def test_bfloat16_neg_abs(self, device):
+        src = torch.randn(256)
+        src[0] = torch.nan
+        src[1] = -torch.nan
+        src[2] = torch.inf
+        src[3] = -torch.inf
+        src_bf16 = src.bfloat16()
+        self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
+        self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
+
+    @onlyCPU
     def test_bfloat16_float_copy(self, device):
         for shape in [(20, 7), (249, 137), (1029, 917), (1, 7, 19, 17), (3, 77, 1091)]:
             input = torch.randn(shape, dtype=torch.float, device=device)
@@ -4367,9 +4401,10 @@ else:
 
     # FIXME: move to test distributions
     @onlyCUDA
+    @skipIfTorchInductor("out_wrapper does not check devices correctly")
     def test_multinomial_device_constrain(self, device):
-        x = torch.empty(0, device="cpu")
-        y = torch.empty(0, device=device)
+        x = torch.empty(3, device="cpu")
+        y = torch.empty(3, device=device)
         self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
@@ -4377,10 +4412,10 @@ else:
     # FIXME: move to test distributions
     @deviceCountAtLeast(2)
     @onlyCUDA
-    @skipIfTorchInductor("FIXME")
+    @skipIfTorchInductor("out_wrapper does not check devices correctly")
     def test_multinomial_gpu_device_constrain(self, devices):
-        x = torch.empty(0, device=devices[0])
-        y = torch.empty(0, device=devices[1])
+        x = torch.empty(3, device=devices[0])
+        y = torch.empty(3, device=devices[1])
         self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device",
             lambda: torch.multinomial(x, 2, out=y))
@@ -4480,6 +4515,17 @@ else:
         self.assertEqual(torch.CharTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.FloatTensor(5).to(device).is_signed(), True)
         self.assertEqual(torch.HalfTensor(10).to(device).is_signed(), True)
+
+    def test_tensor_type(self):
+        for t in torch._tensor_classes:
+            if 'cuda' in t.__module__:
+                self.assertEqual(t.is_cuda, True)
+            else:
+                self.assertEqual(t.is_cuda, False)
+            if 'xpu' in t.__module__:
+                self.assertEqual(t.is_xpu, True)
+            else:
+                self.assertEqual(t.is_xpu, False)
 
     # Note - reports a leak of 512 bytes on CUDA device 1
     @deviceCountAtLeast(2)
@@ -6827,6 +6873,63 @@ class TestTorch(TestCase):
         self.assertEqual(complexdouble_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
         self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
         self.assertIs(complexdouble_storage.dtype, torch.complex128)
+
+    def test_storage_byteswap(self):
+        input = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        swapped_8bytes = [7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8]
+        swapped_4bytes = [3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12]
+        swapped_2bytes = [1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14]
+        swapped_1byte = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+        storage = torch.storage.TypedStorage(input, dtype=torch.uint8)._untyped_storage
+
+        storage_f64 = storage.__copy__()
+        storage_f64.byteswap(torch.float64)
+        self.assertEqual(storage_f64.tolist(), swapped_8bytes)
+
+        storage_f32 = storage.__copy__()
+        storage_f32.byteswap(torch.float32)
+        self.assertEqual(storage_f32.tolist(), swapped_4bytes)
+
+        storage_f16 = storage.__copy__()
+        storage_f16.byteswap(torch.float16)
+        self.assertEqual(storage_f16.tolist(), swapped_2bytes)
+
+        storage_bf16 = storage.__copy__()
+        storage_bf16.byteswap(torch.bfloat16)
+        self.assertEqual(storage_bf16.tolist(), swapped_2bytes)
+
+        storage_i64 = storage.__copy__()
+        storage_i64.byteswap(torch.int64)
+        self.assertEqual(storage_i64.tolist(), swapped_8bytes)
+
+        storage_i32 = storage.__copy__()
+        storage_i32.byteswap(torch.int32)
+        self.assertEqual(storage_i32.tolist(), swapped_4bytes)
+
+        storage_i16 = storage.__copy__()
+        storage_i16.byteswap(torch.int16)
+        self.assertEqual(storage_i16.tolist(), swapped_2bytes)
+
+        storage_i8 = storage.__copy__()
+        storage_i8.byteswap(torch.int8)
+        self.assertEqual(storage_i8.tolist(), swapped_1byte)
+
+        storage_ui8 = storage.__copy__()
+        storage_ui8.byteswap(torch.uint8)
+        self.assertEqual(storage_ui8.tolist(), swapped_1byte)
+
+        storage_bool = storage.__copy__()
+        storage_bool.byteswap(torch.bool)
+        self.assertEqual(storage_bool.tolist(), swapped_1byte)
+
+        storage_c128 = storage.__copy__()
+        storage_c128.byteswap(torch.complex128)
+        self.assertEqual(storage_c128.tolist(), swapped_8bytes)
+
+        storage_c64 = storage.__copy__()
+        storage_c64.byteswap(torch.complex64)
+        self.assertEqual(storage_c64.tolist(), swapped_4bytes)
 
     # Test that internal versions of functions related to TypedStorage do not
     # produce a deprecation warning
