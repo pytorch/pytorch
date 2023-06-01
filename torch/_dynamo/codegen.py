@@ -132,7 +132,7 @@ class PyCodegen:
             )
             output.append(create_instruction("BINARY_SUBSCR"))
             if isinstance(value, NumpyNdarrayVariable):
-                output.extend([*create_call_function(1, False)])
+                output.extend(create_call_function(1, False))
             elif isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)

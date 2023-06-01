@@ -667,7 +667,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
-class NumpyNdarrayVariable(VariableTracker):
+class NumpyNdarrayVariable(TensorVariable):
     """
     Represents a torch_np.ndarray, but backed by torch Tensor. Use this for Tensor.numpy() call.
     """
@@ -675,35 +675,32 @@ class NumpyNdarrayVariable(VariableTracker):
     def __init__(
         self,
         proxy: torch.fx.Proxy,
-        class_type=torch.Tensor,
         **kwargs,
     ):
-        if "specialized_value" in kwargs:
-            kwargs.pop("specialized_value")
-        super().__init__(**kwargs)
-        self.proxy = proxy
-        self.class_type = class_type
+        raw_value = kwargs.pop("raw_value", None)
+        super().__init__(proxy, **kwargs)
+        self.raw_value = raw_value
 
-    def python_type(self):
-        return self.class_type
+    @classmethod
+    def from_tensor_variable(cls, tensor_variable, raw_value):
+        # Convert a `TensorVariable` instance into an `NumpyNdarrayVariable` instance.
+        return NumpyNdarrayVariable(
+            **dict(tensor_variable.__dict__),
+            raw_value=raw_value,
+        )
 
-    def as_proxy(self):
-        return self.proxy
+    def preprocess(self, cg, argname):
+        from .. import utils
+        from ..bytecode_transformation import create_call_function
 
-    @staticmethod
-    def specialize(value: torch.Tensor):
-        props = {
-            "class_type": type(value),
-        }
-        return props
-
-    def unpack_var_sequence(self, tx):
-        super().unpack_var_sequence(tx)
+        cg.extend_output([cg.load_import_from(utils.__name__, "numpy_to_tensor")])
+        cg.extend_output([cg.create_load(argname)])
+        cg.append_output(create_call_function(1, False))
 
     def var_getattr(self, tx, name):
         from torch._dynamo.variables import GetAttrVariable, TupleVariable
-        from ..utils import attr_wrapper
-        from .builder import wrap_fx_proxy_cls
+        from ..utils import numpy_attr_wrapper
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         result = None
         options = VariableTracker.propagate(self)
@@ -713,7 +710,7 @@ class NumpyNdarrayVariable(VariableTracker):
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    attr_wrapper,
+                    numpy_attr_wrapper,
                     (self.as_proxy(), name),
                     {},
                 ),
@@ -729,6 +726,8 @@ class NumpyNdarrayVariable(VariableTracker):
                 **options,
             )
         elif name == "shape":
+            # ndarray.shape gives a tuple of ints while tensor.shape returns a torch.Size object.
+            # Here we overrides target_cls to be TupleVariable to match ndarray.shape return type.
             result = wrap_fx_proxy_cls(
                 target_cls=TupleVariable,
                 tx=tx,
@@ -737,8 +736,7 @@ class NumpyNdarrayVariable(VariableTracker):
                 **options,
             )
         elif name == "size":
-            result = wrap_fx_proxy_cls(
-                target_cls=ConstantVariable,
+            result = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_method",
@@ -750,13 +748,17 @@ class NumpyNdarrayVariable(VariableTracker):
                 **options,
             )
         elif name == "strides":
-            result = wrap_fx_proxy_cls(
-                target_cls=ConstantVariable,
+            # ndarray.strides returns a tuple of strides in terms of bytes. E.g., np.ones([2, 3]).strides -> (24, 8).
+            # This result can't be generated from tensor attributes or functions (given we don't have tensor.strides()
+            # and the semantics of tensor.stride() is different), so instead we delegate it to torch_np.ndarray
+            # strides() function call.
+            torch_np_func_name = "strides"
+            result = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    attr_wrapper,
-                    (self.as_proxy(), name),
+                    numpy_attr_wrapper,
+                    (self.as_proxy(), torch_np_func_name),
                     {},
                 ),
                 example_value=None,

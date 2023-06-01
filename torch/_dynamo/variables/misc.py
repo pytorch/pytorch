@@ -574,7 +574,7 @@ class NumpyVariable(VariableTracker):
             unimplemented(f"numpy.{self.value}()")
         import torch_np
 
-        from ..utils import to_tensor_wrapper
+        from ..utils import np, numpy_to_tensor_wrapper
 
         from .builder import wrap_fx_proxy_cls
         from .tensor import NumpyNdarrayVariable
@@ -588,7 +588,7 @@ class NumpyVariable(VariableTracker):
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    to_tensor_wrapper(func),
+                    numpy_to_tensor_wrapper(func),
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=None,
