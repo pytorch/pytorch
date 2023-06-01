@@ -16,32 +16,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.8'
-          architecture: x64
-          check-latest: false
-          cache: pip
-          cache-dependency-path: |
-            **/.ci/docker/requirements-ci.txt
-            **/.github/requirements-gha-cache.txt
-
       - name: Install Python Packages
         run: |
           pip3 install rockset==1.0.3
           pip3 install boto3==1.19.12
 
-      - name: Get latest viable commit
-        env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+      - name: Create alerts
         run: |
           output=$(.github/scripts/create_alerts.py)
           echo "::set-output name=script_output::$output"
         id: alert_creation_step
-      - name: Create alerts
-        uses: pytorch/test-infra/.github/actions/upload-alerts@main
+      - name: Upload alerts
+        uses: pytorch/test-infra/.github/actions/upload_alerts@main
         with:
           alerts: ${{ steps.alert_creation_step.outputs.script_output }}
           organization: "pytorch"
           repo: "pytorch"
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
