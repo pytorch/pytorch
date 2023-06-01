@@ -5,6 +5,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/DispatchStub.h>
 
 /**
@@ -427,13 +428,25 @@ static inline scalar_t cubic_interp1d(
   return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
 }
 
-template<typename scalar_t>
+// when `real_input_index` becomes larger than the range the floating point
+// type can accurately represent, the type casting to `int64_t` might exceed
+// `input_size`, causing overflow. So we guard it with `std::min` below.
+template<typename scalar_t, typename opmath_t>
+static inline void guard_index_and_lambda(const opmath_t& real_input_index, const int64_t& input_size, int64_t& input_index, scalar_t& lambda) {
+  input_index = std::min(static_cast<int64_t>(floorf(real_input_index)), input_size - 1);
+  lambda = std::min(
+      std::max(real_input_index - input_index, static_cast<opmath_t>(0)),
+      static_cast<opmath_t>(1)
+    );
+}
+
+template<typename scalar_t, typename opmath_t>
 static inline void compute_source_index_and_lambda(
     int64_t& input_index0,
     int64_t& input_index1,
     scalar_t& lambda0,
     scalar_t& lambda1,
-    scalar_t ratio,
+    opmath_t ratio,
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
@@ -445,21 +458,44 @@ static inline void compute_source_index_and_lambda(
     lambda0 = static_cast<scalar_t>(1);
     lambda1 = static_cast<scalar_t>(0);
   } else {
-    using opmath_t = at::opmath_type<scalar_t>;
     const auto real_input_index =
         area_pixel_compute_source_index<opmath_t>(
             ratio, output_index, align_corners, /*cubic=*/false);
-    // when `real_input_index` becomes larger than the range the floating point
-    // type can accurately represent, the type casting to `int64_t` might exceed
-    // `input_size - 1`, causing overflow. So we guard it with `std::min` below.
-    input_index0 = std::min(static_cast<int64_t>(real_input_index), input_size - 1);
+    guard_index_and_lambda(real_input_index, input_size, input_index0, lambda1);
     int64_t offset = (input_index0 < input_size - 1) ? 1 : 0;
     input_index1 = input_index0 + offset;
-    lambda1 = std::min(
-      std::max(real_input_index - input_index0, static_cast<opmath_t>(0)),
-      static_cast<opmath_t>(1)
-    );
     lambda0 = static_cast<scalar_t>(1.) - lambda1;
+  }
+}
+
+// It will not be used by data types other than BFloat16.
+template <typename scalar_in, typename scalar_out>
+void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
+  TORCH_CHECK((std::is_same<scalar_out, BFloat16>::value),
+              "Upsample backward only support BFloat16 in the lower percision data types on CPU.")
+  TORCH_CHECK((std::is_same<scalar_in, float>::value),
+              "Upsample backward should use float as acc buffer for BFloat16 grad input on CPU.")
+  return;
+}
+
+template <>
+void inline apply_grad_input(float* buffer_ptr, BFloat16* gin, int64_t size) {
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  int64_t d = 0;
+  for (; d < size - (size % bVec::size()); d += bVec::size()) {
+    bVec gin_bvec = bVec::loadu(gin + d);
+    fVec gin_fvec0, gin_fvec1;
+    std::tie(gin_fvec0, gin_fvec1) = convert_bfloat16_float(gin_bvec);
+    gin_fvec0 += fVec::loadu(buffer_ptr + d);
+    gin_fvec1 += fVec::loadu(buffer_ptr + d + fVec::size());
+    fVec(0).store(buffer_ptr + d);
+    fVec(0).store(buffer_ptr + d + fVec::size());
+    convert_float_bfloat16(gin_fvec0, gin_fvec1).store(gin + d);
+  }
+  for (; d < size; d++) {
+    gin[d] += buffer_ptr[d];
+    buffer_ptr[d] = 0;
   }
 }
 
