@@ -242,7 +242,6 @@ def packed_linear_eval(linear: nn.Module, input_size: Optional[list]):
 
 
 def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
-    return gm
     is_cpu = all(
         example_input.device == torch.device("cpu")
         for example_input in example_inputs
