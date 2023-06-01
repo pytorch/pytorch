@@ -51,8 +51,8 @@ jobs:
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-build.outputs.test-matrix }}
 
-  libtorch-linux-bionic-cuda11_8-py3_7-gcc9-build:
-    name: libtorch-linux-bionic-cuda11.8-py3.7-gcc9
+  libtorch-linux-bionic-cuda11_8-py3_7-gcc9-debug-build:
+    name: libtorch-linux-bionic-cuda11.8-py3.7-gcc9-debug
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: libtorch-linux-bionic-cuda11.8-py3.7-gcc9
