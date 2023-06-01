@@ -7,9 +7,9 @@ import torch
 
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.nn as nn
+from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
     Placement,
     Replicate,
@@ -58,6 +58,9 @@ class _ToTorchTensor(torch.autograd.Function):
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
         dtensor_spec = ctx.dtensor_spec
         dtensor_meta = dtensor_spec.tensor_meta
+        _, tensor_stride = compute_global_tensor_info(
+            grad_output, dtensor_spec.mesh, dtensor_spec.placements
+        )
         return DTensor(
             grad_output,
             dtensor_spec.mesh,
@@ -65,7 +68,7 @@ class _ToTorchTensor(torch.autograd.Function):
             shape=dtensor_meta.shape,
             dtype=dtensor_meta.dtype,
             requires_grad=grad_output.requires_grad,
-            stride=dtensor_meta.stride,
+            stride=tuple(tensor_stride),
         )
 
 
@@ -84,22 +87,9 @@ class _FromTorchTensor(torch.autograd.Function):
         # if it's not by default run_check, we assume user is certain that each
         # rank has the same tensor shape, and we just use that to calculate the
         # global shape
-        tensor_shape = list(input.size())
-        tensor_stride = list(input.stride())
-        for idx, placement in enumerate(placements):
-            if placement.is_shard():
-                shard_dim = cast(Shard, placement).dim
-                local_dim_size = tensor_shape[shard_dim]
-                tensor_shape[shard_dim] = local_dim_size * device_mesh.size(idx)
-
-                # recover tensor stride by modifying the stride that larger than
-                # the current stride on the shard_dim
-                for i in range(len(tensor_stride)):
-                    if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
-                        # rescale the stride by the shard size
-                        tensor_stride[i] = tensor_stride[i] * device_mesh.size(idx)
-            elif not isinstance(placement, (Replicate, _Partial)):
-                raise RuntimeError(f"placement type {type(placement)} not supported!")
+        tensor_shape, tensor_stride = compute_global_tensor_info(
+            input, device_mesh, placements
+        )
 
         if device_mesh.get_coordinate() is None:
             # if the global rank is not participating in the device mesh, we
