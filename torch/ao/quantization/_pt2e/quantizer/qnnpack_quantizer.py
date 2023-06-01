@@ -285,12 +285,14 @@ class QNNPackQuantizer(Quantizer):
         self._annotate_hardtanh(model, config)
         self._annotate_mean(model, config)
         self._annotate_adaptive_avg_pool2d(model, config)
+        return model
 
     def annotate_for_dynamic_qconfig(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
         config = self.global_config
         self._annotate_linear(model, config)
+        return model
 
     def _annotate_conv2d_patterns(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
