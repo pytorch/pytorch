@@ -489,7 +489,7 @@ Tensor linalg_pinv(
   Tensor atol, rtol;
   std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.pinv");
 
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
     // therefore we need this early return for 'input.numel() == 0' case
     Tensor U, S, V;
@@ -3089,12 +3089,12 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   TORCH_CHECK(ind > 0, "Expected a strictly positive integer for 'ind', but got ", ind);
 
   // self[ind:]
-  std::vector<int64_t> shape_ind_end = self.sizes().slice(ind).vec();
+  std::vector<c10::SymInt> shape_ind_end = self.sym_sizes().slice(ind).vec();
   // self[:ind]
-  std::vector<int64_t> shape_start_ind = self.sizes().slice(0, ind).vec();
+  std::vector<c10::SymInt> shape_start_ind = self.sym_sizes().slice(0, ind).vec();
 
-  int64_t prod_ind_end = c10::multiply_integers(shape_ind_end.cbegin(), shape_ind_end.cend());
-  int64_t prod_start_ind = c10::multiply_integers(shape_start_ind.cbegin(), shape_start_ind.cend());
+  c10::SymInt prod_ind_end = c10::multiply_integers(shape_ind_end.cbegin(), shape_ind_end.cend());
+  c10::SymInt prod_start_ind = c10::multiply_integers(shape_start_ind.cbegin(), shape_start_ind.cend());
 
   // Check whether the self tensor can be reshaped to the 2D square matrix
   TORCH_CHECK(prod_ind_end == prod_start_ind,
@@ -3106,11 +3106,10 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   shape_ind_end.insert(shape_ind_end.cend(), shape_start_ind.cbegin(), shape_start_ind.cend());
 
   // If the reshaped self is not invertible catch this error
-  Tensor result, info;
-  std::tie(result, info) = at::linalg_inv_ex(self.reshape({prod_ind_end, prod_ind_end}), /*check_errors=*/false);
+  auto [result, info] = at::linalg_inv_ex(self.reshape_symint({prod_ind_end, prod_ind_end}), /*check_errors=*/false);
   at::_linalg_check_errors(info, "inv", /*is_matrix*/true);
 
-  return result.reshape(shape_ind_end);
+  return result.reshape_symint(shape_ind_end);
 }
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
