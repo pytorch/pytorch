@@ -57,9 +57,10 @@
 
 | العنصر | الوصف |
 | ---- | --- |
+| [**torch**](https://pytorch.org/docs/stable/torch.html) | GPU مع دعم قوي لوحدات المعالجة الرسومية ،NumPy  مكتبة تينسور مشابهة لـ |
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | GPU مع دعم قوي لوحدات المعالجة الرسومية ،NumPy  مكتبة تينسور مشابهة لـ  |
-| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | torch مع عمليات التينسور القابلة للتفاضل في بيئة (tape) كتبة تفاضل تلقائية قائمة على الشريط |
-| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | A compilation stack (TorchScript) to create serializable and optimizable models from PyTorch code  |
+| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | torch مع عمليات التينسور القابلة للتفاضل في بيئة (tape) مكتبة تفاضل تلقائية قائمة على الشريط |
+| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | PyTorch لإنشاء نماذج قابلة للتسلسل والتحسين من رمز (TorchScript) مجموعة تراكيب  |
 | [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | A neural networks library deeply integrated with autograd designed for maximum flexibility |
 | [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
 | [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
