@@ -32,6 +32,7 @@ from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
+    ops_wrapper,
     PermuteView,
     Pointwise,
     Reduction,
@@ -476,15 +477,6 @@ def to_device(x: TensorBox, device: torch.device):
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
-
-
-def ops_wrapper(name):
-    assert isinstance(name, str)
-
-    def fn(*args, **kwargs):
-        return getattr(ops, name)(*args, **kwargs)
-
-    return fn
 
 
 def register_pointwise(
