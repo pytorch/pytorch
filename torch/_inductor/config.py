@@ -49,7 +49,7 @@ pattern_matcher = True
 split_cat_fx_passes = True
 
 # enable reordering pass
-reordering = False
+reordering = True
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -105,10 +105,13 @@ conv_1x1_as_mm = False
 # being reduced over is large (by splitting it)
 split_reductions = True
 
-# Only save random seed for backwards rather than full mask
-lowmem_dropout = True
-
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
+
+# Enable constant and index_expr folding
+constant_and_index_propagation = True
+
+# Enable indirect_indexing asserts for decompositions and lowerings
+debug_index_asserts = False
 
 
 def is_fbcode():
@@ -154,7 +157,7 @@ else:
 kernel_name_max_ops = 10
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
-shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
+shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -222,6 +225,12 @@ class cpp:
     # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
     # force usage as specified, without testing.
     vec_isa_ok = None
+
+    # similar to config.triton.descriptive_names
+    descriptive_names = "original_aten"
+
+    # how many nodes to allow into a single horizontal fusion
+    max_horizontal_fusion_size = 16
 
 
 # config specific to codegen/triton.py

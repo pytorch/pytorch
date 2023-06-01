@@ -11,23 +11,20 @@ from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
 
-"""
-The old check `sys.executable == 'torch_deploy'` for torch::deploy was replaced here:
-https://github.com/pytorch/multipy/pull/138/files#diff-dae4e20139ff6af007a16cc6888d0e3c1d40d297cb7aef89d8e6cc201caacb9eR124
-
-The new check is a bit more hackish, but that's all we have for now.
-
-"""
-def _is_running_under_torch_deploy():
-    return torch._meta_registrations is object
-
-
-if _is_running_under_torch_deploy():
+if torch._running_with_deploy():
     def is_torchdynamo_compiling():
         """Can't import torchdynamo in torchdeploy builds currently."""
         return False
 else:
-    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
+    try:
+        from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
+    except Exception:
+        warnings.warn(
+            "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
+        )
+
+        def is_torchdynamo_compiling():
+            return False
 
 """
 New traceable, functional collectives.
@@ -566,7 +563,7 @@ def _register_ops():
         c10_lib_impl.impl(op_name, meta_impl, "Meta")
 
 
-if not _is_running_under_torch_deploy():
+if not torch._running_with_deploy():
     # Library MUST be defined at module scope or it doesn't work
     # Creating a "DEF" Library always crashes torch::deploy so we create our Library instances here
     #   guarded against running inside it
@@ -575,3 +572,47 @@ if not _is_running_under_torch_deploy():
     _register_ops()
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
+
+# We allow torchdynamo to convert calls from legacy inplace APIs into traceable APIs
+# via a pseudo-inplace version (like a decomp) that uses the functional collective
+# and a copy.
+#
+# These schemas intentionally match torch.distributed.distributed_c10d.* ops that we are trying to remap from
+def all_gather_tensor_inplace(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    group,  # TODO add a type,
+    async_op: bool = False,
+    tag: str = "",
+    gather_dim: int = 0
+):
+    assert not async_op, "Can't remap async version of inplace op to functional collective"
+    return output.copy_(all_gather_tensor(input, gather_dim, group, tag))
+
+def reduce_scatter_tensor_inplace(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    op: str = "sum",  # TODO type is actually c10d ReduceOp. is this ok?
+    group=None,  # TODO add a type
+    async_op: bool = False,
+    scatter_dim: int = 0,
+    tag: str = "",
+):
+    assert not async_op, "Can't remap async version of inplace op to functional collective"
+    return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
+
+from torch.distributed.distributed_c10d import (
+    all_gather_into_tensor as legacy_allgather,
+    reduce_scatter_tensor as legacy_reducescatter,
+)
+
+"""
+This dict should contain sets of functions that dynamo is allowed to remap.
+
+Functions in this set should accept the same args/kwargs 1:1 as their mapping.
+"""
+
+traceable_collective_remaps = {
+    legacy_allgather: all_gather_tensor_inplace,
+    legacy_reducescatter: reduce_scatter_tensor_inplace,
+}
