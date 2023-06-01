@@ -289,8 +289,7 @@ class TritonTemplateKernel(TritonKernel):
         self.body.clear()
         self.indexing_code.clear()
 
-    def call_kernel(self, name: str):
-        wrapper = V.graph.wrapper_code
+    def call_kernel(self, code, name: str):
         _, call_args, _ = self.args.python_argdefs()
 
         for i in range(len(call_args)):
@@ -298,12 +297,10 @@ class TritonTemplateKernel(TritonKernel):
                 call_args[i] = call_args[i] + ".item()"
         call_args = ", ".join(call_args)
 
-        stream_name = wrapper.write_get_cuda_stream(
-            V.graph.scheduler.current_device.index
-        )
+        stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
 
-        wrapper.add_import_once(f"import {self.grid_fn.__module__}")
-        meta = wrapper.add_meta_once(self.meta)
+        V.graph.wrapper_code.add_import_once(f"import {self.grid_fn.__module__}")
+        meta = V.graph.wrapper_code.add_meta_once(self.meta)
 
         grid_call = [texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes] + [
             meta
@@ -311,7 +308,7 @@ class TritonTemplateKernel(TritonKernel):
         grid_call = (
             f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
         )
-        wrapper.writeline(
+        code.writeline(
             f"{name}.run({call_args}, grid={grid_call}, stream={stream_name})"
         )
 

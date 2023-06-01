@@ -101,38 +101,30 @@ bool _nnpack_available() {
   return init_nnpack();
 }
 
-namespace {
-struct Workspace {
-  void* buffer = nullptr;
-  size_t size = 0;
-
-  void deallocate() {
-    if (buffer) {
-      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-      std::free(buffer);
-      buffer = nullptr;
-    }
-  }
-
-  void allocate() {
-    deallocate();
-
-    // NNPack has alignment requirements
-    constexpr size_t nnpack_memory_alignment_boundary = 64;
-
-    // Won't work on Windows, but NNPACK doesn't support Windows either
-    posix_memalign(&buffer, nnpack_memory_alignment_boundary, size);
-  }
-
-  ~Workspace() {
-    deallocate();
-  }
-};
-} // namespace
-
 // Make thread_local for safety in cases where we have multiple threads running
 // Convs at once
-static thread_local Workspace workspace;
+static thread_local void* workspace = nullptr;
+static thread_local size_t workspace_size = 0;
+
+static inline void deallocate_workspace() {
+  if (workspace) {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    std::free(workspace);
+    workspace = nullptr;
+  }
+}
+
+static inline void allocate_workspace() {
+  if (workspace) {
+    deallocate_workspace();
+  }
+
+  // NNPack has alignment requirements
+  constexpr size_t nnpack_memory_alignment_boundary = 64;
+
+  // Won't work on Windows, but NNPACK doesn't support Windows either
+  posix_memalign(&workspace, nnpack_memory_alignment_boundary, workspace_size);
+}
 
 Tensor _nnpack_spatial_convolution(
     const Tensor& input,
@@ -245,8 +237,8 @@ Tensor _nnpack_spatial_convolution(
             weight_.data_ptr<float>(),
             bias_.data_ptr<float>(),
             output.data_ptr<float>() + batch * output_size_per_batch,
-            workspace.buffer,
-            &workspace.size,
+            workspace,
+            &workspace_size,
             nnp_activation_identity,
             nullptr,
             nnpack_threadpool(),
@@ -272,8 +264,8 @@ Tensor _nnpack_spatial_convolution(
         weight_.data_ptr<float>(),
         bias_.data_ptr<float>(),
         output.data_ptr<float>(),
-        workspace.buffer,
-        &workspace.size,
+        workspace,
+        &workspace_size,
         nnp_activation_identity,
         nullptr,
         nnpack_threadpool(),
@@ -289,11 +281,11 @@ Tensor _nnpack_spatial_convolution(
     if (status != nnp_status_success) {
       throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
     }
-    workspace.allocate();
+    allocate_workspace();
   };
 
   // If no workspace created yet, allocate it
-  if (workspace.buffer == nullptr) {
+  if (workspace == nullptr) {
     size_and_allocate_ws();
   }
 
@@ -302,7 +294,7 @@ Tensor _nnpack_spatial_convolution(
 
   if (status == nnp_status_insufficient_buffer) {
     // Need to reallocate the workspace
-    workspace.deallocate();
+    deallocate_workspace();
     size_and_allocate_ws();
 
     // Try one more time

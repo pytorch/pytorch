@@ -54,7 +54,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   const Tensor& values() const {
     return values_;
   }
-  int64_t nnz() {
+  int nnz() {
     return col_indices_.size(-1);
   }
 
