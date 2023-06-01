@@ -19,6 +19,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
+from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._guards import detect_fake_mode, tracing
@@ -748,7 +749,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata = False
 
             input_info.append(InputAliasInfo(
-                is_leaf=isinstance(arg, torch.Tensor) and arg.is_leaf,
+                is_leaf=isinstance(arg, torch.Tensor) and safe_is_leaf(arg),
                 mutates_data=mutates_data,
                 mutates_metadata=mutates_metadata
             ))
