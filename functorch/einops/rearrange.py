@@ -5,7 +5,7 @@ from typing import Callable, Dict, List, Sequence, Tuple, Union, TYPE_CHECKING
 
 import torch
 from functorch._C import dim as _C
-from ._parsing import AnonymousAxis, _ellipsis, comma_sepparate, parse_pattern, validate_rearrange_expressions
+from ._parsing import AnonymousAxis, _ellipsis, comma_separate, parse_pattern, validate_rearrange_expressions
 
 if TYPE_CHECKING:
     from functorch.dim.dim import Dim
@@ -112,13 +112,13 @@ def _create_rearrange_callable(
     custom_rearrange_callable_code = (
         (
             f"def {custom_rearrange_callable_name}(tensor):\n"
-            f"    {comma_sepparate(first_class_dims)} = dims({n_dims})\n"
+            f"    {comma_separate(first_class_dims)} = dims({n_dims})\n"
             + (
                 f"    for dim, length in {specified_lengths}:\n"
                 "        dim.size = length\n"
                 if specified_lengths else ""
             )
-            + f"    tensor = tensor[{comma_sepparate(left_dims)}].order({comma_sepparate(right_dims)})\n"
+            + f"    tensor = tensor[{comma_separate(left_dims)}].order({comma_separate(right_dims)})\n"
             + (f"    return tensor.sum({anon_dims}, keepdim=False)\n" if anon_dims else "    return tensor\n")
         )
     )

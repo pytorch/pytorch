@@ -213,5 +213,5 @@ def validate_rearrange_expressions(
         raise ValueError(f"Identifiers not found in expression: {unmatched_axes}")
 
 
-def comma_sepparate(iterable: Iterable[Any]) -> str:
+def comma_separate(iterable: Iterable[Any]) -> str:
     return ", ".join(str(item) for item in iterable)
