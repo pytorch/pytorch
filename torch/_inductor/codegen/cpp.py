@@ -2010,7 +2010,7 @@ class CppVecKernelChecker(CppVecKernel):
                             and expr <= i32_iinfo.max
                             and expr >= i32_iinfo.min
                         )
-                    expr_range = bound_sympy(expr, vars_ranges)
+                    expr_ranges = bound_sympy(expr, vars_ranges)
                     if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
                         return False
                     return range_expressable_in_32_bits(
