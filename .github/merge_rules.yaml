@@ -411,6 +411,7 @@
   - mruberry
   - lezcano
   - Skylion007
+  - ngimel
   mandatory_checks_name:
   - EasyCLA
   - Lint
