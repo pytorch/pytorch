@@ -269,12 +269,12 @@ class QNNPackQuantizer(Quantizer):
         """just handling global spec for now"""
         # hacked for handling dynamic linear quant. will fix later.
         if self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
-            model = self.annotate_for_dynamic_qconfig(model)
+            model = self._annotate_for_dynamic_quantization_config(model)
         else:
-            model = self.annotate_for_static_qconfig(model)
+            model = self._annotate_for_static_quantization_config(model)
         return model
 
-    def annotate_for_static_qconfig(
+    def _annotate_for_static_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
         config = self.global_config
@@ -287,7 +287,7 @@ class QNNPackQuantizer(Quantizer):
         self._annotate_adaptive_avg_pool2d(model, config)
         return model
 
-    def annotate_for_dynamic_qconfig(
+    def _annotate_for_dynamic_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
         config = self.global_config
