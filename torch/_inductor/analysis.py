@@ -1,9 +1,11 @@
-from . import scheduler, ir
-from .scheduler import BaseSchedulerNode
-from typing import List, Any
-import torch.fx as fx
-import torch
 import collections
+from typing import Any, List
+
+import torch
+import torch.fx as fx
+from . import ir, scheduler
+from .scheduler import BaseSchedulerNode
+
 
 def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     """
@@ -19,7 +21,9 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
     FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
-    func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused", "collective"]}
+    func_dict = {
+        s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused", "collective"]
+    }
     buf_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
@@ -28,7 +32,9 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     group: Any = None
     # create call_function node for each Buffer and Kernel
     for snode in snodes:
-        if isinstance(snode.node, ir.CollectiveKernel) or isinstance(snode.node, ir.Wait):
+        if isinstance(snode.node, ir.CollectiveKernel) or isinstance(
+            snode.node, ir.Wait
+        ):
             node_type = "collective"
             group = node_type
         elif snode.is_extern():
@@ -54,7 +60,9 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         def in_output(snode):
             if isinstance(snode, scheduler.FusedSchedulerNode):
                 return any(in_output(x) for x in snode.snodes)
-            return any(isinstance(user.node, scheduler.OutputNode) for user in snode.users)
+            return any(
+                isinstance(user.node, scheduler.OutputNode) for user in snode.users
+            )
 
         if in_output(snode):
             outputs.append(fx_node)

@@ -23,6 +23,7 @@ from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 
 from . import config, ir  # noqa: F811, this is needed
+from .analysis import create_fx_from_snodes
 from .scheduler import (
     BaseSchedulerNode,
     FusedSchedulerNode,
@@ -30,7 +31,6 @@ from .scheduler import (
     OutputNode,
     SchedulerNode,
 )
-from .analysis import create_fx_from_snodes
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def draw_buffers(nodes, print_graph=False, fname=None):
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
 
-        requires_grad = node.meta['fusion_meta'].snode.node.__class__.__name__
+        requires_grad = node.meta["fusion_meta"].snode.node.__class__.__name__
         metadata = TensorMetadata(group, dtype, requires_grad, None, None, None, None)
         node.meta["tensor_meta"] = metadata
 
