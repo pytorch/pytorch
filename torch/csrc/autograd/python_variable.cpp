@@ -614,8 +614,7 @@ static PyObject* THPVariable_make_subclass(
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       std::move(data),
-      c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED,
-      /*allow_preexisting_pyobj=*/true);
+      c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
 
