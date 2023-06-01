@@ -198,19 +198,19 @@ def validate_rearrange_expressions(
         axes_lengths (Mapping[str, int]): any additional length specifications for dimensions
     """
     for length in axes_lengths.values():
-        if type(length) is not int:
-            raise TypeError("Axis lengths must be integers")
+        if (length_type := type(length)) is not int:
+            raise TypeError(f"rearrange axis lengths must be integers, got: {length_type}")
 
     if left.has_non_unitary_anonymous_axes or right.has_non_unitary_anonymous_axes:
-        raise ValueError("Non-unitary anonymous axes are not supported in rearrange (exception is length 1)")
+        raise ValueError("rearrange only supports unnamed axes of size 1")
 
     difference = set.symmetric_difference(left.identifiers, right.identifiers)
     if len(difference) > 0:
-        raise ValueError(f"Identifiers only on one side of expression (should be on both): {difference}")
+        raise ValueError(f"Identifiers only on one side of rearrange expression (should be on both): {difference}")
 
     unmatched_axes = axes_lengths.keys() - left.identifiers
     if len(unmatched_axes) > 0:
-        raise ValueError(f"Identifiers not found in expression: {unmatched_axes}")
+        raise ValueError(f"Identifiers not found in rearrange expression: {unmatched_axes}")
 
 
 def comma_separate(iterable: Iterable[Any]) -> str:
