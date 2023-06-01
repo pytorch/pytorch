@@ -851,7 +851,12 @@ class CPUReproTests(TestCase):
         for dtype in vec_dtypes:
             x = torch.randn(64, dtype=dtype)
             y = torch.randn(64, dtype=dtype)
-            logical_fns = [torch.logical_and, torch.logical_not, torch.logical_or, torch.logical_xor]
+            logical_fns = [
+                torch.logical_and,
+                torch.logical_not,
+                torch.logical_or,
+                torch.logical_xor,
+            ]
             for logical_fn in logical_fns:
                 torch._dynamo.reset()
                 metrics.reset()
