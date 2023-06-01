@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -131,7 +132,12 @@ def build_triton(
         if build_rocm:
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
 
-        check_call([sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir)
+        max_jobs = os.getenv("MAX_JOBS", str(os.cpu_count()))
+        check_call(
+            [sys.executable, "setup.py", "bdist_wheel"],
+            cwd=triton_pythondir,
+            env=dict(MAX_JOBS=max_jobs),
+        )
 
         whl_path = list((triton_pythondir / "dist").glob("*.whl"))[0]
         shutil.copy(whl_path, Path.cwd())
