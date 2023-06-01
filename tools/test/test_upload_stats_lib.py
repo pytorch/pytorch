@@ -1,3 +1,4 @@
+import decimal
 import inspect
 import unittest
 from typing import Any
@@ -30,7 +31,10 @@ class TestUploadStats(unittest.TestCase):
 
     @mock.patch("boto3.Session.resource")
     def test_emit_metric(self, mock_resource: Any) -> None:
-        metric = {"some_number": 123}
+        metric = {
+            "some_number": 123,
+            "float_number": 32.34,
+        }
 
         # Querying for this instead of hard coding it b/c this will change
         # based on whether we run this test directly from python or from
@@ -48,7 +52,8 @@ class TestUploadStats(unittest.TestCase):
             "job": JOB,
             "workflow_run_number": WORKFLOW_RUN_NUMBER,
             "workflow_run_attempt": WORKFLOW_RUN_ATTEMPT,
-            **metric,
+            "some_number": 123,
+            "float_number": decimal.Decimal(str(32.34)),
         }
 
         emit_metric("metric_name", metric)

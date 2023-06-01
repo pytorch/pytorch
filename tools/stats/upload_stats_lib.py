@@ -5,6 +5,8 @@ import json
 import os
 import xml.etree.ElementTree as ET
 import zipfile
+import decimal
+
 from pathlib import Path
 from typing import Any, Dict, List
 from warnings import warn
@@ -122,6 +124,11 @@ def upload_to_rockset(
     )
     print("Done!")
 
+def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
+    for key, value in data.items():
+        if isinstance(value, float):
+            data[key] = decimal.Decimal(str(value)) # str() preserves the precision
+    return data
 
 def emit_metric(
     metric_name: str,
@@ -203,6 +210,9 @@ def emit_metric(
     calling_file = os.path.basename(calling_frame_info.filename)
     calling_module = inspect.getmodule(calling_frame).__name__  # type: ignore[union-attr]
     calling_function = calling_frame_info.function
+
+    # boto3 doesn't support uplaoding float values to DynamoDB, so convert them all to decimals.
+    metrics = _convert_float_values_to_decimals(metrics)
 
     try:
         session = boto3.Session(region_name="us-east-1")
