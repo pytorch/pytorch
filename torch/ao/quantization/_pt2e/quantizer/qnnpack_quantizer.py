@@ -16,9 +16,9 @@ from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization._pt2e.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
+    get_bias_qspec,
     get_input_act_qspec,
     get_output_act_qspec,
-    get_bias_qspec,
     get_weight_qspec,
 )
 from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
@@ -123,17 +123,26 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
 def get_symmetric_quantization_config(
     is_per_channel: bool = False,
     is_qat: bool = False,
+    is_dynamic: bool = False,
 ):
-    act_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        FusedMovingAvgObsFakeQuantize if is_qat else HistogramObserver
-    )
+    if is_qat:
+        if is_dynamic:
+            raise NotImplementedError(
+                "dynamic quantization for qat is not yet implemented."
+            )
+        act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
+    else:
+        if is_dynamic:
+            act_observer_or_fake_quant_ctr = PlaceholderObserver  # type: ignore[assignment]
+        else:
+            act_observer_or_fake_quant_ctr = HistogramObserver  # type: ignore[assignment]
 
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
         quant_max=127,
         qscheme=torch.per_tensor_affine,
-        is_dynamic=False,
+        is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
             eps=2**-12
         ),
@@ -173,9 +182,22 @@ def get_symmetric_quantization_config(
     bias_quantization_spec = QuantizationSpec(
         dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
     )
-    quantization_config = QuantizationConfig(
-        act_quantization_spec, act_quantization_spec, weight_quantization_spec, bias_quantization_spec, is_qat
-    )
+    if is_dynamic:
+        quantization_config = QuantizationConfig(
+            act_quantization_spec,
+            None,
+            weight_quantization_spec,
+            bias_quantization_spec,
+            is_qat,
+        )
+    else:
+        quantization_config = QuantizationConfig(
+            act_quantization_spec,
+            act_quantization_spec,
+            weight_quantization_spec,
+            bias_quantization_spec,
+            is_qat,
+        )
     return quantization_config
 
 
@@ -245,7 +267,11 @@ class QNNPackQuantizer(Quantizer):
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
-        model = self._annotate_for_static_quantization_config(model)
+        # hacked for handling dynamic linear quant. will fix later.
+        if self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
+            model = self._annotate_for_dynamic_quantization_config(model)
+        else:
+            model = self._annotate_for_static_quantization_config(model)
         return model
 
     def _annotate_for_static_quantization_config(
@@ -259,6 +285,13 @@ class QNNPackQuantizer(Quantizer):
         self._annotate_hardtanh(model, config)
         self._annotate_mean(model, config)
         self._annotate_adaptive_avg_pool2d(model, config)
+        return model
+
+    def _annotate_for_dynamic_quantization_config(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        config = self.global_config
+        self._annotate_linear(model, config)
         return model
 
     def _annotate_conv2d_patterns(
