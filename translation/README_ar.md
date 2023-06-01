@@ -24,13 +24,13 @@
 - [المزيد عن PyTorch](#المزيد-عن-PyTorch)
   - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات GPU](#مكتبة-tensor)
   - [شبكات عصبية ديناميكية: نظام تلقائي للتفاضل يعتمد على التسجيل بواسطة الشريط](#شبكات-عصبية-ديناميكية)
-  - [بايثون في المقام الأول](#python-first)
-  - [التجارب الحتمية](#imperative-experiences)
-  - [سريع وخفيف](#fast-and-lean)
-  - [سهولة في التوسع](#extensions-without-pain)
-- [التثبيت](#installation)
-  - [الملفات التنفيذية](#binaries)
-    - [منصات NVIDIA Jetson](#nvidia-jetson-platforms)
+  - [بايثون في المقام الأول](#بايثون-في-المقام-الأول)
+  - [التجارب الحتمية](#التجارب-الحتمية)
+  - [سريع وخفيف](#سريع-وخفيف)
+  - [سهولة في التوسع](#سهولة-في-التوسع)
+- [التثبيت](#التثبيت)
+  - [الملفات التنفيذية](#الملفات-لتنفيذية)
+    - [منصات NVIDIA Jetson](#منصات-NVIDA-Jeston)
   - [من المصدر](#from-source)
     - [المتطلبات الأساسية](#prerequisites)
     - [تثبيت التبعيات أو الاعتماديات](#install-dependencies)
@@ -104,7 +104,7 @@ You get the best of speed and flexibility for your crazy research.
 
 ![Dynamic graph](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/dynamic_graph.gif)
 
-### Python First
+### بايثون في المقام الأول
 
 PyTorch is not a Python binding into a monolithic C++ framework.
 It is built to be deeply integrated into Python.
@@ -113,7 +113,7 @@ You can write your new neural network layers in Python itself, using your favori
 and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
 Our goal is to not reinvent the wheel where appropriate.
 
-### Imperative Experiences
+### التجارب الحتمية
 
 PyTorch is designed to be intuitive, linear in thought, and easy to use.
 When you execute a line of code, it gets executed. There isn't an asynchronous view of the world.
@@ -121,7 +121,7 @@ When you drop into a debugger or receive error messages and stack traces, unders
 The stack trace points to exactly where your code was defined.
 We hope you never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
 
-### Fast and Lean
+### سريع وخفيف
 
 PyTorch has minimal framework overhead. We integrate acceleration libraries
 such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) to maximize speed.
@@ -135,7 +135,7 @@ We've written custom memory allocators for the GPU to make sure that
 your deep learning models are maximally memory efficient.
 This enables you to train bigger deep learning models than before.
 
-### Extensions Without Pain
+### سهولة في التوسع
 
 Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
 and with minimal abstractions.
@@ -147,13 +147,14 @@ If you want to write your layers in C/C++, we provide a convenient extension API
 No wrapper code needs to be written. You can see [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
 
 
-## Installation
+## التثبيت
 
-### Binaries
+### الملفات التنفيذية
 Commands to install binaries via Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
 
-#### NVIDIA Jetson Platforms
+#### منصات NVIDA Jeston
+
 
 Python wheels for NVIDIA's Jetson Nano, Jetson TX1/TX2, Jetson Xavier NX/AGX, and Jetson AGX Orin are provided [here](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) and the L4T container is published [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
 
