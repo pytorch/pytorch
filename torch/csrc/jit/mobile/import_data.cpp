@@ -238,7 +238,7 @@ std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
       "' in deserialized mobile::Module");
 }
 
-static std::map<std::string, at::Tensor> _load_parameters_bytes(
+std::map<std::string, at::Tensor> _load_parameters_bytes(
     std::shared_ptr<char> data,
     size_t size,
     c10::optional<at::Device> device) {
