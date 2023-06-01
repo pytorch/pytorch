@@ -39,7 +39,12 @@ from torch.distributed.fsdp.flat_param import (
     HandleTrainingState,
     RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES,
 )
-from torch.distributed.utils import _apply_to_tensors, _p_assert, _to_kwargs
+from torch.distributed.utils import (
+    _apply_to_tensors,
+    _cast_forward_inputs,
+    _p_assert,
+    _to_kwargs,
+)
 
 log = logging.getLogger(__name__)
 
@@ -623,38 +628,6 @@ def _root_cast_forward_input(state: _FSDPState, args, kwargs) -> Tuple[Any, Any]
         args, kwargs = _cast_forward_inputs(input_dtype, *args, **kwargs)
 
     return args, kwargs
-
-
-def _cast_forward_inputs(
-    input_dtype: Optional[torch.dtype],
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Prepares the forward inputs by casting them to ``input_dtype`` if it is not ``None``.
-    """
-    # TODO: For mixed precision, cast to reduced-precision in a single `to()` call.
-    if input_dtype is not None:
-        args, kwargs = _cast_fp_inputs_to_dtype(input_dtype, *args, **kwargs)
-    return args, kwargs
-
-
-def _cast_fp_inputs_to_dtype(
-    dtype: torch.dtype,
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Casts floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
-    This respects the existing ``requires_grad`` on the tensors.
-    """
-
-    def cast_fn(x: torch.Tensor) -> torch.Tensor:
-        if not torch.is_floating_point(x) or x.dtype == dtype:
-            return x
-        return x.to(dtype)
-
-    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 
 @no_type_check
