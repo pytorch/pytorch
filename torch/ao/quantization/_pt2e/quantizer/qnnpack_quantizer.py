@@ -133,9 +133,9 @@ def get_symmetric_quantization_config(
         act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
     else:
         if is_dynamic:
-            act_observer_or_fake_quant_ctr = PlaceholderObserver
+            act_observer_or_fake_quant_ctr = PlaceholderObserver  # type: ignore[assignment]
         else:
-            act_observer_or_fake_quant_ctr = HistogramObserver
+            act_observer_or_fake_quant_ctr = HistogramObserver  # type: ignore[assignment]
 
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
@@ -268,7 +268,7 @@ class QNNPackQuantizer(Quantizer):
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
         # hacked for handling dynamic linear quant. will fix later.
-        if self.global_config.input_activation.is_dynamic:
+        if self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
             model = self.annotate_for_dynamic_qconfig(model)
         else:
             model = self.annotate_for_static_qconfig(model)
