@@ -1283,13 +1283,20 @@ void Node::assignTopoPosition() {
 
     // insert between two existing nodes
   } else {
-    const auto posBetween = prevPos + (nextPos - prevPos) / 2;
-    if (posBetween == prevPos) {
+    int64_t remaining = nextPos - prevPos;
+    AT_ASSERT(remaining > 0);
+    if (remaining == 1) {
       // There was no room
       owningBlock()->reIndexTopology();
       return;
     }
-    topo_position_ = posBetween;
+    int64_t predicted_future_insertions = 0;
+    if (next() == graph_->insertPoint()) {
+      predicted_future_insertions = graph_->predicted_insert_count_++;
+    }
+    topo_position_ = prevPos +
+        std::max(int64_t(1), remaining / (2 + predicted_future_insertions));
+    AT_ASSERT(prevPos < topo_position_ && topo_position_ < nextPos);
   }
 }
 
