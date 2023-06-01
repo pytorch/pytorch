@@ -150,7 +150,7 @@ class ExportedProgram:
         )
         return transformed_ep
 
-    def add_runtime_assertions(self) -> "ExportedProgram":
+    def _add_runtime_assertions(self) -> "ExportedProgram":
         return self.transform(
             _AddRuntimeAssertionsForConstraintsPass(
                 self._input_shape_constraints,
