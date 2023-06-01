@@ -582,6 +582,7 @@ class FakeTensorTest(TestCase):
             out = mod(torch.randn(1, 1, 3, 3))
         self.checkType(out, "cpu", (1, 1, 3, 3))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_aten_copy_multi_device(self):
         with FakeTensorMode():
             x1 = torch.rand(4, device="cpu")
@@ -594,6 +595,7 @@ class FakeTensorTest(TestCase):
         self.checkType(copy2, "cuda", (4,))
         self.checkType(out, "cpu", (4,))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_aten_index_multi_device(self):
         with FakeTensorMode():
             x1 = torch.rand(4, 4, device="cpu")
