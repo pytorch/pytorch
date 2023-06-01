@@ -405,7 +405,7 @@ static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-static Tensor bucketize_decomp_Tensor(
+Tensor bucketize_decomp_Tensor(
     const Tensor& self,
     const Tensor& boundaries,
     bool out_int32,
@@ -415,7 +415,7 @@ static Tensor bucketize_decomp_Tensor(
   return at::searchsorted(boundaries, self, out_int32, right, nullopt, nullopt);
 }
 
-static Tensor bucketize_decomp_Scalar(
+Tensor bucketize_decomp_Scalar(
     const Scalar& self,
     const Tensor& boundaries,
     bool out_int32,
