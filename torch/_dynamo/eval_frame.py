@@ -7,7 +7,6 @@ import functools
 import inspect
 import logging
 import os
-import re
 import sys
 import textwrap
 import threading
@@ -23,6 +22,7 @@ from unittest.mock import patch
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
+import torch.utils.checkpoint
 from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -142,6 +142,9 @@ class OptimizedModule(torch.nn.Module):
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._forward(*args, **kwargs)
+
+    def __dir__(self):
+        return self._orig_mod.__dir__()
 
 
 def remove_from_cache(f):
@@ -478,11 +481,6 @@ def check_if_dynamo_supported():
         raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 12):
         raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
-    elif sys.version_info >= (3, 11):
-        warnings.warn(
-            "torch.compile support of Python 3.11 is experimental. "
-            "Program may segfault."
-        )
 
 
 def is_dynamo_supported():
@@ -707,6 +705,14 @@ class Constraint(ConstraintTarget):
             "dim": self.dim,
             "min": self.constraint_range.vr.lower,
             "max": self.constraint_range.vr.upper,
+            "shared": (
+                None
+                if self.shared is None
+                else {
+                    "t_id": self.shared.t_id,
+                    "dim": self.shared.dim,
+                }
+            ),
         }
 
     def __eq__(self, other):
@@ -723,6 +729,61 @@ class Constraint(ConstraintTarget):
         )
 
 
+class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
+    def __init__(
+        self,
+        m: torch.fx.GraphModule,
+        flat_args: Tuple[Any],
+        matched_input_elements_positions: List[int],
+        matched_output_elements_positions: List[int],
+        example_fake_inputs: List[torch.Tensor],
+    ):
+        super().__init__(m)
+
+        matched_input_elements_to_fake = {
+            val: example_fake_inputs[ix]
+            for ix, val in enumerate(matched_input_elements_positions)
+        }
+        fake_mode = _guards.detect_fake_mode(example_fake_inputs)
+
+        self.new_args = []
+        for i in range(0, len(flat_args)):
+            arg = super(FlattenInputOutputSignature, self).placeholder(
+                f"arg{i}", (), {}
+            )
+            if i in matched_input_elements_to_fake:
+                arg.node.meta["val"] = matched_input_elements_to_fake[i]
+            else:
+                # Fill node.mata["val"] with faketensor from the input,
+                # if it's not found in matched_input_elements_positions
+                if fake_mode is not None and isinstance(flat_args[i], torch.Tensor):
+                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+            self.new_args.append(arg)
+        self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
+        self.matched_output_elements_positions = matched_output_elements_positions
+
+    def placeholder(self, target, args, kwargs):
+        arg = next(self.old_args_gen)
+        if "val" in self.current_node.meta:
+            arg.node.meta["val"] = self.current_node.meta["val"]
+        if "tensor_dict" in self.current_node.meta:
+            arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
+        return arg
+
+    def output(self, target, args, kwargs):
+        dynamo_result_flat = args[0]
+        lookup = [*dynamo_result_flat, *self.new_args]
+        new_result_flat = [lookup[i] for i in self.matched_output_elements_positions]
+        return super().output(target, (new_result_flat,), {})
+
+    def run_node(self, n):
+        self.current_node = n
+        r = super().run_node(n)
+        if "val" in self.current_node.meta:
+            r.node.meta["val"] = self.current_node.meta["val"]
+        return r
+
+
 def export(
     f: Callable[..., Any],
     *args,
@@ -732,7 +793,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    constraints: List[Constraint] = None,
+    constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
     functionalize: bool = False,
     **kwargs,
@@ -887,7 +948,9 @@ def export(
             constraint_violation_error = e
     remove_from_cache(f)
 
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+    if (
+        shape_env := getattr(fake_mode, "shape_env", None)
+    ) is not None and not skipfiles.check(inspect.getsourcefile(call_to_inspect)):
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
@@ -897,10 +960,20 @@ def export(
                 constraint_violation_error.args[0] + msg,
             )
         else:
-            log.warning(
+            log.info(
                 "Summary of dimension constraints:%s",
                 msg,
             )
+
+        # Error if we have any constraints on static values
+        for k in shape_env.var_to_range.keys():
+            if isinstance(k, sympy.Integer):
+                constraint_violation_error = ConstraintViolationError(
+                    f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
+                    "It appears that you're trying to set a constraint on a "
+                    f"value which we evaluated to have a static value of {k}. "
+                    "Scroll up to see where this constraint was set."
+                )
     if constraint_violation_error:
         raise constraint_violation_error
 
@@ -912,50 +985,13 @@ def export(
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
+    # NB: This is mostly hitting the cache; Dynamo already converted these
+    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
     assert graph_captured_result is not None
     flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
-
-    class ChangeInputOutputSignature(torch.fx.interpreter.Transformer):
-        def __init__(
-            self,
-            m,
-        ):
-            super().__init__(m)
-            arg_len = len(flat_args)
-            self.new_args = [
-                super(ChangeInputOutputSignature, self).placeholder(f"arg{i}", (), {})
-                for i in range(0, arg_len)
-            ]
-            self.old_args_gen = (
-                self.new_args[i] for i in matched_input_elements_positions
-            )
-
-        def placeholder(self, target, args, kwargs):
-            arg = next(self.old_args_gen)
-            if "val" in self.current_node.meta:
-                arg.node.meta["val"] = self.current_node.meta["val"]
-            if "tensor_dict" in self.current_node.meta:
-                arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
-            return arg
-
-        def output(self, target, args, kwargs):
-            dynamo_result_flat = args[0]
-            lookup = [*dynamo_result_flat, *self.new_args]
-            new_result_flat = [lookup[i] for i in matched_output_elements_positions]
-            return super().output(target, (new_result_flat,), {})
-
-        def run_node(self, n):
-            self.current_node = n
-            r = super().run_node(n)
-            if "val" in self.current_node.meta:
-                r.node.meta["val"] = self.current_node.meta["val"]
-            return r
-
-    # NB: This is mostly hitting the cache; Dynamo already converted these
-    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
         memo: Dict[torch.Tensor, torch.Tensor] = {}
@@ -1006,32 +1042,20 @@ def export(
                 # Wrap the internal error to the user-facing error
                 raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
-    new_graph = ChangeInputOutputSignature(
+    new_graph = FlattenInputOutputSignature(
         graph,
+        flat_args,
+        matched_input_elements_positions,
+        matched_output_elements_positions,
+        example_fake_inputs,
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
     new_graph.meta["input_shape_constraints"] = (
         [constraint.serializable_spec for constraint in constraints]
         if constraints
-        else None
+        else []
     )
-
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
-        dim_constraints.solve()
-        log.warning(
-            "Summary of dimension constraints:%s",
-            dim_constraints.prettify_results(inspect.signature(f)),
-        )
-
-        # Inline constraints added by users correspond to unbacked symbols in shape_env,
-        new_graph.meta["inline_constraints"] = {
-            k: v
-            for k, v in shape_env.var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
@@ -1121,9 +1145,6 @@ def export(
     )
 
     new_graph.recompile()
-    # TODO remove this once Executorch uses proper functionalization
-    new_graph._matched_input_elements_positions = matched_input_elements_positions
-
     return (new_graph, out_guards)
 
 
@@ -1268,6 +1289,18 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
+
+        # TorchDynamo does not step inside utils.checkpoint function.  The flow
+        # looks likes this
+        #  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
+        #     speculatively checking if the forward function is safe to trace.
+        #  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
+        #     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
+        #  3) If not, then TorchDynamo falls back to eager by performing a graph
+        #     break. And here, the following disable wrapper ensures that
+        #     TorchDynamo does not trigger again on the frames created by
+        #     utils.checkpoint innards.
+        torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
