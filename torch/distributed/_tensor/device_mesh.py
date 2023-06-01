@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import warnings
+import logging
 from typing import List, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -9,9 +9,7 @@ from torch.distributed.distributed_c10d import (
     _get_default_group,
     all_gather,
     all_to_all,
-    Backend,
     broadcast,
-    get_backend,
     get_global_rank,
     get_rank,
     get_world_size,
@@ -25,28 +23,30 @@ from torch.distributed.distributed_c10d import (
     Work,
 )
 
+
+logger = logging.getLogger(__name__)
+
 # only import numpy typing when type checking
 if TYPE_CHECKING:
     try:
         from numpy.typing import ArrayLike
     except ImportError:
-        warnings.warn(
+        logger.warning(
             "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
         )
 
 
-_global_device_mesh: Optional["DeviceMesh"] = None
+class _MeshEnv(object):
+    def __init__(self) -> None:
+        self.mesh_stack: List[DeviceMesh] = []
+
+    def get_current_mesh(self) -> "DeviceMesh":
+        if len(self.mesh_stack) == 0:
+            raise RuntimeError("No device mesh is currently active!")
+        return self.mesh_stack[-1]
 
 
-def get_global_device_mesh() -> "DeviceMesh":
-    global _global_device_mesh
-    assert _global_device_mesh is not None, "Could not get a default device mesh!"
-    return _global_device_mesh
-
-
-def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
-    global _global_device_mesh
-    _global_device_mesh = mesh
+mesh_resources: _MeshEnv = _MeshEnv()
 
 
 class DeviceMesh(object):
@@ -69,8 +69,6 @@ class DeviceMesh(object):
         mesh (ndarray): could be a multi-dimension array or an integer tensor that
             describes the layout of devices, the ids are global ids of the
             default process group.
-        dim_groups (List[ProcessGroup], optional): The ProcessGroup used per mesh
-            dimension.
 
     Returns:
         A :class:`DeviceMesh` object
@@ -78,8 +76,6 @@ class DeviceMesh(object):
     Example (2 host with 4 GPUs each):
         ```
         # The following program runs on each process/rank in SPMD manner.
-        # initialized default world
-        torch.distributed.init_process_group(backend="nccl", world_size=8)
         # initialize device mesh as (2, 4) to represent the topology
         # of cross-host(dim 0), and within-host (dim 1)
         mesh = DeviceMesh(device_type="cuda",
@@ -114,28 +110,13 @@ class DeviceMesh(object):
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
         self._get_or_create_default_group()
-        # validate that all calling ranks pass in the same `mesh` argument.
-        mesh_list = [
-            torch.empty_like(self.mesh, device=self.device_type)
-            for _ in range(get_world_size())
-        ]
-        self_mesh = self.mesh.to(self.device_type)
-        all_gather(mesh_list, self_mesh)
-        for other_rank, other_mesh in enumerate(mesh_list):
-            if not torch.equal(self_mesh, other_mesh):
-                raise RuntimeError(
-                    f"DeviceMesh.__init__ does not allow different mesh argument:"
-                    f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
-                    f"has mesh {other_mesh}!"
-                )
         if _init_process_groups:
             self._dim_groups = self._init_process_groups()
 
     def _get_or_create_default_group(self):
-        self._backend = Backend.GLOO if self.device_type == "cpu" else Backend.NCCL
         default_initialized = is_initialized()
         if not default_initialized:
-            init_process_group(backend=self._backend)
+            init_process_group()
 
         world_size = get_world_size()
         if self.mesh.numel() > world_size:
@@ -144,34 +125,21 @@ class DeviceMesh(object):
             )
 
         # TODO: if user want to pass pg_options, offer a way to do it
-        world_backend = get_backend()
-        if self.device_type == "cpu":
-            cpu_backends = ["gloo", "threaded"]
-            assert (
-                world_backend in cpu_backends
-            ), f"Default PG backend: {world_backend} not supporting CPU!"
-        elif self.device_type == "cuda":
-            cuda_backends = ["nccl", "gloo", "threaded"]
-            if world_backend == "gloo":
-                warnings.warn(
-                    "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
+        if not default_initialized and self.device_type == "cuda":
+            # automatically set the current cuda device base on num of gpu devices available in each host
+            # NOTE: This device selection would only work for homogeneous hardware.
+            num_gpus_per_host = torch.cuda.device_count()
+            if world_size % num_gpus_per_host != 0:
+                raise RuntimeError(
+                    f"DeviceMesh only support homogeneous hardware, but found "
+                    f"{world_size} ranks and {num_gpus_per_host} cuda devices!"
                 )
-            assert (
-                world_backend in cuda_backends
-            ), f"Default PG backend: {world_backend} not supporting CUDA!"
-            if not default_initialized:
-                # automatically set the current cuda device base on num of gpu devices available in each host
-                # NOTE: This device selection would only work for homogeneous hardware.
-                torch.cuda.set_device(get_rank() % torch.cuda.device_count())
-            # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
-            # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
-            # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
-            # this attribute, so we will implement this logic once we figure out the answer.
-            self._seed = torch.cuda.initial_seed()
-        else:
-            raise RuntimeError(
-                f"DeviceMesh only support cpu or cuda device type for now, but got {self.device_type}"
-            )
+            torch.cuda.set_device(get_rank() % num_gpus_per_host)
+        # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
+        # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
+        # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
+        # this attribute, so we will implement this logic once we figure out the answer.
+        self._seed = torch.initial_seed()
 
         # calculate the coordinates of the current global rank on the mesh
         rank_coords = (self.mesh == get_rank()).nonzero()
@@ -183,11 +151,23 @@ class DeviceMesh(object):
 
     def _init_process_groups(self):
         default_pg = _get_default_group()
+        # check mesh tensor validity
         unique_mesh_values = self.mesh.unique(sorted=True)
         if unique_mesh_values.numel() != self.mesh.numel():
             raise RuntimeError(
                 f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
             )
+        # validate that all calling ranks pass in the same `mesh` argument.
+        self_mesh = self.mesh.to(self.device_type)
+        mesh_list = [self_mesh.clone() for _ in range(get_world_size())]
+        all_gather(mesh_list, self_mesh)
+        for other_rank, other_mesh in enumerate(mesh_list):
+            if not torch.equal(self_mesh, other_mesh):
+                raise RuntimeError(
+                    f"DeviceMesh initialization does not allow different mesh argument:"
+                    f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
+                    f"has mesh {other_mesh}!"
+                )
 
         # groups created by dimension, each dimension should have exact
         # one valid process group per rank
@@ -200,17 +180,14 @@ class DeviceMesh(object):
             dim_groups.append(default_pg)
         else:
             # create sub pgs base on the mesh argument specified
-            # handle multi-dim mesh, create subgroups by
-            # looping over the pg_ranks_by_dim for each dim
             for dim in range(self.mesh.ndim):
                 # swap the current dim to the last dim
                 # then reshape to flatten out other dims
                 pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
                     -1, self.mesh.size(dim)
                 )
-                # multi-dim mesh, create subgroups by
-                # looping over the pg_ranks for each dim
-                # and append the groups
+                # multi-dim mesh, create subgroups by looping over the pg_ranks
+                # for each dim and append the groups
                 for dim_mesh in pg_ranks_by_dim:
                     subgroup_ranks = dim_mesh.tolist()
                     # call new_group regardless of the current rank in the
@@ -228,14 +205,14 @@ class DeviceMesh(object):
         return dim_groups
 
     def __enter__(self) -> "DeviceMesh":
-        # set global device_mesh to this instance
-        set_global_device_mesh(self)
+        # set this mesh as the current mesh in mesh env
+        mesh_resources.mesh_stack.append(self)
         return self
 
     # pyre-fixme[2]: Parameter must be annotated.
     def __exit__(self, exc_type, exc_value, exc_traceback) -> None:
-        # unset global device mesh
-        set_global_device_mesh(None)
+        # pop this mesh from mesh env
+        mesh_resources.mesh_stack.pop()
 
     def __repr__(self) -> str:
         return f"DeviceMesh:({self.mesh.tolist()})"
@@ -370,20 +347,18 @@ class DeviceMesh(object):
         gather_dim: int = 0,
     ) -> torch.Tensor:
         """
-        all_gather the tensor on each rank to the tensor_list on a
+        all_gather the tensor on each rank to a bigger tensor on a
         device mesh dimension.
 
         Args:
-            tensor_list (List[torch.Tensor]): The gathered tensor list.
             tensor (torch.Tensor): tensor to be gathered on each rank.
             mesh_dim (int, optional): indicate which mesh dimension we want
                 to scatter on, we by default choose the first rank on the
                 mesh dimension as source of truth.
             gather_dim (int, optional): Dimension to concatenate the resulting tensor.
 
-            This suppport up to 1 elem of padding on gather_dim.
         Returns:
-            A :class:`torch.Tensor` object
+            A :class:`AsyncCollectiveTensor` object
         """
         dim_group = self._dim_groups[mesh_dim]
         return funcol.all_gather_tensor(tensor, gather_dim=gather_dim, group=dim_group)
@@ -391,9 +366,8 @@ class DeviceMesh(object):
     def all_reduce(
         self,
         tensor: torch.Tensor,
-        op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
+        op: ReduceOp.RedOpType = ReduceOp.SUM,
         mesh_dim: int = 0,
-        async_op: bool = False,
     ) -> torch.Tensor:
         """
         all_reduce the tensor on each rank on a device mesh dimension, and
@@ -407,29 +381,20 @@ class DeviceMesh(object):
                 to reduce on.
 
         Returns:
-            A :class:`torch.Tensor` object
+            A :class:`AsyncCollectiveTensor` object
         """
-        dim_group = self._dim_groups[mesh_dim]
-        op_name: str = op.name  # type: ignore[attr-defined]
-        return funcol.all_reduce(
-            tensor,
-            reduceOp=op_name,
-            group=(
-                self,
-                mesh_dim,
-            ),
-        )
+        return funcol.all_reduce(tensor, reduceOp=op.name, group=(self, mesh_dim))
 
     def reduce_scatter(
         self,
         input: torch.Tensor,
-        op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
+        op: ReduceOp.RedOpType = ReduceOp.SUM,
         mesh_dim: int = 0,
         scatter_dim: int = 0,
     ) -> torch.Tensor:
         """
         reduce the input on each rank on a device mesh dimension, and scatter
-        the results to the output tensor on each rank.
+        the results as output tensor on each rank.
 
         Args:
             input (torch.Tensor): tensor to be reduced and scattered
@@ -442,17 +407,10 @@ class DeviceMesh(object):
         Returns:
             A :class:`torch.Tensor` object
         """
-        op_name: str = op.name  # type: ignore[attr-defined]
-        if self._backend == "nccl" or self._backend == "threaded":
-            dim_group = self._dim_groups[mesh_dim]
-            scatter_tensor = funcol.reduce_scatter_tensor(
-                input, reduceOp=op_name, scatter_dim=scatter_dim, group=dim_group
-            )
-
-        elif self._backend == "gloo":
-            # it's gloo, which does not have reduce_scatter
-            # we have to do all_reduce + scatter
-            warnings.warn(
+        if self.device_type == "cpu":
+            # cpu::gloo backend does not have reduce_scatter we fallback to do all_reduce
+            # + local chunk
+            logger.warning(
                 "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
             )
             dim_group = self._dim_groups[mesh_dim]
@@ -462,12 +420,13 @@ class DeviceMesh(object):
                 tensor_list = torch.chunk(input, group_size, dim=scatter_dim)
                 input = torch.cat(tensor_list)
 
-            flat_tensor = funcol.all_reduce(input, reduceOp=op_name, group=dim_group)
+            flat_tensor = funcol.all_reduce(input, reduceOp=op.name, group=dim_group)
             chunks = flat_tensor.chunk(group_size, dim=0)
             scatter_tensor = chunks[group_rank]
         else:
-            raise RuntimeError(
-                f"backend {self._backend} does not support reduce_scatter!"
+            dim_group = self._dim_groups[mesh_dim]
+            scatter_tensor = funcol.reduce_scatter_tensor(
+                input, reduceOp=op.name, scatter_dim=scatter_dim, group=dim_group
             )
 
         return scatter_tensor
@@ -484,7 +443,10 @@ class DeviceMesh(object):
 
         work = None
         # no direct dist.all_to_all support on 'gloo' so we manually do scatters
-        if self._backend == "gloo":
+        if self.device_type == "cpu":
+            logger.warning(
+                "ProcessGroupGloo does not support all_to_all, falling back with scatters!"
+            )
             # TODO: pull the handle of uneven case in #492
             dim_group_size = get_world_size(dim_group)
             for i in range(dim_group_size):
@@ -500,16 +462,11 @@ class DeviceMesh(object):
                     src=src_for_dim,
                     async_op=async_op,
                 )
-
-        elif self._backend == "nccl":
+        else:
             work = all_to_all(
                 output_tensor_list,
                 input_tensor_list,
                 dim_group,
                 async_op=async_op,
-            )
-        else:
-            raise RuntimeError(
-                f"DeviceMesh does not support all-to-all collective operations on {self._backend} backend."
             )
         return work

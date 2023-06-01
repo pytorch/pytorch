@@ -7,6 +7,7 @@ import json
 import logging
 import multiprocessing
 import os
+import pathlib
 import re
 import shutil
 import signal
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import types
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -64,10 +66,9 @@ log = logging.getLogger(__name__)
 
 @functools.lru_cache(None)
 def cache_dir():
-    cache_dir = os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR",
-        f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
-    )
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if cache_dir is None:
+        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
@@ -79,7 +80,7 @@ def cubin_cache_dir():
     return cubin_dir
 
 
-class PersistentCache:
+class CacheBase:
     def __init__(self):
         if not torch.cuda.is_available():
             return
@@ -127,6 +128,33 @@ class PersistentCache:
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
         )
 
+
+class LocalCache(CacheBase):
+    def lookup(self, *keys: List[str]):
+        cache = self.get_local_cache()
+
+        sub_cache = cache
+        for key in keys:
+            if key in cache:
+                sub_cache = cache[key]
+            else:
+                return None
+
+        return sub_cache
+
+    def set_value(self, *keys: List[str], value: Any):
+        cache = self.get_local_cache()
+
+        sub_cache = cache
+        for key in keys[0:-1]:
+            sub_cache.setdefault(key, {})
+            sub_cache = sub_cache[key]
+        sub_cache[keys[-1]] = value
+
+        self.update_local_cache(cache)
+
+
+class PersistentCache(CacheBase):
     @functools.lru_cache(None)
     def get_global_cache(self):
         if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
@@ -229,11 +257,14 @@ def write(source_code, ext, extra=""):
 
 
 def write_atomic(path: str, source_code: str):
-    # use a temp file for thread safety
-    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
-    with os.fdopen(fd, "w") as f:
+    # Write into temporary file first to avoid conflicts between threads
+    # Avoid using a named temporary file, as those have restricted permissions
+    path = pathlib.Path(path)
+    tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
+    with tmp_path.open("w") as f:
         f.write(source_code)
-    os.rename(tmp_path, path)
+
+    tmp_path.rename(path)
 
 
 def cpp_compiler():
