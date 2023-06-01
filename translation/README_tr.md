@@ -441,7 +441,7 @@ PyTorch, birçok yetenekli mühendis ve araştırmacının katkı sağladığı 
 PyTorch şu anda [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), ve [Nikita Shulga](https://github.com/malfet)tarafından sürdürülmektedir. Ayrıca, yüzlerce yetenekli bireyin çeşitli şekillerde ve yöntemlerle katkıları da bulunmaktadır.
 Kapsamlı olmayan ancak büyüyen bir listeden bahsetmek gerekir: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
 
-Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
+Not: Bu proje, aynı isme sahip [hughperkins/pytorch](https://github.com/hughperkins/pytorch) projesiyle ilgili değildir. Hugh, Torch topluluğuna değerli bir katkıda bulunan biridir ve Torch ve PyTorch konularında birçok konuda yardımcı olmuştur.
 
 ## Lisans
 
