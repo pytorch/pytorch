@@ -977,7 +977,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def logical_not(a):
-        return f"!{a} != 0"
+        return f"!{a}"
 
     @staticmethod
     def logical_or(a, b):
