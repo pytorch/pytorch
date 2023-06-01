@@ -127,10 +127,6 @@ def upload_to_rockset(
 def emit_metric(
     metric_name: str,
     metrics: Dict[str, Any],
-    # Below params are for testing. Normally they're read from env vars.
-    repo: str = "",
-    workflow_run_number: int = 0,
-    workflow_run_attempt: int = 0,
 ) -> None:
     """
     Upload a metric to DynamoDB (and from there, Rockset).
@@ -140,15 +136,16 @@ def emit_metric(
             Name of the metric. Every unique metric must have a different name
             and must be emitted just once per run attempt.
         metrics: The actual data to record.
-        repo:
-            Name of the repo. If left blank, will be read from the GITHUB_REPOSITORY
-            environment variable.
-        workflow_run_number:
-            Workflow run number. If left blank, will be read from the GITHUB_RUN_NUMBER
-            environment variable.
-        workflow_run_attempt:
-            Workflow run attempt. If left blank, will be read from the GITHUB_RUN_ATTEMPT
-            environment variable.
+
+    Some default values are populated from environment variables, which must be set
+    for metrics to be emitted. (If they're not set, this function becomes a noop):
+
+    Env vars which should be set:
+        GITHUB_REPOSITORY: The repo name, e.g. "pytorch/pytorch"
+        GITHUB_WORKFLOW: The workflow name
+        GITHUB_JOB: The job id
+        GITHUB_RUN_NUMBER: The workflow run number
+        GITHUB_RUN_ATTEMPT: The workflow run attempt
     """
 
     if not IS_CI:
@@ -157,43 +154,53 @@ def emit_metric(
     if metrics is None:
         raise ValueError("You didn't ask to upload any metrics!")
 
-    # Env vars that we use if the parameters are not passed in
-    param_env_vars = {
+    # Env vars that we use to determine basic info about the workflow run
+    input_via_env_vars = {
         "repo": "GITHUB_REPOSITORY",
+        "workflow": "GITHUB_WORKFLOW",
+        "job": "GITHUB_JOB",
         "workflow_run_number": "GITHUB_RUN_NUMBER",
         "workflow_run_attempt": "GITHUB_RUN_ATTEMPT",
     }
+
     reserved_metric_keys = [
         "dynamo_key",
         "metric_name",
-        *param_env_vars.keys(),
+        *input_via_env_vars.keys(),
     ]
-
-    # Ensure we have a value for all the required default parameters
-    for var, env_var in param_env_vars.items():
-        if not locals()[var]:
-            locals()[var] = os.environ[env_var]
-            if not locals()[var]:
-                raise ValueError(
-                    f"Missing required {var} parameter. Please either pass it in or set the {env_var} environment variable."
-                )
 
     # Ensure the metrics dict doesn't contain these reserved keys
     for key in reserved_metric_keys:
-        if key in metrics:
-            raise ValueError(f"Metrics dict contains reserved key `{key}`")
+        used_reserved_keys = [k for k in metrics.keys() if k == key]
+        if used_reserved_keys in metrics:
+            raise ValueError(f"Metrics dict contains reserved keys [{', '.join(key)}]")
 
-    dynamo_key = f"{repo}/{metric_name}/{workflow_run_number}/{workflow_run_attempt}"
+    reserved_env_metrics = []
+    # Ensure we have a value for all the required env var based metrics
+    for var, env_var in input_via_env_vars.items():
+        reserved_env_metrics[var] = os.environ[env_var]
+        if not reserved_env_metrics[var]:
+            warn(
+                f"Not emitting metrics, missing {var}. Please set the {env_var} environment variable to pass in this value."
+            )
+            return
+
+    dynamo_key = "/".join([
+        reserved_env_metrics["repo"],
+        metric_name,
+        reserved_env_metrics["workflow"],
+        reserved_env_metrics["job"],
+        reserved_env_metrics["workflow_run_number"],
+        reserved_env_metrics["workflow_run_attempt"],
+    ])
 
     try:
         boto3.resource("dynamodb").Table("torchci-metrics").put_item(
             Item={
                 "dynamo_key": dynamo_key,
                 "metric_name": metric_name,
-                "repo": repo,
-                "workflow_run_number": workflow_run_number,
-                "workflow_run_attempt": workflow_run_attempt,
-                **metrics,  # Expand the metrics dict into the top-level of the item
+                **reserved_env_metrics,
+                **metrics,
             }
         )
     except Exception as e:
