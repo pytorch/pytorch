@@ -79,7 +79,10 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.utils import _p_assert
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, _has_foreach_support
+from torch.utils._foreach_utils import (
+    _group_tensors_by_device_and_dtype,
+    _has_foreach_support,
+)
 
 from ._optim_utils import (
     _flatten_optim_state_dict,
@@ -1018,7 +1021,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     @torch.no_grad()
     def clip_grad_norm_(
-        self, max_norm: Union[float, int], norm_type: Union[float, int] = 2.0, foreach: Optional[bool] = None
+        self,
+        max_norm: Union[float, int],
+        norm_type: Union[float, int] = 2.0,
+        foreach: Optional[bool] = None,
     ) -> torch.Tensor:
         """
         Clips the gradient norm of all parameters. The norm is computed over
@@ -1096,12 +1102,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 if param.grad is not None:
                     grads.append(param.grad)
         # Compute local norms (forced to be in FP32)
-        local_sharded_norm = _get_grad_norm(sharded_params, norm_type, foreach=foreach).to(
-            self.compute_device
-        )
-        local_nonsharded_norm = _get_grad_norm(nonsharded_params, norm_type, foreach=foreach).to(
-            self.compute_device
-        )
+        local_sharded_norm = _get_grad_norm(
+            sharded_params, norm_type, foreach=foreach
+        ).to(self.compute_device)
+        local_nonsharded_norm = _get_grad_norm(
+            nonsharded_params, norm_type, foreach=foreach
+        ).to(self.compute_device)
         # Reconstruct the total gradient norm depending on the norm type
         if norm_type == math.inf:
             total_norm = torch.maximum(local_sharded_norm, local_nonsharded_norm)
@@ -2015,9 +2021,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
 
 def _get_grad_norm(
-    params: Iterable[nn.Parameter],
-    norm_type: float,
-    foreach: Optional[bool]
+    params: Iterable[nn.Parameter], norm_type: float, foreach: Optional[bool]
 ) -> torch.Tensor:
     """
     Returns the gradient norm of parameters ``param`` s, where the gradients

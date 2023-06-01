@@ -86,7 +86,7 @@ class TestClipGradNorm(FSDPTest):
                 ],
                 "use_orig_params": [False, True],
                 "offload_params": [False, True],
-                "foreach": [False, True]
+                "foreach": [False, True],
             },
             self._test_ddp_parity,
         )
@@ -98,7 +98,7 @@ class TestClipGradNorm(FSDPTest):
         sharding_strategy: Union[ShardingStrategy, str],
         use_orig_params: bool,
         offload_params: bool,
-        foreach: bool
+        foreach: bool,
     ):
         local_model = TransformerWithSharedParams.init(
             self.process_group,
@@ -187,7 +187,7 @@ class TestClipGradNorm(FSDPTest):
             ddp_model.parameters(),
             max_norm=max_norm,
             norm_type=norm_type,
-            foreach=foreach
+            foreach=foreach,
         )
         fsdp_total_norm = fsdp_model.clip_grad_norm_(
             max_norm=max_norm, norm_type=norm_type, foreach=foreach
@@ -235,7 +235,7 @@ class TestClipGradNorm(FSDPTest):
                 ddp_model.parameters(),
                 max_norm=max_norm,
                 norm_type=norm_type,
-                foreach=foreach
+                foreach=foreach,
             )
             fsdp_total_norm = fsdp_model.clip_grad_norm_(
                 max_norm=max_norm, norm_type=norm_type, foreach=foreach
@@ -256,7 +256,7 @@ class TestClipGradNorm(FSDPTest):
                     ShardingStrategy.NO_SHARD,
                 ],
                 "use_orig_params": [False, True],
-                "foreach": [False, True]
+                "foreach": [False, True],
             },
             self._test_low_precision_grads,
         )
@@ -267,7 +267,7 @@ class TestClipGradNorm(FSDPTest):
         norm_type: Union[float, int],
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
-        foreach: bool
+        foreach: bool,
     ):
         fsdp_kwargs = {
             "sharding_strategy": sharding_strategy,
@@ -294,7 +294,9 @@ class TestClipGradNorm(FSDPTest):
         for param in fsdp_model.parameters():
             if param.grad is not None:
                 self.assertEqual(param.grad.dtype, torch.float16)
-        total_norm = fsdp_model.clip_grad_norm_(max_norm=max_norm, norm_type=norm_type, foreach=foreach)
+        total_norm = fsdp_model.clip_grad_norm_(
+            max_norm=max_norm, norm_type=norm_type, foreach=foreach
+        )
         # Check that the total norm is in FP16 to match the gradient dtype
         self.assertEqual(total_norm.dtype, torch.float16)
         # As a best effort, check that each gradient has norm at most the max
