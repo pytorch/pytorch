@@ -86,7 +86,7 @@ def construct_functionalization_kernel(mutable_op, functional_op):
         # We can still end up here because DispatchKey::Functionalize is a mode key
         if pytree.tree_all_only(torch.Tensor, lambda x: not torch._is_functional_tensor(x), args):
             with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
-                return mutable_op(*unwrapped_args)
+                return mutable_op(*args)
 
         # NB: This differs from the codegen -- codegen handles cases where there
         # are mixed FunctionalTensorWrapper and non-FunctionalTensorWrapper.
