@@ -4,7 +4,7 @@
 from typing import Any, Callable, Dict
 from unittest import mock
 
-from functorch.dim.einops._parsing import (
+from functorch.einops._parsing import (
     AnonymousAxis, ParsedExpression, parse_pattern, validate_rearrange_expressions, _ellipsis
 )
 from torch.testing._internal.common_utils import TestCase, run_tests

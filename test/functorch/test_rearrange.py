@@ -6,7 +6,7 @@ from typing import List, Tuple
 
 import numpy as np
 import torch
-from functorch.dim import rearrange
+from functorch.einops import rearrange
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 identity_patterns: List[str] = [
