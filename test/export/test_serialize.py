@@ -5,10 +5,14 @@ import torch
 import torch._dynamo as torchdynamo
 from torch._export import export
 <<<<<<< HEAD
+<<<<<<< HEAD
 from torch._export.serde.serialize import ExportedProgramSerializer
 =======
 from torch._export.serialize import serialize
 >>>>>>> [export] Initial serialization
+=======
+from torch._export.serde.serialize import ExportedProgramSerializer
+>>>>>>> idk what happened
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -37,6 +41,7 @@ class TestSerialize(TestCase):
                 torch.ones([512]),
             ),
 <<<<<<< HEAD
+<<<<<<< HEAD
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
@@ -49,6 +54,13 @@ class TestSerialize(TestCase):
         node = serialized.graph.nodes[0]
         self.assertEqual(node.target.name, "aten.var_mean.correction")
 >>>>>>> [export] Initial serialization
+=======
+        )
+
+        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        node = serialized.graph_module.graph.nodes[0]
+        self.assertEqual(node.target, "aten.var_mean.correction")
+>>>>>>> idk what happened
         # aten::native_layer_norm returns 3 tensnors
         self.assertEqual(len(node.outputs), 2)
 
@@ -70,6 +82,7 @@ class TestSerialize(TestCase):
         input = torch.arange(10.0).reshape(5, 2)
         input.requires_grad = True
 <<<<<<< HEAD
+<<<<<<< HEAD
         exported_module = export(MyModule(), (input,))
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
@@ -82,6 +95,13 @@ class TestSerialize(TestCase):
         node = serialized.graph.nodes[0]
         self.assertEqual(node.target.name, "aten.split.Tensor")
 >>>>>>> [export] Initial serialization
+=======
+        exported_module = export(MyModule(), (input,))
+
+        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        node = serialized.graph_module.graph.nodes[0]
+        self.assertEqual(node.target, "aten.split.Tensor")
+>>>>>>> idk what happened
         self.assertEqual(len(node.outputs), 1)
         # Input looks like:
         # tensor([[0, 1],
@@ -121,6 +141,7 @@ class TestSerialize(TestCase):
             MyModule(),
             (torch.ones([512, 512], requires_grad=True),),
 <<<<<<< HEAD
+<<<<<<< HEAD
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
@@ -133,6 +154,13 @@ class TestSerialize(TestCase):
         node = serialized.graph.nodes[0]
         self.assertEqual(node.target.name, "aten.var_mean.correction")
 >>>>>>> [export] Initial serialization
+=======
+        )
+
+        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        node = serialized.graph_module.graph.nodes[0]
+        self.assertEqual(node.target, "aten.var_mean.correction")
+>>>>>>> idk what happened
         self.assertEqual(len(node.outputs), 2)
 
         # check the names are unique
@@ -154,6 +182,7 @@ class TestSerialize(TestCase):
 
         x, _ = torch.sort(torch.randn(3, 4))
 <<<<<<< HEAD
+<<<<<<< HEAD
         exported_module = export(f, (x,))
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
@@ -166,16 +195,27 @@ class TestSerialize(TestCase):
         node = serialized.graph.nodes[1]
         self.assertEqual(node.target.name, "aten.searchsorted.Tensor")
 >>>>>>> [export] Initial serialization
+=======
+        exported_module = export(f, (x,))
+        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+
+        node = serialized.graph_module.graph.nodes[1]
+        self.assertEqual(node.target, "aten.searchsorted.Tensor")
+>>>>>>> idk what happened
         self.assertEqual(len(node.inputs), 6)
         self.assertEqual(node.inputs[2].arg.as_bool, False)
         self.assertEqual(node.inputs[3].arg.as_bool, True)
         self.assertEqual(node.inputs[4].arg.as_string, "right")
         self.assertEqual(node.inputs[5].arg.as_none, ())
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 =======
     
 >>>>>>> [export] Initial serialization
+=======
+
+>>>>>>> idk what happened
 
 if __name__ == '__main__':
     run_tests()
