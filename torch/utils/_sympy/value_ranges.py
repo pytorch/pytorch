@@ -187,11 +187,11 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def or_(a, b):
-        return ValueRanges.increasing_map(a, sympy.Or)
+        return ValueRanges.coordinatewise_increasing_map(a, b, sympy.Or)
 
     @staticmethod
     def and_(a, b):
-        return ValueRanges.increasing_map(a, sympy.And)
+        return ValueRanges.coordinatewise_increasing_map(a, b, sympy.And)
 
     @staticmethod
     def eq(a, b):
