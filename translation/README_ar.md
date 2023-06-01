@@ -53,9 +53,9 @@
 
 ## المزيد عن PyTorch
 
-At a granular level, PyTorch is a library that consists of the following components:
+على المستوى التفصيلي، تعد PyTorch مكتبة تتكون من المكونات التالية:
 
-| Component | Description |
+| العنصر | الوصف |
 | ---- | --- |
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | A Tensor library like NumPy, with strong GPU support |
 | [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | A tape-based automatic differentiation library that supports all differentiable Tensor operations in torch |
