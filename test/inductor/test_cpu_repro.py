@@ -1611,7 +1611,7 @@ class CPUReproTests(TestCase):
             permute = torch.ops.aten.permute.default(view, [0, 2, 1])
             return (bmm, permute)
 
-        torch._inductor.metrics.generated_kernel_count = 0
+        metrics.reset()
         self.common(
             fn,
             [
@@ -1626,7 +1626,7 @@ class CPUReproTests(TestCase):
                 ),
             ],
         )
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        self.assertEqual(metrics.generated_kernel_count, 1)
 
 
 if __name__ == "__main__":
