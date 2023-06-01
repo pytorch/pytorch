@@ -32,7 +32,7 @@ if [ -n "${CONDA_CMAKE}" ]; then
   NUMPY_VERSION=$(get_conda_version numpy)
 fi
 
-if [ -n "${MAX_JOBS}" ]; then
+if [ -z "${MAX_JOBS}" ]; then
     export MAX_JOBS=$(nproc)
 fi
 
