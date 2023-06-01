@@ -176,7 +176,7 @@ def emit_metric(
         if used_reserved_keys:
             raise ValueError(f"Metrics dict contains reserved keys [{', '.join(key)}]")
 
-    reserved_env_metrics = {}
+    reserved_env_metrics: Dict[str, Any] = {}
     # Ensure we have a value for all the required env var based metrics
     for var, env_var in input_via_env_vars.items():
         reserved_env_metrics[var] = os.environ[env_var]
@@ -198,10 +198,10 @@ def emit_metric(
     )
 
     # Use info about the function that invoked this one as a namespace and a way to filter metrics.
-    calling_frame = inspect.currentframe().f_back
-    calling_frame_info = inspect.getframeinfo(calling_frame)
+    calling_frame = inspect.currentframe().f_back  # type: ignore[union-attr]
+    calling_frame_info = inspect.getframeinfo(calling_frame)  # type: ignore[arg-type]
     calling_file = os.path.basename(calling_frame_info.filename)
-    calling_module = inspect.getmodule(calling_frame).__name__
+    calling_module = inspect.getmodule(calling_frame).__name__  # type: ignore[union-attr]
     calling_function = calling_frame_info.function
 
     try:

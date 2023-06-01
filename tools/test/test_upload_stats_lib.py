@@ -1,3 +1,4 @@
+import inspect
 import unittest
 from typing import Any
 from unittest import mock
@@ -31,11 +32,16 @@ class TestUploadStats(unittest.TestCase):
     def test_emit_metric(self, mock_resource: Any) -> None:
         metric = {"some_number": 123}
 
+        # Querying for this instead of hard coding it b/c this will change
+        # based on whether we run this test directly from python or from
+        # pytest
+        current_module = inspect.getmodule(inspect.currentframe()).__name__  # type: ignore[union-attr]
+
         expected_emit = {
             "dynamo_key": f"{REPO}/metric_name/{WORKFLOW}/{JOB}/{WORKFLOW_RUN_NUMBER}/{WORKFLOW_RUN_ATTEMPT}",
             "metric_name": "metric_name",
             "calling_file": "test_upload_stats_lib.py",
-            "calling_module": "__main__",
+            "calling_module": current_module,
             "calling_function": "test_emit_metric",
             "repo": REPO,
             "workflow": WORKFLOW,
