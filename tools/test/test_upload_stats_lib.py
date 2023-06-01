@@ -10,6 +10,7 @@ from tools.stats.upload_stats_lib import emit_metric
 REPO = "some/repo"
 WORKFLOW = "some-workflow"
 JOB = "some-job"
+WORKFLOW_RUN_ID = 56
 WORKFLOW_RUN_NUMBER = 123
 WORKFLOW_RUN_ATTEMPT = 3
 
@@ -24,6 +25,7 @@ class TestUploadStats(unittest.TestCase):
                 "GITHUB_REPOSITORY": REPO,
                 "GITHUB_WORKFLOW": WORKFLOW,
                 "GITHUB_JOB": JOB,
+                "GITHUB_RUN_ID": str(WORKFLOW_RUN_ID),
                 "GITHUB_RUN_NUMBER": str(WORKFLOW_RUN_NUMBER),
                 "GITHUB_RUN_ATTEMPT": str(WORKFLOW_RUN_ATTEMPT),
             },
@@ -42,7 +44,7 @@ class TestUploadStats(unittest.TestCase):
         current_module = inspect.getmodule(inspect.currentframe()).__name__  # type: ignore[union-attr]
 
         expected_emit = {
-            "dynamo_key": f"{REPO}/metric_name/{WORKFLOW}/{JOB}/{WORKFLOW_RUN_NUMBER}/{WORKFLOW_RUN_ATTEMPT}",
+            "dynamo_key": f"{REPO}/metric_name/{WORKFLOW}/{JOB}/{WORKFLOW_RUN_ID}/{WORKFLOW_RUN_NUMBER}/{WORKFLOW_RUN_ATTEMPT}",
             "metric_name": "metric_name",
             "calling_file": "test_upload_stats_lib.py",
             "calling_module": current_module,
@@ -50,8 +52,9 @@ class TestUploadStats(unittest.TestCase):
             "repo": REPO,
             "workflow": WORKFLOW,
             "job": JOB,
-            "workflow_run_number": WORKFLOW_RUN_NUMBER,
-            "workflow_run_attempt": WORKFLOW_RUN_ATTEMPT,
+            "run_id": WORKFLOW_RUN_ID,
+            "run_number": WORKFLOW_RUN_NUMBER,
+            "run_attempt": WORKFLOW_RUN_ATTEMPT,
             "some_number": 123,
             "float_number": decimal.Decimal(str(32.34)),
         }

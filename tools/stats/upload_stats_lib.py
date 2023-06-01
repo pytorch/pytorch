@@ -152,7 +152,8 @@ def emit_metric(
     Env vars which should be set:
         GITHUB_REPOSITORY: The repo name, e.g. "pytorch/pytorch"
         GITHUB_WORKFLOW: The workflow name
-        GITHUB_JOB: The job id
+        GITHUB_JOB: The job name
+        GITHUB_RUN_ID: The workflow run number (aka job id)
         GITHUB_RUN_NUMBER: The workflow run number
         GITHUB_RUN_ATTEMPT: The workflow run attempt
     """
@@ -166,8 +167,9 @@ def emit_metric(
         "repo": "GITHUB_REPOSITORY",
         "workflow": "GITHUB_WORKFLOW",
         "job": "GITHUB_JOB",
-        "workflow_run_number": "GITHUB_RUN_NUMBER",
-        "workflow_run_attempt": "GITHUB_RUN_ATTEMPT",
+        "run_id": "GITHUB_RUN_ID",
+        "run_number": "GITHUB_RUN_NUMBER",
+        "run_attempt": "GITHUB_RUN_ATTEMPT",
     }
 
     reserved_metric_keys = [
@@ -201,14 +203,16 @@ def emit_metric(
             metric_name,
             reserved_env_metrics["workflow"],
             reserved_env_metrics["job"],
-            reserved_env_metrics["workflow_run_number"],
-            reserved_env_metrics["workflow_run_attempt"],
+            reserved_env_metrics["run_id"],
+            reserved_env_metrics["run_number"],
+            reserved_env_metrics["run_attempt"],
         ]
     )
 
     # These are ints, even though the env vars were read as strings. Lets emit them that way
-    reserved_env_metrics["workflow_run_number"] = int(reserved_env_metrics["workflow_run_number"])
-    reserved_env_metrics["workflow_run_attempt"] = int(reserved_env_metrics["workflow_run_attempt"])
+    reserved_env_metrics["run_id"] = int(reserved_env_metrics["run_id"])
+    reserved_env_metrics["run_number"] = int(reserved_env_metrics["run_number"])
+    reserved_env_metrics["run_attempt"] = int(reserved_env_metrics["run_attempt"])
 
     # Use info about the function that invoked this one as a namespace and a way to filter metrics.
     calling_frame = inspect.currentframe().f_back  # type: ignore[union-attr]

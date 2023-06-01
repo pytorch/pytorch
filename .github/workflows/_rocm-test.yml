@@ -119,6 +119,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_WORKFLOW: ${{ github.workflow }}
           GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -173,6 +174,7 @@ jobs:
             -e GITHUB_REPOSITORY \
             -e GITHUB_WORKFLOW \
             -e GITHUB_JOB \
+            -e GITHUB_RUN_ID \
             -e GITHUB_RUN_NUMBER \
             -e GITHUB_RUN_ATTEMPT \
             -e BRANCH \
