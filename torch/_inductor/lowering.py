@@ -3621,6 +3621,9 @@ def _validate_reduction_axis(x, axis):
         axis = [axis]
     elif not axis:
         axis = range(len(size))
+    if len(size) == 0:
+        assert tuple(axis) in [(), (0,), (-1,)], f"invalid axis: {axis}"
+        return []
     axis = list(axis)
     for i in range(len(axis)):
         if axis[i] < 0:
