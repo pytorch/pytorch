@@ -202,8 +202,8 @@ class SymPyValueRangeAnalysis:
     def ne(cls, a, b):
         return cls.not_(cls.eq(a, b))
 
-    @classmethod
-    def lt(cls, a, b):
+    @staticmethod
+    def lt(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if a.upper < b.lower:
