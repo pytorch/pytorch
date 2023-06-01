@@ -49,7 +49,7 @@ pattern_matcher = True
 split_cat_fx_passes = True
 
 # enable reordering pass
-reordering = False
+reordering = True
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -157,7 +157,7 @@ else:
 kernel_name_max_ops = 10
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
-shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
+shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"

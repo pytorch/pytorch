@@ -5,7 +5,7 @@ from .analysis import get_runtime_snode
 from typing import List
 import torch.fx as fx
 
-# Used to ensure that linearizing a set is deterministic
+# Used to ensure that iterating over a set is deterministic
 def tuple_sorted(x):
     return sorted(tuple(x), key=lambda x: x.name)
 
@@ -139,6 +139,7 @@ def order_heuristic(nodes: List[fx.Node]) -> List[fx.Node]:
         print2("Priority 1")
         add_all_nodes(tuple_sorted(priority1))
         print2("Priority 2")
+
         if total_cost > comm_cost:
             pass
         else:

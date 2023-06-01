@@ -1,0 +1,408 @@
+From 6a739947de679ec7805a9807da2e2c7a66d95fc3 Mon Sep 17 00:00:00 2001
+From: Rodrigo Kumpera <kumpera@fb.com>
+Date: Fri, 21 Apr 2023 21:36:20 +0000
+Subject: [PATCH 1/2] Rework Inductor support for collectives.
+
+This is done by introducing two new base classes: InPlaceCollectiveKernel and OutOfPlaceCollectiveKernel.
+
+They deal with the differences for when InPlaceHint needs to be used.
+
+Additionally to that, we introduce `has_side_effects` method to buffers that
+prevents them from being DCE'd by the scheduduler. This is needed because InPlaceHint
+nodes both wrap the inputs and are the outputs, which places no users to the collectives
+themselves.
+
+[ghstack-poisoned]
+---
+ torch/_inductor/ir.py        | 153 ++++++++++++++---------------------
+ torch/_inductor/lowering.py  |   7 +-
+ torch/_inductor/scheduler.py |   8 +-
+ 3 files changed, 70 insertions(+), 98 deletions(-)
+
+diff --git a/torch/_inductor/ir.py b/torch/_inductor/ir.py
+index c954fa1136548..efa5bca53a8f0 100644
+--- a/torch/_inductor/ir.py
++++ b/torch/_inductor/ir.py
+@@ -4072,8 +4072,8 @@ def get_alias_names(self):
+ 
+ class CollectiveKernel(ExternKernel):
+     """
+-    Each CollectiveKernel should follow the patterns
+-    - it writes into a given output buffer
++    Each collective should follow the pattern:
++    - extend InPlaceCollectiveKernel or OutOfPlaceCollectiveKernel.
+     - the kernel delegates into c10d processgroup, which returns a 'work' obj
+     - the work obj is registered via _register_tensor_work so it can be waited on later
+     """
+@@ -4082,13 +4082,24 @@ def __init__(self, layout, inputs, constant_args):
+         super().__init__(None, layout, inputs, constant_args)
+         self.name = V.graph.register_buffer(self)
+ 
+-    def should_allocate(self):
+-        return True
+-
+     def codegen_collective(self, wrapper, output_name, input_names):
+         # factor so the boilerplate can be handled in CollectiveKernel.codegen
+         raise NotImplementedError("Must implement")
+ 
++    def codegen_output(self, wrapper, output_name, input_names):
++        # factor so the boilerplate can be handled in CollectiveKernel.codegen
++        raise NotImplementedError("Must implement")
++
++    @classmethod
++    def wrap_inputs_as_inplace(cls, inputs):
++        def wrap_input(var):
++            op = InPlaceHint(
++                FlexibleLayout(var.get_device(), var.get_dtype(), var.get_size()), var
++            )
++            return TensorBox.create(op)
++
++        return list(map(wrap_input, inputs))
++
+     def codegen(self, wrapper):
+         wrapper.add_import_once("import torch.distributed as dist")
+         wrapper.add_import_once(
+@@ -4108,21 +4119,40 @@ def codegen(self, wrapper):
+             f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+         )
+ 
++        self.codegen_output(wrapper, output_name, input_names)
+         self.codegen_collective(wrapper, output_name, input_names)
+-
+         wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
+ 
+ 
+-class MultiOutputNoSizeAssert(MultiOutput):
+-    """
+-    Extract partial output from a multi-output OP.
+-        Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emiting this.
+-    """
++class InPlaceCollectiveKernel(CollectiveKernel):
++    def __init__(self, layout, inputs, constant_args):
++        super().__init__(layout, inputs, constant_args)
+ 
+-    def codegen(self, wrapper):
+-        wrapper.writeline(
+-            f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
+-        )
++    def should_allocate(self):
++        return False
++
++    def has_side_effects(self):
++        return True
++
++    def codegen_output(self, wrapper, output_name, input_names):
++        if len(input_names) > 1:
++            wrapper.writeline(f"{output_name} = [{','.join(input_names)}] ")
++        else:
++            wrapper.writeline(f"{output_name} = {input_names[0]}")
++
++
++class OutOfPlaceCollectiveKernel(CollectiveKernel):
++    def __init__(self, layout, inputs, constant_args):
++        super().__init__(layout, self.unwrap_storage(inputs), constant_args)
++
++    def should_allocate(self):
++        return True
++
++    def has_side_effects(self):
++        return False
++
++    def codegen_output(self, wrapper, output_name, input_names):
++        pass
+ 
+ 
+ class InPlaceHint(ExternKernel):
+@@ -4152,11 +4182,10 @@ def should_allocate(self):
+         return True
+ 
+ 
+-class AllReduceCoalesced(ExternKernel):
++class AllReduceCoalesced(InPlaceCollectiveKernel):
+     def __init__(self, layout, inputs, constant_args, reduce_op):
+-        super().__init__(None, layout, inputs, constant_args)
++        super().__init__(layout, inputs, constant_args)
+         self.reduce_op = reduce_op
+-        self.name = V.graph.register_buffer(self)
+ 
+     def should_allocate(self):
+         return False
+@@ -4170,60 +4199,18 @@ def create(
+         ranks: List[int],
+         group_size: int,
+     ):
+-        res = []
+-
+-        def wrap_input(var):
+-            nonlocal res
+-            op = InPlaceHint(
+-                FlexibleLayout(var.get_device(), var.get_dtype(), var.get_size()), var
+-            )
+-            res.append(op)
+-            return TensorBox.create(op)
+-
+-        inputs = list(map(wrap_input, inputs))
+-
++        inplace_inputs = cls.wrap_inputs_as_inplace(inputs)
+         layout = MultiOutputLayout(inputs[0].get_device())
+ 
+-        packed = AllReduceCoalesced(
++        _ = AllReduceCoalesced(
+             layout=layout,
+-            inputs=inputs,
++            inputs=inplace_inputs,
+             constant_args=[tag, ranks, group_size],
+             reduce_op=reduce_op,
+         )
+-        for i, in_t in enumerate(inputs):
+-            res.append(
+-                MultiOutputNoSizeAssert(
+-                    FlexibleLayout(
+-                        in_t.get_device(), in_t.get_dtype(), in_t.get_size()
+-                    ),
+-                    packed,
+-                    f"[{i}]",
+-                )
+-            )
+-        return res
+-
+-    def codegen(self, wrapper):
+-        wrapper.add_import_once("import torch.distributed as dist")
+-        wrapper.add_import_once(
+-            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
+-        )
+-        wrapper.add_import_once(
+-            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+-        )
+-
+-        output_name = self.get_name()
+-        tag, ranks, group_size = self.constant_args
+-
+-        wrapper.writeline(
+-            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+-        )
+-
+-        inputs = []
+-        for inp in self.inputs:
+-            inputs.append(inp.codegen_reference())
+-
+-        wrapper.writeline(f"{output_name} = [{','.join(inputs)}] ")
++        return inplace_inputs
+ 
++    def codegen_collective(self, wrapper, output_name, input_names):
+         wrapper.writeline(
+             f"{output_name}_work = dist.all_reduce_coalesced("
+             f"{output_name}, "
+@@ -4231,10 +4218,9 @@ def codegen(self, wrapper):
+             f"group={output_name}_pg, "
+             "async_op=True)"
+         )
+-        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
+ 
+ 
+-class AllReduce(CollectiveKernel):
++class AllReduce(InPlaceCollectiveKernel):
+     def __init__(self, layout, inputs, constant_args, reduce_op):
+         super().__init__(layout, inputs, constant_args)
+         self.reduce_op = reduce_op
+@@ -4243,35 +4229,25 @@ def __init__(self, layout, inputs, constant_args, reduce_op):
+     def create(
+         cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
+     ):
+-        x = cls.realize_input(x)
+-
+-        # is there a difference between literally using x.data.layout below, vs
+-        # creating a new one that has the same properties?
+-        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
++        inplace_inputs = cls.wrap_inputs_as_inplace([x])
++        layout = MultiOutputLayout(inplace_inputs[0].get_device())
+ 
+-        return AllReduce(
+-            layout=new_layout,
+-            inputs=[x],
++        _ = AllReduce(
++            layout=layout,
++            inputs=inplace_inputs,
+             constant_args=[tag, ranks, group_size],
+             reduce_op=reduce_op,
+         )
++        return inplace_inputs[0]
+ 
+     def codegen_collective(self, wrapper, output_name, input_names):
+-        # We must copy our input buffer sometimes, but the scheduler will help us find opportunities
+-        # to reuse the input buffer.  (This requires no other users of the input buffer.)
+-        if not wrapper.did_reuse(self, self.inputs[0]):
+-            wrapper.writeline(f"{output_name}.copy_({input_names[0]})")
+-
+-        # At this point, output_name points to a buffer that is either
+-        # (1) the input buffer, which we're allowed to inplace modify
+-        # (2) a freshly allocated buffer, which we've copied the input into above
+         wrapper.writeline(
+             f"{output_name}_work = dist.all_reduce("
+             f"{output_name}, async_op=True, group={output_name}_pg, op=_str_to_reduce_op('{str(self.reduce_op)}'))"
+         )
+ 
+ 
+-class AllGatherIntoTensor(CollectiveKernel):
++class AllGatherIntoTensor(OutOfPlaceCollectiveKernel):
+     def __init__(self, layout, inputs, constant_args):
+         super().__init__(layout, inputs, constant_args)
+ 
+@@ -4300,15 +4276,8 @@ def codegen_collective(self, wrapper, output_name, input_names):
+             f"{output_name}, {input_names[0]}, async_op=True, group={output_name}_pg)"
+         )
+ 
+-        # At this point, output_name points to a fresh buffer
+-        wrapper.writeline(
+-            f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_names[0]}, async_op=True,"
+-            f" group={output_name}_pg)"
+-        )
+-        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
+-
+ 
+-class ReduceScatterTensor(CollectiveKernel):
++class ReduceScatterTensor(OutOfPlaceCollectiveKernel):
+     def __init__(self, layout, inputs, constant_args, reduce_op):
+         super().__init__(layout, inputs, constant_args)
+         self.reduce_op = reduce_op
+diff --git a/torch/_inductor/lowering.py b/torch/_inductor/lowering.py
+index 52f87566c9d21..e969f71f12a74 100644
+--- a/torch/_inductor/lowering.py
++++ b/torch/_inductor/lowering.py
+@@ -3906,9 +3906,7 @@ def wait(input):
+ 
+     @register_lowering(c10d_functional.all_reduce)
+     def allreduce(input, reduce_op, tag, ranks, group_size):
+-        return TensorBox.create(
+-            ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
+-        )
++        return ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
+ 
+     @register_lowering(c10d_functional.all_gather_into_tensor)
+     def all_gather_into_tensor(shard, tag, ranks, group_size):
+@@ -3924,8 +3922,7 @@ def reduce_scatter_tensor(input, reduce_op, tag, ranks, group_size):
+ 
+     @register_lowering(c10d_functional.all_reduce_coalesced)
+     def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
+-        result = ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+-        return list(map(TensorBox.create, result))
++        return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+ 
+ except ImportError:
+     log.info(
+diff --git a/torch/_inductor/scheduler.py b/torch/_inductor/scheduler.py
+index 98adf65180d72..712446e8dd25c 100644
+--- a/torch/_inductor/scheduler.py
++++ b/torch/_inductor/scheduler.py
+@@ -197,6 +197,9 @@ def is_extern(self):
+     def can_inplace(self, read_dep: dependencies.MemoryDep):
+         return False
+ 
++    def has_side_effects(self):
++        return False
++
+     def allocate(self):
+         if not self.node.should_allocate():
+             return
+@@ -324,6 +327,9 @@ def debug_str_extra(self):
+     def is_extern(self):
+         return True
+ 
++    def has_side_effects(self):
++        return hasattr(self.node, "has_side_effects") and self.node.has_side_effects()
++
+     def can_inplace(self, read_dep: dependencies.MemoryDep):
+         if self.get_aliases() or self.is_template():
+             return False
+@@ -796,7 +802,7 @@ def dead_node_elimination(self):
+         """
+         updated_nodes = []
+         for node in self.nodes:
+-            if node.users:
++            if node.users or node.has_side_effects():
+                 updated_nodes.append(node)
+             else:
+                 # dead code
+
+From c697d8bd0a8ea07c1748095950f76579d6d227e6 Mon Sep 17 00:00:00 2001
+From: Rodrigo Kumpera <kumpera@fb.com>
+Date: Mon, 24 Apr 2023 18:34:03 +0000
+Subject: [PATCH 2/2] Update on "Rework Inductor support for collectives."
+
+This is done by introducing two new base classes: InPlaceCollectiveKernel and OutOfPlaceCollectiveKernel.
+
+They deal with the differences for when InPlaceHint needs to be used.
+
+Additionally to that, we introduce `has_side_effects` method to buffers that
+prevents them from being DCE'd by the scheduduler. This is needed because InPlaceHint
+nodes both wrap the inputs and are the outputs, which places no users to the collectives
+themselves.
+
+cc soumith voznesenskym penguinwu anijain2305 EikanWang jgong5 Guobing-Chen XiaobingSuper zhuhaozhe blzheng Xia-Weiwen wenzhe-nrv jiayisunx peterbell10 desertfire
+
+[ghstack-poisoned]
+---
+ test/distributed/test_inductor_collectives.py | 31 ++++++++++---------
+ 1 file changed, 17 insertions(+), 14 deletions(-)
+
+diff --git a/test/distributed/test_inductor_collectives.py b/test/distributed/test_inductor_collectives.py
+index 0b8c8f71e0565..f77041a6a34ea 100644
+--- a/test/distributed/test_inductor_collectives.py
++++ b/test/distributed/test_inductor_collectives.py
+@@ -246,10 +246,11 @@ def func(inp, *, tag, ranks, group_size):
+         FileCheck() \
+             .check("buf0 = empty_strided") \
+             .check("buf0.copy_(arg0_1)") \
+-            .check("buf0_work = dist.all_reduce(buf0") \
+-            .check("_register_tensor_work(buf0, buf0_work)") \
++            .check("buf1 = buf0") \
++            .check("buf1_work = dist.all_reduce(buf1") \
++            .check("_register_tensor_work(buf1, buf1_work)") \
+             .check("_wait_tensor(buf0)") \
+-            .check("return (buf1, )") \
++            .check("return (buf2, )") \
+             .run(code)
+         correct = func(inputs, **self.get_world_trs())
+         assert same(out, correct)
+@@ -277,12 +278,13 @@ def func(inp, *, tag, ranks, group_size):
+         FileCheck() \
+             .check("buf1 = buf0; del buf0  # reuse") \
+             .check_not("buf1.copy_(") \
+-            .check("buf1_work = dist.all_reduce(buf1") \
+-            .check("_register_tensor_work(buf1, buf1_work)") \
+-            .check("_wait_tensor(buf1)") \
+             .check("buf2 = buf1") \
+-            .check("buf3 = empty_strided") \
+-            .check("return (buf2, buf3") \
++            .check("buf2_work = dist.all_reduce(buf2") \
++            .check("_register_tensor_work(buf2, buf2_work)") \
++            .check("_wait_tensor(buf1)") \
++            .check("buf3 = buf1") \
++            .check("buf4 = empty_strided") \
++            .check("return (buf3, buf4") \
+             .run(code)
+         out = compiled(inputs, **self.get_world_trs())
+         correct = func(inputs, **self.get_world_trs())
+@@ -311,15 +313,16 @@ def func(inp, *, tag, ranks, group_size):
+         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+         FileCheck() \
+             .check("buf0 = empty_strided(") \
+-            .check("buf2 = empty_strided") \
+-            .check("triton_poi__0.run(arg0_1, buf0, buf2") \
++            .check("buf3 = empty_strided") \
++            .check("triton_poi__0.run(arg0_1, buf0, buf3") \
+             .check_not("copy_(") \
+             .check("buf1 = buf0; del buf0  # reuse") \
+-            .check("buf1_work = dist.all_reduce(buf1") \
+-            .check("_register_tensor_work(buf1, buf1_work)") \
++            .check("buf2 = buf1") \
++            .check("buf2_work = dist.all_reduce(buf2") \
++            .check("_register_tensor_work(buf2, buf2_work)") \
+             .check("_wait_tensor(buf1)") \
+-            .check("buf3 = buf1") \
+-            .check("return (buf3, buf2, buf4") \
++            .check("buf4 = buf1") \
++            .check("return (buf4, buf3, buf5") \
+             .run(code)
+         out = compiled(inputs, **self.get_world_trs())
+         correct = func(inputs, **self.get_world_trs())

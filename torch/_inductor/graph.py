@@ -716,7 +716,7 @@ class GraphLowering(torch.fx.Interpreter):
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
         if config.benchmark_kernel:
-            print(f"Compiled module path: {mod.__file__}")
+            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
 
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
