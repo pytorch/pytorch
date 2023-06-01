@@ -97,6 +97,9 @@ def calculate_shards(
 
     if debug:
         print(test_file_times)
+        print(tests)
+        print(num_shards)
+        print([x for x in tests if must_serial(x)])
 
     known_tests = [x for x in tests if x in test_file_times]
     unknown_tests: List[str] = [x for x in tests if x not in known_tests]
