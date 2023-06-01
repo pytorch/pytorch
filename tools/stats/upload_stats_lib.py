@@ -6,6 +6,9 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List
+from warnings import warn
+
+from torch.testing._internal.common_utils import IS_CI
 
 import boto3  # type: ignore[import]
 import requests
@@ -119,6 +122,74 @@ def upload_to_rockset(
         workspace=workspace,
     )
     print("Done!")
+
+def emit_metric(
+        metric_name: str,
+        metrics: Dict[str, Any],
+        # Below params are for testing. Normally they're read from env vars.
+        repo: str = "",
+        workflow_run_number: int = 0,
+        workflow_run_attempt: int = 0,
+) -> None:
+    """
+    Upload a metric to DynamoDB (and from there, Rockset).
+
+    Parameters:
+        metric_name: Name of the metric. Every unique metric must have a different name and must be emitted just once per run attempt.
+        metrics: The actual data to record.
+        repo: Name of the repo. If left blank, will be read from the GITHUB_REPOSITORY environment variable.
+        workflow_run_number: Workflow run number. If left blank, will be read from the GITHUB_RUN_NUMBER environment variable.
+        workflow_run_attempt: Workflow run attempt. If left blank, will be read from the GITHUB_RUN_ATTEMPT environment variable.
+    """
+
+    if not IS_CI:
+        return # Don't emit metrics if we're not running in CI
+
+    if metrics is None:
+        raise ValueError("You didn't ask to upload any metrics!")
+
+    # Env vars that we use if the parameters are not passed in
+    param_env_vars = {
+        "repo": "GITHUB_REPOSITORY",
+        "workflow_run_number": "GITHUB_RUN_NUMBER",
+        "workflow_run_attempt": "GITHUB_RUN_ATTEMPT",
+    }
+    reserved_metric_keys = [
+        "dynamo_key",
+        "metric_name",
+        *param_env_vars.keys(),
+    ]
+
+    # Ensure we have a value for all the required default parameters
+    for var, env_var in param_env_vars.items():
+        if not locals()[var]:
+            locals()[var] = os.environ[env_var]
+            if not locals()[var]:
+                raise ValueError(f"Missing required {var} parameter. Please either pass it in or set the {env_var} environment variable.")
+
+    # Ensure the metrics dict doesn't contain these reserved keys
+    for key in reserved_metric_keys:
+        if key in metrics:
+            raise ValueError(f"Metrics dict contains reserved key `{key}`")
+
+    dynamo_key = f"{repo}/{metric_name}/{workflow_run_number}/{workflow_run_attempt}"
+
+    try:
+        boto3.resource("dynamodb").Table("torchci-metrics").put_item(
+            Item={
+                "dynamo_key": dynamo_key,
+                "metric_name": metric_name,
+                "repo": repo,
+                "workflow_run_number": workflow_run_number,
+                "workflow_run_attempt": workflow_run_attempt,
+                **metrics, # Expand the metrics dict into the top-level of the item
+            }
+        )
+    except Exception as e:
+        # We don't want to fail the job if we can't upload the metric.
+        # We still raise the ValueErrors outside this try block since those indicate improperly configured metrics
+        warn(f"Error uploading metric to DynamoDB: {e}")
+        return
 
 
 def upload_to_s3(
