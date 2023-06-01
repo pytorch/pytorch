@@ -260,9 +260,12 @@ def log_time_savings(
         f"Prioritized tests will run about {duration_to_str(max_time_savings_sec)} sooner than they would've otherwise"
     )
 
-    emit_metric("test_reordering_time_savings", {
-        "time_savings_sec": max_time_savings_sec,
-    })
+    emit_metric(
+        "test_reordering_time_savings",
+        {
+            "time_savings_sec": max_time_savings_sec,
+        },
+    )
 
     # Return value used by tests
     return max_time_savings_sec
@@ -327,12 +330,15 @@ def get_reordered_tests(
     else:
         print("Didn't find any tests to prioritize")
 
-    emit_metric("test_reordering_prioritized_tests", {
-        "prioritized_test_cnt": len(bring_to_front),
-        "total_test_cnt": len(tests),
-        "prioritized_tests": prioritized_test_names,
-        "remaining_tests": remaining_test_names,
-    })
+    emit_metric(
+        "test_reordering_prioritized_tests",
+        {
+            "prioritized_test_cnt": len(bring_to_front),
+            "total_test_cnt": len(tests),
+            "prioritized_tests": prioritized_test_names,
+            "remaining_tests": remaining_test_names,
+        },
+    )
 
     return (bring_to_front, the_rest)
 
