@@ -1,10 +1,11 @@
 import torch
-from torch.fx import Node
 from torch.ao.quantization._pt2e.quantizer.quantizer import (
+    QuantizationAnnotation,
     QuantizationConfig,
     QuantizationSpec,
-    QuantizationAnnotation,
 )
+from torch.fx import Node
+
 
 def get_input_act_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
@@ -18,6 +19,7 @@ def get_input_act_qspec(quantization_config: QuantizationConfig):
     ]
     return quantization_spec
 
+
 def get_output_act_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
         return None
@@ -28,12 +30,8 @@ def get_output_act_qspec(quantization_config: QuantizationConfig):
         torch.per_tensor_affine,
         torch.per_tensor_symmetric,
     ]
-    if quantization_spec.is_dynamic:
-        # TODO: extend this helper function to support dynamic quantization
-        raise Exception(
-            "Unsupported quantization_spec for activation: {}".format(quantization_spec)
-        )
     return quantization_spec
+
 
 def get_weight_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
@@ -51,6 +49,7 @@ def get_weight_qspec(quantization_config: QuantizationConfig):
         )
     return quantization_spec
 
+
 def get_bias_qspec(quantization_config: QuantizationConfig):
     if quantization_config is None:
         return None
@@ -63,8 +62,11 @@ def get_bias_qspec(quantization_config: QuantizationConfig):
     ), "Only float dtype for bias is supported for bias right now"
     return quantization_spec
 
+
 def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
-    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
+    quantization_annotation = node.meta.get(
+        "quantization_annotation", QuantizationAnnotation()
+    )
     if quantization_annotation.input_qspec_map is None:
         quantization_annotation.input_qspec_map = {}
     quantization_annotation.input_qspec_map[input_node] = qspec
@@ -72,6 +74,8 @@ def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
 
 
 def _annotate_output_qspec(node: Node, qspec):
-    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
+    quantization_annotation = node.meta.get(
+        "quantization_annotation", QuantizationAnnotation()
+    )
     quantization_annotation.output_qspec = qspec
     node.meta["quantization_annotation"] = quantization_annotation
