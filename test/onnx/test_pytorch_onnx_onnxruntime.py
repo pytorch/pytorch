@@ -744,7 +744,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (x, y))
         self.run_test(model, (), {"x": x, "y": y}, input_names=("x", "y"))
 
-    @skipIfUnsupportedMinOpsetVersion(12)
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_logit(self):
         class Logit(torch.nn.Module):
             def __init__(self, eps):

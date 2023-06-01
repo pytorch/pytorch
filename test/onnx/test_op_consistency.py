@@ -99,7 +99,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
     ),
-    skip("logit", opsets=[onnx_test_common.opsets_before(12)], reason="Need LessOrEqual."),
     xfail(
         "logit",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
