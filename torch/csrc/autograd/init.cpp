@@ -37,8 +37,8 @@
 #include <unordered_set>
 #include <utility>
 
-using torch::impl::py_context_manager_DEPRECATED;
 using torch::impl::py_context_manager;
+using torch::impl::py_context_manager_DEPRECATED;
 
 namespace {
 
