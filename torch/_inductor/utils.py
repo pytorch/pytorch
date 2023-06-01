@@ -680,12 +680,12 @@ def run_and_get_code(fn, *args, **kwargs):
     return result, source_codes
 
 
-def run_and_get_triton_code(fn, *args, **kwargs):
+def run_and_get_triton_code(fn, *args, expected_codes=1, **kwargs):
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     assert (
-        len(source_codes) == 1
+        len(source_codes) == expected_codes
     ), f"expected exactly one code output got {len(source_codes)}"
-    return source_codes[0]
+    return source_codes[0] if expected_codes == 1 else source_codes
 
 
 def developer_warning(msg):

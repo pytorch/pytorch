@@ -154,6 +154,45 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = eager_func(compiled_inductor_func(*inductor_inputs), *eager_inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graphbreak_between_collective_wait_inductor(self):
+
+        def func(inp, *, tag, ranks, group_size):
+            ar = torch.ops.c10d_functional.all_reduce(inp, "sum", tag, ranks, group_size)
+            y = inp + 10
+            print("graph break")
+            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            ar += y
+            return ar
+
+        inputs = torch.ones(4, 4, device="cuda")
+        compiled = torch.compile(func)
+        codes = run_and_get_triton_code(compiled, inputs, expected_codes=2, **self.get_world_trs())
+        self.assertEqual(len(codes), 2)
+        FileCheck() \
+            .check("buf0.copy_(arg0_1)") \
+            .check("buf0_work = dist.all_reduce(buf0") \
+            .check("_register_tensor_work(buf0, buf0_work)") \
+            .check("buf1 = empty_strided") \
+            .check("triton_poi_fused_add_0.run(arg0_1, buf1") \
+            .check("return (buf0, buf1") \
+            .run(codes[0])
+
+        FileCheck() \
+            .check("_wait_tensor(arg0_1)") \
+            .check("buf0 = arg0_1") \
+            .check("buf1 = buf0") \
+            .check("triton_poi_fused_add_0.run(buf1, arg1_1") \
+            .check("return (buf1, )") \
+            .run(codes[1])
+
+        correct = func(inputs, **self.get_world_trs())
+        out = compiled(inputs, **self.get_world_trs())
+        self.assertTrue(same(out, correct))
+
+
+
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
