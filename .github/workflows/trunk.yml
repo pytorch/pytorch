@@ -58,7 +58,7 @@ jobs:
       build-environment: libtorch-linux-bionic-cuda12.1-py3.7-gcc9
       docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
       build-generates-artifacts: false
-      runner: linux.12xlarge
+      runner: linux.2xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
