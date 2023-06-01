@@ -141,7 +141,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           const auto scalar_type = t.scalar_type();
           return scalar_type ==  *dtype;
       })
-      : true
+      : true;
   if (!can_use_fast_route(tensors) || !is_same_dtype || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2))) {
     return foreach_tensor_norm_slow(tensors, ord, dtype);
