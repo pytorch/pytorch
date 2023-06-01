@@ -5,6 +5,7 @@ import os
 
 import torch
 import torch.distributed as dist
+from torch.distributed.distributed_c10d import GroupMember
 import torch.nn as nn
 from torch._dynamo.testing import reduce_to_scalar_loss
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -46,15 +47,40 @@ class CustomLinear(torch.nn.Module):
 
 
 class MyModule(torch.nn.Module):
-    def __init__(self, a, b):
+    def __init__(self, a, b, passthrough=False):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(a, b),
             nn.ReLU(),
         )
+        self.passthrough = passthrough
 
     def forward(self, x):
-        return self.net(x)
+        if self.passthrough:
+            x, passthrough = x
+            return self.net(x), passthrough
+        else:
+            return self.net(x)
+
+class MyGraphBreakAllReduce(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        tag, rankset, group_size = torch.distributed._functional_collectives._expand_group(GroupMember.WORLD, tag="")
+        ar = torch.ops.c10d_functional.all_reduce(x, "sum", tag, rankset, group_size)
+        print("Graph break")
+        return x, ar
+
+class MyWait(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        x, passthrough = x
+        synced = torch.ops.c10d_functional.wait_tensor(passthrough)
+        return x + synced
+        # return x
 
 
 class ToyModel(nn.Module):
@@ -64,10 +90,16 @@ class ToyModel(nn.Module):
             *[nn.Linear(10, 10000), nn.ReLU()]
             + [nn.Linear(10000, 10000), nn.ReLU()]
             + [MyModule(10000, 10000)]
-            + [MyModule(10000, 1000)]
-            + [MyModule(1000, 1000)]
-            + [MyModule(1000, 1000)]
-            + [MyModule(1000, 1000)]
+            + [MyModule(10000, 20000)]
+            + [MyModule(20000, 20000)]
+            + [MyGraphBreakAllReduce()]
+            + [MyModule(20000, 20000, passthrough=True)]
+            + [MyModule(20000, 20000, passthrough=True)]
+            + [MyModule(20000, 20000, passthrough=True)]
+            + [MyModule(20000, 20000, passthrough=True)]
+            + [MyWait()]
+            + [MyModule(20000, 20000)]
+            + [MyModule(20000, 1000)]
             + [MyModule(1000, 1000)]
             + [MyModule(1000, 1000)]
             + [MyModule(1000, 1000)]

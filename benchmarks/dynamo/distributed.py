@@ -163,7 +163,7 @@ if __name__ == "__main__":
         "--toy-model", "--toy_model", action="store_true", help="use toy model instead"
     )
     args = parser.parse_args()
-
+    torch.autograd.set_detect_anomaly(True)
     model_name = args.torchbench_model
     if args.toy_model:
         model_name = "ToyModel"
