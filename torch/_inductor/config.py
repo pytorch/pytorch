@@ -3,8 +3,6 @@ import sys
 
 import torch
 
-expl = os.environ.get("EXPL", "1") == "1"
-
 # add some debug printouts
 debug = False
 

@@ -673,20 +673,9 @@ class GraphLowering(torch.fx.Interpreter):
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if dense and len(strides):
+                if dense and len(strides) and (n.name in self.user_visible_outputs):
                     stride_order = ir.get_stride_order(strides)
-    
-                    if not config.expl:
-                        if (
-                            len(result.get_size()) == 4
-                            and n in self.nodes_prefer_channels_last
-                            and n.name not in self.user_visible_outputs
-                        ):
-                            stride_order = ir.NHWC_STRIDE_ORDER
-
-                    if config.expl:
-                        if n.name in self.user_visible_outputs:
-                            result = ir.ExternKernel.require_stride_order(result, stride_order)
+                    result = ir.ExternKernel.require_stride_order(result, stride_order)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
