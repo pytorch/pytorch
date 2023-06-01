@@ -137,7 +137,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
       });
   const bool is_same_dtype =
       dtype.has_value()
-      ? std::any_of(tensors.begin(), tensors.end(), [](const auto & t) {
+      ? std::any_of(tensors.begin(), tensors.end(), [&](const auto & t) {
           const auto scalar_type = t.scalar_type();
           return scalar_type ==  dtype.value();
       })
