@@ -298,19 +298,19 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def logical_not(a):
-        return f"{a} ^ 1"  # !{a} is not recognized by Triton
+        return f"not ({a} != 0)"
 
     @staticmethod
     def logical_and(a, b):
-        return f"{a} & {b}"  # {a} && {b} is not recognized by Triton
+        return f"({a} != 0) and ({b} != 0)"
 
     @staticmethod
     def logical_or(a, b):
-        return f"{a} | {b}"  # {a} || {b} is not recognized by Triton
+        return f"({a} != 0) or ({b} != 0)"
 
     @staticmethod
     def logical_xor(a, b):
-        return f"{a} ^ {b}"
+        return f"({a} != 0) != ({b} != 0)"
 
     @staticmethod
     def bitwise_and(a, b):

@@ -957,19 +957,19 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def logical_and(a, b):
-        return f"{a} && {b}"
+        return f"({a} != 0) && ({b} != 0)"
 
     @staticmethod
     def logical_not(a):
-        return f"!{a}"
+        return f"!({a} != 0)"
 
     @staticmethod
     def logical_or(a, b):
-        return f"{a} || {b}"
+        return f"({a} != 0) || ({b} != 0)"
 
     @staticmethod
     def logical_xor(a, b):
-        return f"{a} ^ {b}"
+        return f"({a} != 0) != ({b} != 0)"
 
     @staticmethod
     def bitwise_and(a, b):

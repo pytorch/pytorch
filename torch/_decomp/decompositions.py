@@ -3434,36 +3434,6 @@ def arange_start(
     )
 
 
-@register_decomposition(aten.__and__)
-@out_wrapper()
-def dunder_and(self, value):
-    return torch.bitwise_and(self, value)
-
-
-@register_decomposition(aten.__or__)
-@out_wrapper()
-def dunder_or(self, value):
-    return torch.bitwise_or(self, value)
-
-
-@register_decomposition(aten.__xor__)
-@out_wrapper()
-def dunder_xor(self, value):
-    return torch.bitwise_xor(self, value)
-
-
-@register_decomposition(aten.__lshift__)
-@out_wrapper()
-def dunder_lshift(self, value):
-    return torch.bitwise_left_shift(self, value)
-
-
-@register_decomposition(aten.__rshift__)
-@out_wrapper()
-def dunder_rshift(self, value):
-    return torch.bitwise_right_shift(self, value)
-
-
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

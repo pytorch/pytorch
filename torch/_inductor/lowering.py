@@ -4052,10 +4052,30 @@ register_pointwise_numeric(aten.log1p)
 register_pointwise_numeric(aten.tan)
 register_pointwise_numeric(aten.tanh)
 register_pointwise_numeric_ldf64(aten.log)
-logical_and = register_pointwise(aten.logical_and, convert_input_to_bool=True)
-logical_or = register_pointwise(aten.logical_or, convert_input_to_bool=True)
-logical_xor = register_pointwise(aten.logical_xor, convert_input_to_bool=True)
-logical_not = register_pointwise(aten.logical_not, convert_input_to_bool=True)
+logical_and = register_pointwise(
+    aten.logical_and,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+logical_not = register_pointwise(
+    aten.logical_not,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+logical_or = register_pointwise(
+    aten.logical_or,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+logical_xor = register_pointwise(
+    aten.logical_xor,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
@@ -4092,7 +4112,6 @@ register_pointwise_numeric(aten.nextafter)
 
 register_foreach_pointwise(aten._foreach_add.List, add)
 
-
 def register_inplace(aten_op, outplace_op):
     @register_lowering(aten_op, type_promotion_kind=None)
     def fn(*args, **kwargs):
@@ -4120,6 +4139,19 @@ register_inplace(aten.logical_xor_, logical_xor)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
+
+
+register_lowering(aten.__and__)(bitwise_and)
+register_lowering(aten.__lshift__)(bitwise_left_shift)
+register_lowering(aten.__or__)(bitwise_or)
+register_lowering(aten.__rshift__)(bitwise_right_shift)
+register_lowering(aten.__xor__)(bitwise_xor)
+
+register_inplace(aten.__iand__, aten.__and__)
+register_inplace(aten.__ilshift__, aten.__lshift__)
+register_inplace(aten.__ior__, aten.__or__)
+register_inplace(aten.__irshift__, aten.__rshift__)
+register_inplace(aten.__ixor__, aten.__xor__)
 
 
 @register_lowering(aten.sym_size)
