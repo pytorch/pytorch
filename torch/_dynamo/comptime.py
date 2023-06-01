@@ -297,6 +297,10 @@ def print_guards():
     comptime(lambda ctx: ctx.print_guards())
 
 
+def breakpoint():
+    comptime(lambda ctx: breakpoint())
+
+
 def comptime(fn):
     """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
     return
@@ -310,3 +314,4 @@ comptime.print_value_stack_and_return = print_value_stack_and_return
 comptime.print_locals = print_locals
 comptime.print_bt = print_bt
 comptime.print_guards = print_guards
+comptime.breakpoint = breakpoint
