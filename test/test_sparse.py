@@ -3454,7 +3454,13 @@ class TestSparse(TestSparseBase):
                 return torch.sparse_coo_tensor(x._indices(), x._values().log(),
                                                x.size(), dtype=x.dtype, device=x.device)
 
-            for dim in range(x.sparse_dim() + x.dense_dim()):
+            # Check dim out of bounds
+            with self.assertRaisesRegex(IndexError, r"Dimension out of range"):
+                torch.sparse.softmax(x, x.dim())
+            with self.assertRaisesRegex(IndexError, r"Dimension out of range"):
+                torch.sparse.softmax(x, -x.dim() - 1)
+
+            for dim in range(x.dim()):
                 # Check sparse softmax definition
 
                 # check Python sparse softmax
@@ -3464,12 +3470,13 @@ class TestSparse(TestSparseBase):
                 self.assertEqual(r1, r2)
 
                 # check C++ sparse softmax
-                y1 = torch.sparse.softmax(x, dim)
-                self.assertEqual(y, y1)
+                for d in (dim, dim - x.dim()):
+                    y1 = torch.sparse.softmax(x, d)
+                    self.assertEqual(y, y1)
 
-                # check C++ sparse log_softmax
-                ly1 = torch.sparse.log_softmax(x, dim)
-                self.assertEqual(ly1, sparse_log(y1))
+                    # check C++ sparse log_softmax
+                    ly1 = torch.sparse.log_softmax(x, d)
+                    self.assertEqual(ly1, sparse_log(y1))
 
                 # Check autograd support on sparse softmax
 
@@ -4774,24 +4781,16 @@ class TestSparseAny(TestCase):
         for sample in op.sample_inputs_sparse(layout, device, dtype):
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
-
             result = op.op(t_inp, *t_args, **t_kwargs)
 
             # Check rop(inp, ...).shape == inp.shape
             self.assertEqual(result.shape, t_inp.shape)
 
-            if layout is torch.sparse_coo and t_inp.numel() == 0 and op.name == 'mul' and t_inp.dense_dim() > 0:
-                # BUG: gh-97627
-                with self.assertRaisesRegex(
-                        AssertionError,
-                        "Scalars are not equal!"):
-                    self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
-            else:
-                # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
-                self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
+            # Check rop(inp, ...).sparse_dim() == inp.sparse_dim()
+            self.assertEqual(result.sparse_dim(), t_inp.sparse_dim())
 
-                # Check rop(inp, ...).dense_dim() == inp.dense_dim()
-                self.assertEqual(result.dense_dim(), t_inp.dense_dim())
+            # Check rop(inp, ...).dense_dim() == inp.dense_dim()
+            self.assertEqual(result.dense_dim(), t_inp.dense_dim())
 
             # Check invariant rop(inp, ...).to_dense() == rop(inp.to_dense(), ...)
             try:
