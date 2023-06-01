@@ -648,7 +648,7 @@ def conv(fake_mode, func, *args, **kwargs):
 
 # See [Copy ops where device can differ]
 @register_op_impl(lambda op: op in [aten.copy.default, aten.slice_scatter.default])
-def copy_default(fake_mode, func, *args, **kwargs):
+def copy_and_slice_scatter(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
     device = args[0].device
@@ -657,7 +657,7 @@ def copy_default(fake_mode, func, *args, **kwargs):
 
 # See [Copy ops where device can differ]
 @register_op_impl(aten.copy_.default)
-def copy_default(fake_mode, func, *args, **kwargs):
+def copy_inplace(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
     return out

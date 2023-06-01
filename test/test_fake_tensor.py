@@ -611,7 +611,7 @@ class FakeTensorTest(TestCase):
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_multi_device_slice_assign(self):
         def fn(self, other):
-            self[:,::2] = other
+            self[:, ::2] = other
 
         x = torch.rand((4, 4))
         y = torch.rand((4, 2), device='cuda')
