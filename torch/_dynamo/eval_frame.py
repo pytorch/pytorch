@@ -840,21 +840,54 @@ def export(
     """
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
-    if decomposition_table is not None:
-        assert (
-            aten_graph
-        ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-    if pre_autograd:
-        assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
+
+    def validation(
+        f: Callable[..., Any],
+        args,
+        aten_graph: bool,
+        pre_autograd: bool,
+        decomposition_table: Optional[Dict[torch._ops.OpOverload, Callable[..., Any]]],
+        functionalize: bool,
+        kwargs,
+    ) -> None:
+        if decomposition_table is not None:
+            assert (
+                aten_graph
+            ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
+
+        if pre_autograd:
+            assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
+
+        if functionalize and not aten_graph:
+            raise UserError(
+                UserErrorType.ANTI_PATTERN,
+                "TorchDynamo won't functionalize non-aten graphs. Please set `functionalize` to true",
+            )
+
+        # Run input function in eager mode with provided inputs
+        # This can be used to validate that the function is at least legit defined
+        try:
+            f(*args, **kwargs)
+        except Exception as exc:
+            raise UserError(
+                UserErrorType.ANTI_PATTERN,
+                f"Fail to execute func with input in eager mode due to exception: {exc}",
+            )
+
+    # Run through validation before processing core export logic
+    validation(
+        f=f,
+        args=args,
+        aten_graph=aten_graph,
+        pre_autograd=pre_autograd,
+        decomposition_table=decomposition_table,
+        functionalize=functionalize,
+        kwargs=kwargs,
+    )
+
     f = innermost_fn(f)
     call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
     original_signature = inspect.signature(call_to_inspect)
-
-    if functionalize and not aten_graph:
-        raise UserError(
-            UserErrorType.ANTI_PATTERN,
-            "TorchDynamo won't functionalize non-aten graphs. Please set `functionalize` to true",
-        )
 
     graph = None
     out_guards = None

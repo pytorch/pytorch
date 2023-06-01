@@ -7,6 +7,7 @@ import functools
 import inspect
 import math
 import operator
+import re
 import unittest
 from enum import Enum
 from typing import Dict, List, Sequence
@@ -1494,20 +1495,57 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             2,
         )
 
-    def test_export_decomp_asserts_bad_args(self):
+    def test_export_validation_asserts_bad_args(self):
         def f(x):
             return x.t() + x.t()
 
         def nop(x):
             return x.cos()
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True",
+        ):
             graph, _ = torch._dynamo.export(
                 f,
                 (torch.randn(5)),
                 aten_graph=False,
                 decomposition_table={torch.ops.aten.t.default: nop},
             )
+
+        with self.assertRaisesRegex(
+            AssertionError,
+            "pre_autograd=True can only be used when aten_graph=True",
+        ):
+            graph, _ = torch._dynamo.export(
+                f,
+                (torch.randn(5)),
+                pre_autograd=True,
+                aten_graph=False,
+            )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "TorchDynamo won't functionalize non-aten graphs. Please set `functionalize` to true",
+        ):
+            graph, _ = torch._dynamo.export(
+                f,
+                (torch.randn(5)),
+                functionalize=True,
+                aten_graph=False,
+            )
+
+    def test_export_validation_undefined_error_in_eager_mode(self):
+        inp = torch.ones(6, 4)
+
+        def func(x):
+            outs = x + outs
+            return x + outs
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Fail to execute func with input in eager mode due to exception: ",
+        ):
+            _ = torch._dynamo.export(func, inp)
 
     @config.patch(capture_scalar_outputs=True)
     def test_export_with_module_layer(self):
@@ -1786,8 +1824,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         mod = Module()
         xs = torch.randn(0, 2)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "zero-sized tensor",
+            torch._dynamo.exc.UserError,
+            "Fail to execute func with input in eager mode due to exception: Leading dimensions of mapped xs cannot be 0.",
         ):
             out_graph, _ = torch._dynamo.export(mod, xs)
 
@@ -2644,9 +2682,10 @@ def forward(self, x):
     @config.patch(capture_dynamic_output_shape_ops=True)
     def test_export_dynamic_control_flow_error(self):
         def f(x):
-            if x.nonzero() > 3:
-                return x.cos()
-            return x.sin()
+            if x.sum() > 0:
+                return torch.relu(x)
+            else:
+                return torch.neg(x)
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
@@ -2909,7 +2948,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected 4 arguments",
+            re.escape("cond_dense()"),
         ):
             torch._dynamo.export(f, *example_inputs, aten_graph=True)
 
@@ -2936,7 +2975,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Expected a list but got",
+            re.escape("<lambda>()"),
         ):
             torch._dynamo.export(
                 f_non_list_operands,
@@ -3000,7 +3039,7 @@ def forward(self, x):
 
     def test_cond_raise_user_error_on_branch_return_multiple_tenors(self):
         def f_branch_return_multiple_tensors(x, y):
-            return cond(y, lambda x: (x, x), lambda x: (x, x), [x])
+            return cond(y[0], lambda x: (x, x), lambda x: (x, x), [x])
 
         example_inputs = (torch.randn(4), torch.randn(2))
         with self.assertRaisesRegex(
