@@ -259,6 +259,7 @@ class QNNPackQuantizer(Quantizer):
         self._annotate_hardtanh(model, config)
         self._annotate_mean(model, config)
         self._annotate_adaptive_avg_pool2d(model, config)
+        return model
 
     def _annotate_conv2d_patterns(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
