@@ -44,6 +44,7 @@ try:
         calculate_shards,
         get_reordered_tests,
         get_test_case_configs,
+        log_time_savings,
         NUM_PROCS,
         ShardedTest,
         THRESHOLD,
@@ -594,7 +595,11 @@ def run_test(
     os.close(log_fd)
 
     command = (launcher_cmd or []) + executable + argv
-    should_file_rerun = "--subprocess" not in command and not RERUN_DISABLED_TESTS
+    should_file_rerun = (
+        "--subprocess" not in command
+        and not RERUN_DISABLED_TESTS
+        and not options.continue_through_error
+    )
     timeout = (
         THRESHOLD * 3
         if should_file_rerun
@@ -971,9 +976,9 @@ def get_pytest_args(
     ]
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
-        pytest_args.extend(
-            ["-p", "no:xdist", "--use-pytest", f"--sc={stepcurrent_key}"]
-        )
+        pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
+        if not options.continue_through_error:
+            pytest_args.append(f"--sc={stepcurrent_key}")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
         # is much slower than running them directly
@@ -1606,6 +1611,13 @@ def main():
     remaining_tests = selected_tests
     if IS_CI:
         (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
+        log_time_savings(
+            selected_tests,
+            prioritized_tests,
+            is_serial_test_fn=must_serial,
+            num_procs=NUM_PROCS,
+        )
+
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 

@@ -40,6 +40,7 @@ class ScriptList final {
   // TODO: Do these make sense?
   using size_type = size_t;
   using diff_type = ptrdiff_t;
+  using ssize_t = Py_ssize_t;
 
   // Constructor for empty lists created during slicing, extending, etc.
   ScriptList(const TypePtr& type) : list_(AnyType::get()) {

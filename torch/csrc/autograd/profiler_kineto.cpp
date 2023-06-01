@@ -274,12 +274,6 @@ struct AddGenericMetadata : public MetadataBase {
   const torch::profiler::impl::ProfilerConfig* config_;
 };
 
-// Assumption: Total threads number will not exceed 2^16-1, and total ops will
-// not exceed 2^48 -1.
-static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
-  return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
-}
-
 struct KinetoThreadLocalState : public ProfilerStateBase {
   explicit KinetoThreadLocalState(
       const ProfilerConfig& config,
@@ -362,8 +356,6 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
     materializeOpEvents(records_and_trace.first);
 
-    // finalizeCPUTrace(cpu_trace_.get());
-
     // `kineto_events_` does not include Python events. Instead it exposes them
     // via the `stacks` property.
     kineto_events_.erase(
@@ -404,82 +396,6 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       }
     }
   }
-
-  void finalizeCPUTrace(
-      std::unique_ptr<torch::profiler::impl::kineto::trace_t>& cpu_trace) {
-#ifndef USE_KINETO
-  }
-#else // USE_KINETO
-    TORCH_INTERNAL_ASSERT(
-        cpu_trace->activities.size() == kineto_events_.size());
-    // startThreadId_seqNum to pointer of activity.
-    // Low-16bits of startThreadId and low-48bits seqNum are concatenated into
-    // one uint64_t variable as key.
-
-    // From the time being, we need disable the forward/backward correlation
-    // feature to workaround the crash bug.
-    // TODO: by Mike Guo
-    // reenable the forward/backward correlation when kineto fix the following
-    // raw pointer
-    //    GenericTraceActivity.flow.linkedActivity
-    /*
-    std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
-        tidSeq2activity;
-
-    for (const auto idx : c10::irange(cpu_trace->activities.size())) {
-      auto& kineto_event = kineto_events_[idx];
-      auto& activity = cpu_trace->activities[idx];
-
-      // add information about an associated forward op, if a sequence number
-      // is available (e.g. during training)
-      if (kineto_event.sequenceNr() >= 0) {
-        generateForwardBackwardLink(
-            kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
-      }
-    }
-    */
-  }
-
-  void generateForwardBackwardLink(
-      const KinetoEvent& kineto_event,
-      uint64_t& fwd_bwd_link_id,
-      libkineto::GenericTraceActivity& activity,
-      std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>&
-          tidSeq2activity) {
-    if (kineto_event.fwdThreadId() > 0) {
-      // act is backward op.
-      uint64_t key = getForwardThreadKey(
-          kineto_event.fwdThreadId(), kineto_event.sequenceNr());
-      auto iter = tidSeq2activity.find(key);
-      if (iter != tidSeq2activity.end()) {
-        libkineto::GenericTraceActivity* fwd = iter->second;
-        fwd->flow.start = true;
-        activity.flow.id = fwd->flow.id = fwd_bwd_link_id;
-        activity.flow.type = fwd->flow.type = libkineto::kLinkFwdBwd;
-        ++fwd_bwd_link_id;
-      }
-    } else if (kineto_event.startThreadId() != 0) {
-      // act is forward op.
-      uint64_t key = getForwardThreadKey(
-          kineto_event.startThreadId(), kineto_event.sequenceNr());
-      // Assumption: Among all ops with same sequence number,
-      // the one with biggest start time is most likely launching backward op.
-      auto iter = tidSeq2activity.find(key);
-      if (iter == tidSeq2activity.end()) {
-        tidSeq2activity[key] = &activity;
-      } else {
-        // Now the sequence number is only incremented on creating a "Node"
-        // object for backward pass, by calling
-        // "at::sequence_number::get_and_increment()". Among all ops with same
-        // sequence number, the one with biggest startTime is the one launching
-        // backward op.
-        if (activity.startTime >= iter->second->startTime) {
-          tidSeq2activity[key] = &activity;
-        }
-      }
-    }
-  }
-#endif // USE_KINETO
 
   uint64_t start_time_;
   torch::profiler::impl::ApproximateClockToUnixTimeConverter clock_converter_;
