@@ -4030,6 +4030,131 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         )
 
 
+class QConv(ExternKernelAlloc):
+    kernels = {
+        1: "torch.ao.nn.quantized.functional.conv1d",
+        2: "torch.ao.nn.quantized.functional.conv2d",
+        3: "torch.ao.nn.quantized.functional.conv3d",
+    }
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        input_qparams,
+        weight_qparams,
+        output_qparams,
+        constant_args=(),
+        dim=2,
+    ):
+        """
+        Needs input/weight/output qparams
+        - inputs = [x, w, b]
+        - const_args = [stride, padding, dilation, groups]
+        - input_qparams = [scale, zp], assume per-tensor quantize to uint8
+        - weight_qparams = [scales, zp, axis], assume per-channel quantize to sint8
+        - output_qparams = [scale, zp, dtype], assume per-tensor quantize
+
+        Scales/zero points should be taken as inputs
+        Axis/dtypes are constants
+        """
+        assert len(input_qparams) == 2  # scale, zero point
+        assert len(weight_qparams) == 3  # scale, zero point, axis
+        assert len(output_qparams) == 3  # scale, zero point, dtype
+        inputs.extend(input_qparams + weight_qparams[:2] + output_qparams[:2])
+        constant_args.extend([weight_qparams[2], output_qparams[2]])
+        super().__init__(layout, inputs, constant_args)
+        self.dim = dim
+        self.kernel = self.kernels[dim]
+
+    def codegen(self, wrapper):
+        # args = [x, w, b?, x_scale, x_zp, w_scale, w_zp, o_scale, o_zp]
+        args = [x.codegen_reference() for x in self.inputs]
+        x_scale, x_zp = args[-6], args[-5]
+        w_scale, w_zp = args[-4], args[-3]
+        o_scale, o_zp = args[-2], args[-1]
+        # const args = [stride, padding, dilation, groups, w_axis, o_dtype]
+        const_args = []
+        const_args.extend(self.codegen_const_args())
+        o_dtype = const_args[-1]
+        w_axis = const_args[-2]
+        input_qparams = [x_scale, x_zp]
+        weight_qparams = [w_scale, w_zp, w_axis]
+        output_qparams = [o_scale, o_zp, o_dtype]
+        # Make x and w QTensors for functional conv ops
+        wrapper.writeline(
+            f"{args[0]} = torch._make_per_tensor_quantized_tensor({args[0]}, {', '.join(input_qparams)})"
+        )
+        wrapper.writeline(
+            f"{args[1]} = torch._make_per_channel_quantized_tensor({args[1]}, {', '.join(weight_qparams)})"
+        )
+        # Note: padding_mode is always 'zeros'
+        padding_mode = "'zeros'"
+        conv_args = (
+            ", ".join(args[:-6])
+            + ", "
+            + ", ".join(const_args[:-2])
+            + f", {padding_mode}, "
+            + ", ".join(output_qparams)
+        )
+        # Do not need `.int_repr()` for output since its dtype is already uint8 instead of quint8
+        wrapper.writeline(f"{self.get_name()} = {self.kernel}({conv_args})")
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        dim: int,
+        x: "TensorBox",
+        x_scale: "TensorBox",
+        x_zp: "TensorBox",
+        weight: "TensorBox",
+        w_scale: "TensorBox",
+        w_zp: "TensorBox",
+        w_axis: int,
+        bias: "TensorBox",
+        stride_: List[int],
+        padding_: List[int],
+        dilation_: List[int],
+        groups: int,
+        output_scale: "TensorBox",
+        output_zero_point: "TensorBox",
+        output_dtype,
+    ):
+        transposed = False
+        output_padding = None
+        (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
+            cls,
+            x,
+            weight,
+            bias,
+            padding_,
+            stride_,
+            dilation_,
+            groups,
+            transposed,
+            output_padding,
+        )
+        # swap padding and stride to align with functional conv arg order
+        if bias is None:
+            constant_args[1], constant_args[2] = constant_args[2], constant_args[1]
+        else:
+            constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
+        input_qparams = [x_scale, x_zp]
+        weight_qparams = [w_scale, w_zp, w_axis]
+        output_qparams = [output_scale, output_zero_point, output_dtype]
+        return QConv(
+            layout=kernel_layout,
+            inputs=inputs,
+            input_qparams=input_qparams,
+            weight_qparams=weight_qparams,
+            output_qparams=output_qparams,
+            constant_args=constant_args,
+            dim=dim,
+        )
+
+
 @dataclasses.dataclass
 class MutableBox(IRNode):
     """
