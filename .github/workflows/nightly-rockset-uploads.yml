@@ -37,6 +37,6 @@ jobs:
           retry_wait_seconds: 90
           command: |
             echo "Uploading testing aggregate data" "$(date -d yesterday '+%Y-%m-%d')"
-            python3 -m tools.stats.upload_test_stat_aggregates --date "$(date -d yesterday '+%Y-%m-%d')" --length 10
+            python3 -m tools.stats.upload_test_stat_aggregates --date "$(date -d yesterday '+%Y-%m-%d')"
             echo "Uploading external contribution stats for 10 days starting on $(date -v-10d '+%Y-%m-%d')"
-            python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -v-10d '+%Y-%m-%d')"
+            python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -v-10d '+%Y-%m-%d')" --length 10
