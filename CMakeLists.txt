@@ -713,7 +713,8 @@ cmake_dependent_option(
 if(NOT MSVC)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
   string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
-  # CUDA-12.1 crashes when trying to compile with --soruce-in-ptx
+  # CUDA-12.1 crashes when trying to compile with --source-in-ptx
+  # See https://github.com/pytorch/pytorch/issues/102372#issuecomment-1572526893
   if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.1)
     string(APPEND CMAKE_CUDA_FLAGS_DEBUG " --source-in-ptx")
     string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " --source-in-ptx")
