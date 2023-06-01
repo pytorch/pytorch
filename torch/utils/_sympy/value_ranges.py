@@ -98,7 +98,7 @@ class ValueRanges:
         else:
             range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
             # Assert that it can't prove that the resulting range is invalid
-            assert (range.lower > range.upper) is not True, (self, other)
+            assert (range.lower > range.upper) is not True, (self, other)  # type: ignore[operator]
         return range
 
     # Intersection
@@ -422,7 +422,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             elif 0 not in x:
                 return ValueRanges.wrap(sympy.true)
             else:
-                return ValueRanges.ValueRanges(sympy.false, sympy.true)
+                return ValueRanges(sympy.false, sympy.true)
         # If we want to do this properly, we'd need to track the type of the variables
         return x
 
