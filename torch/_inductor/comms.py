@@ -230,7 +230,7 @@ def smart_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
                     # If we're not able to leverage more than half of this
                     # node's compute to overlap, we skip it.
                     # TODO: Smarter heuristics for packing the cost here
-                    if (comm_cost - runtime_cost) <= runtime_cost / 2:
+                    if (comm_cost - total_cost) <= runtime_cost / 2:
                         continue
                     add_node(node)
                     total_cost += get_runtime_fx(node)
