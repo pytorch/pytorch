@@ -77,7 +77,7 @@ def single_record_test(**kwargs):
 
 class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
-    test_output_code = multi_record_test(1, output_code=True)
+    test_output_code = multi_record_test(2, output_code=True)
     test_aot_graphs = multi_record_test(2, aot_graphs=True)
 
     @requires_cuda()
@@ -223,6 +223,8 @@ exclusions = {
     "aot_graphs",
     "recompiles",
     "ddp_graphs",
+    "perf_hints",
+    "not_implemented",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

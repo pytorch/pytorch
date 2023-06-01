@@ -1,8 +1,9 @@
 import logging
 import os
-import sys
 import tempfile
 from typing import Any, Dict
+
+import torch
 
 log = logging.getLogger(__name__)
 
@@ -12,7 +13,7 @@ log = logging.getLogger(__name__)
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
-if sys.executable == "torch_deploy":
+if torch._running_with_deploy():
     # __file__ is meaningless in the context of frozen torch used in torch deploy.
     # setting empty torch_parent should allow below functions to operate without crashing,
     # but it's unclear if there is a valid use case for them in the context of deploy.
