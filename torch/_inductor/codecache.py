@@ -797,8 +797,8 @@ class CppWrapperCodeCache:
             os.makedirs(cpp_wrapper_dir)
 
         name = f"inline_extension_{key}"
-        EXT = "so"
-        filepath = os.path.join(cpp_wrapper_dir, f"{name}.{EXT}")
+        ext = "so"
+        filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
         log.debug("Cpp wrapper code path %s", filepath)
 
         if key not in cls.cache:

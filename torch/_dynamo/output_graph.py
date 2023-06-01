@@ -371,7 +371,27 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def save_global_state(self):
         global_state = self.tracing_context.global_context.global_state
-        global_state["is_grad_enabled"] = torch.is_grad_enabled()
+        global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
+        global_state["autocast_enabled"] = (
+            torch.set_autocast_enabled,
+            torch.is_autocast_enabled(),
+        )
+        global_state["autocast_cpu_enabled"] = (
+            torch.set_autocast_cpu_enabled,
+            torch.is_autocast_cpu_enabled(),
+        )
+        global_state["autocast_gpu_dtype"] = (
+            torch.set_autocast_gpu_dtype,
+            torch.get_autocast_gpu_dtype(),
+        )
+        global_state["autocast_cpu_dtype"] = (
+            torch.set_autocast_cpu_dtype,
+            torch.get_autocast_cpu_dtype(),
+        )
+        global_state["autocast_cache_enabled"] = (
+            torch.set_autocast_cache_enabled,
+            torch.is_autocast_cache_enabled(),
+        )
 
     def push_tx(self, tx):
         self._current_tx.append(tx)
@@ -627,14 +647,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
-                        for leaf_name, _ in target.named_parameters(
-                            remove_duplicate=False
-                        ):
+                        for leaf_name, _ in target.named_parameters():
                             register_leaf_name(leaf_name)
                     if hasattr(target, "_buffers"):
-                        for leaf_name, _ in target.named_buffers(
-                            remove_duplicate=False
-                        ):
+                        for leaf_name, _ in target.named_buffers():
                             register_leaf_name(leaf_name)
 
                 return wrap_name(name)
@@ -1073,21 +1089,26 @@ class SubgraphTracer(fx.Tracer):
         #   higher-order-op subgraph until we hit the subgraph where the free
         #   variable is bound
         if self.parent is not None:
-            flat_args, _ = pytree.tree_flatten(args)
+            flat_args, tree_spec = pytree.tree_flatten(args)
+            new_args = []
             for arg in flat_args:
                 if not isinstance(arg, torch.fx.Proxy):
-                    # Is a constant
-                    continue
-                if arg in self.seen_proxies:
-                    continue
-                if not hasattr(arg, "node"):
-                    continue
-                if arg.node.name in self.input_name_to_proxy:
-                    continue
-                if "saved_tensor_marked" in arg.node.meta:
-                    continue
+                    new_args.append(arg)
+                elif arg in self.seen_proxies:
+                    new_args.append(arg)
+                elif not hasattr(arg, "node"):
+                    new_args.append(arg)
+                elif "saved_tensor_marked" in arg.node.meta:
+                    new_args.append(arg)
+                elif arg.node.name in self.input_name_to_proxy:
+                    new_args.append(self.input_name_to_proxy[arg.node.name])
+                else:
+                    # Create a new input for this arg, and replace the current arg
+                    # with the new arg
+                    new_arg = self.lift_tracked_freevar_to_input(arg)
+                    new_args.append(new_arg)
 
-                self.lift_tracked_freevar_to_input(arg)
+            args = pytree.tree_unflatten(new_args, tree_spec)
 
         rv = super().create_proxy(
             kind, target, args, kwargs, name, type_expr, proxy_factory_fn
@@ -1197,10 +1218,12 @@ class SubgraphTracer(fx.Tracer):
         assert (
             self.parent is not None
         ), "lift_tracked_freevar_to_input on root SubgraphTracer"
-        self.create_graph_input(proxy.node.name)
+        new_proxy = self.create_graph_input(proxy.node.name)
+        new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
         self.lifted_freevars[proxy] = None
         if self.parent is not None and not self.parent.is_name_bound(proxy.node.name):
             self.parent.lift_tracked_freevar_to_input(proxy)
+        return new_proxy
 
 
 # NOTE: [HigherOrderOperator tracing design]
