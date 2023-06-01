@@ -32,7 +32,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           timeout_minutes: 10
-          max_attempts: 5
+          max_attempts: 10
           retry_wait_seconds: 90
           command: |
             echo "Uploading testing aggregate data" "$(date -d yesterday '+%Y-%m-%d')"
