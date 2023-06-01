@@ -1,4 +1,4 @@
-# upload alerts every 15 minutes
+# upload alerts every 5 minutes
 
 name: Upload Alerts to AWS/Rockset
 
