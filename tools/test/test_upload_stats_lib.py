@@ -64,7 +64,7 @@ class TestUploadStats(unittest.TestCase):
         mock.patch.dict(
             "os.environ",
             {
-                "GITHUB_REPOSITORY": "", # unset this env var
+                "GITHUB_REPOSITORY": "",  # unset this env var
             },
         ).start()
 
@@ -72,6 +72,7 @@ class TestUploadStats(unittest.TestCase):
 
         mock_table = mock_resource.return_value.Table.return_value
         mock_table.put_item.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
