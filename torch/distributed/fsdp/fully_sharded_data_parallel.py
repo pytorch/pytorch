@@ -2034,19 +2034,35 @@ def _get_grad_norm(
         )
 
     first_device = grads[0].device
-    grouped_grads: Dict[Tuple[torch.device, torch.dtype], List[List[Tensor]]] \
-        = _group_tensors_by_device_and_dtype([[g.detach() for g in grads]])  # type: ignore[assignment]
+    grouped_grads: Dict[
+        Tuple[torch.device, torch.dtype], List[List[Tensor]]
+    ] = _group_tensors_by_device_and_dtype(
+        [[g.detach() for g in grads]]
+    )  # type: ignore[assignment]
 
     grad_norms = []
-    for ((device, _), [grads]) in grouped_grads.items():
+    for (device, _), [grads] in grouped_grads.items():
         if (foreach is None or foreach) and _has_foreach_support(grads, device=device):
-            grad_norms.extend(torch._foreach_norm(grads, norm_type, dtype=torch.float32))
+            grad_norms.extend(
+                torch._foreach_norm(grads, norm_type, dtype=torch.float32)
+            )
         elif foreach:
-            raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
+            raise RuntimeError(
+                f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
+            )
         else:
-            grad_norms.extend([torch.linalg.vector_norm(g, norm_type, dtype=torch.float32) for g in grads])
+            grad_norms.extend(
+                [
+                    torch.linalg.vector_norm(g, norm_type, dtype=torch.float32)
+                    for g in grads
+                ]
+            )
 
-    grad_norm = torch.linalg.vector_norm(torch.stack([norm.to(first_device) for norm in norms]), norm_type, dtype=torch.float32)
+    grad_norm = torch.linalg.vector_norm(
+        torch.stack([norm.to(first_device) for norm in norms]),
+        norm_type,
+        dtype=torch.float32,
+    )
 
     return grad_norm
 
