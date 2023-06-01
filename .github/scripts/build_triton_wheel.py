@@ -133,7 +133,10 @@ def build_triton(
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
 
         env = os.environ.copy()
-        env["MAX_JOBS"] = os.getenv("MAX_JOBS", str(os.cpu_count()))
+        if "MAX_JOBS" not in env:
+            max_jobs = os.cpu_count() or 1
+            max_jobs = max(1, max_jobs // 2)
+            env["MAX_JOBS"] = str(max_jobs)
         check_call(
             [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
         )
