@@ -3035,9 +3035,9 @@ def forward(self, x):
         )
 
     def test_capture_symbolic_tracing(self) -> None:
+        from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
-        from torch._dynamo.output_graph import config
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -3051,29 +3051,31 @@ def forward(self, x):
                 return out
 
         # User-instantiated FakeTensorMode
-        fake_mode = fake_tensor.FakeTensorMode(allow_non_fake_inputs=False,
-                                               allow_fallback_kernels=True,
-                                               shape_env=ShapeEnv(
-                                                   allow_scalar_outputs=config.capture_scalar_outputs,
-                                                   allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                                                   frame_id=0),)
+        fake_mode = fake_tensor.FakeTensorMode(
+            allow_non_fake_inputs=False,
+            allow_fallback_kernels=True,
+            shape_env=ShapeEnv(
+                allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                frame_id=0,
+            ),
+        )
         # Fakefy input+model before exporting it
         with fake_mode:
             x = torch.rand(5, 2, 2)
             model = Model()
 
-
         # Export the model with fake inputs and parameters
         for aten_graph in [True, False]:
             graph_module, _ = torch._dynamo.export(
-                model,
-                x,
-                aten_graph=aten_graph,
-                fake_mode=fake_mode
+                model, x, aten_graph=aten_graph, fake_mode=fake_mode
             )
 
-            self.assertTrue(isinstance(graph_module, torch.fx.GraphModule),
-                            msg="test_capture_symbolic_tracing_aten_graph_" + str(aten_graph))
+            self.assertTrue(
+                isinstance(graph_module, torch.fx.GraphModule),
+                msg="test_capture_symbolic_tracing_aten_graph_" + str(aten_graph),
+            )
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
