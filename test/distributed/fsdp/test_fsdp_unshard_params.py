@@ -242,7 +242,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             * dist.get_world_size()
         )
         tot_numel = 0
-        with FSDP.summon_full_params(models):
+        with FSDP.summon_full_params(tuple(models)):
             for model in models:
                 numel = sum(p.numel() for p in model.parameters())
                 tot_numel += numel
@@ -457,6 +457,8 @@ class TestUnshardParams(TestUnshardParamsBase):
             self.process_group,
         )
         fsdp_model.register_buffer("buffer", torch.ones(1))
+        is_iterable = iter(fsdp_model)
+        print(f"RV: {fsdp_model} is_iterable {is_iterable}")
         with FSDP.summon_full_params(fsdp_model):
             for call in ["named_parameters", "named_buffers"]:
                 for (n1, p1), (n2, p2) in itertools.zip_longest(
