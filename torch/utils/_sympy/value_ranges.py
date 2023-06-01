@@ -7,6 +7,8 @@ import math
 import logging
 import torch
 from typing import Union, Dict
+
+from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
 
 log = logging.getLogger(__name__)
@@ -20,15 +22,15 @@ class ValueRangeError(RuntimeError):
 # Like sympify, but supports less stuff, and also ensures that direct
 # sympy expressions don't have free variables
 def simple_sympify(e):
-    if isinstance(e, int):
+    if isinstance(e, bool):
+        return sympy.true if e else sympy.false
+    elif isinstance(e, int):
         return sympy.Integer(e)
     elif isinstance(e, float):
         # infinity is special; we use it to bracket integers as well
         if math.isinf(e):
             return sympy.oo if e > 0 else -sympy.oo
         return sympy.Float(e)
-    elif isinstance(e, bool):
-        return sympy.true if e else sympy.false
     elif isinstance(e, sympy.Expr):
         # TODO: Eventually, we will want to do indexing calculations with
         # respect to symbols, so we can generate a dynamic kernel which will
@@ -153,12 +155,15 @@ class ValueRanges:
 class SymPyValueRangeAnalysis:
     @staticmethod
     def constant(value, dtype):
-        # NB: value is NOT a sympy expression, it's a constant!
-        assert isinstance(value, (int, float, bool))
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
         if math.isnan(value):
             return ValueRanges.unknown()
+
+        assert isinstance(value, (int, float, bool))
+        type_ = dtype_to_type(dtype)
+        value = type_(value)
+
         return ValueRanges.wrap(value)
 
     @staticmethod
@@ -187,15 +192,19 @@ class SymPyValueRangeAnalysis:
     def ne(cls, a, b):
         return cls.not_(cls.eq(a, b))
 
-    @staticmethod
-    def lt(a, b):
+    @classmethod
+    def lt(cls, a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-        if a.upper < b.lower:
-            return ValueRanges.wrap(sympy.true)
-        elif a.lower >= b.upper:
-            return ValueRanges.wrap(sympy.false)
-        return ValueRanges(sympy.false, sympy.true)
+        assert a.is_bool == b.is_bool
+        if a.is_bool:
+            return cls.and_(cls.not_(a), b)
+        else:
+            if a.upper < b.lower:
+                return ValueRanges.wrap(sympy.true)
+            elif a.lower >= b.upper:
+                return ValueRanges.wrap(sympy.false)
+            return ValueRanges(sympy.false, sympy.true)
 
     @classmethod
     def gt(cls, a, b):
@@ -391,11 +400,15 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     @staticmethod
     def to_dtype(x, dtype: torch.dtype):
         x = ValueRanges.wrap(x)
-        if x.is_bool:
-            if dtype.is_floating_point:
-                return ValueRanges(0.0, 1.0)
+        type_ = dtype_to_type(dtype)
+        if type_ is bool:
+            if x.is_singleton():
+                return ValueRanges.wrap(x.lower != 0)
+            elif 0 not in x:
+                return ValueRanges.wrap(sympy.true)
             else:
-                return ValueRanges(0, 1)
+                return ValueRanges.ValueRanges(sympy.false, sympy.true)
+        # If we want to do this properly, we'd need to track the type of the variables
         return x
 
     @staticmethod
@@ -439,7 +452,12 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def where(a, b, c):
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
-        return ValueRanges(min(b.lower, c.lower), max(b.upper, c.upper))
+        assert a.is_bool
+        assert b.is_bool == c.is_bool
+        if b.is_bool:
+            return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
+        else:
+            return ValueRanges(min(b.lower, c.lower), max(b.upper, c.upper))
 
     @classmethod
     def floor(cls, x):
