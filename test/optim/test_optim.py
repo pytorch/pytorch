@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo
 )
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
+from torch.testing._internal.common_device_type import largeTensorTest
 from typing import Dict, Any, Tuple
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
 from unittest.mock import patch
@@ -760,8 +761,9 @@ class TestOptim(TestCase):
                 for k in st_p_state:
                     self.assertEqual(st_p_state[k], mt_p_state[k])
 
-    def test_multi_tensor_optimizers(self):
-        optimizer_pairs_with_flags = [
+    @property
+    def _multi_tensor_optimizer_configs(self):
+        return [
             (optim.Adam, dict(weight_decay=1.0, amsgrad=True, fused=False)),
             (optim.Adam, dict(weight_decay=1.0, amsgrad=False, fused=False)),
             (optim.Adam, dict(weight_decay=0.0, amsgrad=True, fused=False)),
@@ -800,53 +802,29 @@ class TestOptim(TestCase):
             (optim.Adagrad, dict(weight_decay=0)),
             (optim.Adagrad, dict(weight_decay=1)),
         ]
-        self._test_derived_optimizers(optimizer_pairs_with_flags, "foreach")
+
+    def test_multi_tensor_optimizers(self):
+        self._test_derived_optimizers(self._multi_tensor_optimizer_configs, "foreach")
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_multi_tensor_optimizers_with_varying_tensors(self):
-        optimizer_pairs_with_flags = [
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=True, fused=False)),
-            (optim.Adam, dict(weight_decay=1.0, amsgrad=False, fused=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=True, fused=False)),
-            (optim.Adam, dict(weight_decay=0.0, amsgrad=False, fused=False)),
-            (optim.AdamW, dict(weight_decay=1.0, amsgrad=True)),
-            (optim.AdamW, dict(weight_decay=1.0, amsgrad=False)),
-            (optim.AdamW, dict(weight_decay=0.0, amsgrad=True)),
-            (optim.AdamW, dict(weight_decay=0.0, amsgrad=False)),
-            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=6e-3)),
-            (optim.NAdam, dict(weight_decay=1.0, momentum_decay=6e-3)),
-            (optim.NAdam, dict(weight_decay=0.0, momentum_decay=4e-3)),
-            (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
-            (
-                optim.SGD,
-                dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True),
-            ),
-            (
-                optim.SGD,
-                dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False),
-            ),
-            (optim.RAdam, dict(weight_decay=0, eps=1e-6)),
-            (optim.RAdam, dict(weight_decay=0)),
-            (optim.RAdam, dict(weight_decay=1, eps=1e-6)),
-            (optim.RAdam, dict(weight_decay=1)),
-            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
-            (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
-            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
-            (optim.RMSprop, dict(weight_decay=0, momentum=1, centered=False)),
-            (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
-            (optim.ASGD, dict(weight_decay=0)),
-            (optim.ASGD, dict(weight_decay=1)),
-            (optim.Adamax, dict(weight_decay=0)),
-            (optim.Adamax, dict(weight_decay=1)),
-            (optim.Adadelta, dict(weight_decay=0)),
-            (optim.Adadelta, dict(weight_decay=1)),
-            (optim.Adagrad, dict(weight_decay=0)),
-            (optim.Adagrad, dict(weight_decay=1)),
-        ]
-        self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "foreach")
+        self._test_derived_optimizers_varying_tensors(self._multi_tensor_optimizer_configs, "foreach")
 
-    def test_fused_optimizers(self):
-        optimizer_pairs_with_flags = tuple(itertools.product(
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires a GPU")
+    @largeTensorTest("72GB", "cuda")
+    def test_multi_tensor_optimizers_with_large_tensors(self):
+        for optimizer_ctor, optimizer_params in self._multi_tensor_optimizer_configs:
+            # note(crcrpar): H100 wasn't sufficient for Adamax, surprisingly
+            if optimizer_ctor == optim.Adamax:
+                continue
+            params = [torch.ones(2 ** 32, device="cuda", dtype=torch.float16)]
+            params[0].grad = torch.zeros_like(params[0])
+            optimizer = optimizer_ctor(params, foreach=True, **optimizer_params)
+            optimizer.step()
+
+    @property
+    def _fused_optimizer_configs(self):
+        return tuple(itertools.product(
             (optim.Adam, optim.AdamW),
             (
                 dict(weight_decay=1., amsgrad=False),
@@ -855,20 +833,22 @@ class TestOptim(TestCase):
                 dict(weight_decay=0., amsgrad=True),
             ),
         ))
-        self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
+
+    def test_fused_optimizers(self):
+        self._test_derived_optimizers(self._fused_optimizer_configs, "fused")
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_fused_optimizers_with_varying_tensors(self):
-        optimizer_pairs_with_flags = tuple(itertools.product(
-            (optim.Adam, optim.AdamW),
-            (
-                dict(weight_decay=1., amsgrad=False),
-                dict(weight_decay=1., amsgrad=True),
-                dict(weight_decay=0., amsgrad=False),
-                dict(weight_decay=0., amsgrad=True),
-            ),
-        ))
-        self._test_derived_optimizers_varying_tensors(optimizer_pairs_with_flags, "fused")
+        self._test_derived_optimizers_varying_tensors(self._fused_optimizer_configs, "fused")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires a GPU")
+    @largeTensorTest("64GB", "cuda")
+    def test_fused_optimizers_with_large_tensors(self):
+        for optimizer_ctor, optimizer_params in self._fused_optimizer_configs:
+            params = [torch.ones(2 ** 32, device="cuda", dtype=torch.float16)]
+            params[0].grad = torch.zeros_like(params[0])
+            optimizer = optimizer_ctor(params, fused=True, **optimizer_params)
+            optimizer.step()
 
     def test_adam(self):
         self._test_basic_cases(
