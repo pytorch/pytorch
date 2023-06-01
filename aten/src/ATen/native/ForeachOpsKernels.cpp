@@ -351,7 +351,7 @@ std::vector<Tensor> foreach_tensor_norm_slow(
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
-    result.emplace_back(at::linalg_vector_norm(t, ord, opt_dtype=dtype));
+    result.emplace_back(at::linalg_vector_norm(t, ord, c10::nullopt, false, dtype));
   }
   return result;
 }
