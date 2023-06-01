@@ -139,7 +139,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
       dtype.has_value
       ? std::any_of(tensors.begin(), tensors.end(), [](const auto & t) {
           const auto scalar_type = t.scalar_type();
-          return scalar_type ==  *dtype
+          return scalar_type ==  *dtype;
       })
       : true
   if (!can_use_fast_route(tensors) || !is_same_dtype || has_int_or_complex ||
