@@ -6,18 +6,18 @@ from torch.cuda._utils import _get_device_index
 from torch.cuda.amp import autocast
 from torch._utils import ExceptionWrapper
 
-__all__ = ['parallel_apply']
+__all__ = ['get_a_var', 'parallel_apply']
 
-def _get_a_var(obj: Union[torch.Tensor, List[Any], Tuple[Any, ...], Dict[Any, Any]]) -> Optional[torch.Tensor]:
+def get_a_var(obj: Union[torch.Tensor, List[Any], Tuple[Any, ...], Dict[Any, Any]]) -> Optional[torch.Tensor]:
     if isinstance(obj, torch.Tensor):
         return obj
 
     if isinstance(obj, (list, tuple)):
-        for result in map(_get_a_var, obj):
+        for result in map(get_a_var, obj):
             if isinstance(result, torch.Tensor):
                 return result
     if isinstance(obj, dict):
-        for result in map(_get_a_var, obj.items()):
+        for result in map(get_a_var, obj.items()):
             if isinstance(result, torch.Tensor):
                 return result
     return None
@@ -67,7 +67,7 @@ def parallel_apply(
     ) -> None:
         torch.set_grad_enabled(grad_enabled)
         if device is None:
-            t = _get_a_var(input)
+            t = get_a_var(input)
             if t is None:
                 with lock:
                     results[i] = ExceptionWrapper(

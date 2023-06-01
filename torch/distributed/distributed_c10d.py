@@ -255,10 +255,9 @@ class BackendConfig:
         if backend == Backend.UNDEFINED:
             # default config when backend is not specified
             # supported since PyTorch 2.0
-            self.device_backend_map = {
-                "cpu": Backend.GLOO,
-                "cuda": Backend.NCCL,
-            }
+            self.device_backend_map = {"cpu": Backend.GLOO}
+            if is_nccl_available():
+                self.device_backend_map["cuda"] = Backend.NCCL
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
@@ -610,13 +609,6 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None):
     return _world.pg_default_device[group]
 
 
-# Environment variable to control whether we do a barrier after process group
-# init. Default value is 1 for now to stay the same with previous behavior.
-# Users can change it to 0 if such behavior is undesired. We reserve the right
-# to change the default value to 0 if small rollout is successful.
-_barrier_after_init = int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
-
-
 @_time_logger
 def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, logging_interval=timedelta(seconds=10)):
     """
@@ -886,6 +878,14 @@ def is_torchelastic_launched() -> bool:
     return os.getenv("TORCHELASTIC_RUN_ID") is not None
 
 
+def _is_barrier_after_init() -> int:
+    # Environment variable to control whether we do a barrier after process group
+    # init. Default value is 1 for now to stay the same with previous behavior.
+    # Users can change it to 0 if such behavior is undesired. We reserve the right
+    # to change the default value to 0 if small rollout is successful.
+    return int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
+
+
 def _get_default_group():
     """
     Getting the default process group created by init_process_group
@@ -1115,7 +1115,7 @@ def init_process_group(
     _backend = _world.pg_map[GroupMember.WORLD][0]  # type: ignore[index]
     _default_pg_init_method = init_method
 
-    if _barrier_after_init == 1:
+    if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
         # process groups including global variables are updated correctly on all
         # ranks.
@@ -3895,7 +3895,7 @@ def _new_group_with_tag(
         global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
     }
 
-    if _barrier_after_init == 1:
+    if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
         # process groups including global variables are updated correctly on all
         # ranks.
