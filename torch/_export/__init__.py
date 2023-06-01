@@ -138,7 +138,7 @@ def export(
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
 
-    flat_args, in_spec = pytree.tree_flatten((args, kwargs)
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs))
     out_spec = (
         gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args, **kwargs))[1]  # type: ignore[attr-defined]
     )
