@@ -35,7 +35,7 @@ jobs:
           max_attempts: 10
           retry_wait_seconds: 90
           command: |
+            echo "Uploading external contribution stats for 10 days starting on" "$(date -d '10 days ago' '+%Y-%m-%d')"
+            python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d '10 days ago' '+%Y-%m-%d')" --length 10
             echo "Uploading testing aggregate data" "$(date -d yesterday '+%Y-%m-%d')"
             python3 -m tools.stats.upload_test_stat_aggregates --date "$(date -d yesterday '+%Y-%m-%d')"
-            echo "Uploading external contribution stats for" "$(date -d yesterday '+%Y-%m-%d')"
-            python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d yesterday '+%Y-%m-%d')"
