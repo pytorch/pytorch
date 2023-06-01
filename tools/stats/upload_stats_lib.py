@@ -3,7 +3,6 @@ import inspect
 import io
 import json
 import os
-import sys
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -199,7 +198,7 @@ def emit_metric(
     )
 
     # Use info about the function that invoked this one as a namespace and a way to filter metrics.
-    calling_frame = sys._getframe(1)
+    calling_frame = inspect.currentframe().f_back
     calling_frame_info = inspect.getframeinfo(calling_frame)
     calling_file = os.path.basename(calling_frame_info.filename)
     calling_module = inspect.getmodule(calling_frame).__name__
