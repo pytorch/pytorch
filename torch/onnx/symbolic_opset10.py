@@ -927,7 +927,7 @@ def quantized_conv2d(
 
 @_onnx_symbolic("quantized::conv3d")
 @_beartype.beartype
-def quantized_conv2d(
+def quantized_conv3d(
     g: jit_utils.GraphContext,
     q_input,
     q_weight,
