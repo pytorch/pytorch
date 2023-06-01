@@ -56,7 +56,7 @@
 على المستوى التفصيلي، تعد PyTorch مكتبة تتكون من المكونات التالية:
 
 | العنصر | الوصف |
-| ---- | --- |
+| --- | ---- |
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | GPU مع دعم قوي لوحدات المعالجة الرسومية ،NumPy  مكتبة تينسور مشابهة لـ |
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | GPU مع دعم قوي لوحدات المعالجة الرسومية ،NumPy  مكتبة تينسور مشابهة لـ  |
 | [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | torch مع عمليات التينسور القابلة للتفاضل في بيئة (tape) مكتبة تفاضل تلقائية قائمة على الشريط |
