@@ -582,6 +582,52 @@ class FakeTensorTest(TestCase):
             out = mod(torch.randn(1, 1, 3, 3))
         self.checkType(out, "cpu", (1, 1, 3, 3))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_multi_device_copy(self):
+        def fn(self, other):
+            return torch.ops.aten.copy(self, other)
+
+        x = torch.rand((4, 4))
+        y = torch.rand((4, 4), device='cuda')
+
+        # make sure this runs in eager
+        out = fn(x, y)
+        self.assertTrue("cpu" in str(out.device))
+        out = fn(y, x)
+        self.assertTrue("cuda" in str(out.device))
+
+        with FakeTensorMode(allow_non_fake_inputs=False) as mode:
+            x_f = mode.from_tensor(x)
+            y_f = mode.from_tensor(y)
+            out = fn(x_f, y_f)
+        self.checkType(out, "cpu", (4, 4))
+
+        with FakeTensorMode(allow_non_fake_inputs=False) as mode:
+            x_f = mode.from_tensor(x)
+            y_f = mode.from_tensor(y)
+            out = fn(y, x)
+        self.checkType(out, "cuda", (4, 4))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_multi_device_slice_assign(self):
+        def fn(self, other):
+            self[:,::2] = other
+
+        x = torch.rand((4, 4))
+        y = torch.rand((4, 2), device='cuda')
+
+        # make sure this runs in eager
+        out = fn(x, y)
+        self.assertTrue("cpu" in str(x.device))
+        self.assertTrue("cuda" in str(y.device))
+
+        with FakeTensorMode(allow_non_fake_inputs=False) as mode:
+            x_f = mode.from_tensor(x)
+            y_f = mode.from_tensor(y)
+            out = fn(x_f, y_f)
+        self.checkType(x_f, "cpu", (4, 4))
+        self.checkType(y_f, "cuda", (4, 2))
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):

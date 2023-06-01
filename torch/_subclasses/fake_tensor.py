@@ -642,6 +642,27 @@ def conv(fake_mode, func, *args, **kwargs):
             )
 
 
+# Note: [Copy ops where device can differ]
+# These ops are like self.copy_(other), which will copy other into self.
+# self and other can have different devices.
+
+# See [Copy ops where device can differ]
+@register_op_impl(lambda op: op in [aten.copy.default, aten.slice_scatter.default])
+def copy_default(fake_mode, func, *args, **kwargs):
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(*args, **kwargs)
+    device = args[0].device
+    return FakeTensor(fake_mode, out, device)
+
+
+# See [Copy ops where device can differ]
+@register_op_impl(aten.copy_.default)
+def copy_default(fake_mode, func, *args, **kwargs):
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(*args, **kwargs)
+    return out
+
+
 FAST_OP_IMPLEMENTATIONS = {}
 
 
