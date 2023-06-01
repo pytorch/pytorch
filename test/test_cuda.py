@@ -5730,14 +5730,14 @@ class TestBlockStateAbsorption(TestCase):
 
     def test_no_triton_on_import(self):
         """ Test that Trition is not imported on first GPU use """
-        script = "import sys; import torch; torch.rand(2, device='cuda'); exit(2 if 'triton' in sys.modules else 0)"
+        script = "import sys; import torch; torch.rand(2, device='cuda'); print('triton' in sys.modules)"
 
-        subprocess.check_output(
+        rc = subprocess.check_output(
             [sys.executable, '-c', script],
-            stderr=subprocess.STDOUT,
             # On Windows, opening the subprocess with the default CWD makes `import torch`
             # fail, so just set CWD to this script's directory
-            cwd=os.path.dirname(os.path.realpath(__file__)))
+            cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
+        self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
 
 instantiate_parametrized_tests(TestCuda)
