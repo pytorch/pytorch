@@ -6,11 +6,13 @@ import sys
 import warnings
 
 from copy import deepcopy
+from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch._dynamo.config as dynamo_config
+import torch._functorch.config as functorch_config
 
 import torch.fx
 import torch.utils._pytree as pytree
@@ -23,17 +25,33 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
-from . import config, metrics, overrides
+from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .utils import developer_warning, get_dtype_size, has_incompatible_cudagraph_ops
+from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
+if config.is_fbcode():
+    from torch._inductor.fb.logging import time_and_log
+else:
+    # no-op decorator
+    def time_and_log(attr: str):
+        def wrap(old_func):
+            @wraps(old_func)
+            def newFunction(*args, **kwargs):
+                return old_func(*args, **kwargs)
+
+            return newFunction
+
+        return wrap
+
+
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 ALIGNMENT = 16
 
 
@@ -177,8 +195,17 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 }
                 compiled = inner_compile(gm, example_inputs, **kwargs_patched)
                 if detect_fake_mode(example_inputs):
+
+                    def materialize(x):
+                        if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                            # Need concrete value to run dynamic shapes and tune the result
+                            return x.node.hint
+                        else:
+                            # TODO: the defaked value may be problematic in some cases
+                            return defake(x)
+
                     with torch.utils._python_dispatch._disable_current_modes():
-                        inputs_real = [defake(t) for t in example_inputs]
+                        inputs_real = [materialize(t) for t in example_inputs]
                 else:
                     inputs_real = deepcopy(example_inputs)
 
@@ -195,6 +222,7 @@ def inner_compile_with_cpp_wrapper(inner_compile):
 
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
+@time_and_log(attr="compilation time (in seconds)")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -243,7 +271,10 @@ def compile_fx_inner(
     # correct we will need to fix.
 
     with V.set_fake_mode(fake_mode):
-        # post_grad_passes(gm)
+        # has some issues with memory in training
+        locality_reorder = is_inference and config.reordering
+
+        post_grad_passes(gm, locality_reorder=locality_reorder)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
@@ -321,16 +352,16 @@ def compile_fx_inner(
                     return compiled_fn_inner(new_inputs)
 
             if len(set(graph.device_types)) > 1:
-                developer_warning("skipping cudagraphs due to multiple devices")
+                perf_hint_log.warning("skipping cudagraphs due to multiple devices")
             elif set(graph.device_types) == {"cuda"}:
                 if graph.mutated_inputs:
-                    developer_warning("skipping cudagraphs due to input mutation")
+                    perf_hint_log.warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
-                    developer_warning(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to complex input striding"
                     )
                 elif len(graph.device_idxs) > 1 and config.triton.cudagraph_trees:
-                    developer_warning(
+                    perf_hint_log.warning(
                         "skipping cudagraphs due to multiple device indexes"
                     )
 
@@ -540,14 +571,18 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     Infers which inputs are static for a backwards graph
     """
 
-    def is_not_gradout(x):
-        return "tangents" not in x.name
+    def is_saved_tensor(x):
+        return (
+            "tangents" not in x.name
+            and "bwd_seed" not in x.name
+            and "bwd_base_offset" not in x.name
+        )
 
     arg_count = 0
     static_arg_idxs = []
     for n in fx_g.graph.nodes:
         if n.op == "placeholder":
-            if is_not_gradout(n):
+            if is_saved_tensor(n):
                 static_arg_idxs.append(arg_count)
             arg_count += 1
 
@@ -652,7 +687,8 @@ def compile_fx(
             # partition_fn won't be called
             joint_graph_passes(model)
 
-        fixed = len(example_inputs) - num_example_inputs
+        num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
+        fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
         return inner_compile(
             model,
             example_inputs,
@@ -691,12 +727,12 @@ def compile_fx(
                 boxed_forward_device_index=forward_device,
             )
 
-    with overrides.patch_functions():
-        if decompositions is None:
-            decompositions = select_decomp_table()
-        # TODO: can add logging before/after the call to create_aot_dispatcher_function
-        # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
-        # once torchdynamo is merged into pytorch
+    if decompositions is None:
+        decompositions = select_decomp_table()
+    # TODO: can add logging before/after the call to create_aot_dispatcher_function
+    # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
+    # once torchdynamo is merged into pytorch
+    with V.set_fake_mode(detect_fake_mode(example_inputs_)):
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,

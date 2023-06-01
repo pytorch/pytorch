@@ -8,9 +8,10 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 # import time
-from tools.stats.upload_stats_lib import upload_to_s3
+from tools.stats.upload_stats_lib import read_from_s3, upload_to_s3
 
 FILTER_OUT_USERS = {"pytorchmergebot", "facebook-github-bot", "pytorch-bot[bot]"}
+MAXIMUM_RETRIES = 5
 
 
 def _fetch_url(
@@ -126,17 +127,35 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     for i in range(args.length):
+        tries = 0
         startdate = args.startDate + datetime.timedelta(days=i)
         data = get_external_pr_data(
             startdate,
             startdate + datetime.timedelta(days=args.period_length),
             period_length=args.period_length,
         )
-        upload_to_s3(
-            bucket_name="torchci-contribution-data",
-            key=f"external_contribution_counts/{str(startdate)}",
-            docs=data,
-        )
+        while tries < MAXIMUM_RETRIES:
+            success = True
+            upload_to_s3(
+                bucket_name="torchci-contribution-data",
+                key=f"external_contribution_counts/{str(startdate)}",
+                docs=data,
+            )
+            uploaded_data = read_from_s3(
+                "torchci-contribution-data",
+                f"external_contribution_counts/{str(startdate)}",
+            )
+            for doc in data:
+                if doc not in uploaded_data:
+                    tries += 1
+                    print(
+                        f"Failed to upload data retrying upload up to {MAXIMUM_RETRIES - tries} more times"
+                    )
+                    success = False
+                    break
+            if success:
+                break
+
         # uncomment when running large queries locally to avoid github's rate limiting
         #
         # import time
