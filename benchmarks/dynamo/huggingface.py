@@ -175,6 +175,10 @@ SKIP_FOR_CPU = {
     "OPTForCausalLM",  # OOMs
 }
 
+ONLY_EVAL_MODE = {
+    "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
+}
+
 
 def get_module_cls_by_model_name(model_cls_name):
     _module_by_model_name = {
@@ -456,7 +460,11 @@ class HuggingfaceRunner(BenchmarkRunner):
             if "drop" in attr and isinstance(getattr(config, attr), float):
                 setattr(config, attr, 1e-30)
 
-        if is_training and not use_eval_mode:
+        if (
+            is_training
+            and not use_eval_mode
+            and not (self.args.accuracy and model_name in ONLY_EVAL_MODE)
+        ):
             model.train()
         else:
             model.eval()

@@ -1,8 +1,7 @@
 #pragma once
 
 #include <c10/core/DispatchKeySet.h>
-#include <c10/macros/Macros.h>
-#include <c10/util/Flags.h>
+#include <c10/macros/Export.h>
 
 // TLS management for DispatchKeySet (the "local" DispatchKeySet(s))
 //

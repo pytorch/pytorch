@@ -2235,4 +2235,18 @@ class DistributedDataParallel(Module, Joinable):
             )
 
     def _remove_autograd_hooks(self):
+        """
+        Removes autograd hooks registered by the reducer on the model parameters.
+        """
         self.reducer._remove_autograd_hooks()
+
+    def _check_reducer_finalized(self):
+        """
+        Checks if the reducer has processed all buckets and finalized the backward
+        appropriately.
+
+        It is useful to call this method after calling .backward() in your training loop
+        in order to avoid subsequent hard to debug errors down the road due to the
+        reducer not finalizing backward.
+        """
+        self.reducer._check_reducer_finalized()
