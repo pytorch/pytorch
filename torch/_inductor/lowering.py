@@ -32,6 +32,7 @@ from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
+    ops_wrapper,
     PermuteView,
     Pointwise,
     Reduction,
@@ -476,15 +477,6 @@ def to_device(x: TensorBox, device: torch.device):
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
-
-
-def ops_wrapper(name):
-    assert isinstance(name, str)
-
-    def fn(*args, **kwargs):
-        return getattr(ops, name)(*args, **kwargs)
-
-    return fn
 
 
 def register_pointwise(
@@ -1291,7 +1283,6 @@ def bernoulli_(x, *args):
         "cpu"
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
-    V.graph.realize_users_of(x.get_name())
     ir.InplaceBernoulliFallback(x, *args)
     return x
 
@@ -1387,6 +1378,7 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
         inner_fn=inner_fn,
         ranges=[*size],
     )
+    result.realize()
     return result
 
 
@@ -1464,8 +1456,8 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
-make_fallback(aten._scaled_dot_product_efficient_attention.default)
-make_fallback(aten._scaled_dot_product_efficient_attention_backward.default)
+make_fallback(aten._scaled_dot_product_efficient_attention)
+make_fallback(aten._scaled_dot_product_efficient_attention_backward)
 make_fallback(aten._scaled_dot_product_flash_attention)
 make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
@@ -1499,7 +1491,6 @@ make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.erfinv, warn=False)
 make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -2286,7 +2277,6 @@ def index_put_impl_(self, indices, values, accumulate, check):
 
     assert isinstance(self, TensorBox)
     self.realize()
-    V.graph.realize_users_of(self.get_name())
 
     # self is an scalar Tensor
     if x_ndim == 0:
@@ -2431,7 +2421,6 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     dim = _validate_dim(self, dim)
 
     self.realize()
-    V.graph.realize_users_of(self.get_name())
     index_loader = index.make_loader()
     src_loader = src.make_loader() if isinstance(src, TensorBox) else None
 
@@ -3624,6 +3613,9 @@ def _validate_reduction_axis(x, axis):
         axis = [axis]
     elif not axis:
         axis = range(len(size))
+    if len(size) == 0:
+        assert tuple(axis) in [(), (0,), (-1,)], f"invalid axis: {axis}"
+        return []
     axis = list(axis)
     for i in range(len(axis)):
         if axis[i] < 0:
@@ -4104,6 +4096,7 @@ register_pointwise_numeric(aten.atan)
 register_pointwise_numeric(aten.atanh)
 register_pointwise_numeric(aten.copysign)
 register_pointwise_numeric(aten.erfc)
+register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)

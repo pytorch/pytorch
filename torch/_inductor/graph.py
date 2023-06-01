@@ -52,6 +52,7 @@ from .utils import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
@@ -169,6 +170,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
+        self.removed_inplace_buffers: Set[str] = set()
+        self.mutated_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
         self.num_static_inputs = num_static_inputs
@@ -187,7 +190,7 @@ class GraphLowering(torch.fx.Interpreter):
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
-            log.info("Using FallbackKernel: %s", name)
+            perf_hint_log.warning("Using FallbackKernel: %s", name)
 
     def add_device_idx(self, idx: Optional[int]):
         if idx is not None:
@@ -250,12 +253,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.lists[name] = buffer_names
         return name
 
-    def realize_users_of(self, name: str):
+    def mark_buffer_mutated(self, name: str):
         """
         When a buffer is mutated we need to make sure all the reads to
         the old version are realized before the mutation happens.
         """
         assert isinstance(name, str)
+        self.mutated_buffers.add(name)
 
         def visit(value):
             if isinstance(value, (list, tuple)):
@@ -269,7 +273,7 @@ class GraphLowering(torch.fx.Interpreter):
             try:
                 visit(value)
             except Exception:
-                log.warning("error in realize_users_of", exc_info=True)
+                log.warning("error in mark_buffer_mutated", exc_info=True)
 
     def add_tensor_constant(self, data):
         def allocate():
