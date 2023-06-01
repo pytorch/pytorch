@@ -18,9 +18,11 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
+from ..optimize_indexing import get_expr_range, range_expressable_in_32_bits
 from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
@@ -29,6 +31,7 @@ from ..utils import (
     sympy_subs,
     sympy_symbol,
 )
+
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
@@ -1984,8 +1987,6 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def index_expr(expr, dtype):
-                current_node: torch.fx.Node = V.interpreter.current_node
-
                 assert len(self.ranges) == len(self.itervars)
                 if not len(self.ranges) or not all(
                     not isinstance(range, sympy.Expr) or sympy.simplify(range).is_number
@@ -1995,43 +1996,34 @@ class CppVecKernelChecker(CppVecKernel):
                     self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
                     return self.cse.newvar()
 
-                def mod_indexing_rep(x, y, z):
-                    if z.is_constant():
-                        return x / y
-
-                    # never really happens, we'll bail on optimizing
-                    return (x / y) % z
-
-                def indexing_div_rep(x, y):
-                    return x / y
+                def can_use_int32():
+                    free_symbols = list(expr.free_symbols)
+                    vars_ranges = {
+                        k: ValueRanges(0, v)
+                        for k, v in zip(self.itervars, self.ranges)
+                        if k in free_symbols
+                    }
+                    if not vars_ranges or len(vars_ranges) != len(free_symbols):
+                        i32_iinfo = numpy.iinfo(numpy.int32)
+                        return (
+                            expr.is_number
+                            and expr <= i32_iinfo.max
+                            and expr >= i32_iinfo.min
+                        )
+                    expr_ranges = get_expr_range(expr, vars_ranges)
+                    if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
+                        return False
+                    return range_expressable_in_32_bits(
+                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper))
+                    )
 
                 with RecordOptimizationContext(__name__) as node_ctx:
                     assert len(self.ranges) == len(self.itervars)
-
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    max_expr = expr.replace(
-                        ir.ModularIndexing, mod_indexing_rep
-                    ).replace(ir.FloorDiv, indexing_div_rep)
-                    min_expr = max_expr
-                    for idx in range(len(self.ranges)):
-                        max_expr = sympy.maximum(
-                            max_expr,
-                            self.itervars[idx],
-                            sympy.Interval(0, self.ranges[idx]),
-                        )
-                        min_expr = sympy.minimum(
-                            min_expr,
-                            self.itervars[idx],
-                            sympy.Interval(0, self.ranges[idx]),
-                        )
-                    i32_iinfo = numpy.iinfo(numpy.int32)
                     if (
                         dtype == torch.int64
-                        and max_expr.is_number
-                        and min_expr.is_number
-                        and max_expr <= i32_iinfo.max
-                        and min_expr >= i32_iinfo.min
+                        and can_use_int32()
                         and all(
                             user.target in VecCheckerProxy.bin_cmp_ops
                             for user in node_ctx.current_node.users

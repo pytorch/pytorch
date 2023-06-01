@@ -1343,9 +1343,9 @@ RecordQueue::getRecords(
     auto materialize = [&](auto& events) {
       for (auto& i : events) {
         time_t start_time_ns;
-        if constexpr (std::is_same<
+        if constexpr (std::is_same_v<
                           std::remove_reference_t<decltype(i)>,
-                          ExtraFields<EventType::Backend>>::value) {
+                          ExtraFields<EventType::Backend>>) {
           start_time_ns = i.start_time_us_ * 1000;
         } else {
           start_time_ns = converter(i.start_time_);
