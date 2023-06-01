@@ -52,9 +52,9 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 // last resort in case `ncclCommAbort` itself is hanging
 enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2, SkipCleanUp = 3 };
 
-#define SHOULD_CLEAN_UP(a) a != NoHandling && a != SkipCleanUp
+#define SHOULD_CLEAN_UP(a) (a != NoHandling && a != SkipCleanUp)
 
-#define SHOULD_TEAR_DOWN(a) a != NoHandling && a != CleanUpOnly
+#define SHOULD_TEAR_DOWN(a) (a != NoHandling && a != CleanUpOnly)
 
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and
