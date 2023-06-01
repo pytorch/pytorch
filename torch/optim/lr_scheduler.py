@@ -1244,10 +1244,10 @@ class CyclicLR(LRScheduler):
         if self._scale_fn_custom is not None:
             return
         if self.mode == 'triangular':
-            self._scale_fn_ref = weakref.WeakMethod(self._triangular_scale_fn)
+            self._scale_fn_ref = self._triangular_scale_fn
             self.scale_mode = 'cycle'
         elif self.mode == 'triangular2':
-            self._scale_fn_ref = weakref.WeakMethod(self._triangular2_scale_fn)
+            self._scale_fn_ref = self._triangular2_scale_fn
             self.scale_mode = 'cycle'
         elif self.mode == 'exp_range':
             self._scale_fn_ref = weakref.WeakMethod(self._exp_range_scale_fn)
@@ -1266,9 +1266,10 @@ class CyclicLR(LRScheduler):
     def scale_fn(self, x):
         if self._scale_fn_custom is not None:
             return self._scale_fn_custom(x)
-
-        else:
+        elif isinstance(self._scale_fn_ref, weakref.WeakMethod):  # method is bound
             return self._scale_fn_ref()(x)
+        else:
+            return self._scale_fn_ref(x)  # static method
 
     @staticmethod
     def _triangular_scale_fn(x):
