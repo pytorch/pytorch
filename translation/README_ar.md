@@ -36,8 +36,8 @@
     - [تثبيت التبعيات أو الاعتماديات](#تثبيت-التبعيات-أو-الاعتماديات)
     - [الحصول على مصدر PyTorch](#الحصول-على-مصدر-PyTorch)
     - [تثبيت PyTorch](#تثبيت-PyTorch)
-      - [ضبط خيارات البناء (اختياري)](#ضبط-خيارات-البناء-(اختياري))
-  - [صورة دوكر (Docker Image)](#صورة-دوكر-(Docker Image))
+      - [ضبط خيارات البناء (اختياري)](#ضبط-خيارات-البناء-اختياري)
+  - [صورة دوكر (Docker Image)](#صورة-دوكر-Docker-Image)
     - [استخدام صور مبنية مسبقًا](#استخدام-صور-مبنية-مسبقًا)
     - [بناء الصورة بنفسك](#بناء-الصورة-بنفسك)
   - [إنشاء الوثائق](#إنشاء-الوثائق)
@@ -331,7 +331,7 @@ python setup.py develop
 
 ```
 
-##### ضبط خيارات البناء (اختياري)
+##### ضبط خيارات البناء اختياري
 
 You can adjust the configuration of cmake variables optionally (without building first), by doing
 the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
@@ -351,7 +351,7 @@ MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake
 ccmake build  # or cmake-gui build
 ```
 
-### صورة دوكر (Docker Image)
+### صورة دوكر Docker Image
 
 #### استخدام صور مبنية مسبقًا
 
