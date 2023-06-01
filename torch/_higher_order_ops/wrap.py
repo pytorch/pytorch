@@ -1,3 +1,4 @@
+import torch
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint
 
@@ -77,7 +78,7 @@ class RunWithRngState(HigherOrderOperator):
 
     def __call__(self, rng_state, op, *args, **kwargs):
         current_state = torch.cuda.get_rng_state()
-        set_rng_state(rng_state)
+        torch.cuda.set_rng_state(rng_state)
         out = op(*args, **kwargs)
         torch.cuda.set_rng_state(current_state)
         return out

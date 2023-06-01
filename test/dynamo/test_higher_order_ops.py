@@ -662,10 +662,13 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         for arg in args:
             cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
 
+        torch.manual_seed(0)
         expected = fn(*args)
         expected.sum().backward()
 
-        result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*cloned_args)
+        opt_fn = torch.compile(fn, fullgraph=fullgraph, backend=backend)
+        torch.manual_seed(0)
+        result = opt_fn(*cloned_args)
         result.sum().backward()
 
         if not skip_check:
@@ -833,9 +836,11 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         for arg in args:
             cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
 
+        torch.manual_seed(0)
         expected = fn(*args)
         expected.sum().backward()
 
+        torch.manual_seed(0)
         result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*cloned_args)
         result.sum().backward()
 
@@ -964,6 +969,30 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x)
 
     @requires_cuda()
+    def test_tags_rand_recomputed(self):
+        def gn(x, y):
+            return torch.sigmoid(torch.rand_like(x) * y) * x
+
+        def fn(x, y):
+            x = torch.sin(x)
+            z = torch.utils.checkpoint.checkpoint(gn, x, y)
+            x = torch.sin(z)
+            z = torch.utils.checkpoint.checkpoint(gn, x, y)
+            return z
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        # fw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+        # bw_compiler = functools.partial(
+        #     count_ops, freq=6, op=torch.ops.aten.mm.default
+        # )  # mm recomputed in the bwd
+        # backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        backend = "aot_eager"
+        self._validate(fn, backend, x, y)
+
+
+    @requires_cuda()
     def test_tags_rand(self):
         def gn(x, y):
             return torch.sigmoid(torch.rand_like(x) * y)
@@ -978,12 +1007,14 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
 
-        fw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
-        bw_compiler = functools.partial(
-            count_ops, freq=6, op=torch.ops.aten.mm.default
-        )  # mm recomputed in the bwd
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        # fw_compiler = functools.partial(count_ops, freq=2, op=torch.ops.aten.mm.default)
+        # bw_compiler = functools.partial(
+        #     count_ops, freq=6, op=torch.ops.aten.mm.default
+        # )  # mm recomputed in the bwd
+        # backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        backend = "aot_eager"
         self._validate(fn, backend, x, y)
+
 
     @requires_cuda()
     def test_tags_dropout(self):

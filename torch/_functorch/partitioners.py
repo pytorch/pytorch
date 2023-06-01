@@ -18,6 +18,8 @@ from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.fx import replace_pattern
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
@@ -36,6 +38,7 @@ def has_recomputable_tags(fx_g):
                 break
     return found
 
+is_recomputable = lambda node: "recompute" in node.meta and node.meta["recompute"]
 class InvalidNodeBase:
     def __repr__(self):
         return "Invalid Node"
@@ -123,212 +126,6 @@ def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
 
-
-
-
-def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, modified_rand_nodes, is_fwd):
-    """
-    Given a graph, extracts out a subgraph that takes the specified nodes as
-    inputs and returns the specified outputs.
-
-    This includes specifying non-placeholder nodes as inputs.
-
-    The general strategy is to initialize all inputs with proxies as we
-    encounter them, and trace through the graph, only keeping values which take
-    in valid proxies. Then, all dead code is eliminated.
-    """
-    run_and_save_rng = torch._higher_order_ops.wrap.run_and_save_rng_state
-    run_with_rng_state = torch._higher_order_ops.wrap.run_with_rng_state
-
-    new_graph = fx.Graph()
-    env = {}
-
-
-    rand_states = []
-    # Add new placeholder nodes in the order specified by the inputs
-    for node in inputs:
-        new_node = new_graph.placeholder(node.name)
-        # Can't use node_copy here as we may be turning previous call_function into placeholders
-        new_node.meta = node.meta
-        env[node] = new_node
-
-    for node in joint_graph.nodes:
-        if node in inputs:
-            continue
-        elif node.op == 'placeholder':
-            env[node] = InvalidNode
-        elif node.op == 'call_function':
-            all_args = pytree.tree_flatten((node.args, node.kwargs))[0]
-            all_args = [isinstance(env[x], InvalidNodeBase) for x in all_args if isinstance(x, fx.Node)]
-            if any(all_args):
-                env[node] = InvalidNode
-                continue
-
-            if is_fwd:
-                if hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
-                    new_args = []
-                    for arg in new_args:
-                        if isinstance(arg, torch.fx.node.Node):
-                            new_args.append(env[arg])
-                        else:
-                            new_args.append(arg)
-                    # What should be kwargs?
-                    state_and_output = new_graph.create_node("call_function", run_and_save_rng, args=(node.target, *new_args), kwargs=node.kwargs)
-                    state = new_graph.create_node("call_function", operator.getitem, args=(state_and_output, 0), kwargs={})
-                    new_output = new_graph.create_node("call_function", operator.getitem, args=(state_and_output, 1,), kwargs={})
-                    rand_states.append(state)
-                    env[node] = new_output
-                    modified_rand_nodes[node] = state
-                else:
-                    env[node] = new_graph.node_copy(node, lambda x: env[x])
-            else:
-                if hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
-                    assert node in modified_rand_nodes
-                    fwd_state = env[modified_rand_nodes[node]]
-                    new_args = []
-                    for arg in new_args:
-                        if isinstance(arg, torch.fx.node.Node):
-                            new_args.append(env[arg])
-                        else:
-                            new_args.append(arg)
-                    # What should be kwargs?
-                    output = new_graph.create_node("call_function", run_with_rng_state, args=(fwd_state, node.target, *new_args), kwargs=node.kwargs)
-                    env[node] = output
-                else:
-                    env[node] = new_graph.node_copy(node, lambda x: env[x])
-
-
-        elif node.op == 'get_attr':
-            env[node] = new_graph.node_copy(node, lambda x: env[x])
-        elif node.op == 'output':
-            pass
-    output_values = []
-    for x in outputs:
-        if isinstance(x, fx.Node):
-            if x not in env:
-                raise RuntimeError(f"Node {x} couldn't be found in env")
-            assert not isinstance(env[x], InvalidNodeBase), f"Node {x} was invalid, but is output"
-            output_values.append(env[x])
-        else:
-            output_values.append(x)
-    output_values.extend(rand_states)
-    new_graph.output(output_values)
-
-    new_graph.eliminate_dead_code()
-    new_graph.lint()
-    return new_graph, rand_states
-
-
-def _extract_fwd_bwd_modules_special(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-    primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-    tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
-    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
-    bwd_seed_offset_inputs = list(filter(_is_bwd_seed_offset, joint_module.graph.nodes))
-
-    # Construct the forward module
-    # Keep symints separate from tensors, passed between fwd/bwd graphs, and in the right order.
-    modified_rand_nodes = dict()
-    fwd_graph, rand_states = _extract_graph_with_inputs_outputs_special(
-        joint_module.graph,
-        primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs + saved_values + saved_sym_nodes,
-        modified_rand_nodes,
-        is_fwd=True
-    )
-    bwd_graph, _ = _extract_graph_with_inputs_outputs_special(
-        joint_module.graph,
-        saved_sym_nodes + saved_values + rand_states + tangent_inputs + bwd_seed_offset_inputs,
-        bwd_outputs,
-        modified_rand_nodes,
-        is_fwd=False,
-    )
-
-    # This is to filter out saved values that don't actually end up being used by the backwards pass
-    for node in bwd_graph.nodes:
-        if node.op == 'placeholder' and not node.users:
-            for saved_value in saved_values:
-                if saved_value.name == node.name:
-                    saved_values.remove(saved_value)
-                    break
-
-            for saved_sym in saved_sym_nodes:
-                if saved_sym.name == node.name:
-                    saved_sym_nodes.remove(saved_sym)
-                    break
-
-    # Now that we have the finalized list of saved values, we need to ensure
-    # we propagate all symbols which are referenced by backwards inputs.
-    # These are not directly used in the graph but are required for downstream
-    # sizevar assignment
-    saved_symbols: Set[sympy.Symbol] = set()
-    saved_sym_nodes_binding = []
-    saved_sym_nodes_derived = []
-
-    # Some symbols may already be bound in the directly saved_sym_nodes,
-    # keep track of them so we don't re-bind them
-    for node in saved_sym_nodes:
-        symbol = is_symbol_binding_fx_node(node)
-        if symbol:
-            saved_symbols.add(symbol)
-            saved_sym_nodes_binding.append(node)
-        else:
-            saved_sym_nodes_derived.append(node)
-
-    # Now go through all of the prospective backward inputs and track any
-    # other symbols we need to bind
-    symbol_bindings = find_symbol_binding_fx_nodes(joint_module.graph)
-    for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
-        if "val" not in node.meta:
-            continue
-        new_symbols = free_symbols(node.meta["val"]) - saved_symbols
-        # NB: Deterministic order please!
-        for s in sorted(new_symbols, key=lambda s: s.name):
-            # NB: For well formed graphs, the symbol should always be present,
-            # but we also have ways to produce ill-formed graphs, e.g., direct
-            # make_fx usages, so don't choke in this case
-            if s not in symbol_bindings:
-                continue
-            saved_sym_nodes_binding.append(symbol_bindings[s])
-        saved_symbols |= new_symbols
-
-
-    # Update saved_sym_nodes that are now reordered to have all bindings
-    # at front
-    saved_sym_nodes = saved_sym_nodes_binding + saved_sym_nodes_derived
-
-    # Now, we re-generate the fwd/bwd graphs.
-    # NB: This might increase compilation time, but I doubt it matters
-    modified_rand_nodes = dict()
-    fwd_graph, rand_states = _extract_graph_with_inputs_outputs_special(
-        joint_module.graph,
-        primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs + saved_values + saved_sym_nodes,
-        modified_rand_nodes,
-        is_fwd=True
-    )
-    bwd_graph, _ = _extract_graph_with_inputs_outputs_special(
-        joint_module.graph,
-        saved_sym_nodes + saved_values + rand_states + tangent_inputs + bwd_seed_offset_inputs,
-        bwd_outputs,
-        modified_rand_nodes,
-        is_fwd=False,
-    )
-
-    # fwd_graph = _extract_graph_with_inputs_outputs(
-    #     joint_module.graph,
-    #     primal_inputs + fwd_seed_offset_inputs,
-    #     fwd_outputs + saved_values + saved_sym_nodes
-    # )
-    # bwd_graph = _extract_graph_with_inputs_outputs(
-    #     joint_module.graph,
-    #     saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
-    #     bwd_outputs
-    # )
-
-    fwd_module = fx.GraphModule(joint_module, fwd_graph)
-    bwd_module = fx.GraphModule(joint_module, bwd_graph)
-    return fwd_module, bwd_module
 
 def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
@@ -574,6 +371,317 @@ def pointwise_ops():
 
     return ops
 
+
+def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, recomputable_rng_ops_map, is_fwd):
+    """
+    Given a graph, extracts out a subgraph that takes the specified nodes as
+    inputs and returns the specified outputs.
+
+    This includes specifying non-placeholder nodes as inputs.
+
+    The general strategy is to initialize all inputs with proxies as we
+    encounter them, and trace through the graph, only keeping values which take
+    in valid proxies. Then, all dead code is eliminated.
+    """
+    run_and_save_rng = torch._higher_order_ops.wrap.run_and_save_rng_state
+    run_with_rng_state = torch._higher_order_ops.wrap.run_with_rng_state
+
+    new_graph = fx.Graph()
+    env = {}
+
+
+    # Add new placeholder nodes in the order specified by the inputs
+    for node in inputs:
+        new_node = new_graph.placeholder(node.name)
+        # Can't use node_copy here as we may be turning previous call_function into placeholders
+        new_node.meta = node.meta
+        env[node] = new_node
+
+    for node in joint_graph.nodes:
+        if node in inputs:
+            continue
+        elif node.op == 'placeholder':
+            env[node] = InvalidNode
+        elif node.op == 'call_function':
+            all_args = pytree.tree_flatten((node.args, node.kwargs))[0]
+            all_args = [isinstance(env[x], InvalidNodeBase) for x in all_args if isinstance(x, fx.Node)]
+            if any(all_args):
+                env[node] = InvalidNode
+                continue
+
+            if node in recomputable_rng_ops_map:
+                new_args = []
+                for arg in node.args:
+                    if isinstance(arg, torch.fx.node.Node):
+                        new_args.append(env[arg])
+                    else:
+                        new_args.append(arg)
+                if is_fwd:
+                    functional_rng = new_graph.create_node("call_function", run_and_save_rng, args=(node.target, *new_args), kwargs=node.kwargs)
+                    state = new_graph.create_node("call_function", operator.getitem, args=(functional_rng, 0), kwargs={})
+                    rng_output = new_graph.create_node("call_function", operator.getitem, args=(functional_rng, 1,), kwargs={})
+                    # Fix this.
+                    state.meta["val"] = torch.cuda.get_rng_state()
+                    env[node] = rng_output
+                    # Create a mapping from forward node to the state
+                    recomputable_rng_ops_map[node] = state
+                else:
+                    # Get the fwd state
+                    assert node in recomputable_rng_ops_map
+                    fwd_state = env[recomputable_rng_ops_map[node]]
+                    output = new_graph.create_node("call_function", run_with_rng_state, args=(fwd_state, node.target, *new_args), kwargs=node.kwargs)
+                    env[node] = output
+            else:
+                env[node] = new_graph.node_copy(node, lambda x: env[x])
+        elif node.op == 'get_attr':
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
+        elif node.op == 'output':
+            pass
+    output_values = []
+    for x in outputs:
+        if isinstance(x, fx.Node):
+            if x not in env:
+                raise RuntimeError(f"Node {x} couldn't be found in env")
+            assert not isinstance(env[x], InvalidNodeBase), f"Node {x} was invalid, but is output"
+            output_values.append(env[x])
+        else:
+            output_values.append(x)
+    extra_rand_states = []
+    if is_fwd:
+        extra_rand_states = list(recomputable_rng_ops_map.values())
+        output_values.extend(extra_rand_states)
+    new_graph.output(output_values)
+
+    new_graph.eliminate_dead_code()
+    new_graph.lint()
+    return new_graph, extra_rand_states
+
+
+def _extract_fwd_bwd_modules_special(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
+    primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
+    tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
+    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
+    bwd_seed_offset_inputs = list(filter(_is_bwd_seed_offset, joint_module.graph.nodes))
+
+    recomputable_rng_ops_map = dict()
+    for node in joint_module.graph.nodes:
+        if is_recomputable(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
+            # The map value will be set while creating the fwd pass
+            recomputable_rng_ops_map[node] = InvalidNode
+
+    # Construct the forward module
+    # Keep symints separate from tensors, passed between fwd/bwd graphs, and in the right order.
+    fwd_graph, extra_rand_states = _extract_graph_with_inputs_outputs_special(
+        joint_module.graph,
+        primal_inputs + fwd_seed_offset_inputs,
+        fwd_outputs + saved_values + saved_sym_nodes,
+        recomputable_rng_ops_map,
+        is_fwd=True
+    )
+    bwd_graph, _ = _extract_graph_with_inputs_outputs_special(
+        joint_module.graph,
+        saved_sym_nodes + saved_values + extra_rand_states + tangent_inputs + bwd_seed_offset_inputs,
+        bwd_outputs,
+        recomputable_rng_ops_map,
+        is_fwd=False,
+    )
+    fwd_module = fx.GraphModule(joint_module, fwd_graph)
+    bwd_module = fx.GraphModule(joint_module, bwd_graph)
+
+    # This is to filter out saved values that don't actually end up being used by the backwards pass
+    for node in bwd_graph.nodes:
+        if node.op == 'placeholder' and not node.users:
+            for saved_value in saved_values:
+                if saved_value.name == node.name:
+                    saved_values.remove(saved_value)
+                    break
+
+            for saved_sym in saved_sym_nodes:
+                if saved_sym.name == node.name:
+                    saved_sym_nodes.remove(saved_sym)
+                    break
+
+    # Now that we have the finalized list of saved values, we need to ensure
+    # we propagate all symbols which are referenced by backwards inputs.
+    # These are not directly used in the graph but are required for downstream
+    # sizevar assignment
+    saved_symbols: Set[sympy.Symbol] = set()
+    saved_sym_nodes_binding = []
+    saved_sym_nodes_derived = []
+
+    # Some symbols may already be bound in the directly saved_sym_nodes,
+    # keep track of them so we don't re-bind them
+    for node in saved_sym_nodes:
+        symbol = is_symbol_binding_fx_node(node)
+        if symbol:
+            saved_symbols.add(symbol)
+            saved_sym_nodes_binding.append(node)
+        else:
+            saved_sym_nodes_derived.append(node)
+
+    # Now go through all of the prospective backward inputs and track any
+    # other symbols we need to bind
+    symbol_bindings = find_symbol_binding_fx_nodes(joint_module.graph)
+    for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
+        if "val" not in node.meta:
+            continue
+        new_symbols = free_symbols(node.meta["val"]) - saved_symbols
+        # NB: Deterministic order please!
+        for s in sorted(new_symbols, key=lambda s: s.name):
+            # NB: For well formed graphs, the symbol should always be present,
+            # but we also have ways to produce ill-formed graphs, e.g., direct
+            # make_fx usages, so don't choke in this case
+            if s not in symbol_bindings:
+                continue
+            saved_sym_nodes_binding.append(symbol_bindings[s])
+        saved_symbols |= new_symbols
+
+
+    # Update saved_sym_nodes that are now reordered to have all bindings
+    # at front
+    saved_sym_nodes = saved_sym_nodes_binding + saved_sym_nodes_derived
+
+    # Now, we re-generate the fwd/bwd graphs.
+    # NB: This might increase compilation time, but I doubt it matters
+    fwd_graph, extra_rand_states = _extract_graph_with_inputs_outputs_special(
+        joint_module.graph,
+        primal_inputs + fwd_seed_offset_inputs,
+        fwd_outputs + saved_values + saved_sym_nodes,
+        recomputable_rng_ops_map,
+        is_fwd=True
+    )
+    bwd_graph, _ = _extract_graph_with_inputs_outputs_special(
+        joint_module.graph,
+        saved_sym_nodes + saved_values + extra_rand_states + tangent_inputs + bwd_seed_offset_inputs,
+        bwd_outputs,
+        recomputable_rng_ops_map,
+        is_fwd=False,
+    )
+
+    fwd_module = fx.GraphModule(joint_module, fwd_graph)
+    bwd_module = fx.GraphModule(joint_module, bwd_graph)
+    return fwd_module, bwd_module
+
+
+# def wrap_rng_ops_into_higher_order_ops(joint_module, joint_inputs):
+
+#     recomputable_rng_ops_in_fwd = set()
+#     for node in joint_module.graph.nodes:
+#         if is_recomputable(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
+#             recomputable_rng_ops_in_fwd.add(node)
+
+#     run_and_save_rng = torch._higher_order_ops.wrap.run_and_save_rng_state
+#     recomputed_rng_ops = {}
+
+
+#     class NegSigmSwapXformer(torch.fx.Transformer):
+#         def call_function(self, target, args, kwargs):
+#             if node in recomputable_rng_ops_in_fwd:
+#                 new_args = node.args
+#                 # new_args = []
+#                 # for arg in node.args:
+#                 #     if isinstance(arg, torch.fx.node.Node):
+#                 #         new_args.append(env[arg])
+#                 #     else:
+#                 #         new_args.append(arg)
+#                 state_and_output = new_graph.create_node("call_function", run_and_save_rng, args=(node.target, *new_args), kwargs=node.kwargs)
+#                 state_and_output.meta = node.meta
+#                 state = new_graph.create_node("call_function", operator.getitem, args=(state_and_output, 0), kwargs={})
+#                 state.meta["val"] = torch.cuda.get_rng_state()
+#                 new_output = new_graph.create_node("call_function", operator.getitem, args=(state_and_output, 1,), kwargs={})
+#                 new_output.meta = node.meta
+#                 env[node] = new_output
+#                 recomputed_rng_ops[state_and_output] = (new_output, state)
+#                 return 
+#             return super().call_function(n)
+
+#     class Replacer(torch.fx.Interpreter):
+#         call_method = None
+#         call_module = None
+#         get_attr = None
+
+#         def run_node(self, node):
+#             if node.op in ("placeholder", "output"):
+#                 return super().run_node(node)
+#             if node.op == "call_function" and node in recomputable_rng_ops_in_fwd:
+#                 new_args = node.args
+#                 # new_args = []
+#                 # for arg in node.args:
+#                 #     if isinstance(arg, torch.fx.node.Node):
+#                 #         new_args.append(env[arg])
+#                 #     else:
+#                 #         new_args.append(arg)
+#                 state_and_output = new_graph.create_node("call_function", run_and_save_rng, args=(node.target, *new_args), kwargs=node.kwargs)
+#                 state_and_output.meta = node.meta
+#                 state = new_graph.create_node("call_function", operator.getitem, args=(state_and_output, 0), kwargs={})
+#                 state.meta["val"] = torch.cuda.get_rng_state()
+#                 new_output = new_graph.create_node("call_function", operator.getitem, args=(state_and_output, 1,), kwargs={})
+#                 new_output.meta = node.meta
+#                 env[node] = new_output
+#                 recomputed_rng_ops[state_and_output] = (new_output, state)
+#                 return new_output
+#             return super().run_node(node)
+
+#     new_graph = Replacer(joint_module).run(*joint_inputs)
+#     breakpoint()
+
+#     run_and_save_rng = torch._higher_order_ops.wrap.run_and_save_rng_state
+#     recomputable_rng_ops_in_fwd = set()
+#     for node in joint_module.graph.nodes:
+#         if is_recomputable(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
+#             recomputable_rng_ops_in_fwd.add(node)
+
+#     new_graph = fx.Graph()
+#     env = {}
+
+
+#     outputs = []
+#     recomputed_rng_ops = {}
+#     for node in joint_module.graph.nodes:
+#         if node.op == 'placeholder':
+#             new_node = new_graph.placeholder(node.name)
+#             new_node.meta = node.meta
+#             env[node] = new_node
+#         elif node.op == 'call_function':
+#             if node in recomputable_rng_ops_in_fwd:
+#                 new_args = []
+#                 for arg in node.args:
+#                     if isinstance(arg, torch.fx.node.Node):
+#                         new_args.append(env[arg])
+#                     else:
+#                         new_args.append(arg)
+ 
+#                 state_and_output = new_graph.create_node("call_function", run_and_save_rng, args=(node.target, *new_args), kwargs=node.kwargs)
+#                 state_and_output.meta = node.meta
+#                 state = new_graph.create_node("call_function", operator.getitem, args=(state_and_output, 0), kwargs={})
+#                 state.meta["val"] = torch.cuda.get_rng_state()
+#                 new_output = new_graph.create_node("call_function", operator.getitem, args=(state_and_output, 1,), kwargs={})
+#                 new_output.meta = node.meta
+#                 env[node] = new_output
+#                 recomputed_rng_ops[state_and_output] = (new_output, state)
+#             else:
+#                 env[node] = new_graph.node_copy(node, lambda x: env[x])
+#         elif node.op == 'get_attr':
+#             env[node] = new_graph.node_copy(node, lambda x: env[x])
+#         elif node.op == 'output':
+#             outputs = [env[arg] if isinstance(arg, torch.fx.node.Node) else arg for arg in node.args]
+#     outputs = outputs[0]
+#     output_values = []
+#     for x in outputs:
+#         if isinstance(x, fx.Node):
+#             if x not in env:
+#                 raise RuntimeError(f"Node {x} couldn't be found in env")
+#             assert not isinstance(env[x], InvalidNodeBase), f"Node {x} was invalid, but is output"
+#             output_values.append(env[x])
+#         else:
+#             output_values.append(x)
+#     new_graph.output(output_values)
+
+#     # DONT DCE - it wil remove the states
+#     new_graph.lint()
+#     return fx.GraphModule(joint_module, new_graph), recomputed_rng_ops
+
 def tagged_min_cut_rematerialization_partition(
     joint_module: fx.GraphModule, _joint_inputs, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
@@ -586,8 +694,9 @@ def tagged_min_cut_rematerialization_partition(
     2)
 
     """
-    is_recomputable = lambda node: "recompute" in node.meta and node.meta["recompute"]
 
+    # for node in joint_module.graph.nodes:
+    #     print(node, is_recomputable(node))
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
