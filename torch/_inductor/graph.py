@@ -675,15 +675,18 @@ class GraphLowering(torch.fx.Interpreter):
                 # recreate the same strides, and would fail with view, defer for now.
                 if dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
+    
+                    if not config.expl:
+                        if (
+                            len(result.get_size()) == 4
+                            and n in self.nodes_prefer_channels_last
+                            and n.name not in self.user_visible_outputs
+                        ):
+                            stride_order = ir.NHWC_STRIDE_ORDER
 
-                    if (
-                        len(result.get_size()) == 4
-                        and n in self.nodes_prefer_channels_last
-                        and n.name not in self.user_visible_outputs
-                    ):
-                        stride_order = ir.NHWC_STRIDE_ORDER
-
-                    result = ir.ExternKernel.require_stride_order(result, stride_order)
+                    if config.expl:
+                        if n.name in self.user_visible_outputs:
+                            result = ir.ExternKernel.require_stride_order(result, stride_order)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
