@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 
 import functools
+
 from typing import Any, Optional
 
 import onnxscript  # type: ignore[import]
@@ -90,7 +91,7 @@ def _onnxscript_torch_script_tensor(obj: graph_building.TorchScriptTensor) -> st
 
 
 @_format_argument.register
-def _onnxscript_onnx_function(obj: onnxscript.values.OnnxFunction) -> str:
+def _onnxscript_onnx_function(obj: onnxscript.OnnxFunction) -> str:
     return f"`OnnxFunction({obj.name})`"
 
 

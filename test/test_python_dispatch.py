@@ -101,7 +101,7 @@ class TestPythonRegistration(TestCase):
 
     def test_finalizer(self):
         impls_refcnt = sys.getrefcount(torch.library._impls)
-        lib = Library(f"{self.test_ns}", "FRAGMENT")
+        lib = Library(self.test_ns, "FRAGMENT")
         lib.define("foo123(Tensor x) -> Tensor")
 
         # 1 for `lib`, 1 for sys.getrefcount
@@ -293,7 +293,7 @@ class TestPythonRegistration(TestCase):
         del my_lib1
 
     def test_create_new_library(self) -> None:
-        my_lib1 = Library(f"{self.test_ns}", "DEF")
+        my_lib1 = Library(self.test_ns, "DEF")
 
         my_lib1.define("sum(Tensor self) -> Tensor")
 
@@ -306,7 +306,7 @@ class TestPythonRegistration(TestCase):
         op = getattr(torch.ops, self.test_ns).sum
         self.assertEqual(op(x), x)
 
-        my_lib2 = Library(f"{self.test_ns}", "IMPL")
+        my_lib2 = Library(self.test_ns, "IMPL")
 
         # Example 2
         @torch.library.impl(my_lib2, op.default, "ZeroTensor")
@@ -324,7 +324,7 @@ class TestPythonRegistration(TestCase):
         del my_lib1
 
     def test_create_new_library_fragment_no_existing(self):
-        my_lib = Library(f"{self.test_ns}", "FRAGMENT")
+        my_lib = Library(self.test_ns, "FRAGMENT")
 
         my_lib.define("sum2(Tensor self) -> Tensor")
 
@@ -338,10 +338,10 @@ class TestPythonRegistration(TestCase):
         del my_lib
 
     def test_create_new_library_fragment_with_existing(self):
-        my_lib1 = Library(f"{self.test_ns}", "DEF")
+        my_lib1 = Library(self.test_ns, "DEF")
 
         # Create a fragment
-        my_lib2 = Library(f"{self.test_ns}", "FRAGMENT")
+        my_lib2 = Library(self.test_ns, "FRAGMENT")
 
         my_lib2.define("sum4(Tensor self) -> Tensor")
 
@@ -353,7 +353,7 @@ class TestPythonRegistration(TestCase):
         self.assertEqual(getattr(torch.ops, self.test_ns).sum4(x), x)
 
         # Create another fragment
-        my_lib3 = Library(f"{self.test_ns}", "FRAGMENT")
+        my_lib3 = Library(self.test_ns, "FRAGMENT")
 
         my_lib3.define("sum3(Tensor self) -> Tensor")
 
@@ -371,7 +371,7 @@ class TestPythonRegistration(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     def test_alias_analysis(self):
         def test_helper(alias_analysis=""):
-            my_lib1 = Library(f"{self.test_ns}", "DEF")
+            my_lib1 = Library(self.test_ns, "DEF")
 
             called = [0]
 
@@ -406,7 +406,7 @@ class TestPythonRegistration(TestCase):
 
         s0, s1 = ft.shape
 
-        tlib = Library(f"{self.test_ns}", "DEF")
+        tlib = Library(self.test_ns, "DEF")
         tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
 
         @impl(tlib, "sqsum", "CompositeExplicitAutograd")
