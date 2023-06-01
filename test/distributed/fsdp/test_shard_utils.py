@@ -51,7 +51,7 @@ class TestShardUtilsDistributed(FSDPTest):
 class TestShardUtilsDistributedDTensor(DTensorTestBase):
     @property
     def world_size(self):
-        return 4
+        return 2
 
     def _create_tensor(self, *size):
         # Keep everything deterministic.
