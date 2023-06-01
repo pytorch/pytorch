@@ -136,10 +136,10 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
             at::isComplexType(scalar_type);
       });
   const bool is_same_dtype =
-      dtype.has_value
+      dtype.has_value()
       ? std::any_of(tensors.begin(), tensors.end(), [](const auto & t) {
           const auto scalar_type = t.scalar_type();
-          return scalar_type ==  *dtype;
+          return scalar_type ==  dtype.value();
       })
       : true;
   if (!can_use_fast_route(tensors) || !is_same_dtype || has_int_or_complex ||
