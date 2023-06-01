@@ -110,14 +110,21 @@ def calculate_shards(
         reverse=True,
     )
 
+    print(sorted_tests)
+
     sharded_jobs: List[ShardJob] = [ShardJob() for _ in range(num_shards)]
     for test in sorted_tests:
+        print(test)
         if must_serial(test.name):
             min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
+            print(min_sharded_job.convert_to_tuple()[1])
             min_sharded_job.serial.append(test)
         else:
             min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
+            print(min_sharded_job.convert_to_tuple()[1])
             min_sharded_job.parallel.append(test)
+
+    print(sharded_jobs)
 
     # Round robin the unknown jobs starting with the smallest shard
     index = min(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())

@@ -1604,7 +1604,7 @@ def main():
         print_to_stderr(
             "Selected tests:\n {}".format("\n ".join(str(x) for x in selected_tests))
         )
-
+    exit(1)
     if options.dry_run:
         return
 
