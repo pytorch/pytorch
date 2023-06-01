@@ -5062,6 +5062,12 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    def test_issue102546(self):
+        def fn(x):
+            return x.mean(0)
+
+        self.common(fn, [torch.rand(())])
+
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(

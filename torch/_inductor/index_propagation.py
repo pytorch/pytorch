@@ -26,9 +26,8 @@ from typing import Any
 import sympy
 
 import torch
-from torch._inductor import ir
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 
 @dataclass
@@ -114,7 +113,7 @@ class SymPyOps:
         if not is_integer_dtype(result_type):
             return NotImplemented
 
-        result_expr = ir.ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+        result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
         return TypedExpr(result_expr, result_type)
 
 
