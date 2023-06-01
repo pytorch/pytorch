@@ -11,6 +11,7 @@ import sympy
 import torch
 import torch._dynamo
 from torch._C import FileCheck
+from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import codecache, config, metrics
 from torch._inductor.codegen.cpp import (
@@ -1717,6 +1718,34 @@ class CPUReproTests(TestCase):
         code = run_and_get_cpp_code(fn_opt, *inps)
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
+
+    def test_eliminate_meaningless_copy(self):
+        def fn(x1, x2):
+            permute = torch.ops.aten.permute.default(x2, [0, 2, 1, 3])
+            clone = torch.ops.aten.clone.default(
+                permute, memory_format=torch.contiguous_format
+            )
+            view = torch.ops.aten.view.default(clone, [1024, -1, 32])
+            bmm = torch.ops.aten.bmm.default(view, x1)
+            permute = torch.ops.aten.permute.default(view, [0, 2, 1])
+            return (bmm, permute)
+
+        metrics.reset()
+        self.common(
+            fn,
+            [
+                rand_strided(
+                    (1024, 32, 128), (4096, 1, 32), device="cpu", dtype=torch.float32
+                ),
+                rand_strided(
+                    (64, 128, 16, 32),
+                    (65536, 512, 32, 1),
+                    device="cpu",
+                    dtype=torch.float32,
+                ),
+            ],
+        )
+        self.assertEqual(metrics.generated_kernel_count, 1)
 
 
 if __name__ == "__main__":
