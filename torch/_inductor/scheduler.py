@@ -63,7 +63,6 @@ class BaseSchedulerNode:
         self.node: ir.Buffer = node
         self.users: Optional[List[NodeUser]] = None
         self.inverse_users: List[BaseSchedulerNode] = []
-        self.additional_dependencies = set()
         self.set_read_writes(node.get_read_writes())
         self.recursive_predecessors: Optional[Set[str]] = None
         self.min_order: Optional[int] = None
@@ -157,7 +156,6 @@ class BaseSchedulerNode:
         return used_names
 
     def prune_deps(self):
-        old = set(self.unmet_dependencies)
         self.unmet_dependencies = {
             dep
             for dep in self.unmet_dependencies
@@ -726,7 +724,6 @@ class Scheduler:
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
-        from .debug import draw_buffers
 
         comms.decide_global_ordering_comms(self.nodes)
 
