@@ -27,7 +27,7 @@ from torch.ao.quantization._pt2e.quantizer import (
     QuantizationAnnotation,
     EdgeOrNode,
 )
-from torch.ao.quantization import ObserverOrFakeQuantize
+from torch.ao.quantization import ObserverOrFakeQuantizer
 
 def _maybe_insert_input_observer_for_arg_or_kwarg(
     node: Union[Node, Any],
@@ -35,7 +35,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -92,7 +92,7 @@ def _maybe_insert_input_observers_for_node(
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: Dict[str, torch.nn.Module],
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -116,11 +116,7 @@ def _maybe_insert_input_observers_for_node(
         )
         new_args.append(new_arg)
 
-    # Clone has memory_format kwarg that persist in exported graph
-    # this is just a work around for that.
-    assert (
-        node.target == torch.ops.aten.clone.default or len(node.kwargs) == 0
-    ), " expecting kwargs for aten op IR to be empty"
+    assert len(node.kwargs) == 0, " expecting kwargs for aten op IR to be empty"
 
     # assign the new args to the node, inplace
     node.args = tuple(new_args)
@@ -128,7 +124,7 @@ def _maybe_insert_input_observers_for_node(
 def _maybe_insert_input_and_output_observers_for_node(
     node: Node,
     model: torch.fx.GraphModule,
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer],
 ):
     this_node_dtype_info = node.meta["quantization_annotation"] if "quantization_annotation" in node.meta else None
     if "val" in node.meta:
@@ -205,7 +201,7 @@ def prepare(
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
     nodes_before_observation = list(model.graph.nodes)
-    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize] = {}
+    obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantizer] = {}
 
     for node in nodes_before_observation:
 

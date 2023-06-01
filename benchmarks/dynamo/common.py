@@ -235,7 +235,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
-    "AlbertForQuestionAnswering",  # accuracy
     "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
     "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
     "mobilevit_s",
@@ -1265,17 +1264,11 @@ class BenchmarkRunner:
                 except NotImplementedError:
                     continue  # bad benchmark implementation
 
-    def deepcopy_model(self, model):
-        try:
-            return copy.deepcopy(model)
-        except TypeError:
-            return model
-
     def validate_model(self, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
-        model = self.deepcopy_model(model)
+        model = copy.deepcopy(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1290,7 +1283,7 @@ class BenchmarkRunner:
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = self.deepcopy_model(model)
+        model = copy.deepcopy(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1394,7 +1387,7 @@ class BenchmarkRunner:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         def deepcopy_and_maybe_ddp(model):
-            model = self.deepcopy_model(model)
+            model = copy.deepcopy(model)
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
@@ -1444,7 +1437,6 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
-                log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Rerun native pytorch

@@ -92,8 +92,16 @@ def parse_et_yaml(
     ignore_keys: Optional[Set[DispatchKey]] = None,
     skip_native_fns_gen: bool = False,
 ) -> ETParsedYaml:
-    native_yaml = parse_native_yaml(path, tags_yaml_path, ignore_keys, skip_native_fns_gen=skip_native_fns_gen)
-
     with open(path, "r") as f:
         es = yaml.load(f, Loader=LineLoader)
-    return ETParsedYaml(native_yaml.native_functions, parse_et_yaml_struct(es))
+
+    et_kernel = parse_et_yaml_struct(es)
+
+    # Remove ET specific fields from entries for BC compatibility
+    et_fields = ("type_alias", "dim_order_alias", "kernels")
+    for entry in es:
+        for field in et_fields:
+            entry.pop(field, None)
+
+    native_yaml = parse_native_yaml(path, tags_yaml_path, ignore_keys, skip_native_fns_gen=skip_native_fns_gen, loaded_yaml=es)
+    return ETParsedYaml(native_yaml.native_functions, et_kernel)

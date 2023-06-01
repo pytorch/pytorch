@@ -5267,7 +5267,7 @@ class CommonTemplate:
             self.assertEqual(bw_code.count("tl.rand"), 0)
             expected_kernel = 4
         else:
-            expected_kernel = 6
+            expected_kernel = 5
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
@@ -6250,14 +6250,6 @@ class CommonTemplate:
             return torch.erfc(x)
 
         self.common(fn, (torch.randn(8, 8),))
-
-    def test_erfinv(self):
-        def fn(x):
-            return torch.erfinv(x)
-
-        # domain for erfinv is (-1, 1)
-        x = torch.empty(8, 8).uniform_(-1, 1)
-        self.common(fn, (x,))
 
     def test_uint(self):
         def fn(z):

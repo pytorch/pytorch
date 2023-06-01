@@ -6,7 +6,6 @@ from .quantizer import (
     QuantizationSpec,
     QuantizationAnnotation,
     SharedQuantizationSpec,
-    DerivedQuantizationSpec,
 )
 
 __all__ = [
@@ -16,5 +15,4 @@ __all__ = [
     "QNNPackQuantizer",
     "QuantizationAnnotation",
     "SharedQuantizationSpec",
-    "DerivedQuantizationSpec",
 ]

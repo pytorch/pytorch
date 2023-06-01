@@ -203,9 +203,7 @@ class ArrayRef final {
   }
 
   /// slice(n) - Chop off the first N elements of the array.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N) const {
-    TORCH_CHECK(
-        N <= size(), "ArrayRef: invalid slice, N = ", N, "; size = ", size());
+  constexpr ArrayRef<T> slice(size_t N) const {
     return slice(N, size() - N);
   }
 
