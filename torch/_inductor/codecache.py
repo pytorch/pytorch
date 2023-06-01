@@ -792,11 +792,13 @@ class CppWrapperCodeCache:
 
     @classmethod
     def load(cls, source_code, func_name, key, cuda):
-        cpp_wrapper_dir = os.path.join(cache_dir(), "cpp_wrapper")
+        name = f"inline_extension_{key}"
+        cpp_wrapper_dir = torch.utils.cpp_extension._get_build_directory(
+            name, verbose=False
+        )
         if not os.path.exists(cpp_wrapper_dir):
             os.makedirs(cpp_wrapper_dir)
 
-        name = f"inline_extension_{key}"
         ext = "so"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
         log.debug("Cpp wrapper code path %s", filepath)
