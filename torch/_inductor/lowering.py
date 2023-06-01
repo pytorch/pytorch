@@ -3757,8 +3757,7 @@ def var_(x, axis=None, *, correction=None, keepdim=False):
     def scale_fn(data):
         c = get_constant_or_index_expr(correction, dtype)
         N = get_constant_or_index_expr(rnumel, dtype)
-        scale = ops.reciprocal(N - c)
-        return data * scale
+        return data / (N - c)
 
     return make_pointwise(scale_fn)(sum_dx2)
 
