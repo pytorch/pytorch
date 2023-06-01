@@ -4425,10 +4425,6 @@ class Wait(ExternKernelAlloc):
         constant_args=(),
     ):
         super().__init__(layout, inputs, constant_args)
-        from .utils import is_local
-        self.parent_comm = inputs[0].data.data
-        inputs[0].data.data.child_wait = self
-
 
     def should_allocate(self):
         return False
@@ -4471,7 +4467,6 @@ class CollectiveKernel(ExternKernel):
     def __init__(self, layout, inputs, constant_args):
         super().__init__(None, layout, inputs, constant_args)
         self.name = V.graph.register_buffer(self)
-        self.child_wait = None
 
     def should_allocate(self):
         return True
@@ -4622,6 +4617,7 @@ class AllReduceCoalesced(ExternKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
 
 class AllReduce(CollectiveKernel):
@@ -4655,9 +4651,6 @@ class AllReduce(CollectiveKernel):
         # At this point, output_name points to a buffer that is either
         # (1) the input buffer, which we're allowed to inplace modify
         # (2) a freshly allocated buffer, which we've copied the input into above
-        # wrapper.writeline(f"high_stream = torch.cuda.Stream(priority=-1)")
-        # wrapper.writeline(f"high_stream.wait_stream(torch.cuda.default_stream())")
-        # wrapper.writeline(f"with torch.cuda.stream(high_stream):")
         wrapper.writeline(
             f"{output_name}_work = dist.all_reduce("
             f"{output_name}, async_op=True, group={output_name}_pg, op=_str_to_reduce_op('{str(self.reduce_op)}'))"
@@ -4688,14 +4681,17 @@ class AllGatherIntoTensor(CollectiveKernel):
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_gather_into_tensor("
+            f"{output_name}, {input_names[0]}, async_op=True, group={output_name}_pg)"
+        )
+
         # At this point, output_name points to a fresh buffer
-        # wrapper.writeline(f"high_stream = torch.cuda.Stream(priority=-1)")
-        # wrapper.writeline(f"high_stream.wait_stream(torch.cuda.default_stream())")
-        # wrapper.writeline(f"with torch.cuda.stream(high_stream):")
         wrapper.writeline(
             f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_names[0]}, async_op=True,"
-            f"group={output_name}_pg)"
+            f" group={output_name}_pg)"
         )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
 
 class ReduceScatterTensor(CollectiveKernel):
@@ -4728,9 +4724,6 @@ class ReduceScatterTensor(CollectiveKernel):
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):
-        # wrapper.writeline(f"high_stream = torch.cuda.Stream(priority=-1)")
-        # wrapper.writeline(f"high_stream.wait_stream(torch.cuda.default_stream())")
-        # wrapper.writeline(f"with torch.cuda.stream(high_stream):")
         wrapper.writeline(
             f"{output_name}_work = dist.reduce_scatter_tensor("
             f"{output_name}, {input_names[0]}, "
