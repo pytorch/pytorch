@@ -599,14 +599,13 @@ class Reduction(Loops):
         return self.reduction_type
 
     def store_reduction(self, output_name, indexer, vars, reduction_vars):
-        return ops.reduction(
-            output_name,
+        value = ops.reduction(
             self.dtype,
             self.src_dtype,
             self.reduction_type,
-            indexer(vars),
             self.inner_fn(vars, reduction_vars),
         )
+        return ops.store_reduction(output_name, indexer(vars), value)
 
     def index_length(self):
         return len(self.ranges) + len(self.reduction_ranges)
@@ -4320,11 +4319,9 @@ class LoopBodyBlock:
                 index = add_index(index, "writes", name)
                 return self._inner.store(name, index, value, mode)
 
-            def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+            def store_reduction(self, name, index, value):
                 index = add_index(index, "writes", name)
-                return self._inner.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
-                )
+                return self._inner.store_reduction(name, index, value)
 
             def index_expr(self, index, dtype):
                 if isinstance(index, (int, sympy.Integer)):

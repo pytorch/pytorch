@@ -762,10 +762,13 @@ class Kernel(CodeGen):
         finally:
             self.loads = prior
 
+    def store_reduction(self, name, index, value):
+        raise NotImplementedError()
+
     def store(self, name, index, value, mode=None):
         raise NotImplementedError()
 
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
+    def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
     def __enter__(self):
@@ -813,11 +816,18 @@ class Kernel(CodeGen):
                     return self.store(name, index, value, mode=mode)
 
             @staticmethod
-            def reduction(name, dtype, src_dtype, reduction_type, index, value):
-                self.store_buffer_names.add(name)
-                return self.reduction(
-                    name, dtype, src_dtype, reduction_type, index, value
-                )
+            def store_reduction(name, index, value):
+                self.cse.store_cache[name] = value
+                if self.current_node:
+                    for other_name in self.current_node.get_mutations():
+                        self.cse.store_cache[other_name] = value
+
+                if name not in V.graph.removed_buffers:
+                    return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def reduction(dtype, src_dtype, reduction_type, value):
+                return self.reduction(dtype, src_dtype, reduction_type, value)
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())
