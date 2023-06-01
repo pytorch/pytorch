@@ -47,6 +47,7 @@ runs:
       shell: bash
       run: |
         set +e
+        set -x
 
         PYTHON3=$(${CONDA_RUN} which python3)
         EXIT_CODE=$?
@@ -65,6 +66,8 @@ runs:
           EXIT_CODE=$?
 
           if [[ "${EXIT_CODE}" == "0" ]]; then
+            echo "Found Python at ${PYTHON}, set Python3 alias and add it into GITHUB_PATH"
+
             PYTHON3=$(echo "${PYTHON}" | sed "s/python/python3/")
             # It's difficult to setup alias across GitHub action steps, so I just add a softlink
             # here pointing to Python
@@ -87,7 +90,7 @@ runs:
     - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
       shell: powershell
       run: |
-        Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TMPDIR -ErrorAction Ignore
+        Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TMPDIR,"C:\Jenkins\Miniconda3" -ErrorAction Ignore
         # Let's both exclude the path and disable Windows Defender completely just to be sure
         # that it doesn't interfere
         Set-MpPreference -DisableRealtimeMonitoring $True
