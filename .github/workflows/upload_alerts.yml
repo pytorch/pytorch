@@ -23,7 +23,7 @@ jobs:
 
       - name: Create alerts
         run: |
-          output=$(tools/alerts/create_alerts.py)
+          output=$(python tools/alerts/create_alerts.py)
           echo "output is the following"
           echo $output
           ehco "end of output"
