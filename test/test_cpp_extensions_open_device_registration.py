@@ -345,12 +345,12 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             # test cpu float storage
             cpu_tensor = torch.randn([8]).float()
             cpu_storage = cpu_tensor.storage()
-            self.assertTrue(cpu_storage.type() == "torch.FloatStorage")
+            self.assertEqual(cpu_storage.type(), "torch.FloatStorage")
 
             # test custom float storage before defining FloatStorage
             foo_tensor = cpu_tensor.foo()
             foo_storage = foo_tensor.storage()
-            self.assertTrue(foo_storage.type() == "torch.storage.TypedStorage")
+            self.assertEqual(foo_storage.type(), "torch.storage.TypedStorage")
 
             class CustomFloatStorage():
                 @property
@@ -362,14 +362,16 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                     return "FloatStorage"
 
             # test custom float storage after defining FloatStorage
-            torch.foo.FloatStorage = CustomFloatStorage()
-            self.assertTrue(foo_storage.type() == "torch.foo.FloatStorage")
+            try:
+                torch.foo.FloatStorage = CustomFloatStorage()
+                self.assertEqual(foo_storage.type(), "torch.foo.FloatStorage")
 
-            # test custom int storage after defining FloatStorage
-            foo_tensor2 = torch.randn([8]).int().foo()
-            foo_storage2 = foo_tensor2.storage()
-            self.assertTrue(foo_storage2.type() == "torch.storage.TypedStorage")
-            torch.foo.FloatStorage = None
+                # test custom int storage after defining FloatStorage
+                foo_tensor2 = torch.randn([8]).int().foo()
+                foo_storage2 = foo_tensor2.storage()
+                self.assertEqual(foo_storage2.type(), "torch.storage.TypedStorage")
+            finally:
+                torch.foo.FloatStorage = None
 
         test_base_device_registration()
         test_before_common_registration()
