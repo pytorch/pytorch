@@ -25,7 +25,7 @@ jobs:
           output=$("python tools/alerts/create_alerts.py")
           echo "uploading following alerts"
           echo "$output"
-          echo "::set-output name=script_output::$output"
+          echo "{script_output}={$output}" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
       - name: Upload alerts
         uses: pytorch/test-infra/.github/actions/upload-alerts@main
