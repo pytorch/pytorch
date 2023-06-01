@@ -460,7 +460,6 @@ def forward(self, primals_1):
 
     # https://github.com/pytorch/pytorch/issues/93363
     def test_mutates_input_noncontiguous(self):
-        # Tensor, None, int
         def f(a):
             a.add_(1)
             return ()
