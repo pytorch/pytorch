@@ -29,25 +29,25 @@
   - [سريع وخفيف](#سريع-وخفيف)
   - [سهولة في التوسع](#سهولة-في-التوسع)
 - [التثبيت](#التثبيت)
-  - [الملفات التنفيذية](#الملفات-لتنفيذية)
+  - [الملفات التنفيذية](#الملفات-التنفيذية)
     - [منصات NVIDIA Jetson](#منصات-NVIDA-Jeston)
-  - [من المصدر](#from-source)
-    - [المتطلبات الأساسية](#prerequisites)
-    - [تثبيت التبعيات أو الاعتماديات](#install-dependencies)
-    - [الحصول على مصدر PyTorch](#get-the-pytorch-source)
-    - [تثبيت PyTorch](#install-pytorch)
-      - [ضبط خيارات البناء (اختياري)](#adjust-build-options-optional)
-  - [صورة دوكر (Docker Image)](#docker-image)
-    - [استخدام صور مبنية مسبقًا](#using-pre-built-images)
-    - [بناء الصورة بنفسك](#building-the-image-yourself)
-  - [إنشاء الوثائق](#building-the-documentation)
-  - [الإصدارات السابقة](#previous-versions)
-- [البدء بالاستخدام](#getting-started)
-- [موارد](#resources)
-- [التواصل](#communication)
-- [الإصدارات والمساهمة](#releases-and-contributing)
-- [الفريق](#the-team)
-- [الترخيص](#license)
+  - [من المصدر](#من-المصدر)
+    - [المتطلبات الأساسية](#المتطلبات-الأساسية)
+    - [تثبيت التبعيات أو الاعتماديات](#تثبيت-التبعيات-أو-الاعتماديات)
+    - [الحصول على مصدر PyTorch](#الحصول-على-مصدر-PyTorch)
+    - [تثبيت PyTorch](#تثبيت-PyTorch)
+      - [ضبط خيارات البناء (اختياري)](#ضبط-خيارات-البناء-(اختياري))
+  - [صورة دوكر (Docker Image)](#صورة-دوكر-(Docker Image))
+    - [استخدام صور مبنية مسبقًا](#استخدام-صور-مبنية-مسبقًا)
+    - [بناء الصورة بنفسك](#بناء-الصورة-بنفسك)
+  - [إنشاء الوثائق](#إنشاء-الوثائق)
+  - [الإصدارات السابقة](#الإصدارات-السابقة)
+- [البدء بالاستخدام](#البدء-بالاستخدام)
+- [موارد](#موارد)
+- [التواصل](#التواصل)
+- [الإصدارات والمساهمة](#الإصدارات-والمساهمة)
+- [الفريق](#الفريق)
+- [الترخيص](#الترخيص)
 
 <!-- tocstop -->
 
@@ -161,9 +161,9 @@ Python wheels for NVIDIA's Jetson Nano, Jetson TX1/TX2, Jetson Xavier NX/AGX, an
 They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv) and [@ptrblck](https://github.com/ptrblck) are maintaining them.
 
 
-### From Source
+### من المصدر
 
-#### Prerequisites
+#### المتطلبات الأساسية
 If you are installing from source, you will need:
 - Python 3.8 or later (for Linux, Python 3.8.1+ is needed)
 - A C++17 compatible compiler, such as clang
@@ -189,7 +189,7 @@ If you want to compile with ROCm support, install
 If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
-#### Install Dependencies
+#### تثبيت التبعيات أو الاعتماديات
 
 **Common**
 
@@ -229,7 +229,7 @@ conda install mkl mkl-include
 conda install -c conda-forge libuv=1.39
 ```
 
-#### Get the PyTorch Source
+#### الحصول على مصدر PyTorch
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
@@ -238,7 +238,7 @@ git submodule sync
 git submodule update --init --recursive
 ```
 
-#### Install PyTorch
+#### تثبيت PyTorch
 **On Linux**
 
 If you're compiling for AMD ROCm then first run this command:
@@ -331,7 +331,7 @@ python setup.py develop
 
 ```
 
-##### Adjust Build Options (Optional)
+##### ضبط خيارات البناء (اختياري)
 
 You can adjust the configuration of cmake variables optionally (without building first), by doing
 the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
@@ -351,9 +351,9 @@ MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake
 ccmake build  # or cmake-gui build
 ```
 
-### Docker Image
+### صورة دوكر (Docker Image)
 
-#### Using pre-built images
+#### استخدام صور مبنية مسبقًا
 
 You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
 
@@ -365,7 +365,7 @@ Please note that PyTorch uses shared memory to share data between processes, so 
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
 
-#### Building the image yourself
+#### بناء الصورة بنفسك
 
 **NOTE:** Must be built with a docker version > 18.06
 
@@ -385,7 +385,7 @@ See [setup.py](../setup.py) for the list of available variables.
 CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
 ```
 
-### Building the Documentation
+### إنشاء الوثائق
 
 To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
 readthedocs theme.
@@ -407,13 +407,13 @@ A combination of versions that is known to work is `node@6.13.1` and
 `katex@0.13.18`. To install the latter with `npm` you can run
 ```npm install -g katex@0.13.18```
 
-### Previous Versions
+### الإصدارات السابقة
 
 Installation instructions and binaries for previous PyTorch versions may be found
 on [our website](https://pytorch.org/previous-versions).
 
 
-## Getting Started
+## البدء بالاستخدام
 
 Three-pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
@@ -421,7 +421,7 @@ Three-pointers to get you started:
 - [The API Reference](https://pytorch.org/docs/)
 - [Glossary](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
 
-## Resources
+## موارد
 
 * [PyTorch.org](https://pytorch.org/)
 * [PyTorch Tutorials](https://pytorch.org/tutorials/)
@@ -434,7 +434,7 @@ Three-pointers to get you started:
 * [PyTorch Blog](https://pytorch.org/blog/)
 * [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
-## Communication
+## التواصل
 * Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
@@ -442,7 +442,7 @@ Three-pointers to get you started:
 * Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
 * For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 
-## Releases and Contributing
+## الإصدارات والمساهمة
 
 Typically, PyTorch has three major releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
@@ -453,7 +453,7 @@ Sending a PR without discussion might end up resulting in a rejected PR because 
 
 To learn more about making a contribution to Pytorch, please see our [Contribution page](../CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](../RELEASE.md).
 
-## The Team
+## الفريق
 
 PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
 
@@ -462,6 +462,6 @@ A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chila
 
 Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 
-## License
+## الترخيص
 
 PyTorch has a BSD-style license, as found in the [LICENSE](../LICENSE) file.
