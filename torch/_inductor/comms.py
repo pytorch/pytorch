@@ -2,8 +2,9 @@ from collections import defaultdict
 from typing import List
 
 import torch.fx as fx
-from . import ir
+from . import ir, scheduler
 from .analysis import get_runtime_snode
+from .dependencies import WeakDep
 from .utils import is_local, print2
 
 
@@ -13,6 +14,10 @@ def tuple_sorted(x):
 
 
 def sink_waits(result: List[fx.Node]) -> List[fx.Node]:
+    """
+    Greedily moves waits as late as possible (i.e. until we reach an use). Optimal in terms of
+    communication overlap.
+    """
     new_result = []
     cur_waits = set()
     for node in result:
@@ -31,6 +36,10 @@ def sink_waits(result: List[fx.Node]) -> List[fx.Node]:
 
 
 def raise_comms(result: List[fx.Node]) -> List[fx.Node]:
+    """
+    Greedily moves comms as early as possible (i.e. until we reach an input).
+    Optimal in terms of communication overlap.
+    """
     new_result = []
     cur_comms = []
     for node in reversed(result):
@@ -76,34 +85,67 @@ def get_descendants(node):
     return descendants
 
 
-def order_heuristic(nodes: List[fx.Node]) -> List[fx.Node]:
+def decide_global_ordering_comms(nodes: List["scheduler.BaseSchedulerNode"]):
+    """
+    Just enforces the ordering that's in the input graph.
+    TODO: Come up with a better approach
+    """
+    comm_nodes = [n for n in nodes if isinstance(n.node, ir.CollectiveKernel)]
+    for i in range(1, len(comm_nodes)):
+        comm_nodes[i].add_mutation_dep(WeakDep(comm_nodes[i - 1].get_name()))
+
+
+def dumb_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
+    """
+    Sinks waits and raises comms. Does not try to reorder compute in order to
+    maximize overlap.
+    """
+    nodes = [node for node in nodes if "fusion_meta" in node.meta]
+    nodes = sink_waits(nodes)
+    nodes = raise_comms(nodes)
+    return [node.meta["fusion_meta"].snode for node in nodes]
+
+
+def debug_print(s=""):
+    import os
+
+    if os.environ.get("INDUCTOR_COMM_DEBUG") == "1":
+        print2(s)
+
+
+def smart_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
+    """
+    Decides a global ordering of all nodes. Assumes that we already have a global ordering of communication nodes.
+
+    Overall strategy is:
+    Priority 1. Given that we've currently scheduled comm N, we now schedule all compute nodes that are required for comm N + 1, but do not depend on comm N.
+    Priority 2. Now, if all those compute nodes are sufficient to overlap comm N, we're done. Otherwise, we now need to look elsewhere to find compute that overlaps with comm N. We prioritize compute nodes that are needed sooner.
+    Priority 3. Now, we schedule the compute nodes dependent on comm N and required for comm N + 1.
+
+    Repeat.
+    """
+    nodes = [node for node in nodes if "fusion_meta" in node.meta]
     comm_nodes = []
     for node in nodes:
-        if "fusion_meta" in node.meta and isinstance(
-            node.meta["fusion_meta"].snode.node, ir.CollectiveKernel
-        ):
+        if isinstance(node.meta["fusion_meta"].snode.node, ir.CollectiveKernel):
             comm_nodes.append(node)
 
-    new_nodes = [node for node in nodes if "fusion_meta" in node.meta]
     if len(comm_nodes) == 0:
-        return new_nodes
+        return nodes
 
     comm_ancestors = {node: get_ancestors(node) for node in comm_nodes}
     comm_descendants = {node: get_descendants(node) for node in comm_nodes}
 
-    # new_nodes = sink_waits(new_nodes)
-    # new_nodes = raise_comms(new_nodes)
-    # return [node.meta['fusion_meta'].snode for node in new_nodes]
-    indeg = {k: 0 for k in new_nodes}
+    indeg = {k: 0 for k in nodes}
     buf_uses = defaultdict(set)
-    for node in new_nodes:
+    for node in nodes:
         snode = node.meta["fusion_meta"].snode
         for buf in snode.used_buffer_names():
             buf_uses[buf].add(snode)
         for user in node.users:
             if user in indeg:
                 indeg[user] += 1
-    free_nodes = set([node for node in new_nodes if indeg[node] == 0])
+    free_nodes = set([node for node in nodes if indeg[node] == 0])
 
     result = []
     unused_nodes = set([node for node in nodes if "fusion_meta" in node.meta])
@@ -111,7 +153,7 @@ def order_heuristic(nodes: List[fx.Node]) -> List[fx.Node]:
     def add_node(node):
         assert node in unused_nodes
         assert node in free_nodes
-        print2(f"adding {node}")
+        debug_print(f"adding {node}")
         free_nodes.remove(node)
         unused_nodes.remove(node)
         result.append(node)
@@ -138,46 +180,78 @@ def order_heuristic(nodes: List[fx.Node]) -> List[fx.Node]:
     def get_runtime_fx(node):
         return get_runtime_snode(node.meta["fusion_meta"].snode)
 
+    rolled_over_compute = 0
     for idx in range(1, len(comm_ancestors)):
         is_comm_blocking = (
             len(comm_descendants[comm_nodes[idx - 1]] & comm_ancestors[comm_nodes[idx]])
             > 0
         )
-        print2(f"Start {comm_nodes[idx - 1]} -> {comm_nodes[idx]} ({is_comm_blocking})")
+        debug_print(
+            f"Start {comm_nodes[idx - 1]} -> {comm_nodes[idx]} ({is_comm_blocking}, {rolled_over_compute if not is_comm_blocking else ''})"
+        )
+        debug_print("Priority 1")
+        # Priority 1: Nodes that are required for the next comm, but are not dependent on the current comm
         priority1 = unused_nodes & (
             comm_ancestors[comm_nodes[idx]] - comm_descendants[comm_nodes[idx - 1]]
         )
-        total_cost = sum([get_runtime_fx(node) for node in priority1])
+        total_cost = rolled_over_compute + sum(
+            [get_runtime_fx(node) for node in priority1]
+        )
         comm_cost = get_runtime_fx(comm_nodes[idx - 1])
-        print2("Priority 1")
         add_all_nodes(tuple_sorted(priority1))
-        print2("Priority 2")
 
-        if total_cost > comm_cost:
+        debug_print("Priority 2")
+        # Priority 2: These are nodes that we're only allocating here for overlap reasons. We prioritize nodes that are needed sooner. This component is the main area with nontrivial decisions.
+        group1_cost = total_cost
+        if total_cost >= comm_cost:
             pass
         else:
-            while total_cost < comm_cost:
-                compute_overlap_node = None
-                for node in tuple_sorted(
-                    free_nodes - comm_descendants[comm_nodes[idx - 1]]
-                ):
-                    if not isinstance(
-                        node.meta["fusion_meta"].snode.node, ir.CollectiveKernel
-                    ):
-                        compute_overlap_node = node
-                        break
-                if compute_overlap_node is None:
-                    break
+            overlappable_nodes = tuple_sorted(
+                free_nodes - comm_descendants[comm_nodes[idx - 1]]
+            )
 
-                add_node(compute_overlap_node)
-                total_cost += get_runtime_fx(compute_overlap_node)
-        print2(f"{comm_nodes[idx-1]} overlap: {total_cost}/{comm_cost}")
-        # if is_local():
-        #     print(f"{comm_nodes[idx - 1]} -> {comm_nodes[idx]}", total_cost, comm_cost)
-        print2("priority 3")
+            def earliest_comm_descendant(node):
+                for idx in range(len(comm_nodes)):
+                    if node in comm_ancestors[comm_nodes[idx]]:
+                        return idx
+                return len(comm_nodes)
+
+            overlappable_nodes = sorted(
+                overlappable_nodes, key=earliest_comm_descendant
+            )
+
+            for node in overlappable_nodes:
+                if total_cost >= comm_cost:
+                    break
+                if not isinstance(
+                    node.meta["fusion_meta"].snode.node, ir.CollectiveKernel
+                ):
+                    runtime_cost = get_runtime_fx(node)
+                    # If we're not able to leverage more than half of this
+                    # node's compute to overlap, we skip it.
+                    # TODO: Smarter heuristics for packing the cost here
+                    if (comm_cost - runtime_cost) <= runtime_cost / 2:
+                        continue
+                    add_node(node)
+                    total_cost += get_runtime_fx(node)
+        rollable_compute = total_cost - group1_cost
+        # The idea here is that if there are no compute nodes in priority 3, we
+        # can roll over the compute nodes in priority 2 to the next comm, since
+        # they're not required to finish before the next comm starts
+
+        # We can extend our ability to roll over compute if we leverage low
+        # priority streams here, since that would lift us from the requirement
+        # to finish priority 2 compute before the next comm starts.
+        if is_comm_blocking:
+            rolled_over_compute = 0
+        else:
+            rolled_over_compute = rollable_compute
+        debug_print(f"{comm_nodes[idx-1]} overlap: {total_cost}/{comm_cost}")
+        debug_print("priority 3")
+        # Priority 3: Now, we schedule everything else required for comm N + 1, which also includes compute nodes dependent on comm N.
         priority3 = unused_nodes & comm_ancestors[comm_nodes[idx]]
         add_all_nodes(list(priority3) + [comm_nodes[idx]])
-        print2()
+        debug_print()
 
     add_all_nodes(unused_nodes)
 

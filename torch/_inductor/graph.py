@@ -23,23 +23,14 @@ from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
 
-from . import comms, config, ir, metrics, scheduler
-from .analysis import get_runtime_snode
+from . import comms, config, ir, metrics
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import (
-    CollectiveKernel,
-    Constant,
-    FixedLayout,
-    InputBuffer,
-    Pointwise,
-    Reduction,
-    TensorBox,
-)
+from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
@@ -56,8 +47,6 @@ from .utils import (
     gather_origins,
     get_dtype_size,
     get_sympy_Expr_dtype,
-    is_local,
-    print2,
     sympy_product,
 )
 from .virtualized import V
@@ -660,9 +649,10 @@ class GraphLowering(torch.fx.Interpreter):
             new_nodes = ordering_pass(fx_graph.nodes)
             return [node.meta["fusion_meta"].snode for node in new_nodes]
 
-        self.scheduler.nodes = reorder_nodes(
-            self.scheduler.nodes, comms.order_heuristic
-        )
+        if config.comm_reordering:
+            self.scheduler.nodes = reorder_nodes(
+                self.scheduler.nodes, comms.smart_reordering
+            )
 
         self.scheduler.compute_last_usage()
         self.scheduler.codegen()

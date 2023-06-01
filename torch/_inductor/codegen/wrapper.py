@@ -182,7 +182,7 @@ class AllocateLine(MemoryPlanningLine):
 
         # try to reuse a recently freed buffer
         key = buffer_reuse_key(self.node)
-        if key in state:
+        if key in state and config.allow_buffer_reuse:
             free_line = state.pop(key)
             free_line.is_reused = True
             return ReuseLine(self.wrapper, free_line.node, self.node)
@@ -756,10 +756,6 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
-
-        if not config.allow_buffer_reuse:
-            self.writeline(self.make_buffer_free(buffer))
-            return
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):

@@ -3,14 +3,14 @@ from typing import Any, List
 
 import torch
 import torch.fx as fx
-from . import ir, scheduler
-from .scheduler import BaseSchedulerNode
+from . import ir
 
 
-def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
+def create_fx_from_snodes(snodes: List["scheduler.BaseSchedulerNode"]) -> fx.Graph:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
+    from . import ir, scheduler
 
     def get_fake_func(name):
         def func1(*args):
@@ -32,9 +32,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     group: Any = None
     # create call_function node for each Buffer and Kernel
     for snode in snodes:
-        if isinstance(snode.node, ir.CollectiveKernel) or isinstance(
-            snode.node, ir.Wait
-        ):
+        if isinstance(snode.node, (ir.CollectiveKernel, ir.Wait)):
             node_type = "collective"
             group = node_type
         elif snode.is_extern():
@@ -101,12 +99,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     return graph
 
 
-def get_runtime_snode(snode: BaseSchedulerNode):
+def get_runtime_snode(snode: "BaseSchedulerNode"):
     """
     Gets the runtime of Scheduler node. Currently somewhat of a placeholder, todo to be replaced by more sophisticated approaches.
     """
-    # if node.name == 'buf45':
-    #     return 35
     if isinstance(snode.node, ir.AllReduce):
         return 5
     if isinstance(snode.node, ir.CollectiveKernel):
