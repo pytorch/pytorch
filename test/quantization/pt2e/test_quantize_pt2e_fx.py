@@ -445,6 +445,70 @@ class TestQuantizePT2EFXX86Inductor(QuantizationTestCase):
                     inductor_res = run(*example_inputs)
                     self.assertEqual(ref_result, inductor_res, atol=5e-2, rtol=5e-2)
 
+    @skipIfNoX86
+    def test_inductor_qconv_lowering(self):
+        dim_to_module = {
+            1: nn.Conv1d,
+            2: nn.Conv2d,
+            3: nn.Conv3d
+        }
+
+        class M(torch.nn.Module):
+            def __init__(self, dim: int, bias: bool):
+                super().__init__()
+                self.conv = dim_to_module[dim](3, 6, 2, stride=2, padding=0, dilation=1, bias=bias)
+
+            def forward(self, x):
+                return nn.functional.gelu(self.conv(x))
+
+        conv_dims = [1, 2, 3]
+        use_bias_list = [True, False]
+        with override_quantized_engine("x86"):
+            with torch.no_grad():
+                cases = itertools.product(conv_dims, use_bias_list)
+                for dim, use_bias in cases:
+                    m = M(dim, use_bias).eval()
+                    input_shape = (2, 3, *([6] * dim))
+                    example_inputs = (torch.randn(input_shape),)
+                    # program capture
+                    exported_model, guards = torchdynamo.export(
+                        m,
+                        *copy.deepcopy(example_inputs),
+                        aten_graph=True,
+                        tracing_mode="real",
+                    )
+
+                    qconfig = get_default_qconfig("x86")
+                    qconfig_mapping = QConfigMapping().set_global(qconfig)
+                    backend_config_inductor = get_x86_inductor_pt2e_backend_config()
+                    prepared_model = prepare_pt2e(
+                        exported_model,
+                        qconfig_mapping,
+                        example_inputs,
+                        backend_config_inductor
+                    )
+                    prepared_model(*example_inputs)
+                    converted_model = convert_pt2e(prepared_model)
+
+                    run = compile_fx(converted_model, example_inputs)
+                    result_inductor = run(*example_inputs)
+
+                    m_copy = copy.deepcopy(m)
+                    backend_config_fx = get_x86_backend_config()
+                    prepared_model_fx = prepare_fx(
+                        m_copy,
+                        qconfig_mapping,
+                        example_inputs,
+                        backend_config=backend_config_fx,
+                    )
+                    prepared_model_fx(*example_inputs)
+                    converted_model_fx = convert_fx(
+                        prepared_model_fx, backend_config=backend_config_fx
+                    )
+                    result_fx = converted_model_fx(*example_inputs)
+
+                    self.assertEqual(result_inductor, result_fx)
+
 
 class TestQuantizePT2EFXModels(QuantizationTestCase):
     @skip_if_no_torchvision

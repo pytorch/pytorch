@@ -19,9 +19,11 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._export import dynamic_dim
+from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import skipIfRocm
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -1880,6 +1882,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 aten_graph=True,
             )
 
+    @skipIfRocm
     @config.patch(capture_scalar_outputs=True)
     def test_dynamic_slicing_simple(self):
         def f(x):
@@ -1890,6 +1893,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
 
+    # pre_autograd seems to violate new fake tensor invariants
+    @unittest.expectedFailure
     def test_pre_autograd_simple(self):
         def f(x):
             y = torch.ones_like(x)
@@ -1915,6 +1920,7 @@ def forward(self, x):
     return pytree.tree_unflatten([matmul_default], self._out_spec)""",
         )
 
+    @skipIfRocm
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
         class ConditionOp(torch.nn.Module):
@@ -2245,6 +2251,23 @@ def forward(self, x):
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
+    def test_export_module_specify_constraints_signature(self):
+        y = torch.randn([3, 3, 3])
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] == 3:
+                    return x.sin()
+                return x.cos()
+
+        mod = Mod()
+        torch._dynamo.export(mod, y)
+
+        with self.assertRaisesRegex(
+            ConstraintViolationError, "def specify_constraints\\(x\\):"
+        ):
+            torch._dynamo.export(mod, y, constraints=[dynamic_dim(y, 0)])
+
     def test_export_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -2288,6 +2311,7 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn, y, y, y)
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
 
+    @skipIfRocm
     def test_export_multi_dynamic_dim_unsafe_relationship(self):
         x = torch.randn([3, 3, 3])
         y = torch.randn([2, 2, 2])
@@ -2311,9 +2335,7 @@ def forward(self, x):
         specialize_int=True,
         capture_scalar_outputs=True,
     )
-    def test_export_preserve_constraints_as_metadata(self):
-        from torch._export.constraints import constrain_as_size
-
+    def test_export_preserve_constraints_as_metadata_scalar(self):
         def f(x, y):
             b = x.item()
             constrain_as_size(b, min=2, max=5)
@@ -2335,12 +2357,28 @@ def forward(self, x):
             gm.meta["input_shape_constraints"],
             [c.serializable_spec for c in constraints],
         )
-        preserved = False
-        for _, vr in gm.meta["inline_constraints"].items():
-            # Should have the constraint with min=2, max=5
-            if vr.lower == 2 and vr.upper == 5:
-                preserved = True
-        self.assertTrue(preserved)
+
+    @torch._dynamo.config.patch(
+        dynamic_shapes=True,
+        capture_dynamic_output_shape_ops=True,
+        specialize_int=True,
+        capture_scalar_outputs=True,
+    )
+    def test_export_preserve_constraints_as_metadata_tensor(self):
+        def f(x):
+            b = x.nonzero()
+            constrain_as_value(b.shape[0], min=2, max=5)
+            return b
+
+        y = torch.tensor([8, 8, 6])
+        constraints = []
+        gm, _ = torch._dynamo.export(
+            f,
+            y,
+            constraints=constraints,
+            aten_graph=True,
+            tracing_mode="symbolic",
+        )
 
     @config.patch(
         dynamic_shapes=True,
@@ -2350,8 +2388,6 @@ def forward(self, x):
     )
     def test_exported_graph_serialization(self):
         import io
-
-        from torch._export.constraints import constrain_as_size
 
         def f(x, y):
             b = x.item()
@@ -3027,6 +3063,18 @@ def forward(self, x):
                 *example_inputs,
                 aten_graph=True,
             )
+
+    def test_byte_tensor_does_not_crash(self):
+        # See https://github.com/pytorch/pytorch/issues/100455
+        def func(text):
+            tensor = torch.ByteTensor(list(bytes(text, "utf8")))
+            return tensor + tensor
+
+        text = "".join(chr(a % 90 + 40) for a in range(111))
+        opt_func = torch._dynamo.optimize("eager", dynamic=True)(func)
+        for i in [99, 100]:
+            input = text[:i]
+            opt_func(input)
 
     def test_export_defaults_ok(self):
         class DynamicSliceExportMod(torch.nn.Module):

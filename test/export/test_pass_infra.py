@@ -3,18 +3,20 @@ from typing import List, Type
 import unittest
 
 import torch
-import torch._dynamo as torchdynamo
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx import subgraph_rewriter
 from torch.library import impl, Library
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch._export import export
 from torch._export.pass_base import ExportPassBase, ExportPassBaseError
+from torch._export.constraints import constrain_as_value
+from functorch.experimental import control_flow
 
 
+@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPassInfra(TestCase):
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_export_pass_base(self) -> None:
         def f(x: torch.Tensor) -> List[torch.Tensor]:
             y = torch.cat([x, x])
@@ -23,10 +25,11 @@ class TestPassInfra(TestCase):
         class NullPass(ExportPassBase):
             pass
 
-        gm, _ = torchdynamo.export(f, *(torch.ones(3, 2),), aten_graph=True)
-        new_gm = NullPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_nodes = new_gm.graph_module.graph.nodes
+        ep = export(f, (torch.ones(3, 2),))
+        old_nodes = ep.graph.nodes
+
+        ep = ep.transform(NullPass())
+        new_nodes = ep.graph.nodes
 
         for node in new_nodes:
             if node.op != "call_function":
@@ -34,13 +37,11 @@ class TestPassInfra(TestCase):
             self.assertTrue(hasattr(node, "stack_trace"))
             self.assertIsNotNone(node.stack_trace)
 
-        old_nodes = gm.graph.nodes
         self.assertEqual(len(new_nodes), len(old_nodes))
         for new_node, old_node in zip(new_nodes, old_nodes):
             self.assertEqual(new_node.op, old_node.op)
             self.assertEqual(new_node.target, old_node.target)
 
-    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_dialects(self) -> None:
         """
         Test if the dialects are maintained
@@ -69,14 +70,10 @@ class TestPassInfra(TestCase):
             z = x + y
             return torch.ops.aten.relu.default(z)
 
-        gm, _ = torchdynamo.export(
-            f,
-            *(torch.randn(2, 2), torch.randn(2, 2)),
-            aten_graph=True,
-        )
+        ep = export(f, (torch.randn(2, 2), torch.randn(2, 2)))
         FileCheck().check("torch.ops.aten.add.Tensor").check(
             "torch.ops.aten.relu.default"
-        ).run(gm.code)
+        ).run(ep.graph_module.code)
 
         class AddReluFusionPass(ExportPassBase):
             def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
@@ -89,6 +86,7 @@ class TestPassInfra(TestCase):
                     return backend_op(x, y)
 
                 subgraph_rewriter.replace_pattern(graph_module, pattern, replacement)
+                return PassResult(graph_module, True)
 
         class BackendNullPass(ExportPassBase):
             def get_valid_dialects(self) -> List[Type]:
@@ -118,17 +116,39 @@ class TestPassInfra(TestCase):
                     )
                 return super().call_operator(op, args, kwargs, meta)
 
-        AddReluFusionPass()(gm)
+        ep = ep.transform(AddReluFusionPass())
         FileCheck().check(
             "torch.ops.DO_NOT_USE_TEST_ONLY.add_relu.default"
-        ).run(gm.code)
+        ).run(ep.graph_module.code)
 
-        new_gm = BackendNullPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_gm = new_gm.graph_module
+        ep = ep.transform(BackendNullPass())
 
         with self.assertRaisesRegex(ExportPassBaseError, "Expecting op of dialects:"):
-            _ = BackendViolatePass()(gm)
+            ep.transform(BackendViolatePass())
+
+    def test_cond(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x, y):
+                def true_fn(x, y):
+                    b = x.item()
+                    constrain_as_value(b, min=2, max=5)
+                    return x - y
+
+                def false_fn(x, y):
+                    c = y.item()
+                    constrain_as_value(c, min=2, max=5)
+                    return x + y
+
+                ret = control_flow.cond(pred, true_fn, false_fn, [x, y])
+                return ret
+
+        x = torch.tensor([2])
+        y = torch.tensor([5])
+        mod = M()
+        _ = export(mod, (torch.tensor(True), x, y)).transform(ExportPassBase())
 
 
 if __name__ == '__main__':

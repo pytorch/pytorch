@@ -11,9 +11,9 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cudnn/ConvShared.h>
 #include <ATen/native/quantized/cudnn/utils.h>
+#include <ATen/native/quantized/ConvUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
@@ -52,40 +52,11 @@ struct CacheKey {
   bool kReluFused;
 };
 std::unordered_map<CacheKey, cudnn_frontend::ExecutionPlan, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
-}
+} // anonymous namespace
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
 // multiple operators
 // reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/conv_sample.cpp#L293
 //static cudnn_frontend::ExecutionPlanCache plan_cache("sample_cache");
-
-template <int kSpatialDim>
-at::SmallVector<int64_t, kSpatialDim + 2> MakeConvOutputShape(
-    int N, // mini-batch
-    int M, // output channels
-    const std::array<int64_t, kSpatialDim>& input_image_shape,
-    const std::vector<int64_t>& kernel,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation);
-
-template <>
-at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
-    int N, // mini-batch
-    int M, // output channels
-    const std::array<int64_t, 2>& input_image_shape,
-    const std::vector<int64_t>& kernel,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation) {
-  const int H = input_image_shape[0];
-  const int W = input_image_shape[1];
-  const int64_t Y_H =
-      (H + 2 * padding[0] - dilation[0] * (kernel[0] - 1) - 1) / stride[0] + 1;
-  const int64_t Y_W =
-      (W + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1;
-  return {N, M, Y_H, Y_W};
-}
-
 
 // the parameter quantized_output is a quantized tensor
 template <int kSpatialDim>
@@ -314,7 +285,7 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
   const auto W = act.size(kSpatialDim + 1);
   const auto num_output_channels = maybe_padded_weight_.size(0); // output channels
   std::vector<int64_t> kernel_size = {maybe_padded_weight_.size(2), maybe_padded_weight_.size(3)};
-  at::SmallVector<int64_t, kSpatialDim + 2> output_shape = MakeConvOutputShape<kSpatialDim>(batch_size, num_output_channels, {H, W},
+  auto output_shape = at::native::quantized::MakeConvOutputShape<kSpatialDim>(batch_size, num_output_channels, {H, W},
   kernel_size, stride_, padding_, dilation_);
   at::Tensor quantized_output = at::_empty_affine_quantized(
       output_shape,
@@ -369,8 +340,7 @@ template at::Tensor PackedConvWeightCudnn<2>::apply_relu(
     double output_scale,
     int64_t output_zero_point);
 
-namespace at {
-namespace native {
+namespace at:: native {
 namespace {
 
 template <bool kReluFused>
@@ -427,9 +397,8 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu.new"), QConvInt8<2, true>::run);
 }
 
-} // namespace
-} // namespace native
-} // namespace at
+} // anonyous namespace
+} // namespace at::native
 
 
 #endif  // HAS_CUDNN_V8

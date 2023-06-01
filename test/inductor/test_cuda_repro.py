@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_FBCODE,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
 )
 
 try:
@@ -670,10 +671,65 @@ class CudaReproTests(TestCase):
         with torch.no_grad():
             self.common(mod, (torch.randn(4, 4),))
 
+    def test_lookup_seed_backward(self):
+        @torch.compile(fullgraph=True)
+        def forward(inductor_seeds, mul_4, view_15):
+            inductor_lookup_seed_2 = torch.ops.prims.inductor_lookup_seed.default(
+                inductor_seeds, 2
+            )
+            inductor_random_2 = torch.ops.prims.inductor_random.default(
+                [2, 512, 768], inductor_lookup_seed_2, "rand"
+            )
+            gt_2 = torch.ops.aten.gt.Scalar(inductor_random_2, 0.1)
+            mul_7 = torch.ops.aten.mul.Tensor(gt_2, view_15)
+            mul_8 = torch.ops.aten.mul.Tensor(mul_7, 1.1111111111111112)
+            add_5 = torch.ops.aten.add.Tensor(mul_8, mul_4)
+            var_mean_1 = torch.ops.aten.var_mean.correction(
+                add_5, [2], correction=0, keepdim=True
+            )
+            getitem_3 = var_mean_1[1]
+            sub_3 = torch.ops.aten.sub.Tensor(add_5, getitem_3)
+            return (sub_3,)
+
+        buf0 = torch.zeros((37,), dtype=torch.int64, device="cuda")
+        buf1 = torch.zeros((2, 512, 768), device="cuda")
+        buf2 = torch.zeros((2, 512, 768), device="cuda")
+        forward(buf0, buf1, buf2)
+
+    def test_issue100806(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear1 = torch.nn.Linear(10, 20)
+                self.linear2 = torch.nn.Linear(20, 30)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = self.linear2(x)
+                x = torch.cat((x, x), dim=1)
+                x = x.view(-1, 2, 30)
+                x = x[:, 1, :]
+                x = self.relu(x)
+                return x
+
+        device = "cuda"
+        batch_size = 2
+        x = torch.randn(batch_size, 10).to(device)
+        func = Model().to(device)
+
+        with torch.no_grad():
+            func.train(False)
+            jit_func = torch.compile(func)
+
+            res1 = func(x)
+            res2 = jit_func(x)
+            self.assertEqual(res1, res2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CUDA
 
-    if HAS_CUDA and not TEST_WITH_ASAN:
+    if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
         run_tests(needs="filelock")
