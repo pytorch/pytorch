@@ -67,8 +67,7 @@ class MyGraphBreakAllReduce(torch.nn.Module):
         super().__init__()
 
     def forward(self, x):
-        tag, rankset, group_size = torch.distributed._functional_collectives._expand_group(GroupMember.WORLD, tag="")
-        ar = torch.ops.c10d_functional.all_reduce(x, "sum", tag, rankset, group_size)
+        ar = torch.distributed._functional_collectives.all_reduce(x, "sum", GroupMember.WORLD, "")
         print("Graph break")
         return x, ar
 
@@ -78,8 +77,7 @@ class MyWait(torch.nn.Module):
 
     def forward(self, x):
         x, passthrough = x
-        synced = torch.ops.c10d_functional.wait_tensor(passthrough)
-        return x + synced
+        return x + passthrough
         # return x
 
 
