@@ -162,11 +162,15 @@ def serialize_signature(sig: ep.ExportGraphSignature) -> GraphSignature:
 
     graph_signature = GraphSignature(
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> lint
         inputs_to_parameters=sig.inputs_to_parameters,  # type: ignore[arg-type]
         inputs_to_buffers=sig.inputs_to_buffers,  # type: ignore[arg-type]
         user_inputs=sig.user_inputs,  # type: ignore[arg-type]
         user_outputs=sig.user_outputs,  # type: ignore[arg-type]
         buffers_to_mutate=sig.buffers_to_mutate,  # type: ignore[arg-type]
+<<<<<<< HEAD
 =======
         inputs_to_parameters=sig.inputs_to_parameters,
         inputs_to_buffers=sig.inputs_to_buffers,
@@ -174,6 +178,8 @@ def serialize_signature(sig: ep.ExportGraphSignature) -> GraphSignature:
         user_outputs=sig.user_outputs,
         buffers_to_mutate=sig.buffers_to_mutate,
 >>>>>>> idk what happened
+=======
+>>>>>>> lint
         backward_signature=backward_signature,
     )
     return graph_signature
