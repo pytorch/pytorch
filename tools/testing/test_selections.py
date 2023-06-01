@@ -124,7 +124,10 @@ def calculate_shards(
             print(min_sharded_job.convert_to_tuple()[1])
             min_sharded_job.parallel.append(test)
 
-    print(sharded_jobs)
+    for job in sharded_jobs:
+        print(job.serial)
+        print(job.parallel)
+        print()
 
     # Round robin the unknown jobs starting with the smallest shard
     index = min(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())
