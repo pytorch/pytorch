@@ -81,6 +81,21 @@ def cubin_cache_dir():
     return cubin_dir
 
 
+def cpp_wrapper_cache_dir(name):
+    cu_str = (
+        "cpu"
+        if torch.version.cuda is None
+        else f'cu{torch.version.cuda.replace(".", "")}'
+    )
+    python_version = f"py{sys.version_info.major}{sys.version_info.minor}"
+    build_folder = f"{python_version}_{cu_str}"
+
+    cpp_wrapper_dir = os.path.join(cache_dir(), build_folder)
+    cpp_wrapper_build_directory = os.path.join(cpp_wrapper_dir, name)
+    os.makedirs(cpp_wrapper_build_directory, exist_ok=True)
+    return cpp_wrapper_build_directory
+
+
 class CacheBase:
     def __init__(self):
         if not torch.cuda.is_available():
@@ -793,9 +808,7 @@ class CppWrapperCodeCache:
     @classmethod
     def load(cls, source_code, func_name, key, cuda):
         name = f"inline_extension_{key}"
-        cpp_wrapper_dir = torch.utils.cpp_extension._get_build_directory(
-            name, verbose=False
-        )
+        cpp_wrapper_dir = cpp_wrapper_cache_dir(name)
         if not os.path.exists(cpp_wrapper_dir):
             os.makedirs(cpp_wrapper_dir)
 
