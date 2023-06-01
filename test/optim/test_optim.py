@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_device_type import _TestParametrizer, largeTensorTest
 from torch.testing._internal.common_methods_invocations import DecorateInfo
-from typing import Callable, Dict, Any, List, Union
+from typing import Callable, Dict, Any, List, Tuple, Union
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
 from unittest.mock import patch
 
@@ -51,17 +51,17 @@ class OptimizerInfo:
                  # Function to generate optimizer constructor configurations
                  optim_base_constructors_func: Callable,
                  # Implementation specific kwargs the optimizer supports, e.g., fused, foreach
-                 supported_impl_kwargs: List[str]=['foreach', 'differentiable'],
+                 supported_impl_kwargs: Tuple[str] = ('foreach', 'differentiable'),
                  # the devices on which the optim supports sparse tensors for params and grads, see SGD
-                 supports_sparse_on: List[str]=[],
+                 supports_sparse_on: Tuple[str] = (),
                  # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
-                 only_supports_sparse_grads: bool=False,
+                 only_supports_sparse_grads: bool = False,
                  # whether the optimizer.step() function requires a closure to be passed
-                 step_requires_closure: bool=False,
+                 step_requires_closure: bool = False,
                  # whether the optimizer supports per-param options with parameter groups
-                 supports_param_groups: bool=True,
+                 supports_param_groups: bool = True,
                  # whether the optimizer supports parameters on multiple devices
-                 supports_multiple_devices: bool=True,
+                 supports_multiple_devices: bool = True,
                  skips=(),  # Indicates which tests to skip
                  decorators=None,  # Additional decorators to apply to generated tests
                  ):
@@ -116,7 +116,7 @@ class optims(_TestParametrizer):
                     return test(*args, **kwargs)
 
                 decorator_fn = functools.partial(optim_info.get_decorators, generic_cls.__name__,
-                                        test.__name__, device_cls.device_type)
+                                                 test.__name__, device_cls.device_type)
 
                 yield (test_wrapper, test_name, param_kwargs, decorator_fn)
             except Exception as ex:
@@ -253,63 +253,76 @@ def optim_base_constructors_sparseadam(optim_info: OptimizerInfo, params: Union[
 
 # Database of OptimizerInfo entries in alphabetical order.
 module_db: List[OptimizerInfo] = [
-    OptimizerInfo(Adadelta,
-                  optim_base_constructors_func=optim_base_constructors_adadelta,
-                  supported_impl_kwargs=['foreach', 'differentiable'],
+    OptimizerInfo(
+        Adadelta,
+        optim_base_constructors_func=optim_base_constructors_adadelta,
+        supported_impl_kwargs=('foreach', 'differentiable'),
     ),
-    OptimizerInfo(Adagrad,
-                  optim_base_constructors_func=optim_base_constructors_adagrad,
-                  supported_impl_kwargs=['foreach', 'differentiable'],
-                  supports_sparse_on=['cpu'],
+    OptimizerInfo(
+        Adagrad,
+        optim_base_constructors_func=optim_base_constructors_adagrad,
+        supported_impl_kwargs=('foreach', 'differentiable'),
+        supports_sparse_on=('cpu'),
     ),
-    OptimizerInfo(Adam,
-                  optim_base_constructors_func=optim_base_constructors_adam,
-                  supported_impl_kwargs=['foreach', 'differentiable', 'fused', 'capturable'],
+    OptimizerInfo(
+        Adam,
+        optim_base_constructors_func=optim_base_constructors_adam,
+        supported_impl_kwargs=('foreach', 'differentiable', 'fused', 'capturable'),
     ),
-    OptimizerInfo(Adamax,
-                  optim_base_constructors_func=optim_base_constructors_adamax,
-                  supported_impl_kwargs=['foreach', 'differentiable'],
+    OptimizerInfo(
+        Adamax,
+        optim_base_constructors_func=optim_base_constructors_adamax,
+        supported_impl_kwargs=('foreach', 'differentiable'),
     ),
-    OptimizerInfo(AdamW,
-                  optim_base_constructors_func=optim_base_constructors_adamw,
-                  supported_impl_kwargs=['foreach', 'differentiable', 'fused', 'capturable'],
+    OptimizerInfo(
+        AdamW,
+        optim_base_constructors_func=optim_base_constructors_adamw,
+        supported_impl_kwargs=('foreach', 'differentiable', 'fused', 'capturable'),
     ),
-    OptimizerInfo(ASGD,
-                  optim_base_constructors_func=optim_base_constructors_asgd,
-                  supported_impl_kwargs=['foreach', 'differentiable'],
+    OptimizerInfo(
+        ASGD,
+        optim_base_constructors_func=optim_base_constructors_asgd,
+        supported_impl_kwargs=('foreach', 'differentiable'),
     ),
-    OptimizerInfo(LBFGS,
-                  optim_base_constructors_func=optim_base_constructors_lbfgs,
-                  supported_impl_kwargs=[],
-                  step_requires_closure=True,
-                  supports_param_groups=False,
-                  supports_multiple_devices=False,
+    OptimizerInfo(
+        LBFGS,
+        optim_base_constructors_func=optim_base_constructors_lbfgs,
+        supported_impl_kwargs=(),
+        step_requires_closure=True,
+        supports_param_groups=False,
+        supports_multiple_devices=False,
     ),
-    OptimizerInfo(NAdam,
-                  optim_base_constructors_func=optim_base_constructors_nadam,
-                  supported_impl_kwargs=['foreach', 'differentiable'],
+    OptimizerInfo(
+        NAdam,
+        optim_base_constructors_func=optim_base_constructors_nadam,
+        supported_impl_kwargs=('foreach', 'differentiable'),
     ),
-    OptimizerInfo(RAdam,
-                  optim_base_constructors_func=optim_base_constructors_radam,
-                  supported_impl_kwargs=['foreach', 'differentiable'],
+    OptimizerInfo(
+        RAdam,
+        optim_base_constructors_func=optim_base_constructors_radam,
+        supported_impl_kwargs=('foreach', 'differentiable'),
     ),
-    OptimizerInfo(RMSprop,
-                  optim_base_constructors_func=optim_base_constructors_rmsprop,
-                  supported_impl_kwargs=['foreach', 'differentiable'],
+    OptimizerInfo(
+        RMSprop,
+        optim_base_constructors_func=optim_base_constructors_rmsprop,
+        supported_impl_kwargs=('foreach', 'differentiable'),
     ),
-    OptimizerInfo(Rprop,
-                  optim_base_constructors_func=optim_base_constructors_rprop,
-                  supported_impl_kwargs=['foreach', 'differentiable'],
+    OptimizerInfo(
+        Rprop,
+        optim_base_constructors_func=optim_base_constructors_rprop,
+        supported_impl_kwargs=('foreach', 'differentiable'),
     ),
-    OptimizerInfo(SGD,
-                  optim_base_constructors_func=optim_base_constructors_sgd,
-                  supported_impl_kwargs=['foreach', 'differentiable'],
-                  supports_sparse_on=['cpu', 'cuda'],
+    OptimizerInfo(
+        SGD,
+        optim_base_constructors_func=optim_base_constructors_sgd,
+        supported_impl_kwargs=('foreach', 'differentiable'),
+        supports_sparse_on=('cpu', 'cuda'),
     ),
-    OptimizerInfo(SparseAdam,
-                  optim_base_constructors_func=optim_base_constructors_adadelta,
-                  supported_impl_kwargs=[],
-                  only_supports_sparse_grads=True,
+    OptimizerInfo(
+        SparseAdam,
+        optim_base_constructors_func=optim_base_constructors_sparseadam,
+        supported_impl_kwargs=(),
+        only_supports_sparse_grads=True,
     )
 ]
 
