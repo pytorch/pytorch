@@ -9,7 +9,6 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 

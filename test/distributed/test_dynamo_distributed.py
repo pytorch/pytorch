@@ -29,7 +29,6 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     _dynamo_dist_per_rank_init,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
 import torch._dynamo.logging
 from torch._dynamo.comptime import comptime
 

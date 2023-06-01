@@ -13,11 +13,10 @@ from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
-    skipIfRocm,
     DeterministicGuard,
     IS_FBCODE,
+    skipIfRocm,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
 )
 
 try:

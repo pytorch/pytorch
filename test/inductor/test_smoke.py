@@ -5,7 +5,7 @@ import unittest
 import torch
 import torch._logging
 
-from torch.testing._internal.common_utils import skipIfRocm, IS_LINUX, TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 

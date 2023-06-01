@@ -8,10 +8,7 @@ from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.ir import ModularIndexing
 from torch._inductor.sizevars import SizeVarAllocator
 from torch.fx.experimental.symbolic_shapes import FloorDiv
-from torch.testing._internal.common_utils import (
-    TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
-)
+from torch.testing._internal.common_utils import TestCase as TorchTestCase
 
 
 class TestIndexingSimplification(TorchTestCase):

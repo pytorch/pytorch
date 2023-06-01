@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 

@@ -11,7 +11,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import BenchmarkRequest
 
-from torch.testing._internal.common_utils import skipIfRocm, IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
