@@ -90,6 +90,30 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3)
 
+    def test_capture_constants(self):
+        x = torch.randn(3, 3)
+        y = 4.0
+
+        def fn(x, y, z):
+            if z:
+                return x + y
+            return x * y
+
+        def f(x, y, z):
+            return wrap(fn, x, y, z)
+
+        args = (x, 4.0, None)
+        opt_f = torch.compile(f, fullgraph=True, backend=CompileCounter())
+        expected = f(*args)
+        result = opt_f(*args)
+        self.assertEqual(result, expected)
+
+        # Ensure that we recompile here
+        args = (x, 5.0, None)
+        expected = f(*args)
+        result = opt_f(*args)
+        self.assertEqual(result, expected)
+
     def test_capture_untracked_global_nested(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -133,6 +157,15 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         def f(x, y):
             return wrap(lambda x: x + y, x)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_capture_tracked_nested(self):
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        def f(x, y):
+            return wrap(lambda x: wrap(lambda x: x + y, x), x)
 
         self._test_wrap_simple(f, (x, y), 3)
 
@@ -278,7 +311,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
         mod_for_eager = Foo()
 
-        self.assertEqual(mod_for_compile(torch.ones(6, 4)), mod_for_eager(torch.ones(6, 4)))
+        self.assertEqual(
+            mod_for_compile(torch.ones(6, 4)), mod_for_eager(torch.ones(6, 4))
+        )
 
     def test_cond_free_variable_in_both_branches(self):
         backend = EagerAndRecordGraphs()
@@ -300,10 +335,15 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
                 return control_flow.cond(y, true_fn, false_fn, [x])
 
-        mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True, fullgraph=True)
+        mod_for_compile = torch.compile(
+            Foo(), backend=cnt, dynamic=True, fullgraph=True
+        )
         mod_for_eager = Foo()
 
-        self.assertEqual(mod_for_compile(torch.tensor(True), torch.tensor(5)), mod_for_eager(torch.tensor(True), torch.tensor(5)))
+        self.assertEqual(
+            mod_for_compile(torch.tensor(True), torch.tensor(5)),
+            mod_for_eager(torch.tensor(True), torch.tensor(5)),
+        )
 
         for node in backend.graphs[0].graph.nodes:
             if node.op == "call_function" and node.target == control_flow.cond:
@@ -312,33 +352,110 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(len(operands), 5)
             if node.op == "get_attr":
                 if str(node.target) in ("cond_true_0, cond_false_0"):
-                    num_placeholders = len([node for node in getattr(backend.graphs[0], str(node.target)).graph.nodes if node.op == "placeholder"])
+                    num_placeholders = len(
+                        [
+                            node
+                            for node in getattr(
+                                backend.graphs[0], str(node.target)
+                            ).graph.nodes
+                            if node.op == "placeholder"
+                        ]
+                    )
                     self.assertEqual(num_placeholders, 5)
 
     def test_cond_side_effect_in_one_branches(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
 
-        z = torch.ones(4, 4)
+        z = [torch.ones(4, 4)]
 
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
-            def forward(self, x, y):
+            def forward(self, y, x):
                 def true_fn(x):
-                    z.add_(1)
-                    return x.sum() + z.sum()
+                    z.append(x)
+                    z.append(x)
+                    z.pop()
+                    return x.sum() + z[-1].sum()
 
                 def false_fn(x):
-                    return x.sum() - z.sum()
+                    return x.sum() - z[0].sum()
 
                 return control_flow.cond(y, true_fn, false_fn, [x])
 
-        mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True, fullgraph=True)
+        mod_for_compile = torch.compile(
+            Foo(), backend=cnt, dynamic=True, fullgraph=False
+        )
         mod_for_eager = Foo()
 
-        self.assertEqual(mod_for_compile(torch.tensor(True), torch.tensor(5)), mod_for_eager(torch.tensor(True), torch.tensor(5)))
+        res = mod_for_compile(torch.tensor(True), torch.tensor(5))
+        res = mod_for_compile(torch.tensor(True), torch.tensor(5))
+
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(res, mod_for_eager(torch.tensor(True), torch.tensor(5)))
+
+    def test_map_graph_break(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("w", torch.ones(6, 4))
+
+            def forward(self, xs):
+                def body(x):
+                    self.w += 1
+                    return x
+
+                return control_flow.map(body, xs)
+
+        mod = Module()
+
+        mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
+        mod_for_eager = Module()
+
+        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(
+            res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        )
+
+    def test_map_side_effect(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        z = [torch.ones(6, 4)]
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("w", torch.ones(6, 4))
+
+            def forward(self, xs):
+                def body(x):
+                    z.append(x)
+                    z.append(x)
+                    z.pop()
+                    return x + z[-1].sum()
+
+                return control_flow.map(body, xs)
+
+        mod = Module()
+
+        mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
+        mod_for_eager = Module()
+
+        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+
+        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+
+        self.assertEqual(len(backend.graphs), 4)
+        self.assertEqual(res, eager)
 
     def test_wrap_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()

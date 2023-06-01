@@ -239,6 +239,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.cat(*args, **kwargs)
 
     @make_test
+    def test_deque(a, b):
+        d = collections.deque([a, b])
+        d.append(a + 1)
+        d.extend([a, b])
+        d.insert(0, "foo")
+        tmp = d.pop()
+
+        another_deque = collections.deque([tmp])
+        d.extendleft(another_deque)
+        another_deque.clear()
+        d.extend(another_deque)
+
+        d[2] = "setitem"
+        d = d.copy()
+        d.append(d.popleft())
+
+        empty = collections.deque()
+        d.extend(empty)
+
+        # dynamo same() util doesn't support deque so just return a list
+        return list(d)
+
+    @make_test
     def test_slice1(a):
         return a[5]
 

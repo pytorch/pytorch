@@ -1,5 +1,6 @@
 import math
 import operator
+import traceback
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import partial
@@ -112,28 +113,36 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 f"specialized at {shapes[dim]}"
             )
             dim_node = super().call_operator(
-                torch.ops.aten.sym_size,
+                torch.ops.aten.sym_size.int,
                 (arg, dim),
                 {},
-                NodeMetadata({}),
+                NodeMetadata({
+                    "stack_trace": traceback.format_exc(-1)
+                }),
             )
             eq = super().call_operator(
                 operator.eq,
                 (dim_node, shapes[dim]),
                 {},
-                NodeMetadata({}),
+                NodeMetadata({
+                    "stack_trace": traceback.format_exc(-1)
+                }),
             )
             tensor_eq = super().call_operator(
                 torch.ops.aten.scalar_tensor.default,
                 (eq,),
                 {},
-                NodeMetadata({}),
+                NodeMetadata({
+                    "stack_trace": traceback.format_exc(-1)
+                }),
             )
             super().call_operator(
                 torch.ops.aten._assert_async.msg,
                 (tensor_eq, assert_msg),
                 {},
-                NodeMetadata({}),
+                NodeMetadata({
+                    "stack_trace": traceback.format_exc(-1)
+                }),
             )
 
     def placeholder(self, name: str, arg, meta) -> ProxyValue:
@@ -163,10 +172,12 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             for constraint in constraints:
                 constrained_dims.add(constraint.dim)
                 dim = super().call_operator(
-                    torch.ops.aten.sym_size,
+                    torch.ops.aten.sym_size.int,
                     (arg, constraint.dim),
                     {},
-                    NodeMetadata({}),
+                    NodeMetadata({
+                        "stack_trace": traceback.format_exc(-1)
+                    }),
                 )
                 if isinstance(constraint, RangeConstraintSpec):
                     # Add runtime asserts for user-specified range constraints for each
@@ -186,10 +197,12 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                     # Add runtime asserts for user-specified equality constraints.
                     other_arg = self.input_name_to_args[constraint.other_name]
                     other_dim = super().call_operator(
-                        torch.ops.aten.sym_size,
+                        torch.ops.aten.sym_size.int,
                         (other_arg, constraint.other_dim),
                         {},
-                        NodeMetadata({}),
+                        NodeMetadata({
+                            "stack_trace": traceback.format_exc(-1)
+                        }),
                     )
                     assert_msg = (
                         f"Input {name}'s dimension #{constraint.dim} size is "
@@ -213,13 +226,13 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         self._insert_assert_async(operator.eq, proxy1, proxy2, assert_msg)
 
     def _insert_assert_async(self, operator, l, r, assert_msg):
-        cmp = super().call_operator(operator, (l, r), {}, NodeMetadata({}))
+        cmp = super().call_operator(operator, (l, r), {}, NodeMetadata({"stack_trace": traceback.format_exc(-1)}))
         cmp_tensor = super().call_operator(torch.ops.aten.scalar_tensor.default, (cmp,), {}, NodeMetadata({}))
         super().call_operator(
             torch.ops.aten._assert_async.msg,
             (cmp_tensor, assert_msg),
             {},
-            NodeMetadata({}),
+            NodeMetadata({"stack_trace": traceback.format_exc(-1)}),
         )
 
     def call_operator(self, op, args, kwargs, meta) -> ProxyValue:
@@ -254,10 +267,10 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                         for cb, msg in zip(cbs, msgs):
                             def sym_size_cb(proxy, assert_msg, dim):
                                 dim_proxy = super(_AddRuntimeAssertionsForConstraintsPass, self).call_operator(
-                                    torch.ops.aten.sym_size,
+                                    torch.ops.aten.sym_size.int,
                                     (proxy, dim),
                                     {},
-                                    NodeMetadata({}),
+                                    NodeMetadata({"stack_trace": traceback.format_exc(-1)}),
                                 )
                                 cb(proxy=dim_proxy, assert_msg=assert_msg)
                             call_backs.append(partial(sym_size_cb, dim=i))

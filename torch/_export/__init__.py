@@ -92,6 +92,8 @@ def export(
     f: Callable,
     args: Tuple[Any],
     constraints: Optional[List[Constraint]] = None,
+    *,
+    _turn_off_export_validity=False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -160,5 +162,8 @@ def export(
         gm.meta.get("inline_constraints", []),
         flat_args,
     )
+
+    if not _turn_off_export_validity:
+        exported_program = exported_program._add_runtime_assertions()
 
     return exported_program
