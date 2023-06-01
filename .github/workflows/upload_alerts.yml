@@ -26,7 +26,7 @@ jobs:
           output=$(python tools/alerts/create_alerts.py)
           echo "output is the following"
           echo $output
-          ehco "end of output"
+          echo "end of output"
           echo "::set-output name=script_output::$output"
         id: alert_creation_step
       - name: Upload alerts
