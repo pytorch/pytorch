@@ -147,7 +147,7 @@ class TORCH_API PyTorchStreamReader final {
 
 class TORCH_API PyTorchStreamWriter final {
  public:
-  explicit PyTorchStreamWriter(std::string archive_name);
+  explicit PyTorchStreamWriter(const std::string& archive_name);
   explicit PyTorchStreamWriter(
       const std::function<size_t(const void*, size_t)> writer_func);
 
@@ -179,6 +179,7 @@ class TORCH_API PyTorchStreamWriter final {
  private:
   void setup(const std::string& file_name);
   void valid(const char* what, const char* info = "");
+  void writeSerializationId();
   size_t current_pos_ = 0;
   std::unordered_set<std::string> files_written_;
   std::unique_ptr<mz_zip_archive> ar_;
@@ -187,7 +188,9 @@ class TORCH_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
+  uint64_t combined_uncomp_crc32_ = 0;
   std::string serialization_id_;
+
   // This number will be updated when the model has operators
   // that have valid upgraders.
   uint64_t version_ = kMinProducedFileFormatVersion;

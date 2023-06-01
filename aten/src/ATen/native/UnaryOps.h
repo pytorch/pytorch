@@ -16,14 +16,6 @@ namespace at { namespace native {
 using unary_fn = void(*)(TensorIteratorBase&);
 using unary_fn_with_scalar = void(*)(TensorIteratorBase&, const Scalar& a);
 
-inline namespace CPU_CAPABILITY {
-void conj_kernel(TensorIteratorBase &iter);
-void neg_kernel(TensorIteratorBase &iter);
-void reciprocal_kernel(TensorIteratorBase &iter);
-void rsqrt_kernel(TensorIteratorBase& iter);
-void sqrt_kernel(TensorIteratorBase& iter);
-} // namespace CPU_CAPABILITY
-
 DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, angle_stub);
 DECLARE_DISPATCH(unary_fn, conj_physical_stub);
