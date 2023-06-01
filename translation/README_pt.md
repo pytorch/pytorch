@@ -1,13 +1,19 @@
 ![PyTorch Logo](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/pytorch-logo-dark.png)
 
 ---
-#### _Leia em outras línguas:_
-
+#### _Leia em outras línguas:_ 
 <kbd>[<img title="English" alt="English" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/us.svg" width="30">](../README.md)</kbd>
 <kbd>[<img title="Português" alt="Português" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/br.svg" width="30">](README_pt.md)</kbd>
 <kbd>[<img title="عربى" alt="عربى" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/sa.svg" width="30">](README_ar.md)</kbd>
 <kbd>[<img title="Türkçe" alt="Türkçe" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/tr.svg" width="30">](README_tr.md)</kbd>
 <kbd>[<img title="Deutsch" alt="Deutsch" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/de.svg" width="30">](README_de.md)</kbd>
+
+**Essa tradução não é atualizada automaticamente. Alterações no [README.md](../README.md) não são realizadas aqui.**
+
+Este documento pertence a [essa versão](https://github.com/atalman/pytorch/blob/93b27acd035cbfadeae96759db523594b6e6ee92/README.md).
+Última atualização: 18/05/2023.
+
+---
 
 PyTorch é um pacote Python que fornece dois recursos de alto nível:
 
