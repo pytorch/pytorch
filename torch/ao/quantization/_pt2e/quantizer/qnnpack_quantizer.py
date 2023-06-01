@@ -244,10 +244,10 @@ class QNNPackQuantizer(Quantizer):
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
-        model = self.annotate_for_static_qconfig(model)
+        model = self._annotate_for_static_quantization_config(model)
         return model
 
-    def annotate_for_static_qconfig(
+    def _annotate_for_static_quantization_config(
         self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
         config = self.global_config
