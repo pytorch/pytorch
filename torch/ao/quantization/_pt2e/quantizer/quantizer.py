@@ -41,6 +41,19 @@ class QuantizationSpec:
     ch_axis: Optional[int] = None
     is_dynamic: bool = False
 
+    def __hash__(self):
+        return hash((self.dtype, self.quant_min, self.quant_max, self.qscheme, self.ch_axis, self.is_dynamic))
+
+    def __eq__(self, other):
+        eq = (self.dtype == other.dtype and
+              self.quant_min == other.quant_min and
+              self.quant_max == other.quant_max and
+              self.qscheme == other.qscheme and
+              self.ch_axis == other.ch_axis and
+              self.is_dynamic == other.is_dynamic
+        )
+        return eq
+
     def __post_init__(self):
         # check dtype is one of the supported types
         if self.dtype not in SUPPORTED_DTYPES:
