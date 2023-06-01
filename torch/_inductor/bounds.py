@@ -1,12 +1,10 @@
 from functools import partial
 from typing import Dict, Optional
 
-import sympy
-
 import torch
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
-from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
-from .utils import cache_on_self, dominated_nodes, sympy_subs
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
+from .ir import InterpreterShim, LoopBody
+from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
 
 
@@ -86,69 +84,8 @@ class BoundVars:
     def get_index(self, name):
         if name in self.replacement_vals:
             return self.replacement_vals[name]
+        expr = self.loop_body.indexing_exprs[name]
+        out = bound_sympy(expr, self.replacement_vals)
 
-        out = self._get_index_impl(name)
         self.replacement_vals[name] = out
         return out
-
-    def _get_index_impl(self, name):
-        expr = self.loop_body.indexing_exprs[name]
-
-        free_symbols = list(expr.free_symbols)
-
-        if len(free_symbols) == 0:
-            return ValueRanges(expr, expr)
-
-        if expr in self.replacement_vals:
-            return self.replacement_vals[expr]
-
-        def replace_symbols_for_deriv(expr, ignore_mod=False):
-            # for the purposes of finding local, minimum, maximum, assume smoothness
-            def mod_indexing_rep(x, y, z):
-                if z.is_constant():
-                    return x / y
-
-                # never really happens, we'll bail on optimizing
-                return (x / y) % z
-
-            def indexing_div_rep(x, y):
-                return x / y
-
-            return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-                FloorDiv, indexing_div_rep
-            )
-
-        symbols = expr.free_symbols
-        monotonic_increasing = []
-        monotonic_decreasing = []
-        other_symbols = []
-
-        expr_for_deriv = replace_symbols_for_deriv(expr, True)
-        for symbol in symbols:
-            diff = sympy.diff(expr_for_deriv, symbol)
-            if diff.is_positive:
-                monotonic_increasing.append(symbol)
-            elif diff.is_positive is False:  # can return None
-                monotonic_decreasing.append(symbol)
-            else:
-                other_symbols.append(symbol)
-
-        if not other_symbols:
-            max_val = sympy_subs(
-                expr,
-                {
-                    k: (v.upper if k in monotonic_increasing else v.lower)
-                    for k, v in self.replacement_vals.items()
-                },
-            )
-            min_val = sympy_subs(
-                expr,
-                {
-                    k: (v.lower if k in monotonic_increasing else v.upper)
-                    for k, v in self.replacement_vals.items()
-                },
-            )
-            return ValueRanges(min_val, max_val)
-        else:
-            # bail on optimizing, have not run into this yet
-            return ValueRanges.unknown()
