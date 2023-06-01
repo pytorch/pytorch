@@ -4,8 +4,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/impl/PyObjectSlot.h>
 
-#include <c10/util/Optional.h>
-#include <c10/util/flat_hash_map.h>
 #include <c10/util/intrusive_ptr.h>
 
 namespace c10 {
