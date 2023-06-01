@@ -30,7 +30,7 @@ jobs:
           echo "::set-output name=script_output::$output"
         id: alert_creation_step
       - name: Upload alerts
-        uses: pytorch/test-infra/.github/actions/upload_alerts@3336052b76859c5608d9f8a9cee2f1ca89d031d2
+        uses: pytorch/test-infra/.github/actions/upload-alerts@08208e8a3895ef3dbf47e2aeaaabaaade4342ead
         with:
           alerts: ${{ steps.alert_creation_step.outputs.script_output }}
           organization: "pytorch"
