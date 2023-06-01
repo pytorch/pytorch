@@ -56,14 +56,13 @@
 على المستوى التفصيلي، تعد PyTorch مكتبة تتكون من المكونات التالية:
 
 | العنصر | الوصف |
-| --- | ---- |
-| [**torch**](https://pytorch.org/docs/stable/torch.html) | GPU مع دعم قوي لوحدات المعالجة الرسومية ،NumPy  مكتبة تينسور مشابهة لـ |
+| ---- | --- |
 | [**torch**](https://pytorch.org/docs/stable/torch.html) | GPU مع دعم قوي لوحدات المعالجة الرسومية ،NumPy  مكتبة تينسور مشابهة لـ  |
 | [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | torch مع عمليات التينسور القابلة للتفاضل في بيئة (tape) مكتبة تفاضل تلقائية قائمة على الشريط |
 | [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | PyTorch لإنشاء نماذج قابلة للتسلسل والتحسين من رمز (TorchScript) مجموعة تراكيب  |
-| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | A neural networks library deeply integrated with autograd designed for maximum flexibility |
-| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
-| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
+| [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | مصممة لتوفير أقصى قدر من المرونة autograd مكتبة شبكات عصبية متكاملة بشكل عميق مع |
+| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Hogwild وهي مفيدة لتحميل البيانات وتدريب torch ولكن مع مشاركة ذاكرة سحرية لتوزيع التينسورات في multiprocessing من نظام Python تعد مكتبة|
+| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | ووظائف أخرى للراحة والاستخدام الملائم (DataLoader) تحميل البيانات |
 
 Usually, PyTorch is used either as:
 
