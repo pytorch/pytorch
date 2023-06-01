@@ -8,7 +8,7 @@ on:
     - cron: '*/15 * * * *'
 
 jobs:
-  upload_alerts:
+  upload-alerts:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout repo
@@ -23,10 +23,9 @@ jobs:
 
       - name: Create alerts
         run: |
-          output=$(python tools/alerts/create_alerts.py)
-          echo "output is the following"
-          echo $output
-          echo "end of output"
+          output=$("python tools/alerts/create_alerts.py")
+          echo "uploading following alerts"
+          echo "$output"
           echo "::set-output name=script_output::$output"
         id: alert_creation_step
       - name: Upload alerts
