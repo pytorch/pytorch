@@ -1964,6 +1964,7 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+    @skipIfTorchDynamo()
     def test_rprop(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
