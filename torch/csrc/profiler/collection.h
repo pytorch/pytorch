@@ -632,6 +632,10 @@ TORCH_API bool get_record_concrete_inputs_enabled();
 TORCH_API void set_record_concrete_inputs_enabled_fn(std::function<bool()>);
 TORCH_API void set_record_concrete_inputs_enabled_val(bool);
 
+TORCH_API bool get_fwd_bwd_enabled();
+TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
+TORCH_API void set_fwd_bwd_enabled_val(bool);
+
 } // namespace impl
 } // namespace profiler
 } // namespace torch
