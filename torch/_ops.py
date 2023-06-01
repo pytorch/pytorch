@@ -252,7 +252,7 @@ class HigherOrderOperator(OperatorBase):
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
     def name(self):
-        return self.name
+        return self._name
 
 
 def _to_flat_tuple(args, kwargs):

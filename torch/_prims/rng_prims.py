@@ -2,9 +2,12 @@ from typing import Optional, Tuple
 
 import torch
 from torch import _prims
+from torch._ops import HigherOrderOperator
 
 from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
 from torch._prims_common.wrappers import backwards_not_supported
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.types import _device, _dtype
 
 rngprim_namespace = "rngprims"
@@ -130,6 +133,75 @@ def register_philox_rand():
         doc="Philox based stateless rand operator",
         tags=(torch.Tag.nondeterministic_seeded,),  # type: ignore[attr-defined]
     )
+
+
+DispatchKey = torch._C.DispatchKey
+run_and_save_rng_state = HigherOrderOperator("run_and_save_rng_state")
+
+
+@run_and_save_rng_state.py_impl(DispatchKey.Autograd)
+def f(op, *args, **kwargs):
+    with torch._C._AutoDispatchBelowAutograd():
+        return run_and_save_rng_state(op, *args, **kwargs)
+
+
+@run_and_save_rng_state.py_impl(FakeTensorMode)
+@run_and_save_rng_state.py_impl(DispatchKey.CUDA)
+def impl_cuda(op, *args, **kwargs):
+    return torch.cuda.get_rng_state(), op(*args, **kwargs)
+
+
+@run_and_save_rng_state.py_impl(DispatchKey.CPU)
+def impl_cuda(op, *args, **kwargs):
+    return torch.get_rng_state(), op(*args, **kwargs)
+
+
+run_and_save_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
+run_and_save_rng_state.fallthrough(DispatchKey.BackendSelect)
+run_and_save_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)
+
+
+@run_and_save_rng_state.py_impl(ProxyTorchDispatchMode)
+def impl_dispatch(op, *args):
+    raise NotImplementedError()
+
+
+run_with_rng_state = HigherOrderOperator("run_with_rng_state")
+
+
+@run_with_rng_state.py_impl(DispatchKey.Autograd)
+def f(rng_state, op, *args, **kwargs):
+    with torch._C._AutoDispatchBelowAutograd():
+        return run_with_rng_state(rng_state, op, *args, **kwargs)
+
+
+@run_with_rng_state.py_impl(FakeTensorMode)
+@run_with_rng_state.py_impl(DispatchKey.CUDA)
+def impl_cuda(rng_state, op, *args, **kwargs):
+    current_state = torch.cuda.get_rng_state()
+    torch.cuda.set_rng_state(rng_state)
+    out = op(*args, **kwargs)
+    torch.cuda.set_rng_state(current_state)
+    return out
+
+
+@run_with_rng_state.py_impl(DispatchKey.CPU)
+def impl_cpu(rng_state, op, *args, **kwargs):
+    current_state = torch.get_rng_state()
+    torch.set_rng_state(rng_state)
+    out = op(*args, **kwargs)
+    torch.set_rng_state(current_state)
+    return out
+
+
+@run_with_rng_state.py_impl(ProxyTorchDispatchMode)
+def impl_dispatch(rng_state, op, *args, **kwargs):
+    raise NotImplementedError()
+
+
+run_with_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
+run_with_rng_state.fallthrough(DispatchKey.BackendSelect)
+run_with_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)
 
 
 def register_rng_prims():
