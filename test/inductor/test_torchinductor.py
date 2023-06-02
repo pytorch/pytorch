@@ -6256,7 +6256,7 @@ class CommonTemplate:
         for dynamic_shapes in [True, False]:
             with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
                 torch._dynamo.reset()
-                x = torch.randn(2, 2, device="cpu").long()
+                x = torch.randn(2, 2)
                 opt = torch._dynamo.optimize("inductor")(fn)
                 res = opt(x)
                 ref = fn(x)
