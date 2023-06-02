@@ -720,7 +720,14 @@ class CPUReproTests(TestCase):
             "isnan",
             "rand",
             "randint64",
+            "logical_and",
+            "logical_not",
+            "logical_or",
+            "logical_xor",
             "bitwise_and",
+            "bitwise_left_shift",
+            "bitwise_not",
+            "bitwise_right_shift",
             "bitwise_or",
             "bitwise_xor",
         ]
@@ -849,8 +856,14 @@ class CPUReproTests(TestCase):
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
     @patch("torch.cuda.is_available", lambda: False)
-    def test_vec_logical_and_or(self):
-        def wrap_fn(op: Callable):
+    def test_vec_logical(self):
+        def wrap_fn1(op: Callable):
+            def fn(x: torch.Tensor):
+                return torch.where(op(x), 1.0, 0.0)
+
+            return fn
+
+        def wrap_fn2(op: Callable):
             def fn(x: torch.Tensor, y: torch.Tensor):
                 return torch.where(op(x, y), 1.0, 0.0)
 
@@ -859,12 +872,22 @@ class CPUReproTests(TestCase):
         for dtype in vec_dtypes:
             x = torch.randn(64, dtype=dtype)
             y = torch.randn(64, dtype=dtype)
-            logical_fns = [torch.logical_and, torch.logical_or]
+            logical_fns = [
+                torch.logical_and,
+                torch.logical_not,
+                torch.logical_or,
+                torch.logical_xor,
+            ]
             for logical_fn in logical_fns:
-                _fn = wrap_fn(logical_fn)
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(_fn, (x, y))
+                if logical_fn == torch.logical_not:
+                    _fn = wrap_fn1(logical_fn)
+                    _args = (x,)
+                else:
+                    _fn = wrap_fn2(logical_fn)
+                    _args = (x, y)
+                self.common(_fn, _args)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
