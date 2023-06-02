@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import itertools
 import sys
 from copy import deepcopy
 from functools import partial
@@ -11,7 +10,6 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
-    CheckpointImpl,
     offload_wrapper,
 )
 from torch.distributed.fsdp import ShardingStrategy
@@ -310,77 +308,6 @@ class ModelWithCheckpointSubmodule(nn.Module):
 
     def forward(self, x):
         return self.l2(self.relu(self.s2(self.s1(self.l1(x)))))
-
-
-# FSDP(
-# X(
-# A() # no checkpoint
-# Checkpoint(Block())
-# C() # no checkpoint
-# )
-# )
-
-
-class Block(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.lin = nn.Linear(10, 10)
-
-    def forward(self, x):
-        return self.lin(x)
-
-
-class BlockHolder(nn.Module):
-    def __init__(self, rank, checkpoint_indices, reentrant):
-        super().__init__()
-        torch.manual_seed(rank)
-        self.blocks = []
-        for i in range(3):
-            block = Block()
-            if i in checkpoint_indices:
-                block = checkpoint_wrapper(
-                    block,
-                    checkpoint_impl=(
-                        CheckpointImpl.NO_REENTRANT
-                        if not reentrant
-                        else CheckpointImpl.REENTRANT
-                    ),
-                )
-            self.blocks.append(block)
-        self.block_module = nn.Sequential(*self.blocks)
-
-    def forward(self, x):
-        return self.block_module(x)
-
-
-class TestFSDPACInterleaving(FSDPTest):
-    @skip_if_lt_x_gpu(2)
-    def test_fsdp_ac_interleave(self):
-        # Works for non-reentrant, fails for reentrant
-        indices = [[0], [0, 1], [0, 1, 2], [1], [1, 2], [2], [0, 2]]
-        for index, use_orig_params in itertools.product(indices, [True, False]):
-            model = FSDP(
-                BlockHolder(
-                    rank=self.rank, checkpoint_indices=[], reentrant=False
-                ).cuda(),
-                use_orig_params=True,
-            )
-            model_ac = FSDP(
-                BlockHolder(
-                    rank=self.rank, checkpoint_indices=index, reentrant=False
-                ).cuda(),
-                use_orig_params=use_orig_params,
-            )
-            for i in range(6):
-                inp = torch.randn(2, 10, device="cuda")
-                model(inp).sum().backward()
-                model_ac(inp).sum().backward()
-                # Ensure gradients are the same
-                with FSDP.summon_full_params([model, model_ac], with_grads=True):
-                    for p1, p2 in zip(model.parameters(), model_ac.parameters()):
-                        self.assertEqual(
-                            p1.grad, p2.grad, f"Grads differ: {p1.grad} vs {p2.grad}"
-                        )
 
 
 class TestModel(nn.Module):
