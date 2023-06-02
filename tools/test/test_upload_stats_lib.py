@@ -67,7 +67,7 @@ class TestUploadStats(unittest.TestCase):
         # Preserve the metric emitted
         emitted_metric: Dict[str:Any] = {}
 
-        def mock_put_item(Item: Dict[str:Any]) -> None:
+        def mock_put_item(Item: Dict[str, Any]) -> None:
             nonlocal emitted_metric
             emitted_metric = Item
 
