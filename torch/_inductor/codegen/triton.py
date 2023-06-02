@@ -301,8 +301,40 @@ class TritonOverrides(OpOverrides):
         return f"{a} & {b}"
 
     @staticmethod
+    def logical_not(a):
+        return f"{a} == 0"
+
+    @staticmethod
     def logical_or(a, b):
         return f"{a} | {b}"
+
+    @staticmethod
+    def logical_xor(a, b):
+        return f"({a} ^ {b})"
+
+    @staticmethod
+    def bitwise_and(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def bitwise_not(a):
+        return f"~{a}"
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return f"{a} | {b}"
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return f"{a} ^ {b}"
+
+    @staticmethod
+    def bitwise_left_shift(a, b):
+        return f"{a} << {b}"
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return f"{a} >> {b}"
 
     @staticmethod
     def rand(seed, offset):
@@ -1303,19 +1335,8 @@ class TritonKernel(Kernel):
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
-                if reduction_type == "min":
-                    updated = f"triton_helpers.minimum({accumulator}, {value})"
-                elif reduction_type == "max":
-                    updated = f"triton_helpers.maximum({accumulator}, {value})"
-                elif reduction_type == "sum":
-                    updated = f"{accumulator} + {value}"
-                elif reduction_type == "prod":
-                    updated = f"{accumulator} * {value}"
-                elif reduction_type == "xor_sum":
-                    updated = f"{accumulator} ^ {value}"
-                else:
-                    raise NotImplementedError(f"reduction_type {reduction_type}")
-
+                combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
+                updated = combine_fn(accumulator, value)
                 self.compute.writeline(
                     f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
                 )

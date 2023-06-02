@@ -425,7 +425,9 @@ class TensorVariable(VariableTracker):
             return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":
             if (
-                not (config.dynamic_shapes and config.capture_dynamic_output_shape_ops)
+                not config.capture_dynamic_output_shape_ops
+                # NB: the bool tensor and the requires_grad tensor are
+                # never the same tensor!
                 and any(
                     isinstance(a, TensorVariable)
                     and a.dtype in (torch.bool, torch.int8)

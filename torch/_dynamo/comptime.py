@@ -5,6 +5,7 @@
 # The goal of the public API is to give users rope, without actually
 # leaking private implementation details of Dynamo.
 
+import builtins
 import dis
 import traceback
 from typing import Optional, Union
@@ -146,6 +147,9 @@ class ComptimeContext:
         print(
             self.__tx.output.graph.python_code("self", verbose=verbose).src, file=file
         )
+
+    def parent(self):
+        return ComptimeContext(self.__tx.parent)
 
     def __get_tx(self, stacklevel):
         tx = self.__tx
@@ -297,6 +301,30 @@ def print_guards():
     comptime(lambda ctx: ctx.print_guards())
 
 
+def breakpoint():
+    """
+    Like pdb breakpoint(), but drop into pdb whenever this line
+    of code is compiled by dynamo.  Use it by putting
+    this in your model code::
+
+        from torch._dynamo.comptime import comptime
+        comptime.breakpoint()
+
+    And then, inside pdb, you can access 'ctx' to query things
+    about the compilation context::
+
+        (Pdb) !ctx.print_bt()
+        (Pdb) !ctx.print_locals()
+        (Pdb) p ctx.get_local("attention").as_fake()
+    """
+
+    def inner(inner_ctx):
+        ctx = inner_ctx.parent()
+        builtins.breakpoint()
+
+    comptime(inner)
+
+
 def comptime(fn):
     """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
     return
@@ -310,3 +338,4 @@ comptime.print_value_stack_and_return = print_value_stack_and_return
 comptime.print_locals = print_locals
 comptime.print_bt = print_bt
 comptime.print_guards = print_guards
+comptime.breakpoint = breakpoint
