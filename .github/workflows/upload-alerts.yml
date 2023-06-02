@@ -34,8 +34,7 @@ jobs:
           alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
           organization: "pytorch"
           repo: "pytorch"
-        secrets:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+        secrets: inherit
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
