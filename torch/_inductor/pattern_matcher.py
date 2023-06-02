@@ -703,14 +703,12 @@ def register_replacement(
                     device=args[i].device,
                     requires_grad=grad,
                 )
-        with V.fake_mode:
-            specific_graph = trace_fn(search_fn, args)
+        specific_graph = trace_fn(search_fn, args)
         specific_pattern = fx_to_pattern(specific_graph, argnames=argnames)
         specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
         if specific_pattern_match and extra_check(specific_pattern_match):
             # trace the pattern using the shapes form the user program
-            with V.fake_mode:
-                match.replacement_graph = trace_fn(replace_fn, args)
+            match.replacement_graph = trace_fn(replace_fn, args)
             return True
         return False
 
@@ -729,8 +727,7 @@ def register_replacement(
         requires_grad = [
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
         ]
-        with V.fake_mode:
-            search_gm = trace_fn(search_fn, example_inputs)
+        search_gm = trace_fn(search_fn, example_inputs)
         pattern = fx_to_pattern(
             search_gm,
             ignore_types=(int, float, list, torch.device, torch.dtype),
