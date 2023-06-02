@@ -1587,10 +1587,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         og_func = rpc.api._wait_all_workers
 
         def wait_all_workers_sleep(timeout):
-            try:
-                rpc.api._all_gather(SlowPickleClass(0.5), timeout=timeout)
-            except RuntimeError as ex:
-                raise ex
+            rpc.api._all_gather(SlowPickleClass(0.5), timeout=timeout)
 
         rpc.api._wait_all_workers = wait_all_workers_sleep
 

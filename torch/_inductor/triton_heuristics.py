@@ -113,7 +113,7 @@ class CachingAutotuner(KernelInterface):
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
-        compile_meta["debug"] = compile_meta["debug"] = (
+        compile_meta["debug"] = (
             config.triton.assert_indirect_indexing and torch.version.hip is None
         )
 
@@ -842,6 +842,18 @@ def template(num_stages, num_warps, meta, filename=None):
     """
     return cached_autotune(
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
+        meta=meta,
+        heuristic_type=HeuristicType.TEMPLATE,
+        filename=filename,
+    )
+
+
+def foreach(meta, num_warps, filename=None):
+    """
+    Compile a triton foreach kernel
+    """
+    return cached_autotune(
+        [triton.Config({}, num_stages=1, num_warps=num_warps)],
         meta=meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,

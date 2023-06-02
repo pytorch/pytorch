@@ -56,7 +56,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     auto xstep = step.to<accscalar_t>();
 
     double size_d;
-    if (std::is_same<scalar_t, int64_t>::value) {
+    if constexpr (std::is_same_v<scalar_t, int64_t>) {
       size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>()) / step.to<accscalar_t>());
     } else {
       size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>()) / step.to<double>());
@@ -140,7 +140,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
 
     // double size_d = ((xend - xstart) / xstep) + 1;
     double size_d;
-    if (std::is_same<scalar_t, int64_t>::value) {
+    if constexpr (std::is_same_v<scalar_t, int64_t>) {
       size_d = static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>()) / step.to<accscalar_t>() + 1;
     } else {
       size_d = static_cast<double>(end.to<double>() - start.to<double>()) / step.to<double>() + 1;

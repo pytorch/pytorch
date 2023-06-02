@@ -27,13 +27,6 @@ from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
-"""
-If _ENABLE_FALLBACK set to False, dispatch will fail when an op doesn't
-have a sharding rule registered.
-"""
-_ENABLE_FALLBACK = False
-
-
 def wrap(res: object, spec: OutputSpecType) -> object:
     def to_dt(res, spec):
         assert spec is not None and isinstance(
@@ -145,7 +138,7 @@ def _operator_dispatch(
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
 
-    output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
+    output_sharding = sharding_propagator.propagate(op_call, op_schema)
 
     # first we need to lift some private aten aliases to public calls
     if op_call in _CURRENT_DECOMPOSITION_TABLE:

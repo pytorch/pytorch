@@ -126,17 +126,24 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     for i in range(args.length):
+        tries = 0
         startdate = args.startDate + datetime.timedelta(days=i)
         data = get_external_pr_data(
             startdate,
             startdate + datetime.timedelta(days=args.period_length),
             period_length=args.period_length,
         )
+        for pr_info in data:
+            # sometimes users does not get added, so we check it got uploaded
+            assert "users" in pr_info
+            assert isinstance(pr_info["users"], list)
+        print(f"uploading the following data: \n {data}")
         upload_to_s3(
             bucket_name="torchci-contribution-data",
             key=f"external_contribution_counts/{str(startdate)}",
             docs=data,
         )
+
         # uncomment when running large queries locally to avoid github's rate limiting
         #
         # import time

@@ -139,22 +139,29 @@ class elementwise_type_promotion_wrapper:
         return _fn
 
 
-# TODO: handle tuples of tensors
-def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
+# Returns True if resize is necessary
+def _resize_output_check(out: TensorLikeType, shape: ShapeType):
     # If the shapes are correct there's nothing to do
     if utils.same_shape(out.shape, shape):
-        return out
-    else:
-        if out.numel() != 0:
-            msg = (
-                f"An output with one or more elements was resized since it had shape {str(out.shape)} "
-                "which does not match the required output shape {str(shape)}. "
-                "This behavior is deprecated, and in a future PyTorch release outputs will not "
-                "be resized unless they have zero elements. "
-                "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
-            )
-            warnings.warn(msg)
+        return False
+    if out.numel() != 0:
+        msg = (
+            f"An output with one or more elements was resized since it had shape {str(out.shape)} "
+            "which does not match the required output shape {str(shape)}. "
+            "This behavior is deprecated, and in a future PyTorch release outputs will not "
+            "be resized unless they have zero elements. "
+            "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
+        )
+        warnings.warn(msg)
+    return True
+
+
+# TODO: handle tuples of tensors
+def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
+    if _resize_output_check(out, shape):
         return out.resize_(shape)
+    else:
+        return out
 
 
 def _safe_copy_out(
@@ -284,12 +291,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
 
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
-        g = torch._C._AutoDispatchBelowAutograd()
-        try:
+        with torch._C._AutoDispatchBelowAutograd():
             old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
             return prim(*args, **kwargs)
-        finally:
-            del g
 
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
