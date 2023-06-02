@@ -295,7 +295,7 @@ class triton:
     )
 
     # autotune persistent_reduction may increase memory pressure
-    autotune_persistent_reduction = True
+    autotune_persistent_reduction = False
 
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
