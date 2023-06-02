@@ -1374,6 +1374,29 @@ del func
 try:
     import z3
 
+    Z3Expr = Union[z3.ArithRef, z3.BoolRef]
+
+    def _boolref(expr: Any) -> z3.BoolRef:
+        return cast(z3.BoolRef, expr)
+
+    # Wrapper of Z3 expressions.
+    #
+    # Some operations on Z3 depend on an assertion so that Z3 can reason
+    # about it correctly. e.g. division depends on the denominator being
+    # different than 0.
+    #
+    # This class helps propagate such an assertion to the caller.
+    @dataclass
+    class Z3Node:
+        # Actual Z3 expression.
+        expr: Z3Expr
+        # Assertions for this expression.
+        assertion: Optional[z3.BoolRef] = None
+
+        @property
+        def arith(self) -> z3.ArithRef:
+            return cast(z3.ArithRef, self.expr)
+
     # Implementation of Python semantics as Z3 expressions.
     #
     # Z3 Real-Int theory has operators with semantics that differ that of
@@ -1385,76 +1408,134 @@ try:
         #
         # Returns a real expression from 'x'.
         @staticmethod
-        def to_real(x: z3.ArithRef) -> z3.ArithRef:
-            return x if x.is_real() else z3.ToReal(x)
+        def to_real(x: z3.ArithRef) -> Z3Node:
+            return Z3Node(x if x.is_real() else z3.ToReal(x))
 
         # Returns an integer expression from 'x'.
         @staticmethod
-        def to_int(x: z3.ArithRef) -> z3.ArithRef:
-            return x if x.is_int() else z3.ToInt(x)
+        def to_int(x: z3.ArithRef) -> Z3Node:
+            return Z3Node(x if x.is_int() else z3.ToInt(x))
 
         # Implements Python division semantics.
         # This is needed because Z3 integer division does not have the
         # same semantics as Python true division.
         @staticmethod
-        def div(numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
-            return Z3Ops.to_real(numerator) / Z3Ops.to_real(denominator)
+        def div(numerator: z3.ArithRef, denominator: z3.ArithRef) -> Z3Node:
+            denominator = Z3Ops.to_real(denominator).arith
+            return Z3Node(
+                expr=Z3Ops.to_real(numerator).arith / denominator,
+                assertion=_boolref(denominator != 0),
+            )
 
         @staticmethod
-        def floor(number: z3.ArithRef) -> z3.ArithRef:
-            return Z3Ops.to_int(number)
+        def floor(number: z3.ArithRef) -> Z3Node:
+            return Z3Node(Z3Ops.to_int(number).expr)
 
         @staticmethod
-        def floordiv(numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
-            return Z3Ops.to_int(Z3Ops.div(numerator, denominator))
+        def floordiv(numerator: z3.ArithRef, denominator: z3.ArithRef) -> Z3Node:
+            div = Z3Ops.div(numerator, denominator)
+            return Z3Node(Z3Ops.to_int(div.arith).expr, div.assertion)
 
         @staticmethod
-        def ceil(number: z3.ArithRef) -> z3.ArithRef:
-            return z3.If(Z3Ops.floor(number) < number, Z3Ops.floor(number + 1), number)  # type: ignore
+        def ceil(number: z3.ArithRef) -> Z3Node:
+            ite = z3.If(Z3Ops.floor(number).arith < number, Z3Ops.floor(number + 1).arith, number)
+            return Z3Node(cast(z3.ArithRef, ite))
 
         @staticmethod
-        def mod(p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
-            return Z3Ops.to_int(p) % Z3Ops.to_int(q)
+        def mod(p: z3.ArithRef, q: z3.ArithRef) -> Z3Node:
+            q = Z3Ops.to_int(q).arith
+            return Z3Node(
+                expr=Z3Ops.to_int(p).arith % q,
+                assertion=_boolref(q != 0),
+            )
+
+        @staticmethod
+        def pow(base: z3.ArithRef, exp: z3.ArithRef) -> Z3Node:
+            return Z3Node(
+                expr=base ** exp,
+                assertion=_boolref(z3.Or(base != 0, exp > 0)),
+            )
+
+        @staticmethod
+        def sqrt(number: z3.ArithRef) -> Z3Node:
+            # Square-root:
+            # 1. Only work with reals
+            # 2. The number should be positive or zero.
+            #    Otherwise, Z3 returns 'unknown'.
+            number = Z3Ops.to_real(number).arith
+            return Z3Node(
+                expr=number ** 0.5,
+                assertion=number >= 0
+            )
 
     # Lifts a callable to be used in Z3.
     #
-    # This function handles callables into callables that:
+    # This function replaces the given 'op' by a function that:
     #
-    #   1. work as is with Z3 inhabitants
-    #   2. need to be replaced by their Z3 equals
+    #   1. Lifts the arguments into Z3 (i.e. make them inhabitants of Z3)
     #
-    # In both of them, we need to lift the arguments to live
-    # in Z3, before actually applying the operation.
+    #   2. Calls an operation that corresponds to 'op', but works with Z3
+    #      inhabitants (left as is if it works as is)
+    #
+    #   3. Lifts the return statement into 'Z3Node'
     def _operator_to_z3(op: Callable) -> Callable:
+        # Operations that have booleans as their argument.
+        # This is neeeded because the argument of some FX nodes were
+        # literal integers, instead of booleans. So, whenever this flag
+        # is set, we also convert ints to booleans.
+        boolean_ops = {operator.not_, operator.and_, operator.or_}
+        as_bool = op in boolean_ops
 
-        # Lift literals, so that we can use them in Z3 functions.
-        def lift_literals(func):
-            def wrap(a):
+        # Lifts the function into 'Z3Node' domain.
+        def lift(func):
+            def wrap(a) -> Z3Node:
+                if isinstance(a, Z3Node):
+                    return a
+                if isinstance(a, (z3.ArithRef, z3.BoolRef)):
+                    return Z3Node(a)
+                # Convert it into a Z3 value, if it is some of the supported
+                # types below. Finally, wrap it into a 'Z3Node'.
+                if isinstance(a, bool) or (as_bool and isinstance(a, int)):
+                    return Z3Node(z3.BoolVal(bool(a)))
                 if isinstance(a, (int, sympy.Integer)):
-                    return z3.IntVal(int(a))
-                return a
+                    return Z3Node(z3.IntVal(int(a)))
+                if isinstance(a, float):
+                    return Z3Node(z3.RealVal(a))
+                raise ValueError(f"can't lift type: {type(a)}")
 
             @functools.wraps(func)
             def wrapper(*args):
-                args = tuple(wrap(a) for a in args)
-                return func(*args)
+                # Lifts the arguments into a list of 'Z3Node'.
+                args = tuple(wrap(a).expr for a in args)
+                # Run the function on the Z3 expressions.
+                r = func(*args)
+                # Lifts the return value into a 'Z3Node', if it's not
+                # already an object of that type.
+                assert isinstance(r, (z3.ArithRef, z3.BoolRef, Z3Node))
+                return r if isinstance(r, Z3Node) else Z3Node(r)
 
             return wrapper
 
         replacement_map = {
-            operator.not_: lift_literals(z3.Not),
-            operator.and_: lift_literals(z3.And),
-            operator.floordiv: lift_literals(Z3Ops.floordiv),
-            operator.truediv: lift_literals(Z3Ops.div),
-            operator.mod: lift_literals(Z3Ops.mod),
-            math.ceil: lift_literals(Z3Ops.ceil),
+            # Operator module.
+            operator.not_: lift(z3.Not),
+            operator.and_: lift(z3.And),
+            operator.or_: lift(z3.Or),
+            operator.floordiv: lift(Z3Ops.floordiv),
+            operator.truediv: lift(Z3Ops.div),
+            operator.mod: lift(Z3Ops.mod),
 
-            torch.sym_float: lift_literals(Z3Ops.to_real),
+            # Math module.
+            math.ceil: lift(Z3Ops.ceil),
+
+            # Torch module.
+            torch.sym_float: lift(Z3Ops.to_real),
+            sym_sqrt: lift(Z3Ops.sqrt),
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
             torch._assert: torch._assert,
         }
-        return replacement_map[op] if op in replacement_map else lift_literals(op)
+        return replacement_map[op] if op in replacement_map else lift(op)
 
     # Processes an FX graph, populating the given validator.
     #
@@ -1468,12 +1549,12 @@ try:
             validator: "TranslationValidator",
             graph: torch.fx.Graph
     ) -> None:
-        node_to_z3 = {}
+        node_to_z3: Dict[torch.fx.Node, Z3Node] = {}
 
         # Creates a Z3 variable, taking into account the node type.
         def run_placeholder(node: torch.fx.Node) -> None:
             assert "symbol" in node.meta
-            node_to_z3[node] = validator.z3var(node.meta["symbol"])
+            node_to_z3[node] = Z3Node(validator.z3var(node.meta["symbol"]))
 
         # Actually runs the node target function (which is already
         # lifted) with its arguments.
@@ -1486,13 +1567,14 @@ try:
 
             assert callable(node.target)
             node_to_z3[node] = node.target(*args)
+            validator.add_assertion(node_to_z3[node].assertion)
 
         # Adds the Z3 expression corresponding to the first argument
         # as a validator input.
         def run_assertion(node: torch.fx.Node) -> None:
             assertion = node.args[0]
             assert isinstance(assertion, torch.fx.Node)
-            validator._inputs.add(node_to_z3[assertion])
+            validator._inputs.add(node_to_z3[assertion].expr)
 
         for node in graph.nodes:
             if node.op == "placeholder":
@@ -1514,162 +1596,56 @@ try:
     # SymPy expression being translated must be already mapped to a Z3
     # integer variable.
     class SympyToZ3:
+        OPERATOR_HANDLES = {"add", "mul", "eq", "ne", "lt", "gt", "le", "ge"}
+        Z3_REPLACEMENT_HANDLES = {
+            "and_": z3.And,
+            "or_": z3.Or,
+            "not_": z3.Not,
+            "floor": Z3Ops.floor,
+            "ceil": Z3Ops.ceil,
+        }
+
         def __init__(
                 self,
                 validator: "TranslationValidator",
-                symbols: Dict[sympy.Symbol, z3.ArithRef],
         ) -> None:
             self._validator = validator
-            self._symbols = symbols
 
-        # This guarantees that the solution found does not depend on the
-        # solution of a division-by-zero, which is unspecified for Z3.
-        def _add_assertion_nonzero_denominator(self, denominator: z3.ArithRef) -> z3.ArithRef:
-            self._validator.add_assertion(denominator != 0)
-            return denominator
+        def _add_assertion_and_arith(self, node: Z3Node) -> z3.ArithRef:
+            self._validator.add_assertion(node.assertion)
+            return node.arith
 
-        def _Add(self, expr: sympy.Add) -> z3.ArithRef:
-            return functools.reduce(operator.add, self(expr.args))
+        def constant(self, value: Any, dtype: torch.dtype) -> Z3Expr:
+            if dtype is torch.int64:
+                return z3.IntVal(value)
+            if dtype is torch.double:
+                return z3.RealVal(value)
+            if dtype is torch.bool:
+                return z3.BoolVal(value)
+            raise ValueError(f"unsupported dtype (SympyToZ3): {dtype}")
 
-        def _And(self, expr: sympy.And) -> z3.BoolRef:
-            return cast(z3.BoolRef, z3.And(*self(expr.args)))
+        def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            return self._add_assertion_and_arith(Z3Ops.div(numerator, denominator))
 
-        def _bool(self, expr: sympy.logic.boolalg.BooleanAtom) -> z3.BoolRef:
-            return z3.BoolVal(bool(expr))
+        def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            return self._add_assertion_and_arith(Z3Ops.floordiv(numerator, denominator))
 
-        def _Float(self, expr: sympy.Float) -> z3.ArithRef:
-            return z3.RealVal(float(expr))
+        def pow(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
+            return self._add_assertion_and_arith(Z3Ops.pow(base, exp))
 
-        def _floor(self, expr: sympy.floor) -> z3.ArithRef:
-            return Z3Ops.to_int(self(expr.args[0]))
+        def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
+            return self._add_assertion_and_arith(Z3Ops.mod(p, q))
 
-        def _FloorDiv(self, expr: FloorDiv) -> z3.ArithRef:
-            denominator = self._add_assertion_nonzero_denominator(self(expr.divisor))
-            return Z3Ops.floordiv(self(expr.base), denominator)
+        def __getattr__(self, name: str) -> Any:
+            if name in self.Z3_REPLACEMENT_HANDLES:
+                return self.Z3_REPLACEMENT_HANDLES[name]
+            if name in self.OPERATOR_HANDLES:
+                return getattr(operator, name)
+            print(name)
+            raise AttributeError
 
-        def _int(self, expr: int) -> z3.ArithRef:
-            return z3.IntVal(expr)
-
-        def _Mod(self, expr: sympy.Mod) -> z3.ArithRef:
-            p, q = self(expr.args)
-            q = self._add_assertion_nonzero_denominator(q)
-            return Z3Ops.mod(p, q)
-
-        # Turns the multiplication into a division, if there is any
-        # appropriate term.
-        #
-        # SymPy expresses division as a term in the multiplication that consists
-        # of a power expression where the exponent is negative.
-        #
-        # Therefore, we separate the whole multiplication into numerator and
-        # denominator. Then, we create a division node if necessary (i.e. there
-        # is any denominator not equal to 1).
-        #
-        # This separation was based on:
-        # sympy.printing.codeprinter.CodePrinter._print_Mul method.
-        def _Mul(self, expr: sympy.Mul) -> z3.ArithRef:
-            numerator_list = []
-            denominator_list = []
-
-            for item in expr.args:
-                if (
-                        item.is_commutative
-                        and isinstance(item, sympy.Pow)
-                        and item.exp.is_Rational
-                        and item.exp.is_negative
-                ):
-                    denominator_list.append(sympy.Pow(item.base, -item.exp))
-                else:
-                    numerator_list.append(item)
-
-            numerator = self._int(1)
-            if len(numerator_list) > 0:
-                numerator = functools.reduce(operator.mul, self(numerator_list))
-
-            if len(denominator_list) > 0:
-                denominator = functools.reduce(operator.mul, self(denominator_list))
-                denominator = self._add_assertion_nonzero_denominator(denominator)
-                return Z3Ops.div(numerator, denominator)
-
-            return numerator
-
-        def _Not(self, expr: sympy.Not) -> z3.BoolRef:
-            return cast(z3.BoolRef, z3.Not(self(expr.args[0])))
-
-        # We don't check for cases where:
-        #
-        # - 'base' is zero + 'exp' is negative
-        # - 'base' is negative + 'exp' is not an integer
-        #
-        # Ref: https://github.com/pytorch/pytorch/pull/101146#discussion_r1194404896
-        def _Pow(self, expr: sympy.Pow) -> z3.ArithRef:
-            return self(expr.base) ** self(expr.exp)
-
-        def _Rational(self, expr: sympy.Rational) -> z3.ArithRef:
-            return Z3Ops.div(self(expr.p), self(expr.q))
-
-        def _Rel(self, expr: sympy.Rel) -> z3.ArithRef:
-            opmap = {
-                "==": operator.eq,
-                "!=": operator.ne,
-                ">=": operator.ge,
-                ">": operator.gt,
-                "<=": operator.le,
-                "<": operator.lt,
-            }
-            assert isinstance(expr, (sympy.Eq, sympy.Ne, sympy.Ge, sympy.Gt, sympy.Le, sympy.Lt))
-            return opmap[expr.rel_op](self(expr.lhs), self(expr.rhs))
-
-        def _Symbol(self, expr: sympy.Symbol) -> z3.ArithRef:
-            return self._symbols[expr]
-
-        # Entry point for the translation process.
-        #
-        # 'expr' can be either a 'sympy.Expr', a tuple, or a list. If the latter,
-        # this method will convert the elements and return a new list (or tuple).
-        #
-        # This function dispatches to another method according to the type of
-        # the expression being translated. In other words, 'expr' shall be dispatched
-        # to '_type(expr)'. e.g. if 'type(expr) == sympy.Add', it shall be dispatched
-        # to '_Add' method.
-        #
-        # A few exceptions are:
-        # - lists and tuples: recursively called with each element
-        #
-        # - sympy.Rel operations: although 'isinstance(expr, sympy.Rel)' is true,
-        #   'type(expr)' returns either 'Eq', 'Ne', 'Lt'... We combine them into
-        #   a single dispatch call: '_Rel'.
-        #
-        # - sympy.Integer and IntegerConstant: are dispatched to '_int' with its
-        #   corresponding value.
-        def __call__(self, expr) -> Any:
-            if isinstance(expr, (tuple, list)):
-                return type(expr)(self(e) for e in expr)
-            if isinstance(expr, sympy.Rel):
-                typename = "Rel"
-            elif isinstance(expr, sympy.Integer):
-                typename = "int"
-                expr = int(expr)
-            elif isinstance(expr, sympy.core.numbers.IntegerConstant):
-                constantmap = {
-                    sympy.S.Zero: 0,
-                    sympy.S.One: 1,
-                    sympy.S.NegativeOne: -1,
-                }
-                typename = "int"
-                expr = constantmap[expr]
-            elif isinstance(expr, sympy.core.numbers.RationalConstant):
-                typename = "Rational"
-            elif isinstance(expr, sympy.logic.boolalg.BooleanAtom):
-                typename = "bool"
-            else:
-                typename = type(expr).__name__
-
-            method = f"_{typename}"
-            assert hasattr(self, method), (
-                f"unsupported sympy operation: {expr} ({method})"
-            )
-            return getattr(self, method)(expr)
+        def run(self, expr: sympy.Expr) -> z3.ArithRef:
+            return sympy_interp(self, self._validator.symbols, expr)
 
     # Frontend class to Z3 validation.
     #
@@ -1703,7 +1679,7 @@ try:
             super().__init__()
 
             # Mapping of SymPy symbols to Z3 integer variables.
-            self._symbols = {}
+            self.symbols = {}
 
             # Set of Z3 expressions representing all the generated guards.
             # i.e. without any transformation/skipping.
@@ -1717,54 +1693,52 @@ try:
             # input and output expressions.
             self._assertions = set()
 
-            # Translator of SymPy expressions to Z3.
-            self._z3 = SympyToZ3(self, self._symbols)
-
         # Retrieves the corresponding Z3 variable.
         def z3var(self, symbol: sympy.Symbol) -> z3.ArithRef:
-            assert symbol in self._symbols
-            return self._symbols[symbol]
+            assert symbol in self.symbols
+            return self.symbols[symbol]
 
         # Create an integer variable in Z3, if it doesn't already exists.
         def add_int(self, symbol: sympy.Symbol) -> None:
-            if symbol not in self._symbols:
-                self._symbols[symbol] = z3.Int(symbol.name)
+            if symbol not in self.symbols:
+                self.symbols[symbol] = z3.Int(symbol.name)
 
                 # If 's' is positive (SymPy assumption), we have to convey it to Z3 as well.
                 if symbol.is_positive:  # type: ignore
-                    self._outputs.add(self._symbols[symbol] > 0)
+                    self._outputs.add(self.symbols[symbol] > 0)
 
         # Create a float variable in Z3, if it doesn't already exists.
         def add_real(self, symbol: sympy.Symbol) -> None:
-            if symbol not in self._symbols:
-                self._symbols[symbol] = z3.Real(symbol.name)
+            if symbol not in self.symbols:
+                self.symbols[symbol] = z3.Real(symbol.name)
 
         # Create a boolean variable in Z3, if it doesn't already exists.
         def add_bool(self, symbol: sympy.Symbol) -> None:
-            if symbol not in self._symbols:
-                var = self._symbols[symbol] = z3.Int(symbol.name)
+            if symbol not in self.symbols:
+                var = self.symbols[symbol] = z3.Int(symbol.name)
                 self.add_assertion(z3.Or(var == 0, var == 1))  # type: ignore
 
         # Checks whether all symbols were already added.
         def _check_freesymbols(self, e: sympy.Basic) -> None:
-            assert all(isinstance(s, sympy.Symbol) and s in self._symbols for s in e.free_symbols)
+            assert all(isinstance(s, sympy.Symbol) and s in self.symbols for s in e.free_symbols)
+
+        def to_z3(self, e: sympy.Expr) -> z3.ArithRef:
+            return SympyToZ3(self).run(e)
 
         def add_input(self, e: sympy.Expr) -> None:
             self._check_freesymbols(e)
-            self._inputs.add(self._z3(e))
+            self._inputs.add(self.to_z3(e))
 
         def add_output(self, e: sympy.Expr) -> None:
             self._check_freesymbols(e)
-            self._outputs.add(self._z3(e))
+            self._outputs.add(self.to_z3(e))
 
-        def add_assertion(self, e: Union[sympy.Basic, z3.BoolRef]) -> None:
-            if isinstance(e, sympy.Basic):
-                self._check_freesymbols(e)
-                expr = self._z3(e)
-            else:
-                assert isinstance(e, z3.BoolRef)
-                expr = e
-            self._assertions.add(expr)
+        def add_assertion(self, e: Any) -> None:
+            if e is not None:
+                if not isinstance(e, z3.BoolRef):
+                    self._check_freesymbols(e)
+                    e = self.to_z3(e)
+                self._assertions.add(e)
 
         # The result of a validation run.
         @dataclass
@@ -1816,6 +1790,7 @@ else:
 
 
 def _translation_validator_enabled() -> bool:
+    import torch._dynamo
     assert _HAS_Z3 or not torch._dynamo.config.translation_validation, (
         "translation validation requires Z3 package. Please, either install "
         "z3-solver or disable translation validation."
@@ -2256,7 +2231,7 @@ class ShapeEnv:
     def freeze(self):
         self.frozen = True
 
-    def _create_symbol_for_source(self, source: Source, positive: bool =True) -> Optional[sympy.Symbol]:
+    def _create_symbol_for_source(self, source: Source, positive: Optional[bool]) -> Optional[sympy.Symbol]:
         if _translation_validator_enabled():
             srcname = source.name()
             if source not in self.source_to_symbol:
@@ -2463,28 +2438,23 @@ Failed inputs:
             # TODO: This should be DYNAMIC, using DUCK for BC
             dynamic_dim=DimDynamic.DUCK,
             constraint_dim=None,
-        ), hint=ex.storage_offset(), source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), positive=True)
+        ), hint=ex.storage_offset(), source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
         return sym_sizes, sym_stride, sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best
     # guess
-    def create_symintnode(self, sym: "sympy.Expr", *, hint: Optional[int], source: Optional[Source] =None, positive: bool =False):
+    def create_symintnode(self, sym: "sympy.Expr", *, hint: Optional[int], source: Optional[Source] =None, positive: Optional[bool] =None):
         if _translation_validator_enabled() and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source, positive=positive)
             assert symbol is not None
 
-            self._add_z3var_for(symbol, int)
             fxnode = self.create_fx_placeholder(int, name=symbol.name, symbol=symbol)
 
-            # If the given expression is not static, add an equality assertion
-            # between the newly created symbol and the given expr.
-            if len(sym.free_symbols) > 0:
-                self.log.debug("create_symintnode: add assertion: %s == %s", symbol, sym)
-                self._add_assertion(sympy.Eq(symbol, sym))
-            else:
-                self.log.debug("create_symintnode: ignoring assertion: %s == %s", symbol, sym)
+            # Create the Z3 variable for it and add an assertion.
+            self._add_z3var_for(symbol, int)
+            self._add_assertion(sympy.Eq(symbol, sym))
         else:
             fxnode = None
 
@@ -2810,14 +2780,6 @@ Failed inputs:
 
         if not _simplified:
             for source, expr in input_guards:
-                # This logic excludes static values found on tensors from guarding, because
-                # dynamo's check_tensor_fn does that (see guards.cpp).
-                # However, for non tensor sources, we still need to guard here.
-                if ignore_static and isinstance(source, TensorPropertySource):
-                    if len(expr.free_symbols) == 0:
-                        self.log.debug("Skipping guard %s", f"{source_ref(source)} == {expr}")
-                        continue
-
                 if _translation_validator_enabled():
                     # Ignore sources that were not turned into SymInts.
                     srcname = source.name()
@@ -2832,6 +2794,14 @@ Failed inputs:
                     source == symbol_to_source[expr][0]
                 ):
                     continue
+
+                # This logic excludes static values found on tensors from guarding, because
+                # dynamo's check_tensor_fn does that (see guards.cpp).
+                # However, for non tensor sources, we still need to guard here.
+                if ignore_static and isinstance(source, TensorPropertySource):
+                    if len(expr.free_symbols) == 0:
+                        self.log.debug("Skipping guard %s", f"{source_ref(source)} == {expr}")
+                        continue
 
                 if is_dim(source):
                     self.dim_constraints.add_equality(source, expr)
