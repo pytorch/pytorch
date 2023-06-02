@@ -525,7 +525,9 @@ class BuildExtension(build_ext):
                 assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
 
         # Register .cu, .cuh, .hip, and .mm as valid source extensions.
-        self.compiler.src_extensions += ['.cu', '.cuh', '.hip', '.mm']
+        self.compiler.src_extensions += ['.cu', '.cuh', '.hip']
+        if torch.backends.mps.is_built():
+            self.compiler.src_extensions += ['.mm']
         # Save the original _compile method for later.
         if self.compiler.compiler_type == 'msvc':
             self.compiler._cpp_extensions += ['.cu', '.cuh']
