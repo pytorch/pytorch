@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
 
       - name: Install Python Packages
         run: |
@@ -22,6 +24,8 @@ jobs:
       - name: Create alerts
         run: |
           pwd
+          ls tools
+          ls tools/alerts
           output=$("python tools/alerts/create_alerts.py")
           echo "uploading following alerts"
           echo "$output"
