@@ -14,7 +14,10 @@ from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
 
-NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
+# NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
+# to ensure that sharding is consistent, NUM_PROCS is the actual number of procs
+# used to run tests
+NUM_PROCS, NUM_PROCS_FOR_SHARDING_CALC = 1 if IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 
 # See Note [ROCm parallel CI testing]
@@ -37,6 +40,7 @@ if os.path.exists("/opt/rocm") and not IS_MEM_LEAK_CHECK:
     except subprocess.CalledProcessError as e:
         # The safe default for ROCm GHA runners is to run tests serially.
         NUM_PROCS = 1
+    NUM_PROCS_FOR_SHARDING_CALC = 1
 
 
 class ShardedTest(NamedTuple):
@@ -58,7 +62,7 @@ class ShardJob:
         self.parallel: List[ShardedTest] = []
 
     def get_total_time(self) -> float:
-        procs = [0.0 for _ in range(NUM_PROCS)]
+        procs = [0.0 for _ in range(NUM_PROCS_FOR_SHARDING_CALC)]
         for test in self.parallel:
             min_index = procs.index(min(procs))
             procs[min_index] += test.get_time()
