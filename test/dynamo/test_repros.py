@@ -2880,6 +2880,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         obj1 = MyObj(x, x)
         self.assertRaises(AttributeError, lambda: fn(x, obj1))
 
+    def test_attached_attribute_in_dir(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.linear(x))
+
+        mod = torch.compile(MyModule(), backend="eager")
+        mod.is_compiled = True
+        self.assertTrue("is_compiled" in dir(mod))
+
     @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     def test_dynamic_shapes_implicit_guard(self):
