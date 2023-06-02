@@ -227,8 +227,10 @@ class SymPyValueRangeAnalysis:
         def zero(x):
             if x.is_bool:
                 return sympy.false
+            elif x.is_Integer:
+                return sympy.Integer(0)
             else:
-                return 0
+                return sympy.Float(0.0)
 
         def safe_mul(a, b):
             if a == 0:
