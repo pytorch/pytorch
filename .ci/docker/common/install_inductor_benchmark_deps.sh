@@ -63,8 +63,8 @@ function install_torchvision() {
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
 }
 
-install_huggingface
-install_timm
+# install_huggingface
+# install_timm
 # install_torchaudio
 # install_torchtext
 # install_torchvision

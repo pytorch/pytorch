@@ -1483,13 +1483,7 @@ def set_rng_seed(seed):
         np.random.seed(seed)
 
 
-@contextmanager
-def disable_functorch():
-    guard = torch._C._DisableFuncTorch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
+disable_functorch = torch._C._DisableFuncTorch
 
 
 @contextlib.contextmanager
