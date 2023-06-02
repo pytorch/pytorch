@@ -26,8 +26,6 @@ from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
 
-from .virtualized import V
-
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
@@ -103,11 +101,9 @@ class Match:
     def replace_by_example(self, replacement_fn, args, trace_fn=None):
         if trace_fn is None:
             trace_fn = inference_graph
-        with V.fake_mode:
-            replacement = trace_fn(
-                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
-            )
-
+        replacement = trace_fn(
+            replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+        )
         ReplacementPatternEntry.replace_with_graph(
             self,
             self.ctx.graph,

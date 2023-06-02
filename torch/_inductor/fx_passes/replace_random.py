@@ -117,9 +117,9 @@ def replace_randint(
     layout=None,
     pin_memory=None,
 ):
-    def replacement(low, high, size):
+    def replacement(size):
         result = inductor_prims.randint(low, high, size, inductor_prims.seed(device))
         return result.to(dtype)
 
     device = get_device(device)
-    match.replace_by_example(replacement, [low, high, size])
+    match.replace_by_example(replacement, [size])

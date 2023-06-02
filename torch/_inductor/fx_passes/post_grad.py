@@ -171,7 +171,8 @@ def pointless_cumsum_replacement(match: Match, size0, size1, device, dtype):
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    match.replace_by_example(repl, [size0, size1])
+    with V.fake_mode:
+        match.replace_by_example(repl, [size0, size1])
 
 
 def shape_of_mm(a, b):
