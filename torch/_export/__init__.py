@@ -1,29 +1,30 @@
 import dataclasses
 import weakref
-from typing import Any, Callable, List, Tuple, Optional, Dict, Union
+from typing import Any, Callable, Dict, List, Optional, OrderedDict, Tuple, Union
 
 import sympy
 
 import torch
 import torch._dynamo
 import torch.fx
-from .exported_program import (
-    CallSpec,
-    ExportedProgram,
-    ExportGraphSignature,
-    _set_constraints,
-)
-from torch._decomp import core_aten_decompositions
-from torch._dynamo.eval_frame import Constraint
 
 import torch.utils._pytree as pytree
+from torch._decomp import core_aten_decompositions
+from torch._dynamo.eval_frame import Constraint
+from torch._dynamo.exc import UserError, UserErrorType
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
     StrictMinMaxConstraint,
 )
-from torch._dynamo.exc import UserError, UserErrorType
-from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
+from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
+
+from .exported_program import (
+    _set_constraints,
+    CallSpec,
+    ExportedProgram,
+    ExportGraphSignature,
+)
 
 
 
@@ -90,24 +91,31 @@ DECOMP_TABLE = core_aten_decompositions()
 
 def export(
     f: Callable,
-    args: Tuple[Any],
+    args: Tuple[Any] = None,
+    kwargs: OrderedDict[str, Any] = None,
     constraints: Optional[List[Constraint]] = None,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
     operations inside and produce a ExportedProgram.
 
-    Args:
-        m: the `nn.Module` or callable to trace.
+    Parameters:
+        m: The `nn.Module` or callable to trace.
 
-        args: Tracing example inputs.
+        args: A tuple of positional example inputs for tracing.
+
+        kwargs: An ordered dict of named example inputs for tracing.
 
         constraints: A list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
+            their possible range of their shapes.
 
     Returns:
         An ExportedProgram containing the traced method.
     """
+    if args is None:
+        args = ()
+    if kwargs is None:
+        kwargs = {}
     if constraints is None:
         constraints = []
 
@@ -122,6 +130,7 @@ def export(
                 constraints=constraints,
                 assume_static_by_default=True,
                 functionalize=True,
+                **kwargs,
             )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
@@ -130,9 +139,9 @@ def export(
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
 
-    flat_args, in_spec = pytree.tree_flatten(args)
+    flat_args, in_spec = pytree.tree_flatten(args + tuple(kwargs.values()))
     out_spec = (
-        gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args))[1]  # type: ignore[attr-defined]
+        gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args, **kwargs))[1]  # type: ignore[attr-defined]
     )
 
     # TODO(tugsuu): Fill out signature/state_dict
