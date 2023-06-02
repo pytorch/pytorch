@@ -245,6 +245,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       // Whether this is async event or not
       .def("is_async", [](const KinetoEvent& e) { return e.isAsync(); })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
+      .def("privateuse1_elapsed_us", &KinetoEvent::privateuse1ElapsedUs)
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);

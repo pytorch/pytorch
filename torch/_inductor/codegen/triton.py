@@ -1303,19 +1303,8 @@ class TritonKernel(Kernel):
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
-                if reduction_type == "min":
-                    updated = f"triton_helpers.minimum({accumulator}, {value})"
-                elif reduction_type == "max":
-                    updated = f"triton_helpers.maximum({accumulator}, {value})"
-                elif reduction_type == "sum":
-                    updated = f"{accumulator} + {value}"
-                elif reduction_type == "prod":
-                    updated = f"{accumulator} * {value}"
-                elif reduction_type == "xor_sum":
-                    updated = f"{accumulator} ^ {value}"
-                else:
-                    raise NotImplementedError(f"reduction_type {reduction_type}")
-
+                combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
+                updated = combine_fn(accumulator, value)
                 self.compute.writeline(
                     f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
                 )
