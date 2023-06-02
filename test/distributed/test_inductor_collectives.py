@@ -312,16 +312,16 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
             .check("buf0 = empty_strided(") \
-            .check("buf3 = empty_strided") \
-            .check("triton_poi__0.run(arg0_1, buf0, buf3") \
+            .check("buf4 = empty_strided") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf4") \
             .check_not("copy_(") \
             .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
-            .check("buf4 = buf1") \
-            .check("return (buf4, buf3, buf5") \
+            .check("buf3 = buf1") \
+            .check("return (buf3, buf4, buf5") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
