@@ -72,6 +72,7 @@ from torch._inductor.compile_fx import (
     remove_unaligned_input_idxs,
     static_input,
 )
+from torch._prims_common import check
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -1056,7 +1057,7 @@ class CUDAGraphNode:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
-            torch._check(
+            check(
                 o.is_cuda,
                 lambda: f"Expected all cuda outputs in cuda graph recording. Non cuda output from {self.stack_traces[i]}",
             ),
@@ -1429,7 +1430,7 @@ class CUDAGraphNode:
         for idx in self.cudagraph_managed_idxs:
             inputs[idx] = None
 
-        torch._check(
+        check(
             self._check_liveness(
                 self.expected_dead_indices_after_graph, self.path_weakrefs
             ),
@@ -1506,7 +1507,7 @@ def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWr
 
             addr += block["size"]
 
-    torch._check(
+    check(
         len(unique_storages) == 0,
         lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
     )
