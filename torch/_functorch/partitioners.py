@@ -637,8 +637,8 @@ def min_cut_rematerialization_partition(
     if graph_has_recomputable_ops:
         joint_module = cleanup_recompute_tags(joint_module)
 
-    for node in joint_module.graph.nodes:
-        print(node, -1 if "recompute" not in node.meta else node.meta["recompute"])
+    # for node in joint_module.graph.nodes:
+    #     print(node, -1 if "recompute" not in node.meta else node.meta["recompute"])
 
     name_to_node = {}
     for node in joint_module.graph.nodes:

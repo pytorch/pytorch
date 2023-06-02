@@ -970,7 +970,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         #     count_ops, freq=6, op=torch.ops.aten.mm.default
         # )  # mm recomputed in the bwd
         # backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
-        backend = "aot_eager"
+        backend = "inductor"
         self._validate(fn, backend, x, y)
 
     @requires_cuda()
@@ -1003,6 +1003,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x, y)
 
     @requires_cuda()
+    @torch._inductor.config.patch(fallback_random=True)
     def test_tags_dropout(self):
         # Figure out a way to test the number of inductor_random calls
         class MockModule(torch.nn.Module):
