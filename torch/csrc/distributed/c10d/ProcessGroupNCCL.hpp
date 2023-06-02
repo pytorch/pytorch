@@ -193,6 +193,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // This will be used by desync debug.
     bool startTraceUpdated_{false};
 
+    // Record collective sizes for debug. We only record the size on the first
+    // device as multi-device per process is deprecated
+    size_t numelIn_ = -1;
+    size_t numelOut_ = -1;
+
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.
     virtual std::exception_ptr checkForNCCLErrors(
@@ -279,6 +284,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
+
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+    // Configure ranks
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#endif
   };
 
   // If you wish to create multiple process groups, each with a potentially
