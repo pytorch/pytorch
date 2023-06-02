@@ -592,14 +592,7 @@ class ExplainOutput:
         output += "Out Guards:\n"
         for i, guard in enumerate(self.out_guards):
             output += f"  Guard {i+1}:\n"
-            output += f"    Name: {guard.name}\n"
-            output += f"    Source: {guard.source}\n"
-            output += f"    Create Function: {guard.create_fn}\n"
-            output += f"    Is Volatile: {guard.is_volatile}\n"
-            output += f"    Guard Types: {guard.guard_types}\n"
-            output += f"    Code List: {guard.code_list}\n"
-            output += f"    Object Weakref: {guard.obj_weakref}\n"
-            output += f"    Guarded Class Weakref: {guard.guarded_class_weakref}\n"
+            output += f"    {str(guard)}"
 
         # This looks really ugly so far so not sure how I feel about adding it
         # output += "Graphs:\n"
