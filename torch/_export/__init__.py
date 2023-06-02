@@ -15,7 +15,7 @@ from .exported_program import (
     ExportedProgram,
     ExportBackwardSignature,
     ExportGraphSignature,
-    _set_constraints,
+    _process_constraints,
 )
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
@@ -196,20 +196,20 @@ def export(
                 if re.match(r"^[if]\d+$", str(k))
             }
 
+            range_constraints, equality_constraints = _process_constraints(
+                gm,
+                export_graph_signature,
+                flat_args,
+            )
             exported_program = ExportedProgram(
                 gm,
                 gm.graph,
                 export_graph_signature,
                 CallSpec(in_spec, orig_out_spec),
                 params_buffers,
+                range_constraints,
+                equality_constraints,
             )
-            _set_constraints(
-                exported_program,
-                gm.meta.get("input_shape_constraints", []),
-                gm.meta.get("inline_constraints", []),
-                flat_args,
-            )
-
             return exported_program
 
         except (ConstraintViolationError, ValueRangeError) as e:
