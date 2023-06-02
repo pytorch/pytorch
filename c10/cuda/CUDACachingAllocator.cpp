@@ -1157,7 +1157,7 @@ static std::string reportProcessMemoryInfo(int device) {
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
-  pid_t self_pid = getpid();
+  unsigned int self_pid = getpid();
   std::stringstream ss;
   TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
