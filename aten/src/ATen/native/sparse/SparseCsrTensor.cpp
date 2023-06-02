@@ -213,7 +213,7 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
   DimVector compressed_indices_batchsize = DimVector(compressed_indices.sizes().slice(0, batch_ndim));
   DimVector plain_indices_batchsize = DimVector(plain_indices.sizes().slice(0, batch_ndim));
   DimVector values_batchsize = DimVector(values.sizes().slice(0, batch_ndim));
-  const int values_nnz = values.size(batch_ndim);
+  const int64_t values_nnz = values.size(batch_ndim);
   DimVector values_blocksize = DimVector(values.sizes().slice(batch_ndim + 1, block_ndim));
   DimVector values_densesize = DimVector(values.sizes().slice(batch_ndim + 1 + block_ndim, dense_ndim));
   TORCH_CHECK(
@@ -229,9 +229,9 @@ void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_ind
                   ") must be divisible with blocksize[", i, "] (=", blocksize[i],
                   ") as defined by values shape");
   }
-  const int nrows = size[batch_ndim] / blocksize[0];
-  const int ncols = size[batch_ndim + 1] / blocksize[1];
-  int compressed_dim_size, plain_dim_size;
+  const int64_t nrows = size[batch_ndim] / blocksize[0];
+  const int64_t ncols = size[batch_ndim + 1] / blocksize[1];
+  int64_t compressed_dim_size, plain_dim_size;
   std::tie(compressed_dim_size, plain_dim_size) = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args",
                                                                                             [&] { return std::make_tuple(nrows, ncols); },
                                                                                             [&] { return std::make_tuple(ncols, nrows); });
