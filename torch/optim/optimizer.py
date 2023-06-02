@@ -226,6 +226,10 @@ class Optimizer:
 
     # Currently needed by Adam and AdamW
     def _cuda_graph_capture_health_check(self):
+        # If we are compiling, we take the capturable path automatically
+        # One caveat here is that if we are compiling, we *permit* step/param tensors to be on CPU
+        # so we do not explicitly enable the capturable flag. Inductor will decide whether cudagraphs
+        # can be enabled based on whether there is input mutation or CPU tensors.
         if not is_compiling() and torch.has_cuda and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
 
