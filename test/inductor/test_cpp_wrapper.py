@@ -92,7 +92,7 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
             code = test_torchinductor.run_and_get_cpp_code(
                 func, *func_inputs if func_inputs else []
             )
-            self.assertEqual("load_inline" in code, True)
+            self.assertEqual("CppWrapperCodeCache" in code, True)
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -222,6 +222,7 @@ if RUN_CUDA:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_scalar_input"),
+        BaseTest("test_scaled_dot_product_efficient_attention"),
         BaseTest("test_sort"),
         BaseTest("test_silu"),  # single input, single output
         BaseTest("test_sum_dtype"),  # float64
