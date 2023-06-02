@@ -294,6 +294,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
+    # autotune persistent_reduction may increase memory pressure
+    autotune_persistent_reduction = True
+
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
 

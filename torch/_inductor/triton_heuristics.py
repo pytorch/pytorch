@@ -825,7 +825,10 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
         # we don't need RBLOCK for persistent reduction
         c.kwargs.pop("RBLOCK")
 
-    if disable_pointwise_autotuning():
+    if (
+        disable_pointwise_autotuning()
+        or not config.triton.autotune_persistent_reduction
+    ):
         configs = configs[:1]
 
     return cached_autotune(
