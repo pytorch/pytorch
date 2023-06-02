@@ -8,9 +8,10 @@ on:
     - cron: '*/10 * * * *'
 
 jobs:
-  upload-alerts:
+  create-alerts:
     runs-on: ubuntu-20.04
-    secrets: inherit
+    outputs:
+      alerts: ${{ steps.alert_creation_step.outputs.script-output }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -30,12 +31,15 @@ jobs:
           echo "script-output=$output" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
 
-      - name: Upload alerts
-        uses: pytorch/test-infra/.github/actions/upload-alerts@f763034f4fa84008c1eebe4aeadf4931b98b5b53
-        with:
-          alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
-          organization: "pytorch"
-          repo: "pytorch"
+  upload-alerts:
+    needs: create-alerts
+    uses: pytorch/test-infra/.github/actions/upload-alerts@f763034f4fa84008c1eebe4aeadf4931b98b5b53
+    with:
+      alerts: '${{ needs.create-alerts.outputs.alerts }}'
+      organization: "pytorch"
+      repo: "pytorch"
+    secrets: inherit
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
