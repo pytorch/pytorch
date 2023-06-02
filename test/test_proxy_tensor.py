@@ -930,14 +930,14 @@ def forward(self, x_1, y_1):
         self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] < 20""")
 
     def test_repeat_interleave(self):
-        def f(src_tokens, beam_size):
-            return src_tokens.repeat_interleave(beam_size, 0)
+        def f(src_tokens, beam_size_src):
+            return src_tokens.repeat_interleave(beam_size_src.size(0), 0)
 
         prompt_size = 64
         vocab_size = 64
         batch_size = 4
         src_tokens = torch.randint(1, vocab_size, (batch_size, prompt_size))
-        gm = make_fx(f, tracing_mode="symbolic")(src_tokens, 1)
+        gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
         self.assertEqual(len(gm.shape_env.guards), 0)
 
     def test_adv_index_batch(self):
