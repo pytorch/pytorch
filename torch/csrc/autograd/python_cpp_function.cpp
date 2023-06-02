@@ -77,6 +77,14 @@ PyObject* THPCppFunction_call(
 
 int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
   auto& fn = *((THPCppFunction*)self)->cdata;
+  if ((((THPCppFunction*)self)->cdata).use_count() > 1) {
+    // The fields traversed below are owned by the cpp grad_fn, which we own a
+    // reference to. We should only them traverse however if we are the only
+    // owner of the grad_fn, otherwise we risk prematurely gc'ing the grad_fn.
+    //
+    // See: https://github.com/pytorch/pytorch/issues/102174
+    return 0;
+  }
   for (const auto& hook : fn.tensor_pre_hooks()) {
     if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
