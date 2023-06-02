@@ -616,6 +616,7 @@ def detect_fake_mode(inputs: Any = None):
 
 EXPORT_FAKE_MODE = None
 
+
 @contextlib.contextmanager
 def export_fake_mode(fake_mode):
     global EXPORT_FAKE_MODE
