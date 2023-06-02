@@ -22,11 +22,8 @@ def autograd_kernel_indirection(custom_op):
             lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)
         ):
             raise RuntimeError("Autograd has not been implemented for operator")
-        guard = torch._C._AutoDispatchBelowAutograd()
-        try:
+        with torch._C._AutoDispatchBelowAutograd():
             return custom_op(*args, **kwargs)
-        finally:
-            del guard
 
     def inner(*args, **kwargs):
         if custom_op._has_impl('autograd'):
@@ -67,11 +64,8 @@ def construct_autograd_kernel(
         def forward(ctx, *flat_args):
             ctx.set_materialize_grads(True)
             args = pytree.tree_unflatten(list(flat_args), spec)
-            guard = torch._C._AutoDispatchBelowAutograd()
-            try:
+            with torch._C._AutoDispatchBelowAutograd():
                 output = forward_op(*args)
-            finally:
-                del guard
 
             # We use the info about args to give better error messages in backward
             args_info = namedtuple_args(

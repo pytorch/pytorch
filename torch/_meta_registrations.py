@@ -26,6 +26,7 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import (
     _maybe_resize_out,
     _resize_output_check,
+    _safe_copy_out,
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes
@@ -361,12 +362,12 @@ def checkFloatingOrComplex(
     dtype = t.dtype
     check(
         t.is_floating_point() or t.is_complex(),
-        lambda: f"{f_name}, : Expected a floating point or complex tensor as input. Got , {dtype}",
+        lambda: f"{f_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
     if allow_low_precision_dtypes:
         check(
             dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
-            lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
+            lambda: f"{f_name}: Low precision dtypes not supported. Got {dtype}",
         )
 
 
@@ -3194,9 +3195,23 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
         aten.sort.values_stable,
     ]
 )
-@out_wrapper("values", "indices")
-def meta_sort(self, stable=None, dim=-1, descending=False):
-    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
+    v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+    if values is not None and indices is not None:
+        assert isinstance(values, TensorLike)
+        assert isinstance(indices, TensorLike)
+        # Makes sure values and indices have the same strides. For cases where
+        # these have different shapes, like (5, 10, 5) and (0) in msort.
+        out_shape = v.shape
+        out_stride = v.stride()
+        values = _maybe_resize_out(values, out_shape)
+        indices = _maybe_resize_out(indices, out_shape)
+        values.as_strided_(out_shape, out_stride)
+        indices.as_strided_(out_shape, out_stride)
+        _safe_copy_out(copy_from=v, copy_to=values)  # type: ignore[arg-type]
+        _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
+        return values, indices
+    return v, i
 
 
 def rnn_cell_checkSizes(

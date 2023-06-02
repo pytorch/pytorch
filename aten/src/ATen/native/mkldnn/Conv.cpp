@@ -545,8 +545,8 @@ Tensor mkldnn_convolution_pointwise_binary(
 // op, such as "hardtanh" has scalar parameters "gelu" has algorithm parameters.
 
 Tensor& mkldnn_convolution_pointwise_binary_(
-    const Tensor& input_t,
     Tensor& other_t,
+    const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
