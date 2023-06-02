@@ -262,7 +262,7 @@ def get_recurrently_failing_jobs_alerts(
     for job in recurrently_failing_jobs:
         entry = {
             "AlertType": "Recurrently Failing Job",
-            "AlertObject": job.job_name(),
+            "AlertObject": job.job_name,
             "OncallTeams": "",
             "OncallIndividuals": "",
             "Flags": "",
