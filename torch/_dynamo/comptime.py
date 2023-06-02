@@ -5,6 +5,7 @@
 # The goal of the public API is to give users rope, without actually
 # leaking private implementation details of Dynamo.
 
+import builtins
 import dis
 import traceback
 from typing import Optional, Union
@@ -146,6 +147,9 @@ class ComptimeContext:
         print(
             self.__tx.output.graph.python_code("self", verbose=verbose).src, file=file
         )
+
+    def parent(self):
+        return ComptimeContext(self.__tx.parent)
 
     def __get_tx(self, stacklevel):
         tx = self.__tx
@@ -298,7 +302,11 @@ def print_guards():
 
 
 def breakpoint():
-    comptime(lambda ctx: breakpoint())
+    def inner(inner_ctx):
+        ctx = inner_ctx.parent()
+        builtins.breakpoint()
+
+    comptime(inner)
 
 
 def comptime(fn):
