@@ -26,6 +26,7 @@ namespace at::native {
 
 constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
+constexpr int ALIGNMENT = 16;
 
 namespace {
 
@@ -164,7 +165,7 @@ __global__ void CatArrayBatchedCopy(
 */
 
 template <typename T, typename IndexType, int Dims, int batch_size, int stride_size>
-__global__ void CatArrayBatchedCopy_ldg128_contig(
+__global__ void CatArrayBatchedCopy_aligned16_contig(
     T* output,
     CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
     TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
@@ -249,7 +250,11 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
   // If all batches are contiguous we can call a specialized implementation
+  // which requires the input tensor addresses to be aligned to a
+  // 16 Byte boundary.
+
   bool isContig = true;
+  bool isAligned = true;
   unsigned int max_elements_per_tensor = 0;
 
   // Now we loop
@@ -271,6 +276,11 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       catMetaData.offset[batchCounter] = offset;
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
+
+      if (catMetaData.input[batchCounter] % ALIGNMENT != 0) {
+        // We can't call the CatArrayBatchedCopy_aligned16_contig version
+        isAligned = false;
+      }
 
       if (stride_size > 1) {
         auto strides = inputs[i+batchCounter].get().strides();
@@ -318,8 +328,8 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     }
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-    if ((isContig) && (2 < sizeof(scalar_t)) && (sizeof(scalar_t) <= 8)) {\
-      CatArrayBatchedCopy_ldg128_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+    if ((isContig) && (isAligned) && (2 < sizeof(scalar_t)) && (sizeof(scalar_t) <= 8)) {\
+      CatArrayBatchedCopy_aligned16_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
               data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
     } else {\
