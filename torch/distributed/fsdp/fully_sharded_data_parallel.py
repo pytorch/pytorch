@@ -806,7 +806,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     @staticmethod
     @contextlib.contextmanager
     def summon_full_params(
-        module: Union[nn.Module, Tuple[nn.Module]],
+        module: nn.Module,
         recurse: bool = True,
         writeback: bool = True,
         rank0_only: bool = False,
@@ -847,8 +847,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``rank0_only=True``.
 
         Args:
-            module: Union[nn.Module, Tuple[nn.Module]]: Module or tuple
-                of modules to summon full parameters for.
             recurse (bool, Optional): recursively summon all params for nested
                 FSDP instances (default: True).
             writeback (bool, Optional): if ``False``, modifications to params are
@@ -874,22 +872,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 constructor and ``offload_to_cpu=False`` to this method.
                 (Default: ``False``)
         """
-        if isinstance(module, tuple):
-            with contextlib.ExitStack() as stack:
-                unshard_contexts = [
-                    _unshard_params(
-                        m, recurse, writeback, rank0_only, offload_to_cpu, with_grads
-                    )
-                    for m in module
-                ]
-                for mgr in unshard_contexts:
-                    stack.enter_context(mgr)
-                yield
-        else:
-            with _unshard_params(
-                module, recurse, writeback, rank0_only, offload_to_cpu, with_grads
-            ):
-                yield
+        with _unshard_params(
+            module, recurse, writeback, rank0_only, offload_to_cpu, with_grads
+        ):
+            yield
 
     @contextlib.contextmanager
     def _deregister_orig_params_ctx(self):
