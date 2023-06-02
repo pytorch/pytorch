@@ -33,8 +33,27 @@ if(NOT __NCCL_INCLUDED)
       # here to avoid flaky OOM, https://www.gnu.org/software/make/manual/html_node/Parallel.html
       set(MAKE_COMMAND "$(MAKE)" "-l${MAX_JOBS}")
     else()
-      # Parallel build with CPU load limit to avoid oversubscription
+    
+      # If we are memory constrained, we want to limit parallelism in NCCL's
+      # sub-make to avoid OOM.  But if we're not memory constrained, adding a
+      # load limit to make can severely limit parallelism.  The following is
+      # kind of a hack: check available memory, and if we have more than 1 GB
+      # per job, don't use a load limit.
+      # https://github.com/pytorch/pytorch/issues/102732#issuecomment-1572478614
+
       set(MAKE_COMMAND "make" "-j${MAX_JOBS}" "-l${MAX_JOBS}")
+
+      if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        execute_process(
+          COMMAND sh -c "free -g | awk '/^Mem:/ { print $7 }'"
+          RESULT_VARIABLE RETURN_CODE
+          OUTPUT_VARIABLE AVAILABLE_MEMORY
+          ERROR_VARIABLE ERROR_OUTPUT
+        )
+        if(("${RETURN_CODE}" EQUAL 0) AND ("${AVAILABLE_MEMORY}" GREATER "${MAX_JOBS}"))
+          set(MAKE_COMMAND "make" "-j${MAX_JOBS}")
+        endif()
+      endif()
     endif()
 
     set(__NCCL_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/nccl")
