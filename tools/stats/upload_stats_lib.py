@@ -252,7 +252,7 @@ class EnvVarMetric:
             if self.required:
                 raise ValueError(
                     (
-                        f"Not emitting metrics, missing {self.name}. Please set the {self.env_var}"
+                        f"Missing {self.name}. Please set the {self.env_var}"
                         "environment variable to pass in this value."
                     )
                 )
@@ -305,13 +305,18 @@ def emit_metric(
     calling_module = inspect.getmodule(calling_frame).__name__  # type: ignore[union-attr]
     calling_function = calling_frame_info.function
 
-    reserved_metrics = {
-        "metric_name": metric_name,
-        "calling_file": calling_file,
-        "calling_module": calling_module,
-        "calling_function": calling_function,
-        **{m.name: m.value() for m in env_var_metrics},
-    }
+
+    try:
+        reserved_metrics = {
+            "metric_name": metric_name,
+            "calling_file": calling_file,
+            "calling_module": calling_module,
+            "calling_function": calling_function,
+            **{m.name: m.value() for m in env_var_metrics},
+        }
+    except ValueError as e:
+        warn(f"Not emitting metrics. {e}")
+        return
 
     reserved_metrics["dynamo_key"] = "_".join(
         [
