@@ -48,6 +48,55 @@ from torchgen.utils import (
 )
 
 
+def _get_kernel_metadata_for_op(selector: SelectiveBuilder, op_name: str) -> Optional[List[List[str]]]:
+    if op_name not in selector.et_kernel_metadata:
+        # We don't the op from the SelectiveBuilder (from yaml)
+        return None
+    return selector.et_kernel_metadata[op_name]
+
+
+def _compute_specialized_kernel_selection(et_kernel_metadata: List[str], all_specialized_kernels: List[List[Tuple[str, List[int]]]]) -> List[bool]:
+    """
+    For ExecuTorch, we only want to include dtype and dim order specialized
+    kernels. The input is a kernel key in the following format:
+    v<Version>/<TYPE Enum>;<DIM Order>|<TYPE Enum>;<DIM Order>|<TYPE Enum>;<DIM Order>
+
+    The output is a boolean list with the same size as the input list, and
+    each entry means whether the corresponding kernel was selected.
+
+    If the given specialized kernels cannot cover all dtype and dim orders,
+    return empty list. In that case, the caller should use the fallback
+    kernel.
+
+    The caller should check is_native_function_selected() first.
+    """
+
+    def kernel_key_entry_to_tuple(kernel_key: str) -> Optional[Tuple[str, List[int]]]:
+        version, tensors = kernel_key.split("/")[0], kernel_key.split("/")[1]
+        metadata_entries = tensors.split("|")
+        return [
+            (entry.split(";")[0],
+             list(map(int, entry.split(";")[1].split(","))))
+         for entry in metadata_entries]
+
+    selected = [False] * len(all_specialized_kernels)
+
+    for kernel_key in et_kernel_metadata:
+        entries = kernel_key_entry_to_tuple(kernel_key)
+
+        has_kernel = False
+        for kernel_idx, kernel in enumerate(all_specialized_kernels):
+            if all(entries[i] == kernel[i] for i in range(len(kernel))):
+                selected[kernel_idx] = True
+                has_kernel = True
+                continue
+
+        if not has_kernel:
+            return []
+
+    return selected
+
+
 def _sig_decl_wrapper(sig: Union[CppSignature, ExecutorchCppSignature]) -> str:
     """
     A wrapper function to basically get `sig.decl(include_context=True)`.

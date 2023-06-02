@@ -107,8 +107,7 @@ class SelectiveBuilder:
         for k, v in kernel_metadata_dict.items():
             kernel_metadata[str(k)] = [str(dtype) for dtype in v]
 
-        # TODO(T149265497): Need to parse the et kernel metadata
-        et_kernel_metadata: Dict[str, List[List[str]]] = {}
+        et_kernel_metadata = data.get("et_kernel_metadata", {})
 
         custom_classes = data.get("custom_classes", [])
         assert isinstance(custom_classes, Iterable)

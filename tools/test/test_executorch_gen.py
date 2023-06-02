@@ -1,12 +1,12 @@
 import os
 import tempfile
 import unittest
-from typing import Dict
+from typing import Dict, List
 
 import yaml
 from torchgen.gen import LineLoader
 
-from torchgen.gen_executorch import gen_functions_declarations, translate_native_yaml
+from torchgen.gen_executorch import gen_functions_declarations, translate_native_yaml, _compute_specialized_kernel_selection
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
@@ -227,3 +227,53 @@ TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
         """
             in declarations
         )
+
+class TestComputeSpecializedKernelSelection(unittest.TestCase):
+    def setUp(self) -> None:
+        self.ops_in_model_yaml: Dict[str, str] = {
+            "add_float_01": "v1/6;0,1|6;0,1|6;0,1|6;0,1",
+            "add_float_10": "v1/6;1,0|6;1,0|6;1,0|6;1,0",
+            "add_double_01": "v1/7;0,1|7;0,1|7;0,1|7;0,1",
+            "add_double_10": "v1/7;1,0|7;1,0|7;1,0|7;1,0",
+            "add_int_01": "v1/3;0,1|3;0,1|3;0,1|3;0,1",
+            "add_int_10": "v1/3;1,0|3;1,0|3;1,0|3;1,0",
+
+        }
+
+        self.add_specialized_kernels = [
+            [("6", [0, 1]), ("6", [0, 1]), ("6", [0, 1]), ("6", [0, 1])],
+            [("6", [1, 0]), ("6", [1, 0]), ("6", [1, 0]), ("6", [1, 0])],
+            [("3", [0, 1]), ("3", [0, 1]), ("3", [0, 1]), ("3", [0, 1])],
+            [("3", [1, 0]), ("3", [1, 0]), ("3", [1, 0]), ("3", [1, 0])],
+        ]
+
+    def test_compute_add_float_01(self) -> None:
+        used_ops_in_model: List[List[str]] = [
+            self.ops_in_model_yaml["add_float_01"],
+        ]
+        selection = _compute_specialized_kernel_selection(used_ops_in_model, self.add_specialized_kernels)
+        self.assertEqual(selection, [True, False, False, False])
+
+    def test_compute_add_float_01_float_10(self) -> None:
+        used_ops_in_model: List[List[str]] = [
+            self.ops_in_model_yaml["add_float_01"],
+            self.ops_in_model_yaml["add_float_10"],
+        ]
+        selection = _compute_specialized_kernel_selection(used_ops_in_model, self.add_specialized_kernels)
+        self.assertEqual(selection, [True, True, False, False])
+
+    def test_compute_add_float_01_int01(self) -> None:
+        used_ops_in_model: List[List[str]] = [
+            self.ops_in_model_yaml["add_float_01"],
+            self.ops_in_model_yaml["add_int_01"],
+        ]
+        selection = _compute_specialized_kernel_selection(used_ops_in_model, self.add_specialized_kernels)
+        self.assertEqual(selection, [True, False, True, False])
+
+    def test_compute_add_must_use_fallback(self) -> None:
+        used_ops_in_model: List[List[str]] = [
+            self.ops_in_model_yaml["add_float_01"],
+            self.ops_in_model_yaml["add_double_01"],
+        ]
+        selection = _compute_specialized_kernel_selection(used_ops_in_model, self.add_specialized_kernels)
+        self.assertEqual(selection, [])
