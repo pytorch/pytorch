@@ -26,7 +26,7 @@ jobs:
           pwd
           ls tools
           ls tools/alerts
-          output=$("python tools/alerts/create_alerts.py")
+          output=$(python "tools/alerts/create_alerts.py")
           echo "uploading following alerts"
           echo "$output"
           echo "{script_output}={$output}" >> "$GITHUB_OUTPUT"
