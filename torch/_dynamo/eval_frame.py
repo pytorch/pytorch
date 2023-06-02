@@ -553,21 +553,23 @@ def optimize(
         dynamic=dynamic,
     )
 
+
 @dataclasses.dataclass
 class ExplainOutput:
     """
     This is the output of :func:`torch._dynamo.explain()
     There is no reason to create this class directly
     """
-    graph_count : int
-    graph_break_count : int
-    op_count : int
-    out_guards : List[_guards.Guard]
-    graphs : List[torch.fx.GraphModule]
-    ops_per_graph : List[torch.fx.Node]
-    break_reasons : str
-    compile_times : str
-    
+
+    graph_count: int
+    graph_break_count: int
+    op_count: int
+    out_guards: List[_guards.Guard]
+    graphs: List[torch.fx.GraphModule]
+    ops_per_graph: List[torch.fx.Node]
+    break_reasons: List[Any]  # TODO: Not sure if graph break is a type
+    compile_times: str
+
     def __str__(self):
         output = f"Graph Count: {self.graph_count}\n"
         output += f"Graph Break Count: {self.graph_break_count}\n"
@@ -583,8 +585,18 @@ class ExplainOutput:
             output += f"    Code List: {guard.code_list}\n"
             output += f"    Object Weakref: {guard.obj_weakref}\n"
             output += f"    Guarded Class Weakref: {guard.guarded_class_weakref}\n"
-        output += f"Graphs: {self.graphs}\n"
-        output += f"Ops per Graph: {self.ops_per_graph}\n"
+
+        # This looks really ugly so far so not sure how I feel about adding it
+        # output += "Graphs:\n"
+        # for graph in self.graphs:
+        #     output += "  " + graph.print_readable() + "\n"
+
+        output += "Ops per Graph:\n"
+        for idx, ops in enumerate(self.ops_per_graph):
+            output += f"  Ops {idx+1}:\n"
+            for op in ops:
+                output += f"    {op}\n"
+
         output += "Break Reasons:\n"
         for idx, break_reason in enumerate(self.break_reasons):
             output += f"  Break Reason {idx+1}:\n"
@@ -594,7 +606,6 @@ class ExplainOutput:
                 output += f"      {frame_summary}\n"
         output += f"Compile Times: {self.compile_times}\n"
         return output
-
 
 
 # TODO(voz): Consider making "explain" output alongside a run / part of a run
@@ -658,9 +669,8 @@ def explain(f, *args, **kwargs):
 
     break_reasons_str = f"Break Reasons:\n{formatted_list}"
 
-
     graph_break_count = graph_count - 1
-    compile_time = compile_times()
+    compile_time = compile_times(repr="str")
 
     # TODO(voz): Do we want a decorator for this?
     reset()
