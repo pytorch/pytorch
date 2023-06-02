@@ -39,12 +39,13 @@ def _get_split_args_default(split_node):
     input_kwarg = "tensor"
     split_size_kwarg = "split_size_or_sections"
     dim_kwarg = "dim"
+    default_dim_value = 0
     if split_node.op == "call_method":
         split_size_kwarg = "split_size"
     return (
         get_arg_value(split_node, 0, input_kwarg),
         get_arg_value(split_node, 1, split_size_kwarg),
-        get_arg_value(split_node, 2, dim_kwarg),
+        get_arg_value(split_node, 2, dim_kwarg) or default_dim_value,
     )
 
 
@@ -57,7 +58,7 @@ def normalize_split_base(match: Match, _get_split_args: Callable):
     graph = match.graph
     split_input, split_size, split_dim = _get_split_args(split_node)
     if split_input is None or split_dim is None or split_size is None:
-        log.warning("couldn't find split args")
+        log.info("couldn't find split args")
         return
     if "example_value" not in split_node.meta:
         log.warning("example value absent for node: %s", split_node)
@@ -103,6 +104,28 @@ def find_next_users(split_node):
             if getitem_user not in next_users:
                 next_users.append(getitem_user)
     return next_users
+
+
+@register_graph_pattern(
+    CallMethodVarArgs("squeeze", users=MULTIPLE),
+    pass_dict=normalize_split_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def normalize_squeeze_default(match: Match, *args, **kwargs):
+    squeeze_node = match.nodes[0]
+    squeeze_input = get_arg_value(squeeze_node, 0)
+    dim = get_arg_value(squeeze_node, 1, "dim")
+    with match.graph.inserting_after(squeeze_node):
+        if dim is None:
+            new_squeeze_node = match.graph.call_function(
+                torch.squeeze, args=(squeeze_input,)
+            )
+        else:
+            new_squeeze_node = match.graph.call_function(
+                torch.squeeze, args=(squeeze_input, dim)
+            )
+    squeeze_node.replace_all_uses_with(new_squeeze_node)
+    match.graph.erase_node(squeeze_node)
 
 
 class TorchSplit(CallFunction):

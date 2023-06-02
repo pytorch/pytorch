@@ -6,6 +6,7 @@ import torch
 
 import torch.cuda
 from torch._C._profiler import _ExperimentalConfig
+from torch._C import _get_privateuse1_backend_name
 
 from torch.autograd import (
     _disable_profiler,
@@ -170,6 +171,7 @@ class profile:
             enabled=True,
             *,
             use_cuda=False,
+            use_device=None,
             record_shapes=False,
             with_flops=False,
             profile_memory=False,
@@ -182,6 +184,7 @@ class profile:
         if not self.enabled:
             return
         self.use_cuda = use_cuda
+        self.use_device = use_device
         self.function_events: Optional[EventList] = None
         self.entered = False
         self.record_shapes = record_shapes
@@ -216,6 +219,22 @@ class profile:
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
+
+        if self.use_device:
+            if self.use_device == 'cuda':
+                # TODO:using 'use_device' instead of 'use_cuda' facilitates access by other devices
+                # and integrate it in subsequent pr.
+                pass
+            elif self.use_device == _get_privateuse1_backend_name():
+                if not use_kineto:
+                    assert self.use_cpu, "Legacy custombackend profiling requires use_cpu=True"
+                    self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
+                else:
+                    raise AssertionError(
+                        "Now, custombackend events does not support Kineto (use_kineto=False)"
+                    )
+            else:
+                raise AssertionError(f"{self.use_device} doesn't support profile.")
 
         assert len(self.kineto_activities) > 0, \
             "No activities specified for the profiler"

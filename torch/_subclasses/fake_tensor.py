@@ -23,6 +23,7 @@ from torch._prims_common import (
     is_integer_dtype,
 )
 from torch._subclasses.meta_utils import MetaConverter
+from torch._utils import render_call
 from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -558,13 +559,17 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
-def index_put(fake_mode, func, *args, **kwargs):
+@register_op_impl(aten.copy.default)
+@register_op_impl(aten.slice_scatter.default)
+def multi_device_op_default(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
 
-# same with index_put, but return the input
+# same with multi_device_op_default, but return the input
 @register_op_impl(aten.index_put_.default)
-def index_put_(fake_mode, func, *args, **kwargs):
+@register_op_impl(aten.copy.out)
+@register_op_impl(aten.slice_scatter.out)
+def multi_device_op_out(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
@@ -939,6 +944,10 @@ class FakeTensor(torch.Tensor):
             init_cuda_context()
             if device.index is None:
                 device = torch.device(f"cuda:{torch.cuda.current_device()}")
+
+        # normalize hpu device.
+        if device.type == "hpu" and device.index is None:
+            device = torch.device(f"hpu:{torch.hpu.current_device()}")
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
@@ -1417,12 +1426,12 @@ class FakeTensorMode(TorchDispatchMode):
             if not isinstance(x, FakeTensor):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
-                        f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {func}(*{args}, **{kwargs})"
+                        f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
                 if not self.allow_non_fake_inputs:
                     raise Exception(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
-                        f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
+                        f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
                     )
 
                 x = converter(self, x)
