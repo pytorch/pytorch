@@ -825,7 +825,7 @@ def dict_param_key_ids(value):
 
 
 def dict_const_keys(value):
-    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
+    return {k for k in value.keys() if not isinstance(k, (torch.nn.Parameter, torch.Tensor))}
 
 
 def dict_const_keys_repr(const_keys, *, local):
