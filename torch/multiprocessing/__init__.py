@@ -34,7 +34,7 @@ __all__mp = [
 globals().update((name, getattr(_default_context, name)) for name in __all__ctx)
 globals().update((name, getattr(mp, name)) for name in __all__mp)
 
-__all__ += __all__ctx + __all__mp
+__all__ += __all__ctx + __all__mp  # noqa: PLE0605 type: ignore[attr-defined]
 
 # This call adds a Linux specific prctl(2) wrapper function to this module.
 # See https://github.com/pytorch/pytorch/pull/14391 for more information.
