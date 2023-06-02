@@ -204,6 +204,23 @@ def xla_is_flaky_rules() -> List[FlakyRule]:
     ]
 
 
+def xla_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+    return [
+        MergeRule(
+            name=" OSS CI / pytorchbot / XLA",
+            patterns=[".github/ci_commit_pins/xla.txt"],
+            approved_by=["pytorchbot"],
+            mandatory_checks_name=[
+                "Lint",
+                "EasyCLA",
+                "pull / linux-bionic-py3_8-clang8-xla / build",
+                "pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.4xlarge)",
+            ],
+            ignore_flaky_failures=False,
+        ),
+    ]
+
+
 def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
     return []
 
@@ -559,6 +576,7 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(failed) == 0)
 
     @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
+    @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:
         """Regression test for https://github.com/pytorch/test-infra/issues/4126"""
         pr = GitHubPR("pytorch", "pytorch", 100369)

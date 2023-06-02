@@ -106,6 +106,28 @@ def find_next_users(split_node):
     return next_users
 
 
+@register_graph_pattern(
+    CallMethodVarArgs("squeeze", users=MULTIPLE),
+    pass_dict=normalize_split_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def normalize_squeeze_default(match: Match, *args, **kwargs):
+    squeeze_node = match.nodes[0]
+    squeeze_input = get_arg_value(squeeze_node, 0)
+    dim = get_arg_value(squeeze_node, 1, "dim")
+    with match.graph.inserting_after(squeeze_node):
+        if dim is None:
+            new_squeeze_node = match.graph.call_function(
+                torch.squeeze, args=(squeeze_input,)
+            )
+        else:
+            new_squeeze_node = match.graph.call_function(
+                torch.squeeze, args=(squeeze_input, dim)
+            )
+    squeeze_node.replace_all_uses_with(new_squeeze_node)
+    match.graph.erase_node(squeeze_node)
+
+
 class TorchSplit(CallFunction):
     """
     Matches a call to torch.split if it is in a normalized form. Ensures that all users of
