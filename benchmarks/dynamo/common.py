@@ -249,7 +249,6 @@ CI_SKIP[CI("inductor", training=True)] = [
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
-    "cm3leon_generate",  # Could not validate constraint UnspecConstraint
     "hf_T5_generate",  # Could not validate constraint UnspecConstraint
     "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
 ]
