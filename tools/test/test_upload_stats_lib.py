@@ -1,7 +1,7 @@
 import decimal
 import inspect
 import unittest
-from typing import Any
+from typing import Any, Dict
 from unittest import mock
 
 from tools.stats.upload_stats_lib import emit_metric
@@ -65,9 +65,9 @@ class TestUploadStats(unittest.TestCase):
         }
 
         # Preserve the metric emitted
-        emitted_metric = None
+        emitted_metric: Dict[str:Any] = {}
 
-        def mock_put_item(Item: Any) -> None:
+        def mock_put_item(Item: Dict[str:Any]) -> None:
             nonlocal emitted_metric
             emitted_metric = Item
 

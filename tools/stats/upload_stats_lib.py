@@ -305,7 +305,6 @@ def emit_metric(
     calling_module = inspect.getmodule(calling_frame).__name__  # type: ignore[union-attr]
     calling_function = calling_frame_info.function
 
-
     try:
         reserved_metrics = {
             "metric_name": metric_name,
