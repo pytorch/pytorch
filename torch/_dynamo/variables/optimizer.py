@@ -52,8 +52,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 return arg.as_python_constant()
             elif isinstance(arg, ListVariable) and not arg.items:
                 return []
-            elif isinstance(arg, ConstDictVariable) and isinstance(
-                arg.source, GetItemSource
+            elif (
+                isinstance(arg, ConstDictVariable)
+                and isinstance(arg.source, GetItemSource)
+                and isinstance(arg.source.base, AttrSource)
+                and arg.source.base.member == "param_groups"
             ):
                 return self.value.param_groups[arg.source.index]
 
