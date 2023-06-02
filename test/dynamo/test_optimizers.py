@@ -35,7 +35,7 @@ def make_test(optim_cls, exp_graph_count=1, closure=None, **kwargs):
         else:
             fn = opt.step
 
-        _, _, graphs, _, _, _ = torch._dynamo.explain(fn)
+        graphs = torch._dynamo.explain(fn).graphs
 
         self.assertEqual(exp_graph_count, len(graphs))
 
