@@ -647,6 +647,25 @@ class Reduction(Loops):
         reduction_type,
         reduction_numel,
     ):
+        def _is_static(x):
+            return isinstance(x, (int, sympy.Integer))
+
+        should_split = (
+            is_triton(device)
+            and reduction_type
+            not in {
+                "argmax",
+                "argmin",
+                "var_unnormalized",
+            }
+            and config.split_reductions
+            and all(_is_static(r) for r in ranges)
+            and all(_is_static(r) for r in reduction_ranges)
+            and _is_static(reduction_numel)
+        )
+        if not should_split:
+            return ReductionHint.DEFAULT, 1
+
         num_sm = get_device_properties(device).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
@@ -915,7 +934,7 @@ class Reduction(Loops):
 
         if reduction_numel == 1:
             # this reduction is actually a pointwise op
-            if reduction_type in ("argmin", "argmax"):
+            if reduction_type in ("argmin", "argmax", "var_unnormalized"):
 
                 def fn(index):
                     return ops.constant(0, dst_dtype)
@@ -943,30 +962,25 @@ class Reduction(Loops):
                 ranges,
             )
 
-        split_reduction = (
-            is_triton(device)
-            and reduction_type
-            not in {
-                "argmax",
-                "argmin",
-                "var_unnormalized",
-            }
-            and config.split_reductions
+        # triton doesn't support reduce to single element well, so break it up
+        hint, split = cls.num_splits(
+            device,
+            dst_dtype,
+            src_dtype,
+            inner_fn,
+            ranges,
+            reduction_ranges,
+            reduction_type,
+            reduction_numel,
         )
-        if split_reduction:
-            # TODO(voz): dedup with sizevar util introduced in other PR
-            def _is_static(x):
-                return isinstance(x, (int, sympy.Integer))
-
-            split_reduction = (
-                all(_is_static(r) for r in ranges)
-                and all(_is_static(r) for r in reduction_ranges)
-                and _is_static(reduction_numel)
-            )
-
-        if split_reduction:
+        # intermediate reduction in split can contain complex indexing,
+        # and num_splits will fail to correctly set the hint
+        # reuse the passed hint if available
+        if reduction_hint == ReductionHint.DEFAULT:
+            reduction_hint = hint
+        if split > 1:
             # triton doesn't support reduce to single element well, so break it up
-            hint, split = cls.num_splits(
+            return cls.create_multilayer(
                 device,
                 dst_dtype,
                 src_dtype,
@@ -974,26 +988,9 @@ class Reduction(Loops):
                 ranges,
                 reduction_ranges,
                 reduction_type,
-                reduction_numel,
+                split,
+                reduction_hint,
             )
-            # intermediate reduction in split can contain complex indexing,
-            # and num_splits will fail to correctly set the hint
-            # reuse the passed hint if available
-            if reduction_hint == ReductionHint.DEFAULT:
-                reduction_hint = hint
-            if split > 1:
-                # triton doesn't support reduce to single element well, so break it up
-                return cls.create_multilayer(
-                    device,
-                    dst_dtype,
-                    src_dtype,
-                    inner_fn,
-                    ranges,
-                    reduction_ranges,
-                    reduction_type,
-                    split,
-                    reduction_hint,
-                )
 
         return TensorBox.create(
             Reduction(

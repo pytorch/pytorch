@@ -110,6 +110,14 @@ RTYPE_TO_CPP = {
     "any": "||",
     "var_unnormalized": "welford",
 }
+VECTORIZABLE_RTYPES = {
+    "max",
+    "min",
+    "sum",
+    "prod",
+    "xor_sum",
+    "var_unnormalized",
+}
 
 PYTHON_TO_CPP = {
     "int": "long",
@@ -1168,7 +1176,6 @@ class CppKernel(Kernel):
 
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
-            member_name = ".index" if argmax_or_argmin else ""
             self.reduction_suffix.writeline(
                 DeferredLine(name, f"{var}[{cexpr_index(index)}] = {tmpvar};")
             )
@@ -1920,8 +1927,7 @@ class CppVecKernelChecker(CppVecKernel):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type
-            in ["max", "min", "sum", "prod", "xor_sum", "var_unnormalized"]
+            and reduction_type in VECTORIZABLE_RTYPES
         ):
             pass
         else:
