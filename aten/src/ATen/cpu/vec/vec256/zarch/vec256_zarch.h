@@ -13,6 +13,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/complex.h>
 
+#define SLEEF_MEMORY_WORKAROUND
+
 namespace at {
 namespace vec {
 
@@ -701,27 +703,8 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return set_inner<1, size()>(a, b, count);
   }
 
-  const ElementType& operator[](int idx) const {
-    if (idx < size() / 2)
-    {
-      return _vec0[idx];
-    }
-    else
-    {
-      return _vec1[idx - (size() / 2)];
-    }
-  }
-
-  ElementType& operator[](int idx) {
-    if (idx < size() / 2)
-    {
-      return _vec0[idx];
-    }
-    else
-    {
-      return _vec1[idx - (size() / 2)];
-    }
-  }
+  const ElementType& operator[](int idx) const = delete;
+  ElementType& operator[](int idx) = delete;
 
   Vectorized<T> C10_ALWAYS_INLINE operator+(const Vectorized<T>& other) const {
     return Vectorized<T>{_vec0 + other._vec0, _vec1 + other._vec1};
@@ -752,6 +735,51 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   Vectorized<T> C10_ALWAYS_INLINE operator^(const Vectorized<T>& other) const {
     return Vectorized<T>{
         (vtype)(vecb0() ^ other.vecb0()), (vtype)(vecb1() ^ other.vecb1())};
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator<<(const Vectorized<T> &other) const {
+    constexpr ElementType max_shift = sizeof(ElementType) * CHAR_BIT;
+
+    ElementType a_array[Vectorized<T>::size()];
+    ElementType b_array[Vectorized<T>::size()];
+    ElementType c_array[Vectorized<T>::size()];
+
+    store(a_array);
+    other.store(b_array);
+
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      T shift = b_array[i];
+      if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+        c_array[i] = 0;
+      } else {
+        c_array[i] = static_cast<std::make_unsigned_t<T>>(a_array[i]) << shift;
+      }
+   }
+
+    return loadu(c_array);
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator>>(const Vectorized<T> &other) const {
+    // right shift value to retain sign bit for signed and no bits for unsigned
+    constexpr ElementType max_shift = sizeof(T) * CHAR_BIT - std::is_signed_v<T>;
+
+    ElementType a_array[Vectorized<T>::size()];
+    ElementType b_array[Vectorized<T>::size()];
+    ElementType c_array[Vectorized<T>::size()];
+
+    store(a_array);
+    other.store(b_array);
+
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      T shift = b_array[i];
+      if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+        c_array[i] = a_array[i] >> max_shift;
+      } else {
+        c_array[i] = a_array[i] >> shift;
+      }
+    }
+
+    return loadu(c_array);
   }
 
   Vectorized<T> _not() const {
@@ -1039,20 +1067,32 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   }
 
   Vectorized<T> sin() const {
+#ifndef SLEEF_MEMORY_WORKAROUND
     return mapSleef(Sleef_sinf4_u10, Sleef_sind2_u10);
+#else
+    return mapOrdinary(std::sin);
+#endif
   }
   Vectorized<T> sinh() const {
     return mapSleef(Sleef_sinhf4_u10, Sleef_sinhd2_u10);
   }
   Vectorized<T> cos() const {
+#ifndef SLEEF_MEMORY_WORKAROUND
     return mapSleef(Sleef_cosf4_u10, Sleef_cosd2_u10);
+#else
+    return mapOrdinary(std::cos);
+#endif
   }
   Vectorized<T> cosh() const {
     return mapSleef(Sleef_coshf4_u10, Sleef_coshd2_u10);
   }
 
   Vectorized<T> tan() const {
+#ifndef SLEEF_MEMORY_WORKAROUND
     return mapSleef(Sleef_tanf4_u10, Sleef_tand2_u10);
+#else
+    return mapOrdinary(std::tan);
+#endif
   }
   Vectorized<T> tanh() const {
     return mapSleef(Sleef_tanhf4_u10, Sleef_tanhd2_u10);
@@ -1104,12 +1144,28 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return mapOrdinary(calc_i0e);
   }
 
+  /* Propagates NaN if either input is a NaN. */
   Vectorized<T> minimum(const Vectorized<T>& other) const {
-    return {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
+    Vectorized<T> tmp = {vec_min(_vec0, other._vec0), vec_min(_vec1, other._vec1)};
+    tmp = blendv(tmp, *this, isnan());
+    return blendv(tmp, other, other.isnan());
   }
 
+  /* Propagates NaN if either input is a NaN. */
   Vectorized<T> maximum(const Vectorized<T>& other) const {
-    return {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
+    Vectorized<T> tmp = {vec_max(_vec0, other._vec0), vec_max(_vec1, other._vec1)};
+    tmp = blendv(tmp, *this, isnan());
+    return blendv(tmp, other, other.isnan());
+  }
+
+  /* Does not propagate NaN */
+  Vectorized<T> clamp_min(const Vectorized<T>& min) const {
+    return Vectorized<T> {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
+  }
+
+  /* Does not propagate NaN */
+  Vectorized<T> clamp_max(const Vectorized<T>& max) const {
+    return Vectorized<T> {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
   }
 
   template <
@@ -1232,21 +1288,21 @@ inline Vectorized<uint8_t> operator~(const Vectorized<uint8_t>& a) {
 #define DEFINE_CLAMP_MAXMIN_FUNCS(typex)                          \
   DEFINE_MAXMIN_FUNCS(typex)                                      \
   template <>                                                     \
-  Vectorized<typex> C10_ALWAYS_INLINE clamp(                      \
-      const Vectorized<typex>& a,                                 \
-      const Vectorized<typex>& min,                               \
-      const Vectorized<typex>& max) {                             \
-    return minimum(maximum(a, min), max);                         \
-  }                                                               \
-  template <>                                                     \
   Vectorized<typex> C10_ALWAYS_INLINE clamp_min(                  \
       const Vectorized<typex>& a, const Vectorized<typex>& min) { \
-    return maximum(a, min);                                       \
+    return a.clamp_min(min);                                      \
   }                                                               \
   template <>                                                     \
   Vectorized<typex> C10_ALWAYS_INLINE clamp_max(                  \
       const Vectorized<typex>& a, const Vectorized<typex>& max) { \
-    return minimum(a, max);                                       \
+    return a.clamp_max(max);                                      \
+  }                                                               \
+  template <>                                                     \
+  Vectorized<typex> C10_ALWAYS_INLINE clamp(                      \
+      const Vectorized<typex>& a,                                 \
+      const Vectorized<typex>& min,                               \
+      const Vectorized<typex>& max) {                             \
+    return clamp_min(clamp_max(a, max), min);                     \
   }
 
 DEFINE_CLAMP_MAXMIN_FUNCS(int8_t)
@@ -1257,21 +1313,21 @@ DEFINE_CLAMP_MAXMIN_FUNCS(int64_t)
 DEFINE_CLAMP_MAXMIN_FUNCS(float)
 DEFINE_CLAMP_MAXMIN_FUNCS(double)
 
+namespace { /* unnamed namespace */
+
 #if !defined(vec_float) || __ARCH__ < 13
 #warning \
     "float->int and int->float conversion is simulated. compile for z15 for improved performance"
-ZSimdVect<float> vec_int_flt(const ZSimdVect<int> x) {
+inline ZSimdVect<float> vec_int_flt(const ZSimdVect<int> x) {
   return ZSimdVect<float>{float(x[0]), float(x[1]), float(x[2]), float(x[3])};
 }
-ZSimdVect<int> vec_flt_int(const ZSimdVect<float> x) {
+inline ZSimdVect<int> vec_flt_int(const ZSimdVect<float> x) {
   return ZSimdVect<int>{int(x[0]), int(x[1]), int(x[2]), int(x[3])};
 }
 #else
 #define vec_int_flt vec_float
 #define vec_flt_int vec_signed
 #endif
-
-namespace { /* unnamed namespace */
 
 Vectorized<float> convert_to_float(const Vectorized<int32_t>& x) {
   return {vec_int_flt(x.vec0()), vec_int_flt(x.vec1())};
@@ -1524,11 +1580,11 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
 
   static Vectorized<T> C10_ALWAYS_INLINE
   loadu(const void* ptr, int count = size()) {
-    return Vectorized<T>{vinner_type::loadu(ptr)};
+    return Vectorized<T>{vinner_type::loadu(ptr, count)};
   }
 
   void C10_ALWAYS_INLINE store(void* ptr, int count = size()) const {
-    _vec.store(ptr);
+    _vec.store(ptr, count);
   }
 
   Vectorized<T> relu(Vectorized<T> zero_point) const {
@@ -1788,6 +1844,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
   }
   Vectorized<T> C10_ALWAYS_INLINE le(const Vectorized<T>& other) const {
     return Vectorized<T>{_vec.le(other._vec)};
+  }
+
+  Vectorized<T> clamp_min(const Vectorized<T>& min) const {
+    return Vectorized<T>{_vec.clamp_min(min._vec)};
+  }
+
+  Vectorized<T> clamp_max(const Vectorized<T>& max) const {
+    return Vectorized<T>{_vec.clamp_max(max._vec)};
   }
 
   Vectorized<T> minimum(const Vectorized<T>& other) const {
@@ -2300,6 +2364,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
 
   Vectorized<T> exp2() const {
     return mapOrdinary(exp2_impl);
+  }
+
+  Vectorized<T> expm1() const {
+    return mapOrdinary(std::expm1);
   }
 
   Vectorized<T> log() const {

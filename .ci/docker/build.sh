@@ -88,11 +88,25 @@ _UCC_COMMIT=7cb07a76ccedad7e56ceb136b865eb9319c258ea
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7)
+  pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9)
     CUDA_VERSION=12.1.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=7
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc9)
+    CUDA_VERSION=11.8.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -206,6 +220,7 @@ case "$image" in
     KATEX=yes
     CONDA_CMAKE=yes
     TRITON=yes
+    DOCS=yes
     ;;
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
@@ -321,6 +336,7 @@ docker build \
        --build-arg "CONDA_CMAKE=${CONDA_CMAKE}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "ONNX=${ONNX}" \
+       --build-arg "DOCS=${DOCS}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
