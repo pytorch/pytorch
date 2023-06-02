@@ -291,6 +291,8 @@ class Optimizer:
 
     @staticmethod
     def _group_tensors_by_device_and_dtype(tensorlistlist, with_indices=False):
+        """Groups a list of lists of tensors by device and dtype.
+        Skips this step if we are compiling since this will occur during inductor lowering."""
         if is_compiling():
             if with_indices:
                 indices = list(range(len(tensorlistlist[0])))
