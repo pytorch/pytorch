@@ -31,9 +31,9 @@ struct LpNormFunctor {
       opmath_t* output_per_tensor,
       const int max_chunks_per_tensor
   ) {
-    int tensor_loc = tl.block_to_tensor[blockIdx.x];
-    int chunk_idx = tl.block_to_chunk[blockIdx.x];
-    int n = tl.numel_for_tensor[tensor_loc];
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    auto n = tl.numel_for_tensor[tensor_loc];
 
     T* x = (T*)tl.addresses[0][tensor_loc];
     x += chunk_idx * chunk_size;
@@ -48,7 +48,7 @@ struct LpNormFunctor {
     }
 
     if (n % kILP == 0 && (chunk_size & kILP) == 0 && is_aligned(x)) {
-      for (int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
+      for (int64_t i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
         // load
         load_store(r_x, x, 0, i_start);
 #pragma unroll
@@ -58,7 +58,7 @@ struct LpNormFunctor {
         }
       }
     } else {
-      for (int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
+      for (int64_t i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           int i = i_start + threadIdx.x + ii * blockDim.x;
@@ -110,7 +110,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
   } else if (ord.isFloatingPoint()) {
     p = ord.to<double>();
   } else {
-    AT_ERROR("foreach_tensor_norm_cuda expects ord to be integer or float");
+    TORCH_CHECK(false, "foreach_tensor_norm_cuda expects ord to be integer or float");
   }
   check_foreach_api_restrictions(tensors);
   const bool has_int_or_complex = std::any_of(tensors.begin(), tensors.end(), [](const auto & t) {
@@ -174,7 +174,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(TensorList tensors, const Scalar& o
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   } else {
-    AT_ERROR("foreach_tensor_norm_cuda fast path got unexpected ord value: ", p);
+    TORCH_CHECK(false, "foreach_tensor_norm_cuda fast path got unexpected ord value: ", p);
   }
 
   std::vector<Tensor> result;

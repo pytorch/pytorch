@@ -20,6 +20,7 @@ Basics of using torch.profiler and viewing traces
 * Use :code:`prof.export_chrome_trace("trace.json")` to export the profiling artifact.
 
 .. code-block:: python
+
     import torch
     from torchvision.models import resnet18
 
@@ -68,6 +69,7 @@ Working around CUDA Graph profiling issues
 When CUDA graphs are enabled, some cuda configurations (driver version under 525.85.12 or CUDA < 12)  can encounter issues between the profiling tools and CUDA graphs. To fix these issues, add an empty profiling context at the top of your program:
 
 .. code-block:: python
+
     import torch
 
     torch.profiler._utils._init_for_cuda_graphs()
@@ -84,6 +86,7 @@ Note: roughly the same information can also be obtained in non-graphical format 
 See an example below:
 
 .. code-block:: python
+
     import torch
     from torchvision.models import resnet18
 
@@ -132,6 +135,7 @@ When gradients are required for any inputs, graph breaks are easy to identify: e
 See the synthetic example below for a demonstration:
 
 .. code-block:: python
+
     import torch
     import torch._dynamo
 
