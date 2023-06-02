@@ -203,14 +203,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return received_cuda_;
   }
 
-  impl::PyObjectSlot* pyobj_slot() {
-    return &pyobj_slot_;
-  }
-
-  const impl::PyObjectSlot* pyobj_slot() const {
-    return &pyobj_slot_;
-  }
-
  private:
   DataPtr data_ptr_;
   SymInt size_bytes_;

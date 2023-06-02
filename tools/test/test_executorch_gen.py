@@ -4,8 +4,6 @@ import unittest
 from typing import Dict
 
 import yaml
-
-from torchgen.executorch.model import ETKernelIndex
 from torchgen.gen import LineLoader
 
 from torchgen.gen_executorch import gen_functions_declarations, translate_native_yaml
@@ -167,7 +165,6 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
             )
             for k in backend_indices
         ]
-        self.kernel_index = ETKernelIndex.from_backend_indices(backend_indices)
 
     def test_operators_with_different_namespaces_are_grouped_correctly(self) -> None:
         declarations = gen_functions_declarations(
@@ -175,7 +172,7 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
                 self.custom_1_native_function,
                 self.custom_2_native_function,
             ],
-            kernel_index=self.kernel_index,
+            static_dispatch_idx=self.static_dispatch_idx,
             selector=SelectiveBuilder.get_nop_selector(),
             use_aten_lib=False,
         )
@@ -212,7 +209,7 @@ TORCH_API inline bool op_2(torch::executor::RuntimeContext & context) {
             native_functions=[
                 self.custom_1_native_function,
             ],
-            kernel_index=self.kernel_index,
+            static_dispatch_idx=self.static_dispatch_idx,
             selector=SelectiveBuilder.get_nop_selector(),
             use_aten_lib=True,
         )
