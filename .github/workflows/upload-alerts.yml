@@ -29,7 +29,7 @@ jobs:
           echo "{script_output}={$output}" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
       - name: Upload alerts
-        uses: pytorch/test-infra/.github/actions/upload-alerts@ba499cb1
+        uses: pytorch/test-infra/.github/actions/upload-alerts@b04d95f1
         with:
           alerts: ${{ steps.alert_creation_step.outputs.script_output }}
           organization: "pytorch"
