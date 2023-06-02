@@ -8,7 +8,7 @@ torch.profiler is helpful for understanding the performance of your program at a
 
 To understand kernel-level performance, other toosl exist. NVIDIA's ncu tool can be used, or :ref:`inductor's profiling tools<TorchInductor GPU Profiling>``.
 
-See also the :xref:`general pytorch profiler guide <https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html>`.
+See also the :ref:`general pytorch profiler guide <https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html>`.
 
 Basics of using torch.profiler and viewing traces
 -------------------------------------------------
