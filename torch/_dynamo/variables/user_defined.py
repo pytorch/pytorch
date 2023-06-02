@@ -404,9 +404,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__func__, self, source=source, **options
             )
-        elif isinstance(subobj, (types.FunctionType, types.MethodType)):
+        elif isinstance(subobj, types.FunctionType) or (
+            isinstance(subobj, types.MethodType)
+            and isinstance(self.value, torch.nn.Module)
+        ):
             if isinstance(subobj, types.MethodType):
                 func = subobj.__func__
+                source = AttrSource(source, "__func__") if source else None
             else:
                 assert isinstance(subobj, types.FunctionType)
                 func = subobj
