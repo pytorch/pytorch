@@ -239,11 +239,27 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def mul(a, b):
+        def zero(x):
+            if x.is_bool:
+                return sympy.false
+            else:
+                return 0
+
         def safe_mul(a, b):
             if a == 0:
                 return 0
             elif b == 0:
                 return 0
+            # TODO this is not the right fix, but let's see if it unblocks
+            elif a == sympy.true:
+                return b
+            elif b == sympy.true:
+                return a
+            elif a == sympy.false:
+                return zero(b)
+            elif b == sympy.false:
+                return zero(a)
+
             return a * b
 
         return ValueRanges.coordinatewise_monotone_map(a, b, safe_mul)
