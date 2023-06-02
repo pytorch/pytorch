@@ -424,6 +424,20 @@ class TensorVariable(VariableTracker):
         elif name == "__len__":
             return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":
+            if (
+                not config.capture_dynamic_output_shape_ops
+                # NB: the bool tensor and the requires_grad tensor are
+                # never the same tensor!
+                and any(
+                    isinstance(a, TensorVariable)
+                    and a.dtype in (torch.bool, torch.int8)
+                    for a in args
+                )
+                and any(isinstance(a, TensorVariable) and a.requires_grad for a in args)
+            ):
+                unimplemented(
+                    "boolean masking setitem backwards requires dynamic shapes"
+                )
             tx.output.guards.update(options["guards"])
             tx.output.create_proxy(
                 "call_function",
