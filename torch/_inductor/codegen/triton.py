@@ -2044,7 +2044,6 @@ class TritonScheduling:
         self.scheduler.free_buffers()
 
     def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
-
         def current_reduction_nodes(nodes):
             return itertools.takewhile(lambda n: n is not DisableReduction, nodes)
 
