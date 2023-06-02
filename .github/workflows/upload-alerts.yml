@@ -1,0 +1,38 @@
+# upload alerts every 10 minutes
+
+name: Upload Alerts to AWS/Rockset
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
+
+jobs:
+  create-alerts:
+    runs-on: ubuntu-20.04
+    outputs:
+      alerts: ${{ steps.alert_creation_step.outputs.script-output }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+
+      - name: Install Python Packages
+        run: |
+          pip3 install rockset==1.0.3
+          pip3 install boto3==1.19.12
+
+      - name: Create alerts
+        run: |
+          output=$(python "tools/alerts/create_alerts.py")
+          echo "uploading following alerts"
+          echo "$output"
+          echo "script-output=$output" >> "$GITHUB_OUTPUT"
+        id: alert_creation_step
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
