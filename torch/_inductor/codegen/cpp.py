@@ -110,6 +110,14 @@ RTYPE_TO_CPP = {
     "any": "||",
     "var_unnormalized": "welford",
 }
+VECTORIZABLE_RTYPES = {
+    "max",
+    "min",
+    "sum",
+    "prod",
+    "xor_sum",
+    "var_unnormalized",
+}
 
 PYTHON_TO_CPP = {
     "int": "long",
@@ -1923,8 +1931,7 @@ class CppVecKernelChecker(CppVecKernel):
         if (
             dtype == torch.float
             and src_dtype == torch.float
-            and reduction_type
-            in ["max", "min", "sum", "prod", "xor_sum", "var_unnormalized"]
+            and reduction_type in VECTORIZABLE_RTYPES
         ):
             pass
         else:

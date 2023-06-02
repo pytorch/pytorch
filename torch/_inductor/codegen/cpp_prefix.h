@@ -46,7 +46,7 @@ struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 #endif
 
 template <typename T>
-Welford<T> welford_combine(Welford<T> a, Welford<T> b) {
+Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
   if constexpr (!IsVecType<T>::value) {
     if (a.weight == 0) {
       return b;
@@ -67,7 +67,7 @@ Welford<T> welford_combine(Welford<T> a, Welford<T> b) {
 }
 
 template <typename T>
-Welford<T> welford_combine(Welford<T> acc, T data) {
+Welford<T> welford_combine(const Welford<T> &acc, T data) {
   // Add a single data point
   auto delta = data - acc.mean;
   auto new_weight = acc.weight + T(1);
