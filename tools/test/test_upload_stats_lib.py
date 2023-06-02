@@ -47,8 +47,7 @@ class TestUploadStats(unittest.TestCase):
         # pytest
         current_module = inspect.getmodule(inspect.currentframe()).__name__  # type: ignore[union-attr]
 
-        expected_emit = {
-            "dynamo_key": f"metric_name/{REPO}/{WORKFLOW}/{BUILD_ENV}/{JOB}/{TEST_CONFIG}/{RUN_ID}/{RUN_NUMBER}/{RUN_ATTEMPT}",
+        emit_should_include = {
             "metric_name": "metric_name",
             "calling_file": "test_upload_stats_lib.py",
             "calling_module": current_module,
@@ -65,10 +64,18 @@ class TestUploadStats(unittest.TestCase):
             "float_number": decimal.Decimal(str(32.34)),
         }
 
+        # Preserve the metric emitted
+        emitted_metric = None
+
+        def mock_put_item(Item: Any) -> None:
+            nonlocal emitted_metric
+            emitted_metric = Item
+
+        mock_resource.return_value.Table.return_value.put_item = mock_put_item
+
         emit_metric("metric_name", metric)
 
-        mock_table = mock_resource.return_value.Table.return_value
-        mock_table.put_item.assert_called_once_with(Item=expected_emit)
+        self.assertDictEqual(emitted_metric | emit_should_include, emitted_metric)
 
     @mock.patch("boto3.resource")
     def test_blocks_emission_if_reserved_keyword_used(self, mock_resource: Any) -> None:

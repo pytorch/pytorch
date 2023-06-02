@@ -4,6 +4,7 @@ import inspect
 import io
 import json
 import os
+import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -297,17 +298,6 @@ def emit_metric(
         EnvVarMetric("run_attempt", "GITHUB_RUN_ATTEMPT", type_conversion_fn=int),
     ]
 
-    dynamo_key = "/".join(
-        [
-            metric_name,
-            *[
-                str(metric.value())
-                for metric in env_var_metrics
-                if metric.value() is not None
-            ],
-        ]
-    )
-
     # Use info about the function that invoked this one as a namespace and a way to filter metrics.
     calling_frame = inspect.currentframe().f_back  # type: ignore[union-attr]
     calling_frame_info = inspect.getframeinfo(calling_frame)  # type: ignore[arg-type]
@@ -316,13 +306,21 @@ def emit_metric(
     calling_function = calling_frame_info.function
 
     reserved_metrics = {
-        "dynamo_key": dynamo_key,
         "metric_name": metric_name,
         "calling_file": calling_file,
         "calling_module": calling_module,
         "calling_function": calling_function,
         **{m.name: m.value() for m in env_var_metrics},
     }
+
+    reserved_metrics["dynamo_key"] = "_".join(
+        [
+            reserved_metrics[
+                "metric_name"
+            ],  # to derisk chance of a uuid1 name collision
+            uuid.uuid1().hex,
+        ]
+    )
 
     # Ensure the metrics dict doesn't contain any reserved keys
     for key in reserved_metrics.keys():
