@@ -11,10 +11,12 @@ import torch
 from ._memory_viz import _frames_fmt, _block_extra
 import atexit
 import logging
-
+logger =  logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 def observe_garbage(observer):
     enabled = True
     def disable():
+        logger.info("atexit: disabling garbage observer")
         # when GC runs during exit, things like `sys` will already be unloaded
         # so we have to disable the callback to avoid hitting errors.
         nonlocal enabled
@@ -22,18 +24,23 @@ def observe_garbage(observer):
     atexit.register(disable)
     def gc_callback(phase, info):
         nonlocal enabled
+        logger.info(f"observe_garbage callback: phase={phase} enabled={enabled}")
         if not enabled:
             return
         if phase == "start":
             gc.set_debug(gc.DEBUG_SAVEALL)
+            logger.info(f"Running GC with SAVEALL.")
         elif phase == "stop":
+            logger.info(f"GC with SAVEALL finished.")
             orig_trace = sys.getprofile()
-            self_return = False
+            self_return = [False]
             def do_collect(*args, **kwargs):
-                nonlocal self_return, enabled
-                if not self_return:
-                    self_return = True
+                nonlocal enabled
+                if not self_return[0]:
+                    logger.info(f"do_collect profiler waiting for observe garbage to return {self_return}")
+                    self_return[0] = True
                 else:
+                    logger.info("do_collect running outside of GC hook")
                     sys.setprofile(orig_trace)
                     enabled = False
                     try:
@@ -43,16 +50,26 @@ def observe_garbage(observer):
                         # that stuff. So we have to now force gc at the highest level here,
                         # report all of what we found, _then_ we can free it up.
                         if info['generation'] != 2:
+                            logger.info("Running full GC to make sure we have all objects")
                             gc.collect()
+                            logger.info("Finished running full GC")
+                        logger.info("Calling the observer")
                         observer(gc.garbage)
                         gc.garbage.clear()
+                        logger.info("Calling the real GC")
                         gc.set_debug(0)
                         # no clean up for real
+                        before = torch.cuda.memory_allocated()
                         gc.collect()
+                        after = torch.cuda.memory_allocated()
+                        if before != after:
+                            logger.warn(f"CUDA Memory changed during GC {before - after}")
+                        logger.info("Real GC is finished")
                     finally:
                         enabled = True
                 if orig_trace is not None:
                     return orig_trace(*args, **kwargs)
+            logger.info(f"Adding do_collect setprofile callback.")
             sys.setprofile(do_collect)
 
     gc.callbacks.append(gc_callback)
@@ -404,6 +421,7 @@ def observe_tensor_cycles(callback):
     def observer(garbage):
         if garbage:
             if not any(is_cuda_tensor(obj) for obj in garbage):
+                logger.info("No CUDA Tensors found in garbage")
                 return
             callback(to_html(create_graph(garbage)))
     observe_garbage(observer)
@@ -413,5 +431,5 @@ def warn_tensor_cycles():
     def write_and_log(html):
         with NamedTemporaryFile('w', suffix='.html', delete=False) as f:
             f.write(html)
-            logging.warn(f'Reference cycle includes a CUDA Tensor see visualization of cycle {f.name}')
+            logger.warn(f'Reference cycle includes a CUDA Tensor see visualization of cycle {f.name}')
     observe_tensor_cycles(write_and_log)
