@@ -898,9 +898,7 @@ class TritonKernel(Kernel):
         return free_symbol_startswith(index, "tmp")
 
     def is_broadcasted(self, index: sympy.Expr):
-        # not indirect_indexing is necessary as doing: y = torch.arange(n); x[y]
-        # will set tmp0 = x0; original_index == tmp0, so is_broadcasted == True.
-        # This is a bug will be solved by https://github.com/pytorch/pytorch/pull/100895
+        # Note. This may not be correct when there is indirect indexing
         if self.is_indirect_indexing(index):
             return False
         return not set.issubset(set(self.range_tree_nodes.keys()), index.free_symbols)
@@ -1154,9 +1152,7 @@ class TritonKernel(Kernel):
         #   2.1) We are in a reduction loop
         #   2.2) Its not its last use
         #   2.3) This load will not be lifted to the body
-        # TODO(lezcano) We could potentially do better
-        # https://github.com/pytorch/pytorch/pull/91316#issuecomment-1364680622
-        if not indirect_indexing and self.is_broadcasted(original_index):
+        if self.is_broadcasted(original_index):
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and not self.persistent_reduction:
             if name in self.args.inplace_buffers:
@@ -1331,19 +1327,8 @@ class TritonKernel(Kernel):
                 )
                 final_argreduce(self.suffix, result_var, accumulator, accumulator_index)
             else:
-                if reduction_type == "min":
-                    updated = f"triton_helpers.minimum({accumulator}, {value})"
-                elif reduction_type == "max":
-                    updated = f"triton_helpers.maximum({accumulator}, {value})"
-                elif reduction_type == "sum":
-                    updated = f"{accumulator} + {value}"
-                elif reduction_type == "prod":
-                    updated = f"{accumulator} * {value}"
-                elif reduction_type == "xor_sum":
-                    updated = f"{accumulator} ^ {value}"
-                else:
-                    raise NotImplementedError(f"reduction_type {reduction_type}")
-
+                combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
+                updated = combine_fn(accumulator, value)
                 self.compute.writeline(
                     f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
                 )
