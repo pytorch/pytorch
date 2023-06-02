@@ -4,16 +4,45 @@ name: Upload Alerts to AWS/Rockset
 
 on:
   pull_request:
-  push:
-  workflow_dispatch:
   schedule:
     - cron: '*/10 * * * *'
 
 jobs:
-  create-alerts:
+  # create-alerts:
+  #   runs-on: ubuntu-20.04
+  #   outputs:
+  #     alerts: ${{ steps.alert_creation_step.outputs.script-output }}
+  #   steps:
+  #     - name: Checkout repo
+  #       uses: actions/checkout@v3
+  #       with:
+  #         fetch-depth: 1
+
+  #     - name: Install Python Packages
+  #       run: |
+  #         pip3 install rockset==1.0.3
+  #         pip3 install boto3==1.19.12
+
+  #     - name: Create alerts
+  #       run: |
+  #         output=$(python "tools/alerts/create_alerts.py")
+  #         echo "uploading following alerts"
+  #         echo "$output"
+  #         echo "script-output=$output" >> "$GITHUB_OUTPUT"
+  #       id: alert_creation_step
+
+  # upload-alerts:
+  #   needs: create-alerts
+  #   uses: pytorch/test-infra/.github/actions/upload-alerts@f763034f4fa84008c1eebe4aeadf4931b98b5b53
+  #   with:
+  #     alerts: '${{ needs.create-alerts.outputs.alerts }}'
+  #     organization: "pytorch"
+  #     repo: "pytorch"
+  #   secrets: inherit
+
+jobs:
+  upload-alerts:
     runs-on: ubuntu-20.04
-    outputs:
-      alerts: ${{ steps.alert_creation_step.outputs.script-output }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -30,8 +59,14 @@ jobs:
           output=$(python "tools/alerts/create_alerts.py")
           echo "uploading following alerts"
           echo "$output"
-          echo "script-output=$output" >> "$GITHUB_OUTPUT"
+          echo "{script_output}={$output}" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
+      - name: Upload alerts
+        uses: pytorch/test-infra/.github/actions/upload-alerts@ba499cb1
+        with:
+          alerts: ${{ steps.alert_creation_step.outputs.script_output }}
+          organization: "pytorch"
+          repo: "pytorch"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
