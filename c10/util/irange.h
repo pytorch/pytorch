@@ -56,6 +56,13 @@ struct integer_iterator {
     } else {
       return value == other.value;
     }
+    // Suppress "warning: missing return statement at end of non-void function"
+    // which Nvidia's Robert Crovella confirms is an NVCC compiler error
+    // here https://stackoverflow.com/a/64561686/752843 on 2020-10-27
+    // `__builtin_unreachable();` would be best here, but it's not
+    // available with all compilers. So we instead return an arbitrary
+    // value trusting that this line will, in fact, never be reached.
+    return false; // Horrible hack
   }
 
   bool operator!=(const integer_iterator& other) const {

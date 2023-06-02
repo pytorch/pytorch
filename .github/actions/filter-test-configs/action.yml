@@ -69,7 +69,16 @@ runs:
 
         LOG_FILE=$(grep -l -r "${{ github.sha }}" *.log | tail -n 1)
         if [ -n "${LOG_FILE}" ]; then
-          JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:,]' '{print $2}' | sed 's/"//g' | xargs)
+          # For some reasons, awk {print $2} on Linux and Windows (bash) work correctly while it
+          # needs to be awk {print $3} on MacOS
+          case ${RUNNER_OS} in
+            macOS)
+              JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:]' '{print $3}' | sed 's/"//g' | xargs)
+              ;;
+            *)
+              JOB_NAME=$(grep -r "\"jobDisplayName\"" "${LOG_FILE}" | awk -F '[:]' '{print $2}' | sed 's/"//g' | xargs)
+              ;;
+          esac
           echo "job-name=${JOB_NAME}" >> "${GITHUB_OUTPUT}"
         fi
 
@@ -100,4 +109,11 @@ runs:
     - name: Print the filtered test matrix
       shell: bash
       run: |
+        echo "Filtered matrix:"
         echo "${{ steps.filter.outputs.test-matrix }}"
+
+        echo
+        echo "Is the current job unstable? ${{ steps.filter.outputs.is-unstable }}"
+
+        echo
+        echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"

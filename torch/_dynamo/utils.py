@@ -1525,7 +1525,7 @@ def lazy_format_graph_tabular(fn_name, gm):
         except ImportError:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
-                + format_graph_code(fn_name, gm)
+                + str(lazy_format_graph_code(fn_name, gm))
             )
 
         node_specs = [
