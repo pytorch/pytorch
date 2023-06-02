@@ -263,9 +263,9 @@ def get_recurrently_failing_jobs_alerts(
         entry = {
             "AlertType": "Recurrently Failing Job",
             "AlertObject": job.job_name,
-            "OncallTeams": "",
-            "OncallIndividuals": "",
-            "Flags": "",
+            "OncallTeams": [],
+            "OncallIndividuals": [],
+            "Flags": [],
         }
         alerts.append(entry)
     return alerts
