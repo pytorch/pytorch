@@ -26,17 +26,22 @@ def is_symint_node(node):
     assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
     return "val" in node.meta and isinstance(node.meta['val'], torch.SymInt)
 
+def is_recomputable(node):
+    return "recompute" in node.meta and node.meta["recompute"]
 
-def has_recomputable_tags(fx_g):
+def has_recomputable_ops(fx_g):
     found = False
     for node in fx_g.graph.nodes:
-        if node.op == "call_function":
-            if "recompute" in node.meta.keys():
-                found = True
-                break
-    return found
+        if is_recomputable(node):
+            return True
+    return False
 
-is_recomputable = lambda node: "recompute" in node.meta and node.meta["recompute"]
+def has_recomputable_rng_ops(fx_g):
+    for node in fx_g.graph.nodes:
+        if is_recomputable(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
+            return True
+    return False
+
 class InvalidNodeBase:
     def __repr__(self):
         return "Invalid Node"
@@ -243,7 +248,7 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-    if has_recomputable_tags(joint_module):
+    if has_recomputable_ops(joint_module):
         return min_cut_rematerialization_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
@@ -415,7 +420,12 @@ def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, rec
                     else:
                         new_args.append(arg)
                 if is_fwd:
-                    functional_rng = new_graph.create_node("call_function", run_and_save_rng, args=(node.target, *new_args), kwargs=node.kwargs)
+                    functional_rng = new_graph.create_node(
+                        "call_function",
+                        run_and_save_rng,
+                        args=(node.target, *new_args),
+                        kwargs=node.kwargs
+                    )
                     state = new_graph.create_node("call_function", operator.getitem, args=(functional_rng, 0), kwargs={})
                     rng_output = new_graph.create_node("call_function", operator.getitem, args=(functional_rng, 1,), kwargs={})
                     # Fix this.
@@ -428,7 +438,12 @@ def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, rec
                     # Get the fwd state
                     assert node in recomputable_rng_ops_map
                     fwd_state = env[recomputable_rng_ops_map[node]]
-                    output = new_graph.create_node("call_function", run_with_rng_state, args=(fwd_state, node.target, *new_args), kwargs=node.kwargs)
+                    output = new_graph.create_node(
+                        "call_function",
+                        run_with_rng_state,
+                        args=(fwd_state, node.target, *new_args),
+                        kwargs=node.kwargs
+                    )
                     env[node] = output
             else:
                 env[node] = new_graph.node_copy(node, lambda x: env[x])
@@ -707,10 +722,18 @@ def min_cut_rematerialization_partition(
 
         return False
 
-    graph_has_recomputable_tags =  has_recomputable_tags(joint_module)
+    graph_has_recomputable_ops = has_recomputable_ops(joint_module)
+    graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
+    recomputable_rng_ops_map = dict()
+    for node in joint_module.graph.nodes:
+        if is_recomputable(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
+            # The map value will be set while creating the fwd pass
+            recomputable_rng_ops_map[node] = InvalidNode
+
+
 
     def ban_recomputation(node):
-        if graph_has_recomputable_tags:
+        if graph_has_recomputable_ops:
             return not is_recomputable(node)
         elif AGGRESSIVE_RECOMPUTATION:
             return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
@@ -825,7 +848,7 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
-    if graph_has_recomputable_tags:
+    if graph_has_recomputable_rng_ops:
         fw_module, bw_module = _extract_fwd_bwd_modules_special(
             joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
     else:
