@@ -3,6 +3,7 @@
 name: Upload Alerts to AWS/Rockset
 
 on:
+  pull-request:
   schedule:
     - cron: '*/5 * * * *'
 
@@ -28,7 +29,7 @@ jobs:
           echo "{script_output}={$output}" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
       - name: Upload alerts
-        uses: pytorch/test-infra/.github/actions/upload-alerts@main
+        uses: pytorch/test-infra/.github/actions/upload-alerts@9a8e7cc1f0d2ceadbb59b2af141f3e7d25494673
         with:
           alerts: ${{ steps.alert_creation_step.outputs.script_output }}
           organization: "pytorch"
