@@ -948,6 +948,7 @@ class Reduction(Loops):
             not in {
                 "argmax",
                 "argmin",
+                "var_unnormalized",
             }
             and config.split_reductions
         )
