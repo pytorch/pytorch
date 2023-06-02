@@ -33,11 +33,11 @@ jobs:
           echo "script-output=$output" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
 
-  upload-alerts:
-    needs: create-alerts
-    uses: pytorch/test-infra/.github/actions/upload-alerts@f763034f4fa84008c1eebe4aeadf4931b98b5b53
-    with:
-      alerts: '${{ needs.create-alerts.outputs.alerts }}'
-      organization: "pytorch"
-      repo: "pytorch"
-    secrets: inherit
+  # upload-alerts:
+  #   needs: create-alerts
+  #   uses: pytorch/test-infra/.github/actions/upload-alerts@f763034f4fa84008c1eebe4aeadf4931b98b5b53
+  #   with:
+  #     alerts: '${{ needs.create-alerts.outputs.alerts }}'
+  #     organization: "pytorch"
+  #     repo: "pytorch"
+  #   secrets: inherit
