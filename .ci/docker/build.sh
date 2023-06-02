@@ -222,6 +222,18 @@ case "$image" in
     TRITON=yes
     DOCS=yes
     ;;
+    pytorch-linux-focal-py3.8-gcc7-inductor-benchmarks)
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    CONDA_CMAKE=yes
+    TRITON=yes
+    DOCS=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
     CUDA_VERSION=11.7
@@ -337,6 +349,7 @@ docker build \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
+       --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

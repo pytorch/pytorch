@@ -70,7 +70,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-py3_8-gcc7-build
-      docker-image-name: pytorch-linux-focal-py3.8-gcc7
+      docker-image-name: pytorch-linux-focal-py3.8-gcc7-inductor-benchmarks
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_cpu_accuracy", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
