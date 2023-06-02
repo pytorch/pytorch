@@ -12,7 +12,18 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
+from torch._prims_common import (
+    IntLike,
+    make_contiguous_strides_for,
+    NumberType,
+    TensorLike,
+    TensorSequenceType,
+)
+from torch._prims_common.linalg import (
+    _linalg_broadcast_batch_dims,
+    checkFloatingOrComplex,
+    checkInputsSolver,
+)
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
     _maybe_resize_out,
@@ -3432,6 +3443,54 @@ def arange_start(
     return aten.arange.start_step(
         start, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
+
+
+def linalg_solve_is_vector_rhs(input: Tensor, other: Tensor) -> bool:
+    expected_batched_rhs_shape = input.shape[:-1]
+    vector_case = other.ndim == 1 or (
+        input.ndim - 1 == other.ndim and other.shape == expected_batched_rhs_shape
+    )
+    return vector_case
+
+
+@register_decomposition([aten._linalg_solve_ex.default, aten._linalg_solve_ex.result])
+@out_wrapper("result", "LU", "pivots", "info")
+def _linalg_solve_ex(
+    A: Tensor, B: Tensor, *, left: bool = True, check_errors: bool = False
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    checkFloatingOrComplex(A, "linalg.solve")
+    utils.check(
+        A.dtype == B.dtype,
+        lambda: (
+            f"linalg.solve: Expected A and B to have the same dtype, but found A of type "
+            f"{A.dtype} and B of type {B.dtype} instead"
+        ),
+    )
+    vector_case = linalg_solve_is_vector_rhs(A, B)
+    B_ = B.unsqueeze(-1) if vector_case else B
+    checkInputsSolver(A, B_, left, "linalg.solve")
+    B_broad_shape, _ = _linalg_broadcast_batch_dims(B_, A)
+    utils.check(
+        left or not vector_case,
+        lambda: (
+            "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. "
+            "In this case linalg.solve is equivalent to B / A.squeeze(-1)"
+        ),
+    )
+    use_A_T = A.is_contiguous() and not A.is_complex()
+    LU, pivots, info = torch.linalg.lu_factor_ex(A.mT if use_A_T else A)
+    if check_errors:
+        aten._linalg_check_errors(info, "torch.linalg.solve_ex", is_matrix=A.ndim == 2)
+    result_ = torch.linalg.lu_solve(LU, pivots, B_, left=left, adjoint=use_A_T)
+    result_shape = B_broad_shape[:-1] if vector_case else B_broad_shape
+    result = torch.empty_strided(
+        size=result_shape,
+        stride=make_contiguous_strides_for(result_shape, not left),
+        dtype=B.dtype,
+        device=B.device,
+    )
+    result.copy_(result_.reshape(result_shape))
+    return result, LU, pivots, info
 
 
 def register_inplace(aten_op, outplace_op):
