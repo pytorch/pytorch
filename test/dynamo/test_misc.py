@@ -5103,25 +5103,25 @@ def fn():
         self.assertTrue(isinstance(compile_out, torch.Size))
         self.assertEqual(eager_out, compile_out)
 
-    def _prepare_sympy_and_z3_symbols(self):
+    def _prepare_for_translation_validator(self):
         import z3
 
-        # SymPy symbols.
-        s0, s1, s2 = sympy.symbols("x0 x1 x2", integer=True)
+        validator = TranslationValidator()
 
-        # SymPy -> Z3 symbols.
-        symbols = {sym: z3.Int(sym.name) for sym in (s0, s1, s2)}
+        # SymPy symbols.
+        s0, s1, s2 = sympy.symbols("s0 s1 s2", integer=True)
 
         # Z3 symbols.
-        z3_symbols = [symbols[s] for s in (s0, s1, s2)]
+        [validator.add_int(s) for s in (s0, s1, s2)]
+        z0, z1, z2 = [validator.z3var(s) for s in (s0, s1, s2)]
 
-        return (s0, s1, s2), z3_symbols, symbols
+        return (s0, s1, s2), (z0, z1, z2), validator
 
     @torch._dynamo.config.patch(translation_validation=True)
     def test_sympy_to_z3_translation(self):
         import z3
 
-        (s0, s1, s2), (z0, z1, z2), symbols = self._prepare_sympy_and_z3_symbols()
+        (s0, s1, s2), (z0, z1, z2), validator = self._prepare_for_translation_validator()
 
         test_cases = [
             # Integer constants.
@@ -5143,7 +5143,7 @@ def fn():
             ),
             (
                 s0,
-                symbols[s0]
+                z0,
             ),
 
             # Arithmetic operations.
@@ -5177,11 +5177,11 @@ def fn():
             ),
             (
                 s0 / s1,
-                z3.ToReal(z0) / z3.ToReal(z1),
+                z3.ToReal(z0) * (z1 ** -1),
             ),
             (
                 s2 % (s0 / s1),
-                z2 % z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))
+                z2 % z3.ToInt(z3.ToReal(z0) * (z1 ** -1))
             ),
             (
                 s2 % (s0 ** 3),
@@ -5193,18 +5193,17 @@ def fn():
             ),
         ]
 
-        toZ3 = SympyToZ3(TranslationValidator(), symbols)
+        toZ3 = SympyToZ3(validator)
         for sympy_expr, z3_expr in test_cases:
-            result = toZ3(sympy_expr)
+            result = toZ3.run(sympy_expr)
             self.assertTrue(z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}")
 
     @torch._dynamo.config.patch(translation_validation=True)
     def test_translation_validator_sat(self):
         import z3
 
-        (s0, s1, s2), (z0, z1, z2), symbols = self._prepare_sympy_and_z3_symbols()
+        (s0, s1, s2), (z0, z1, z2), validator = self._prepare_for_translation_validator()
 
-        validator = TranslationValidator()
         validator.add_input(s0 > 5)
         validator.add_input(s1 / 2 > s0)
 
@@ -5221,9 +5220,8 @@ def fn():
     def test_translation_validator_unsat(self):
         import z3
 
-        (s0, s1, s2), (z0, z1, z2), symbols = self._prepare_sympy_and_z3_symbols()
+        (s0, s1, s2), (z0, z1, z2), validator = self._prepare_for_translation_validator()
 
-        validator = TranslationValidator()
         validator.add_input(s0 > 5)
         validator.add_input(s1 / 2 > s0)
 
