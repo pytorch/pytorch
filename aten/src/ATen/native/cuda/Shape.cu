@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/TensorShape.h>
@@ -26,6 +27,7 @@ namespace at::native {
 
 constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
+constexpr int ALIGNED_VEC_LOAD_BYTES = 16;
 
 namespace {
 
@@ -52,9 +54,10 @@ template<typename T>
 inline std::tuple<dim3, dim3> getCatGridContig(unsigned int max_elements_per_tensor,
   ptrdiff_t nTensors) {
   constexpr unsigned int threads_per_block = 128;
-  constexpr unsigned int min_int4_per_thread = 1;
+  constexpr unsigned int min_aligned_vec_per_thread = 1;
 
-  unsigned int elements_per_thread = sizeof(int4) / sizeof(T) * min_int4_per_thread;
+  unsigned int elements_per_thread = ALIGNED_VEC_LOAD_BYTES / sizeof(T) *
+    min_aligned_vec_per_thread;
   unsigned int max_threads = ceil_div(max_elements_per_tensor, elements_per_thread);
   dim3 block = dim3(threads_per_block);
   dim3 grid = dim3(ceil_div(max_threads, threads_per_block), (long long)nTensors);
@@ -177,33 +180,34 @@ __global__ void CatArrayBatchedCopy_aligned16_contig(
     IndexType dimStride) {
 
     // This kernel tries to use 128 bit loads
-    constexpr int CAT_ELEMENTS_PER_THREAD = 16 / sizeof(T);
-    IndexType inputOffset = (blockIdx.x * blockDim.x + threadIdx.x) * CAT_ELEMENTS_PER_THREAD;
-    IndexType inputStride = gridDim.x * blockDim.x * CAT_ELEMENTS_PER_THREAD;
+    constexpr int kILP = ALIGNED_VEC_LOAD_BYTES / sizeof(T);
+    IndexType inputOffset = (blockIdx.x * blockDim.x + threadIdx.x) * kILP;
+    IndexType inputStride = gridDim.x * blockDim.x * kILP;
 
     IndexType nElements = inputs.nElements[blockIdx.y];
-    if (inputOffset >= nElements)
+    if (inputOffset >= nElements) {
       return;
+    }
 
     const T* data = inputs.input[blockIdx.y];
     IndexType offset = inputs.offset[blockIdx.y];
     IndexType dimSize = inputs.dimSize[blockIdx.y];
     IndexType dataOffset = offset * dimStride;
 
-    IndexType v_elementOffset[CAT_ELEMENTS_PER_THREAD];
-    T reg_data[CAT_ELEMENTS_PER_THREAD];
+    IndexType v_elementOffset[kILP];
+    T reg_data[kILP];
 
-    while (inputOffset + CAT_ELEMENTS_PER_THREAD <= nElements) {
-      for (int i = 0; i < CAT_ELEMENTS_PER_THREAD; ++i) {
+    while (inputOffset + kILP <= nElements) {
+      for (int i = 0; i < kILP; ++i) {
         v_elementOffset[i] = CatArrIndexToOffset<IndexType, Dims>::compute(os.tensorSize,
           os.tensorStride, dimSize, concatDim, inputOffset + i);
       }
 
-      reinterpret_cast<int4*>(reg_data)[0] =
-        const_cast<int4*>(reinterpret_cast<const int4*>(data + inputOffset))[0];
+      using LT = at::native::memory::aligned_vector<T, kILP>;
+      ((LT*)reg_data)[0] = const_cast<LT*>((LT*)(data + inputOffset))[0];
 
       #pragma unroll
-      for (int i = 0; i < CAT_ELEMENTS_PER_THREAD; ++i) {
+      for (int i = 0; i < kILP; ++i) {
         output[dataOffset + v_elementOffset[i]] = reg_data[i];
       }
 
@@ -211,7 +215,7 @@ __global__ void CatArrayBatchedCopy_aligned16_contig(
     }
 
     // Handle remaining tail in case nElements does not divide
-    // exactly to CAT_ELEMENTS_PER_THREAD
+    // exactly to kILP
 
     while (inputOffset < nElements) {
       v_elementOffset[0] = CatArrIndexToOffset<IndexType, Dims>::compute(os.tensorSize,
@@ -281,10 +285,9 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
 
-      if (!is_aligned_vec4(catMetaData.input[batchCounter])) {
-        // We can't call the CatArrayBatchedCopy_aligned16_contig version
-        isAligned = false;
-      }
+      // If at least one of the inputs is not aligned, we can't call the
+      // CatArrayBatchedCopy_aligned16_contig
+      isAligned &= is_aligned_vec4(catMetaData.input[batchCounter]);
 
       if (stride_size > 1) {
         auto strides = inputs[i+batchCounter].get().strides();
