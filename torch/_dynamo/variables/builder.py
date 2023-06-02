@@ -1178,7 +1178,11 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif isinstance(example_value, int) and not config.dynamic_shapes:
+    elif (
+        isinstance(example_value, int)
+        and config.numpy_ndarray_as_tensor
+        and not config.dynamic_shapes
+    ):
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable(example_value, **options)
     elif (

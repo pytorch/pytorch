@@ -316,7 +316,7 @@ class PyCodegen:
                 self.extend_output(
                     [
                         self.create_load_python_module(torch, True),
-                        self.create_load_attr("tensor"),
+                        self.create_load_attr("as_tensor"),
                     ]
                 )
                 self.extend_output(arg.load(self))
