@@ -43,7 +43,7 @@ Basics of using torch.profiler and viewing traces
 
     prof.export_chrome_trace("trace.json")
 
-**Viewing chrome traces**: In the Chrome browser, open :xref:`chrome://tracing` and load the json file. Use the “w” and “s” keys to zoom in and out, and use “a” and “d” to scroll left and right. “?” will show a “help” screen with a list of shortcuts.
+**Viewing chrome traces**: In the Chrome browser, open :ref:`chrome://tracing` and load the json file. Use the “w” and “s” keys to zoom in and out, and use “a” and “d” to scroll left and right. “?” will show a “help” screen with a list of shortcuts.
 
 .. figure:: ../_static/img/profiling_torch_compile/basic_chrome_trace.png
     :alt: Example of a basic chrome trace, visualized in the chrome://tracing viewer
