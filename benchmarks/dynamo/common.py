@@ -249,7 +249,6 @@ CI_SKIP[CI("inductor", training=True)] = [
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
-    "hf_T5_generate",  # Could not validate constraint UnspecConstraint
     "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
 ]
 
@@ -2264,6 +2263,9 @@ def run(runner, args, original_dir=None):
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
+        if args.only in {"hf_T5_generate"}:
+            # See https://github.com/pytorch/pytorch/issues/102814
+            torch._dynamo.config.assume_static_by_default = False
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
