@@ -582,6 +582,56 @@ class FakeTensorTest(TestCase):
             out = mod(torch.randn(1, 1, 3, 3))
         self.checkType(out, "cpu", (1, 1, 3, 3))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_aten_copy_multi_device(self):
+        with FakeTensorMode():
+            x1 = torch.rand(4, device="cpu")
+            x2 = torch.rand(4, device="cuda")
+            copy1 = torch.ops.aten.copy.default(x1, x2)
+            copy2 = torch.ops.aten.copy.default(x2, x1)
+            out = torch.empty(4, device="cpu")
+            torch.ops.aten.copy.out(x1, x2, out=out)
+        self.checkType(copy1, "cpu", (4,))
+        self.checkType(copy2, "cuda", (4,))
+        self.checkType(out, "cpu", (4,))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_aten_index_multi_device(self):
+        with FakeTensorMode():
+            x1 = torch.rand(4, 4, device="cpu")
+            x2 = torch.rand(4, 4, device="cuda")
+            i1 = torch.tensor([0, 1], device="cuda")
+            i2 = torch.tensor([0, 1], device="cpu")
+            r1 = torch.ops.aten.index(x1, i1)
+            r2 = torch.ops.aten.index(x2, i2)
+
+            y1 = torch.rand(4, device="cpu")
+            y2 = torch.rand(4, device="cuda")
+            j1 = torch.tensor([2], device="cuda")
+            j2 = torch.tensor([2], device="cpu")
+            r3 = torch.ops.aten.index_put.default(x1, j1, y1)
+            r4 = torch.ops.aten.index_put.default(x2, j2, y2)
+        self.checkType(r1, "cpu", ())
+        self.checkType(r2, "cuda", ())
+        self.checkType(r3, "cpu", (4, 4))
+        self.checkType(r4, "cuda", (4, 4))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_aten_slice_scatter_multi_device(self):
+        with FakeTensorMode():
+            x1 = torch.rand(4, 4, device="cpu")
+            y1 = torch.rand(2, 4, device="cuda")
+            x2 = torch.rand(4, 4, device="cuda")
+            y2 = torch.rand(2, 4, device="cpu")
+            out = torch.empty(4, 4, device="cpu")
+            r1 = torch.ops.aten.slice_scatter.default(x1, y1, start=2)
+            r2 = torch.ops.aten.slice_scatter.default(x2, y2, start=2)
+            r3 = torch.ops.aten.slice_scatter.out(x1, y1, out=out, start=2)
+        self.checkType(r1, "cpu", (4, 4))
+        self.checkType(r2, "cuda", (4, 4))
+        self.checkType(r3, "cpu", (4, 4))
+        self.checkType(out, "cpu", (4, 4))
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):

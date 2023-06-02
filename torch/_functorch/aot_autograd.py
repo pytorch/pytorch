@@ -19,6 +19,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
+from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._guards import detect_fake_mode, tracing
@@ -737,7 +738,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata = True
                 else:
                     mutates_data = True
-                    mutates_metadata = not has_same_metadata(arg, new_arg)
+                    mutates_metadata = torch._functionalize_has_metadata_mutation(f_arg)
                 # Only track requires_grad info on *mutated* inputs,
                 # because they show up in the autograd.Function.forward as outputs
                 input_requires_grad_info.append(
@@ -748,7 +749,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata = False
 
             input_info.append(InputAliasInfo(
-                is_leaf=isinstance(arg, torch.Tensor) and arg.is_leaf,
+                is_leaf=isinstance(arg, torch.Tensor) and safe_is_leaf(arg),
                 mutates_data=mutates_data,
                 mutates_metadata=mutates_metadata
             ))
@@ -1456,9 +1457,8 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
         args = list(args)
     assert isinstance(args, list)
 
-    if disable_amp:
-        guard = torch._C._DisableAutocast()
-    try:
+    context = torch._C._DisableAutocast if disable_amp else nullcontext
+    with context():
         if hasattr(f, "_boxed_call"):
             out = normalize_as_list(f(args))
         else:
@@ -1470,9 +1470,6 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
                 "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
             )
             out = normalize_as_list(f(*args))
-    finally:
-        if disable_amp:
-            del guard
     return out
 
 def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
@@ -1518,7 +1515,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     fw_module = aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     disable_amp = torch._C._is_any_autocast_enabled()
-    context = disable_autocast_manager if disable_amp else nullcontext
+    context = torch._C._DisableAutocast if disable_amp else nullcontext
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
@@ -1583,15 +1580,6 @@ def assert_functional_graph(fx_g: torch.fx.Graph, *, allow_input_mutations: bool
                 assert not n.target._schema.is_mutable, \
                     f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
     return copy_count
-
-
-@contextmanager
-def disable_autocast_manager():
-    guard = torch._C._DisableAutocast()
-    try:
-        yield
-    finally:
-        del guard
 
 
 def are_differentiable_views(view1, view2):
@@ -2992,7 +2980,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
                     assert all(a is not None for a in all_args)
-                    context = disable_autocast_manager if disable_amp else nullcontext
+                    context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
                             bw_module, fx_placeholder_vals(bw_module)
