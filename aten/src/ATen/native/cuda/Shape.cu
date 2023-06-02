@@ -312,7 +312,8 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 
 
     dim3 applyBlock, catGrid;
-    if ((isContig) && (sizeof(scalar_t) > 2)) {
+
+    if (isContig && sizeof(scalar_t) > 2) {
       std::tuple<dim3, dim3> launchParams = getCatGridContig<scalar_t>(
           max_elements_per_tensor, batchCounter);
       catGrid = std::get<0>(launchParams);
@@ -335,7 +336,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     }
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-    if ((isContig) && (isAligned) && (sizeof(scalar_t) >= 4) && (sizeof(scalar_t) <= 8)) {\
+    if (isContig && isAligned && sizeof(scalar_t) >= 4 && sizeof(scalar_t) <= 8) {\
       CatArrayBatchedCopy_aligned16_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
               data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
