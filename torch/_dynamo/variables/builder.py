@@ -1104,6 +1104,14 @@ def wrap_fx_proxy_cls(
         # tensor, the stored example value will update too!)
         example_value = _clone_input(example_value)
         proxy.node.meta["example_value"] = example_value
+
+        maybe_user_loc = ""
+        from torch._guards import TracingContext
+        from torch.utils._traceback import format_frame
+        user_tb = TracingContext.extract_stack()
+        if user_tb:
+            maybe_user_loc = " at " + format_frame(user_tb[-1])
+        log.debug("%s: %s%s", proxy.node, tuple(example_value.size()), maybe_user_loc)
         specialized_props = target_cls.specialize(example_value)
         if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
             # NB: This will be wrong for ignore_subclass; fix it up later!
