@@ -1,15 +1,15 @@
 name: BC Lint
 
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
-      - unlabeled
-    branches-ignore:
-      - nightly
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
+  #     - labeled
+  #     - unlabeled
+  #   branches-ignore:
+  #     - nightly
   workflow_dispatch:
 
 jobs:
@@ -26,5 +26,5 @@ jobs:
           docs_link: 'https://github.com/pytorch/test-infra/wiki/BC-Linter'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
