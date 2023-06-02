@@ -258,14 +258,14 @@ CAFFE2_CUDA_API const char* curandGetErrorString(curandStatus_t error);
         << ::caffe2::curandGetErrorString(status); \
   } while (0)
 
-#define CUDA_1D_KERNEL_LOOP(i, n)                                 \
-  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n); \
+#define CUDA_1D_KERNEL_LOOP(i, n)                                  \
+  for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n); \
        i += blockDim.x * gridDim.x)
 
-#define CUDA_2D_KERNEL_LOOP(i, n, j, m)                             \
-  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n);   \
-       i += blockDim.x * gridDim.x)                                 \
-    for (size_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
+#define CUDA_2D_KERNEL_LOOP(i, n, j, m)                              \
+  for (int64_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n);   \
+       i += blockDim.x * gridDim.x)                                  \
+    for (int64_t j = blockIdx.y * blockDim.y + threadIdx.y; j < (m); \
          j += blockDim.y * gridDim.y)
 
 // The following helper functions are here so that you can write a kernel call
