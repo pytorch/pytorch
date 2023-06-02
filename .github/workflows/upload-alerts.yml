@@ -10,6 +10,7 @@ on:
 jobs:
   upload-alerts:
     runs-on: ubuntu-20.04
+    secrets: inherit
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -28,9 +29,9 @@ jobs:
           echo "$output"
           echo "script-output=$output" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
+
       - name: Upload alerts
         uses: pytorch/test-infra/.github/actions/upload-alerts@f763034f4fa84008c1eebe4aeadf4931b98b5b53
-        secrets: inherit
         with:
           alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
           organization: "pytorch"
