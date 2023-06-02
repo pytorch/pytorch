@@ -387,6 +387,16 @@ class CPUReproTests(TestCase):
             (torch.randn(8),),
         )
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_max_reduction_bfloat16(self):
+        def fn(x):
+            return torch.ops.aten.max(x, 1, keepdim=True)[0].float()
+
+        self.common(
+            fn,
+            (torch.randn(1, 32, 4, 4).bfloat16(),),
+        )
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
