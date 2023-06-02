@@ -1,4 +1,4 @@
-# upload alerts every 5 minutes
+# upload alerts every 10 minutes
 
 name: Upload Alerts to AWS/Rockset
 
@@ -26,7 +26,7 @@ jobs:
           output=$(python "tools/alerts/create_alerts.py")
           echo "uploading following alerts"
           echo "$output"
-          echo "script-output={$output}" >> "$GITHUB_OUTPUT"
+          echo "script-output=$output" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
       - name: Upload alerts
         uses: pytorch/test-infra/.github/actions/upload-alerts@ce7a92d829f3a7eb4a6c77aefdbac4fe0c3f7423
