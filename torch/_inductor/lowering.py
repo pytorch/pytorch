@@ -32,6 +32,7 @@ from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
+    ops_wrapper,
     PermuteView,
     Pointwise,
     Reduction,
@@ -476,15 +477,6 @@ def to_device(x: TensorBox, device: torch.device):
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
-
-
-def ops_wrapper(name):
-    assert isinstance(name, str)
-
-    def fn(*args, **kwargs):
-        return getattr(ops, name)(*args, **kwargs)
-
-    return fn
 
 
 def register_pointwise(
@@ -1464,8 +1456,8 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
-make_fallback(aten._scaled_dot_product_efficient_attention.default)
-make_fallback(aten._scaled_dot_product_efficient_attention_backward.default)
+make_fallback(aten._scaled_dot_product_efficient_attention)
+make_fallback(aten._scaled_dot_product_efficient_attention_backward)
 make_fallback(aten._scaled_dot_product_flash_attention)
 make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)

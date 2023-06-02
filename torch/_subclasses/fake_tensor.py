@@ -559,13 +559,17 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
-def index_put(fake_mode, func, *args, **kwargs):
+@register_op_impl(aten.copy.default)
+@register_op_impl(aten.slice_scatter.default)
+def multi_device_op_default(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
 
-# same with index_put, but return the input
+# same with multi_device_op_default, but return the input
 @register_op_impl(aten.index_put_.default)
-def index_put_(fake_mode, func, *args, **kwargs):
+@register_op_impl(aten.copy.out)
+@register_op_impl(aten.slice_scatter.out)
+def multi_device_op_out(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
