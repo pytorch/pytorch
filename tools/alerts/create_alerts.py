@@ -313,6 +313,6 @@ if __name__ == "__main__":
                 args.repo, args.branch, args.job_name_regex
             )
         )
-    data = data.replace('"', "'")
+    data = data.replace('"', '\"')
     print(data)
     
