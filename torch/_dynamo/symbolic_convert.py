@@ -1932,7 +1932,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         export_constraints,
         mutated_closure_cell_contents: Set[str],
         frame_state,
-        fake_mode: fake_tensor.FakeTensorMode = None,
     ):
         _step_logger()(
             logging.INFO,
@@ -1947,7 +1946,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 export,
                 export_constraints,
                 frame_state,
-                fake_mode=fake_mode,
             ),
             instructions=instructions,
             f_locals=f_locals,

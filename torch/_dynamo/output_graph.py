@@ -216,7 +216,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         export: bool,
         export_constraints,
         frame_state,
-        fake_mode: fake_tensor.FakeTensorMode = None,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self)]
@@ -229,7 +228,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = fake_mode or torch._subclasses.FakeTensorMode(
+        fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
