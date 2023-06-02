@@ -229,13 +229,13 @@ def split_const_subgraphs(
     # because we are fetching attributes directly from the root module, instead of
     # fetching them from const_gm. Example: The const_gm must have some format like:
     # graph():
-    #    %inp : [num_users=1] = placeholder[target=const_inp]
-    #    %add : [num_users=1] = call_function[target=operator.add](args = (%inp, %inp), kwargs = {})
+    #    %inp : [#users=1] = placeholder[target=const_inp]
+    #    %add : [#users=1] = call_function[target=operator.add](args = (%inp, %inp), kwargs = {})
     #    return add
     # We replace that with the following, which does not have any placeholders:
     # graph():
-    #    %inp_1 : [num_users=1] = get_attr[target=const_inp]
-    #    %add : [num_users=1] = call_function[target=operator.add](args = (%inp_1, %inp_1), kwargs = {})
+    #    %inp_1 : [#users=1] = get_attr[target=const_inp]
+    #    %add : [#users=1] = call_function[target=operator.add](args = (%inp_1, %inp_1), kwargs = {})
     #    return add
     root_const_gm = torch.fx.GraphModule(split, const_gm.graph)
     for node in root_const_gm.graph.nodes:
