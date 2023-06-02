@@ -73,7 +73,7 @@ class InPlaceCompilationTests(unittest.TestCase):
             loaded_model(torch.randn(1, 10))
 
 
-# The private variants of teh below functions are all extensively tested extensively
+# The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
 class PublicTorchCompilerTests(unittest.TestCase):
     def check_signature(self, public_fn_name, private_fn_name, private_namespace):
