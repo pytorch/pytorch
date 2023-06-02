@@ -819,7 +819,9 @@ def enum_repr(value, local):
 
 
 def dict_param_key_ids(value):
-    return {id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))}
+    return {
+        id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))
+    }
 
 
 def dict_const_keys(value):
