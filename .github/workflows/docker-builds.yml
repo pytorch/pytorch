@@ -1,11 +1,11 @@
 name: docker-builds
 
 on:
-  workflow_dispatch:
-  pull_request:
-    paths:
-      - .ci/docker/**
-      - .github/workflows/docker-builds.yml
+  # workflow_dispatch:
+  # pull_request:
+  #   paths:
+  #     - .ci/docker/**
+  #     - .github/workflows/docker-builds.yml
   push:
     branches:
       - main
