@@ -225,7 +225,6 @@ def convert_frame_assert(
     one_graph: bool = True,
     export: bool = False,
     export_constraints=None,
-    fake_mode: fake_tensor.FakeTensorMode = None,
 ):
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
@@ -371,7 +370,6 @@ def convert_frame_assert(
             hooks,
             frame,
             frame_state=frame_state,
-            fake_mode=fake_mode,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -391,13 +389,13 @@ def _compile(
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
-    fake_mode: fake_tensor.FakeTensorMode = None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
 
     # from .utils import print_once;  print_once(code.co_filename)
+
     def transform(instructions, code_options):
         nonlocal output
         tracer = InstructionTranslator(
@@ -413,7 +411,6 @@ def _compile(
             export_constraints,
             mutated_closure_cell_contents,
             frame_state=frame_state,
-            fake_mode=fake_mode,
         )
         with tracing(tracer.output.tracing_context):
             tracer.run()

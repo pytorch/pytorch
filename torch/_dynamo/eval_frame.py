@@ -938,7 +938,7 @@ def export(
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
         automatic_dynamic_shapes=False,
-    ):
+    ), torch._guards.export_fake_mode(fake_mode):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(
@@ -1147,7 +1147,6 @@ def optimize_assert(
     export=False,
     export_constraints=None,
     dynamic=False,
-    fake_mode: fake_tensor.FakeTensorMode = None,
 ):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
@@ -1159,10 +1158,7 @@ def optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
-            backend,
-            export=export,
-            export_constraints=export_constraints,
-            fake_mode=fake_mode,
+            backend, export=export, export_constraints=export_constraints
         ),
         hooks,
         backend_ctx_ctor,
