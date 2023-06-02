@@ -240,7 +240,7 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def mul(a, b):
         def zero(x):
-            if x.is_bool:
+            if x.is_Boolean:
                 return sympy.false
             elif x.is_Integer:
                 return sympy.Integer(0)
@@ -248,19 +248,15 @@ class SymPyValueRangeAnalysis:
                 return sympy.Float(0.0)
 
         def safe_mul(a, b):
-            if a == 0:
-                return 0
-            elif b == 0:
-                return 0
+            if a == 0 or a == sympy.false:
+                return zero(b)
+            elif b == 0 b == sympy.false:
+                return zero(a)
             # TODO this is not the right fix, but let's see if it unblocks
             elif a == sympy.true:
                 return b
             elif b == sympy.true:
                 return a
-            elif a == sympy.false:
-                return zero(b)
-            elif b == sympy.false:
-                return zero(a)
 
             return a * b
 
