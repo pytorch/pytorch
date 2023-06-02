@@ -182,13 +182,13 @@ class Guard:
             return str(obj_weakref)
 
     def __str__(self):
-        output = f"Name: {self.name}\n"
-        output += f"    Source: {self.source}\n"
-        output += f"    Create Function: {self.create_fn}\n"
-        output += f"    Is Volatile: {self.is_volatile}\n"
+        output = f"Name: {repr(self.name)}\n"
+        source = self.source.name.lower() if self.source else ""
+        output += f"    Source: {source}\n"
+        output += f"    Create Function: {self.create_fn.__name__}\n"
         output += f"    Guard Types: {self.guard_types}\n"
         output += f"    Code List: {self.code_list}\n"
-        output += f"    Object Weakref: {self.obj_weakref}\n"
+        output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"
         output += f"    Guarded Class Weakref: {self.guarded_class_weakref}\n"
         return output
 
