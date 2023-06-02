@@ -1,8 +1,6 @@
-from itertools import product, combinations
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
-from torch.ao.pruning import WeightNormSparsifier
 from tqdm import tqdm
 import pandas as pd
 import argparse
@@ -157,7 +155,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.e2e:
-        test_tensor = test_linear
+        eval_fn = test_linear
+    else:
+        eval_fn = test_tensor
 
     print(f"Started benchmark: {args.mode} | dtype: {args.dtype}")
     dtype = dtype_lookup[args.dtype]
@@ -170,7 +170,7 @@ if __name__ == "__main__":
             (1024, 4096, 16384),
         ]
         results = (
-            test_tensor(m, k, n, dtype, args.contiguous, args.backend)
+            eval_fn(m, k, n, dtype, args.contiguous, args.backend)
             for (m, k, n) in tqdm(bert_shapes)
         )
 
@@ -196,7 +196,7 @@ if __name__ == "__main__":
             20480,
         ]
         results = (
-            test_tensor(mn, 10240, mn, dtype, args.contiguous, args.backend) for mn in tqdm(mn_vals)
+            eval_fn(mn, 10240, mn, dtype, args.contiguous, args.backend) for mn in tqdm(mn_vals)
         )
 
     elif args.mode == "nvidia-fixed-mn":
@@ -218,7 +218,7 @@ if __name__ == "__main__":
             20480,
         ]
         results = (
-            test_tensor(10240, k, 10240, dtype, args.contiguous, args.backend) for k in tqdm(k_vals)
+            eval_fn(10240, k, 10240, dtype, args.contiguous, args.backend) for k in tqdm(k_vals)
         )
 
     df = pd.DataFrame.from_records(results)
