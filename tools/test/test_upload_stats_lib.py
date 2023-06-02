@@ -75,7 +75,7 @@ class TestUploadStats(unittest.TestCase):
 
         emit_metric("metric_name", metric)
 
-        self.assertDictEqual(emitted_metric | emit_should_include, emitted_metric)
+        self.assertDictContainsSubset(emit_should_include, emitted_metric)
 
     @mock.patch("boto3.resource")
     def test_blocks_emission_if_reserved_keyword_used(self, mock_resource: Any) -> None:
