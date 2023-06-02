@@ -8,11 +8,13 @@ from tools.stats.upload_stats_lib import emit_metric
 
 # default values
 REPO = "some/repo"
+BUILD_ENV = "cuda-10.2"
+TEST_CONFIG = "test-config"
 WORKFLOW = "some-workflow"
 JOB = "some-job"
-WORKFLOW_RUN_ID = 56
-WORKFLOW_RUN_NUMBER = 123
-WORKFLOW_RUN_ATTEMPT = 3
+RUN_ID = 56
+RUN_NUMBER = 123
+RUN_ATTEMPT = 3
 
 
 class TestUploadStats(unittest.TestCase):
@@ -22,12 +24,14 @@ class TestUploadStats(unittest.TestCase):
             "os.environ",
             {
                 "CI": "true",
+                "BUILD_ENVIRONMENT": BUILD_ENV,
+                "TEST_CONFIG": TEST_CONFIG,
                 "GITHUB_REPOSITORY": REPO,
                 "GITHUB_WORKFLOW": WORKFLOW,
                 "GITHUB_JOB": JOB,
-                "GITHUB_RUN_ID": str(WORKFLOW_RUN_ID),
-                "GITHUB_RUN_NUMBER": str(WORKFLOW_RUN_NUMBER),
-                "GITHUB_RUN_ATTEMPT": str(WORKFLOW_RUN_ATTEMPT),
+                "GITHUB_RUN_ID": str(RUN_ID),
+                "GITHUB_RUN_NUMBER": str(RUN_NUMBER),
+                "GITHUB_RUN_ATTEMPT": str(RUN_ATTEMPT),
             },
         ).start()
 
@@ -44,17 +48,19 @@ class TestUploadStats(unittest.TestCase):
         current_module = inspect.getmodule(inspect.currentframe()).__name__  # type: ignore[union-attr]
 
         expected_emit = {
-            "dynamo_key": f"{REPO}/metric_name/{WORKFLOW}/{JOB}/{WORKFLOW_RUN_ID}/{WORKFLOW_RUN_NUMBER}/{WORKFLOW_RUN_ATTEMPT}",
+            "dynamo_key": f"metric_name/{REPO}/{WORKFLOW}/{BUILD_ENV}/{JOB}/{TEST_CONFIG}/{RUN_ID}/{RUN_NUMBER}/{RUN_ATTEMPT}",
             "metric_name": "metric_name",
             "calling_file": "test_upload_stats_lib.py",
             "calling_module": current_module,
             "calling_function": "test_emit_metric",
             "repo": REPO,
             "workflow": WORKFLOW,
+            "build_environment": BUILD_ENV,
             "job": JOB,
-            "run_id": WORKFLOW_RUN_ID,
-            "run_number": WORKFLOW_RUN_NUMBER,
-            "run_attempt": WORKFLOW_RUN_ATTEMPT,
+            "test_config": TEST_CONFIG,
+            "run_id": RUN_ID,
+            "run_number": RUN_NUMBER,
+            "run_attempt": RUN_ATTEMPT,
             "some_number": 123,
             "float_number": decimal.Decimal(str(32.34)),
         }

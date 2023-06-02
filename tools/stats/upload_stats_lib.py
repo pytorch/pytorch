@@ -131,6 +131,32 @@ def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
             data[key] = decimal.Decimal(str(value))  # str() preserves the precision
     return data
 
+class EnvVarMetric:
+    name: str
+    env_var: str
+    required: bool = True
+    # Used to cast the value of the env_var to the correct type (defaults to str)
+    type_conversion_fn: Any = None
+
+
+    def __init__(self, name: str, env_var: str, required: bool = True, type_conversion_fn: Any = None) -> None:
+        self.name = name
+        self.env_var = env_var
+        self.required = required
+        self.type_conversion_fn = type_conversion_fn
+
+    def value(self) -> Any:
+        value = os.environ.get(self.env_var)
+        if value is None:
+            if self.required:
+                raise ValueError(
+                    f"Not emitting metrics, missing {self.name}. Please set the {self.env_var} environment variable to pass in this value."
+                )
+            else:
+                return None
+        if self.type_conversion_fn:
+            return self.type_conversion_fn(value)
+        return value
 
 def emit_metric(
     metric_name: str,
@@ -163,56 +189,37 @@ def emit_metric(
 
     # Env vars that we use to determine basic info about the workflow run.
     # This also helps ensure that we only emit metrics during CI.
-    input_via_env_vars = {
-        "repo": "GITHUB_REPOSITORY",
-        "workflow": "GITHUB_WORKFLOW",
-        "job": "GITHUB_JOB",
-        "run_id": "GITHUB_RUN_ID",
-        "run_number": "GITHUB_RUN_NUMBER",
-        "run_attempt": "GITHUB_RUN_ATTEMPT",
-    }
+    env_var_metrics = [
+        EnvVarMetric("repo", "GITHUB_REPOSITORY"),
+        EnvVarMetric("workflow", "GITHUB_WORKFLOW"),
+        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT"),
+        EnvVarMetric("job", "GITHUB_JOB"),
+        EnvVarMetric("test_config", "TEST_CONFIG", required=False), # This isn't always set
+        EnvVarMetric("run_id", "GITHUB_RUN_ID", type_conversion_fn=int),
+        EnvVarMetric("run_number", "GITHUB_RUN_NUMBER", type_conversion_fn=int),
+        EnvVarMetric("run_attempt", "GITHUB_RUN_ATTEMPT", type_conversion_fn=int),
+    ]
 
+    # Ensure the metrics dict doesn't contain any reserved keys
     reserved_metric_keys = [
+        *[metric.name for metric in env_var_metrics],
         "dynamo_key",
         "metric_name",
         "calling_file",
         "calling_module",
         "calling_function",
-        *input_via_env_vars.keys(),
     ]
 
-    # Ensure the metrics dict doesn't contain these reserved keys
     for key in reserved_metric_keys:
         used_reserved_keys = [k for k in metrics.keys() if k == key]
         if used_reserved_keys:
             raise ValueError(f"Metrics dict contains reserved keys [{', '.join(key)}]")
 
-    reserved_env_metrics: Dict[str, Any] = {}
-    # Ensure we have a value for all the required env var based metrics
-    for var, env_var in input_via_env_vars.items():
-        reserved_env_metrics[var] = os.environ[env_var]
-        if not reserved_env_metrics[var]:
-            warn(
-                f"Not emitting metrics, missing {var}. Please set the {env_var} environment variable to pass in this value."
-            )
-            return
 
-    dynamo_key = "/".join(
-        [
-            reserved_env_metrics["repo"],
+    dynamo_key = "/".join([
             metric_name,
-            reserved_env_metrics["workflow"],
-            reserved_env_metrics["job"],
-            reserved_env_metrics["run_id"],
-            reserved_env_metrics["run_number"],
-            reserved_env_metrics["run_attempt"],
-        ]
-    )
-
-    # These are ints, even though the env vars were read as strings. Lets emit them that way
-    reserved_env_metrics["run_id"] = int(reserved_env_metrics["run_id"])
-    reserved_env_metrics["run_number"] = int(reserved_env_metrics["run_number"])
-    reserved_env_metrics["run_attempt"] = int(reserved_env_metrics["run_attempt"])
+            *[str(metric.value()) for metric in env_var_metrics if metric.value() is not None],
+        ])
 
     # Use info about the function that invoked this one as a namespace and a way to filter metrics.
     calling_frame = inspect.currentframe().f_back  # type: ignore[union-attr]
@@ -233,7 +240,7 @@ def emit_metric(
                 "calling_file": calling_file,
                 "calling_module": calling_module,
                 "calling_function": calling_function,
-                **reserved_env_metrics,
+                **{ m.name : m.value() for m in env_var_metrics },
                 **metrics,
             }
         )
