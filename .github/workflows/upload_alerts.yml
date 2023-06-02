@@ -3,6 +3,7 @@
 name: Upload Alerts to AWS/Rockset
 
 on:
+  pull_request:
   schedule:
     - cron: '*/5 * * * *'
 
@@ -20,6 +21,7 @@ jobs:
 
       - name: Create alerts
         run: |
+          pwd
           output=$("python tools/alerts/create_alerts.py")
           echo "uploading following alerts"
           echo "$output"
