@@ -60,6 +60,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "ceil",
         "expand",
         "flatten",
+        "hstack",
         "logical_not",
         # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "nn.functional.scaled_dot_product_attention",
@@ -71,6 +72,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "t",
         "tile",
         "unflatten",
+        "vstack",
     ]
 )
 
@@ -99,6 +101,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
     ),
+    skip("hstack", opsets=[onnx_test_common.opsets_before(11)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ConcatFromSequence")),
     xfail(
         "logit",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
@@ -151,6 +155,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
           reason=onnx_test_common.reason_onnx_runtime_does_not_support("STFT", "Regression on ORT=1.15 4 percent difference")),
     skip("tile", opsets=[onnx_test_common.opsets_before(13)], reason=onnx_test_common.reason_onnx_does_not_support("Tile")),
     xfail("unflatten", opsets=[onnx_test_common.opsets_before(13)], reason="Helper function is needed to support legacy ops."),
+    skip("vstack", opsets=[onnx_test_common.opsets_before(11)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ConcatFromSequence")),
 )
 # fmt: on
 
@@ -186,6 +192,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "unflatten",
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
+    ),
+    xfail(
+        "vstack",
+        matcher=lambda sample: len(sample.input[0].shape) < 2,
+        reason="fixme: Need aten::at_least2d supported",
     ),
 )
 
