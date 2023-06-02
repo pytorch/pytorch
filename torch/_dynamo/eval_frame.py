@@ -574,6 +574,21 @@ class ExplainOutput:
         output = f"Graph Count: {self.graph_count}\n"
         output += f"Graph Break Count: {self.graph_break_count}\n"
         output += f"Op Count: {self.op_count}\n"
+
+        output += "Break Reasons:\n"
+        for idx, break_reason in enumerate(self.break_reasons):
+            output += f"  Break Reason {idx+1}:\n"
+            output += f"    Reason: {break_reason.reason}\n"
+            output += "    User Stack:\n"
+            for frame_summary in break_reason.user_stack:
+                output += f"      {frame_summary}\n"
+
+        output += "Ops per Graph:\n"
+        for idx, ops in enumerate(self.ops_per_graph):
+            output += f"  Ops {idx+1}:\n"
+            for op in ops:
+                output += f"    {op}\n"
+
         output += "Out Guards:\n"
         for i, guard in enumerate(self.out_guards):
             output += f"  Guard {i+1}:\n"
@@ -591,19 +606,6 @@ class ExplainOutput:
         # for graph in self.graphs:
         #     output += "  " + graph.print_readable() + "\n"
 
-        output += "Ops per Graph:\n"
-        for idx, ops in enumerate(self.ops_per_graph):
-            output += f"  Ops {idx+1}:\n"
-            for op in ops:
-                output += f"    {op}\n"
-
-        output += "Break Reasons:\n"
-        for idx, break_reason in enumerate(self.break_reasons):
-            output += f"  Break Reason {idx+1}:\n"
-            output += f"    Reason: {break_reason.reason}\n"
-            output += "    User Stack:\n"
-            for frame_summary in break_reason.user_stack:
-                output += f"      {frame_summary}\n"
         output += f"Compile Times: {self.compile_times}\n"
         return output
 
@@ -666,8 +668,6 @@ def explain(f, *args, **kwargs):
         formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
         msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
         formatted_list += msg
-
-    break_reasons_str = f"Break Reasons:\n{formatted_list}"
 
     graph_break_count = graph_count - 1
     compile_time = compile_times(repr="str")
