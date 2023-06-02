@@ -7,7 +7,6 @@ import expecttest
 
 import torchgen
 from torchgen.executorch.api.custom_ops import ComputeNativeFunctionStub
-from torchgen.executorch.model import ETKernelIndex
 from torchgen.gen_executorch import gen_headers
 from torchgen.model import Location, NativeFunction
 from torchgen.selective_build.selector import SelectiveBuilder
@@ -94,8 +93,9 @@ class TestGenCustomOpsHeader(unittest.TestCase):
                 native_functions=[],
                 gen_custom_ops_header=True,
                 custom_ops_native_functions=[],
+                static_dispatch_idx=[],
                 selector=SelectiveBuilder.get_nop_selector(),
-                kernel_index=ETKernelIndex(index={}),
+                backend_indices={},
                 cpu_fm=fm,
                 use_aten_lib=False,
             )
@@ -114,8 +114,9 @@ class TestGenCustomOpsHeader(unittest.TestCase):
                 native_functions=[],
                 gen_custom_ops_header=False,
                 custom_ops_native_functions=[],
+                static_dispatch_idx=[],
                 selector=SelectiveBuilder.get_nop_selector(),
-                kernel_index=ETKernelIndex(index={}),
+                backend_indices={},
                 cpu_fm=fm,
                 use_aten_lib=False,
             )
