@@ -318,7 +318,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     }
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-    if ((isContig) && (sizeof(scalar_t) > 2)) {\
+    if ((isContig) && (2 < sizeof(scalar_t)) && (sizeof(scalar_t) <= 8)) {\
       CatArrayBatchedCopy_ldg128_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
               data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
