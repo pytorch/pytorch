@@ -26,33 +26,40 @@ const std::string BaseInfo::toString(double gpuTime, double schedulingTime) cons
   // The interval-based signposts will have "duration" as well as accumulated
   // total GPU time, up to the point of execution.
   return fmt::format("{}{}",
-                      gpuTime > 0.0 ? fmt::format(", gpu={:.3f} ms", gpuTime) : "",
-                      schedulingTime > 0.0 ? fmt::format(", cpu={:.3f} ms", schedulingTime) : "");
+                     gpuTime > 0.0 ? fmt::format(", gpu={:.3f} ms", gpuTime) : "",
+                     schedulingTime > 0.0 ? fmt::format(", cpu={:.3f} ms", schedulingTime) : "");
 }
 
 const std::string OperationInfo::toString(double gpuTime, double schedulingTime) const {
   return fmt::format("aten::{} (id={}{}, run={}{})",
-                      strKey, type == Type::GRAPH ? "G" : "K", profileId, runCount,
-                      BaseInfo::toString(gpuTime, schedulingTime));
+                     strKey,
+                     type == Type::GRAPH ? "G" : "K",
+                     profileId,
+                     runCount,
+                     BaseInfo::toString(gpuTime, schedulingTime));
 }
 
 const std::string CpuFbInfo::toString(double gpuTime, double schedulingTime) const {
   return fmt::format("CPU Fallback::{} (id={}, run={}, CopyOverhead={}{})",
-                      strKey, profileId, runCount,
-                      getIMPSAllocator()->formatSize(currentCopyOverhead),
-                      BaseInfo::toString(0.0, schedulingTime));
+                     strKey,
+                     profileId,
+                     runCount,
+                     getIMPSAllocator()->formatSize(currentCopyOverhead),
+                     BaseInfo::toString(0.0, schedulingTime));
 }
 
 const std::string CopyInfo::toString(double gpuTime, double schedulingTime) const {
   return fmt::format("{}Copy{}: {} --> {} (len={}{})",
-                      // Copies could be using Blit Encoder, or using regular
-                      // memcpy() on Unified memory
-                      usesBlitter ? "Blit" : "Mem",
-                      // CopySync indicates COMMIT_AND_WAIT was used to synchronize
-                      // the GPU stream with CPU after the blocking copy
-                      isNonBlocking ? "" : "Sync", srcStrKey, dstStrKey,
-                      getIMPSAllocator()->formatSize(length),
-                      BaseInfo::toString(gpuTime, schedulingTime));
+                     // Copies could be using Blit Encoder, or using regular
+                     // memcpy() on Unified memory
+                     usesBlitter ? "Blit" : "Mem",
+                     // CopySync indicates COMMIT_AND_WAIT was used to synchronize
+                     // the GPU stream with CPU after the blocking copy
+                     isNonBlocking ? "" : "Sync",
+                     srcStrKey,
+                     dstStrKey,
+                     getIMPSAllocator()->formatSize(length),
+                     BaseInfo::toString(gpuTime, schedulingTime));
 }
 
 std::string CopyInfo::buildTensorString(const void* buffer, const OptionalTensorRef tensor, bool includeBufferId) {
