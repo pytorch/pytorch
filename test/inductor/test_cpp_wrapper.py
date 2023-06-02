@@ -29,6 +29,7 @@ try:
         import test_cpu_repro
         import test_foreach
         import test_mkldnn_pattern_matcher
+        import test_select_algorithm
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
