@@ -574,7 +574,7 @@ class NumpyVariable(VariableTracker):
             unimplemented(f"numpy.{self.value}()")
         import torch_np
 
-        from ..utils import np, numpy_to_tensor_wrapper
+        from ..utils import numpy_to_tensor_wrapper
 
         from .builder import wrap_fx_proxy_cls
         from .tensor import NumpyNdarrayVariable

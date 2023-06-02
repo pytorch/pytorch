@@ -1253,9 +1253,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             y = torch.randn([1, 3])
             ref = fn(x, y)
             res = opt_fn(x, y)
-            import pdb
-
-            pdb.set_trace()
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 

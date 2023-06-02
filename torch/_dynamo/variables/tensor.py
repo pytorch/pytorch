@@ -677,25 +677,7 @@ class NumpyNdarrayVariable(TensorVariable):
         proxy: torch.fx.Proxy,
         **kwargs,
     ):
-        raw_value = kwargs.pop("raw_value", None)
         super().__init__(proxy, **kwargs)
-        self.raw_value = raw_value
-
-    @classmethod
-    def from_tensor_variable(cls, tensor_variable, raw_value):
-        # Convert a `TensorVariable` instance into an `NumpyNdarrayVariable` instance.
-        return NumpyNdarrayVariable(
-            **dict(tensor_variable.__dict__),
-            raw_value=raw_value,
-        )
-
-    def preprocess(self, cg, argname):
-        from .. import utils
-        from ..bytecode_transformation import create_call_function
-
-        cg.extend_output([cg.load_import_from(utils.__name__, "numpy_to_tensor")])
-        cg.extend_output([cg.create_load(argname)])
-        cg.append_output(create_call_function(1, False))
 
     def var_getattr(self, tx, name):
         from torch._dynamo.variables import GetAttrVariable, TupleVariable

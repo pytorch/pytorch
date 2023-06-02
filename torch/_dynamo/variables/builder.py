@@ -865,24 +865,24 @@ class VariableBuilder:
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value)
         )
         options = {"source": source}
-        tensor_variable = wrap_fx_proxy(
+        numpy_ndarray_variable = wrap_fx_proxy_cls(
+            target_cls=NumpyNdarrayVariable,
             tx=self.tx,
             proxy=proxy,
             example_value=tensor_value,
             **options,
         )
-        numpy_ndarray_variable = NumpyNdarrayVariable.from_tensor_variable(
-            tensor_variable, raw_value=value
-        )
 
         self.tx.output.input_source_to_var[source] = numpy_ndarray_variable
         example_value = numpy_ndarray_variable.proxy.node.meta["example_value"]
 
+        # is_unspecialized should be true because we are wrapping a np.ndarray as argument input, and it needs to be
+        # converted to a tensor.
         grapharg = GraphArg(
             source,
             tensor_value,
-            False,
-            example_value,
+            is_unspecialized=True,
+            fake_tensor=example_value,
             is_tensor=True,
             example_strong_ref=tensor_value,
         )
@@ -1178,18 +1178,17 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif config.numpy_ndarray_as_tensor:
-        if isinstance(example_value, int):
-            proxy.node.meta["example_value"] = example_value
-            return ConstantVariable(example_value, **options)
-        elif (
-            istype(example_value, torch.Size)
-            and all(isinstance(x, int) for x in example_value)
-            and target_cls is TupleVariable
-        ):  # convert torch.Size to tuple
-            return TupleVariable(
-                [ConstantVariable(x, **options) for x in example_value], **options
-            )
+    elif isinstance(example_value, int) and not config.dynamic_shapes:
+        proxy.node.meta["example_value"] = example_value
+        return ConstantVariable(example_value, **options)
+    elif (
+        istype(example_value, torch.Size)
+        and all(isinstance(x, int) for x in example_value)
+        and target_cls is TupleVariable
+    ):  # convert torch.Size to tuple
+        return TupleVariable(
+            [ConstantVariable(x, **options) for x in example_value], **options
+        )
     elif isinstance(example_value, int) and proxy.node.target in [
         getattr,
         operator.getitem,

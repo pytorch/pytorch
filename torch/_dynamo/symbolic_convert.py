@@ -429,9 +429,7 @@ def break_graph_if_unsupported(*, push):
             self.restore_graphstate(state)
 
             self.output.compile_subgraph(self, reason=reason)
-            import pdb
 
-            pdb.set_trace()
             cg = PyCodegen(self)
             cleanup: List[Instruction] = []
             # Reconstruct the context variables in the block stack
@@ -2084,12 +2082,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 name, types.FunctionType(new_code, self.f_globals, name)
             )
             cg.extend_output(cg.load_function_name(name, True, stack_len))
-        from . import utils
 
-        for k in argnames:
-            cg.load_import_from(utils.__name__, "numpy_to_tensor"),
-            cg.extend_output([cg.create_load(k)])
-            cg.extend_output(create_call_function(1, False))
+        cg.extend_output([cg.create_load(k) for k in argnames])
         cg.extend_output(create_call_function(nargs, False))
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
@@ -2109,9 +2103,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 "return_value", [self.frame_summary()], graph_break=False
             ),
         )
-        import pdb
-
-        pdb.set_trace()
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
 
