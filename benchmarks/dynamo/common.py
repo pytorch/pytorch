@@ -2263,9 +2263,7 @@ def run(runner, args, original_dir=None):
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
-        if args.only in {
-            "hf_T5_generate"
-        }:
+        if args.only in {"hf_T5_generate"}:
             # See https://github.com/pytorch/pytorch/issues/102814
             torch._dynamo.config.assume_static_by_default = False
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
