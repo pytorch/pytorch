@@ -12,7 +12,8 @@ from .quantizer import (
     QuantizationAnnotation,
 )
 from torch.ao.quantization._pt2e.quantizer.utils import (
-    get_act_qspec,
+    get_input_act_qspec,
+    get_output_act_qspec,
     get_weight_qspec,
     get_bias_qspec,
 )
@@ -25,7 +26,7 @@ from torch.ao.quantization.observer import (
     PerChannelMinMaxObserver,
 )
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
-from typing import Callable, List, Dict, Optional, Set, Any
+from typing import List, Dict, Optional, Set, Any
 from torch.fx import Node
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
 
@@ -33,23 +34,6 @@ __all__ = [
     "X86InductorQuantizer",
     "get_default_x86_inductor_quantization_config",
 ]
-
-_QUANT_CONFIG_TO_ANNOTATOR = {}
-
-
-def register_annotator(quantization_configs: List[QuantizationConfig]):
-    def decorator(fn: Callable):
-        for quantization_config in quantization_configs:
-            if quantization_config in _QUANT_CONFIG_TO_ANNOTATOR:
-                raise KeyError(
-                    f"Annotator for quantization config {quantization_config} is already registered"
-                )
-            _QUANT_CONFIG_TO_ANNOTATOR[quantization_config] = functools.partial(
-                fn, config=quantization_config
-            )
-
-    return decorator
-
 
 def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
     supported_operators: Dict[str, List[OperatorPatternType]] = {
@@ -104,7 +88,10 @@ def get_default_x86_inductor_quantization_config():
         observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
     )
     quantization_config = QuantizationConfig(
-        act_quantization_spec, weight_quantization_spec, bias_quantization_spec
+        act_quantization_spec,
+        act_quantization_spec,
+        weight_quantization_spec,
+        bias_quantization_spec
     )
     return quantization_config
 
@@ -156,23 +143,17 @@ class X86InductorQuantizer(Quantizer):
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """ just handling global spec for now
         """
-        global_config = self.global_config
-        _QUANT_CONFIG_TO_ANNOTATOR[global_config](self, model)
-
+        model = self._annotate_for_static_quantization_config(model)
         return model
 
-    @register_annotator(
-        [
-            get_default_x86_inductor_quantization_config(),
-        ]
-    )
-    def annotate_symmetric_config(
-        self, model: torch.fx.GraphModule, config: QuantizationConfig
+    def _annotate_for_static_quantization_config(
+        self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
         # annotate the nodes from last to first since the matching is in the reversed order
         # and fusion operator patterns (conv - relu) can get matched before single operator pattern (conv)
         # and we will mark the matched node with "_annoated" so fusion operator pattern
         # can take precedence over single operator pattern in this way
+        config = self.global_config
         self._annotate_conv2d(model, config)
         for node in reversed(model.graph.nodes):
             # one improvement is to register node annotators for each
@@ -203,7 +184,7 @@ class X86InductorQuantizer(Quantizer):
             input_qspec_map = {}
             input_node = conv_node.args[0]
             assert isinstance(input_node, Node)
-            input_qspec_map[input_node] = get_act_qspec(quantization_config)
+            input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
 
             weight_node = conv_node.args[1]
             assert isinstance(weight_node, Node)
@@ -215,7 +196,7 @@ class X86InductorQuantizer(Quantizer):
 
             conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
-                output_qspec=get_act_qspec(quantization_config),
+                output_qspec=get_output_act_qspec(quantization_config),
                 _annotated=True
             )
 

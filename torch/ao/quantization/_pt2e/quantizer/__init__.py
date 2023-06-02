@@ -3,22 +3,25 @@ from .quantizer import (
     EdgeOrNode,
     OperatorConfig,
     Quantizer,
+    QuantizationSpecBase,
     QuantizationSpec,
-    QuantizationAnnotation,
     FixedQParamsQuantizationSpec,
     SharedQuantizationSpec,
     DerivedQuantizationSpec,
+    QuantizationAnnotation,
 )
 from .x86_inductor_quantizer import X86InductorQuantizer
 
 __all__ = [
     "EdgeOrNode",
+    "OperatorConfig",
     "Quantizer",
-    "QuantizationSpec",
     "QNNPackQuantizer",
-    "QuantizationAnnotation",
+    "QuantizationSpecBase",
+    "QuantizationSpec",
     "FixedQParamsQuantizationSpec",
     "SharedQuantizationSpec",
     "DerivedQuantizationSpec",
+    "QuantizationAnnotation",
     "X86InductorQuantizer",
 ]
