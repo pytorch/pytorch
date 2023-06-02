@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import copy
 import functools
-
 import itertools
+
 import operator
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -16,8 +16,9 @@ from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization._pt2e.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
-    get_act_qspec,
     get_bias_qspec,
+    get_input_act_qspec,
+    get_output_act_qspec,
     get_weight_qspec,
 )
 from torch.ao.quantization.fake_quantize import FusedMovingAvgObsFakeQuantize
@@ -49,8 +50,6 @@ __all__ = [
     "get_symmetric_quantization_config",
 ]
 
-_QUANT_CONFIG_TO_ANNOTATOR = {}
-
 
 def _mark_nodes_as_annotated(nodes: List[Node]):
     for node in nodes:
@@ -79,20 +78,6 @@ def _get_linear_patterns(input_size: List[int]):
     pattern_w_bias = _get_dynamo_graph(linear_op, (act, weight, bias))
     pattern_wo_bias = _get_dynamo_graph(linear_op, (act, weight))
     return [pattern_w_bias, pattern_wo_bias]
-
-
-def register_annotator(quantization_configs: List[QuantizationConfig]):
-    def decorator(fn: Callable):
-        for quantization_config in quantization_configs:
-            if quantization_config in _QUANT_CONFIG_TO_ANNOTATOR:
-                raise KeyError(
-                    f"Annotator for quantization config {quantization_config} is already registered"
-                )
-            _QUANT_CONFIG_TO_ANNOTATOR[quantization_config] = functools.partial(
-                fn, config=quantization_config
-            )
-
-    return decorator
 
 
 def supported_symmetric_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
@@ -138,17 +123,26 @@ def get_supported_symmetric_config_and_operators() -> List[OperatorConfig]:
 def get_symmetric_quantization_config(
     is_per_channel: bool = False,
     is_qat: bool = False,
+    is_dynamic: bool = False,
 ):
-    act_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        FusedMovingAvgObsFakeQuantize if is_qat else HistogramObserver
-    )
+    if is_qat:
+        if is_dynamic:
+            raise NotImplementedError(
+                "dynamic quantization for qat is not yet implemented."
+            )
+        act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize
+    else:
+        if is_dynamic:
+            act_observer_or_fake_quant_ctr = PlaceholderObserver  # type: ignore[assignment]
+        else:
+            act_observer_or_fake_quant_ctr = HistogramObserver  # type: ignore[assignment]
 
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
         quant_max=127,
         qscheme=torch.per_tensor_affine,
-        is_dynamic=False,
+        is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
             eps=2**-12
         ),
@@ -188,9 +182,22 @@ def get_symmetric_quantization_config(
     bias_quantization_spec = QuantizationSpec(
         dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
     )
-    quantization_config = QuantizationConfig(
-        act_quantization_spec, weight_quantization_spec, bias_quantization_spec, is_qat
-    )
+    if is_dynamic:
+        quantization_config = QuantizationConfig(
+            act_quantization_spec,
+            None,
+            weight_quantization_spec,
+            bias_quantization_spec,
+            is_qat,
+        )
+    else:
+        quantization_config = QuantizationConfig(
+            act_quantization_spec,
+            act_quantization_spec,
+            weight_quantization_spec,
+            bias_quantization_spec,
+            is_qat,
+        )
     return quantization_config
 
 
@@ -260,41 +267,41 @@ class QNNPackQuantizer(Quantizer):
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
-        global_config = self.global_config
-        # _QUANT_CONFIG_TO_ANNOTATOR[global_config](self, model)
-        # TODO: validate that global_config is supported
-        self.annotate_symmetric_config(model, global_config)
-
+        # hacked for handling dynamic linear quant. will fix later.
+        if self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
+            model = self._annotate_for_dynamic_quantization_config(model)
+        else:
+            model = self._annotate_for_static_quantization_config(model)
         return model
 
-    # @register_annotator(
-    #     [
-    #         get_symmetric_quantization_config(is_per_channel=False, is_qat=False),
-    #         get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
-    #         get_symmetric_quantization_config(is_per_channel=True, is_qat=True),
-    #         get_symmetric_quantization_config(is_per_channel=True, is_qat=False),
-    #     ]
-    # )
-    def annotate_symmetric_config(
-        self, model: torch.fx.GraphModule, config: QuantizationConfig
+    def _annotate_for_static_quantization_config(
+        self, model: torch.fx.GraphModule
     ) -> torch.fx.GraphModule:
-        # annotate the nodes from last to first since the matching is in the reversed order
-        # and fusion operator patterns (conv - relu) can get matched before single operator pattern (conv)
-        # and we will mark the matched node with "_annoated" so fusion operator pattern
-        # can take precedence over single operator pattern in this way
+        config = self.global_config
         self._annotate_linear(model, config)
-        if config.is_qat:
-            self._annotate_conv2d_bn_relu(model, config)
-            self._annotate_conv2d_bn(model, config)
-        self._annotate_conv2d_relu(model, config)
-        self._annotate_conv2d(model, config)
+        self._annotate_conv2d_patterns(model, config)
         self._annotate_maxpool2d(model, config)
-        self._annotate_add_relu(model, config)
-        self._annotate_add(model, config)
+        self._annotate_add_patterns(model, config)
         self._annotate_hardtanh(model, config)
         self._annotate_mean(model, config)
         self._annotate_adaptive_avg_pool2d(model, config)
         return model
+
+    def _annotate_for_dynamic_quantization_config(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        config = self.global_config
+        self._annotate_linear(model, config)
+        return model
+
+    def _annotate_conv2d_patterns(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        if quantization_config.is_qat:
+            self._annotate_conv2d_bn_relu(gm, quantization_config)
+            self._annotate_conv2d_bn(gm, quantization_config)
+        self._annotate_conv2d_relu(gm, quantization_config)
+        self._annotate_conv2d(gm, quantization_config)
 
     def _annotate_conv2d_bn(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
@@ -326,7 +333,7 @@ class QNNPackQuantizer(Quantizer):
             input_qspec_map = {}
             input_act = conv_node.args[0]
             assert isinstance(input_act, Node)
-            input_qspec_map[input_act] = get_act_qspec(quantization_config)
+            input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
 
             weight = conv_node.args[1]
             assert isinstance(weight, Node)
@@ -341,7 +348,7 @@ class QNNPackQuantizer(Quantizer):
             )
 
             bn_output_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
             )
             nodes_to_mark_annotated = list(conv_partition.nodes)
@@ -381,7 +388,7 @@ class QNNPackQuantizer(Quantizer):
             input_qspec_map = {}
             input_act = conv_node.args[0]
             assert isinstance(input_act, Node)
-            input_qspec_map[input_act] = get_act_qspec(quantization_config)
+            input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
 
             weight = conv_node.args[1]
             assert isinstance(weight, Node)
@@ -396,7 +403,7 @@ class QNNPackQuantizer(Quantizer):
             )
 
             relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
             )
             nodes_to_mark_annotated = list(conv_partition.nodes)
@@ -438,7 +445,7 @@ class QNNPackQuantizer(Quantizer):
             input_qspec_map = {}
             input_act = conv_node.args[0]
             assert isinstance(input_act, Node)
-            input_qspec_map[input_act] = get_act_qspec(quantization_config)
+            input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
 
             weight = conv_node.args[1]
             assert isinstance(weight, Node)
@@ -452,7 +459,7 @@ class QNNPackQuantizer(Quantizer):
                 input_qspec_map=input_qspec_map, _annotated=True
             )
             relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                output_qspec=get_act_qspec(quantization_config),  # type: ignore[arg-type]
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
             )
 
@@ -479,7 +486,7 @@ class QNNPackQuantizer(Quantizer):
             input_qspec_map = {}
             input_act = conv_node.args[0]
             assert isinstance(input_act, Node)
-            input_qspec_map[input_act] = get_act_qspec(quantization_config)
+            input_qspec_map[input_act] = get_input_act_qspec(quantization_config)
 
             weight = conv_node.args[1]
             assert isinstance(weight, Node)
@@ -491,7 +498,7 @@ class QNNPackQuantizer(Quantizer):
 
             conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
-                output_qspec=get_act_qspec(quantization_config),
+                output_qspec=get_output_act_qspec(quantization_config),
                 _annotated=True,
             )
 
@@ -501,7 +508,8 @@ class QNNPackQuantizer(Quantizer):
         module_partitions = get_source_partitions(
             gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
         )
-        act_qspec = get_act_qspec(quantization_config)
+        input_act_qspec = get_input_act_qspec(quantization_config)
+        output_act_qspec = get_output_act_qspec(quantization_config)
         weight_qspec = get_weight_qspec(quantization_config)
         bias_qspec = get_bias_qspec(quantization_config)
         for module_or_fn_type, partitions in module_partitions.items():
@@ -533,14 +541,14 @@ class QNNPackQuantizer(Quantizer):
                         _annotate_input_qspec_map(
                             act_use_node,
                             act_node,
-                            act_qspec,
+                            input_act_qspec,
                         )
                     if bias_node and _is_annotated([bias_node]) is False:
                         _annotate_output_qspec(bias_node, bias_qspec)
                     if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
                         _annotate_output_qspec(weight_node, weight_qspec)
                     if _is_annotated([output_node]) is False:
-                        _annotate_output_qspec(output_node, act_qspec)
+                        _annotate_output_qspec(output_node, output_act_qspec)
                     nodes_to_mark_annotated = list(p.nodes)
                     _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
@@ -563,15 +571,16 @@ class QNNPackQuantizer(Quantizer):
             input_act = maxpool_node.args[0]  # type: ignore[union-attr]
             assert isinstance(input_act, Node)
 
-            act_qspec = get_act_qspec(quantization_config)
+            input_act_qspec = get_input_act_qspec(quantization_config)
+            output_act_qspec = get_output_act_qspec(quantization_config)
             maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(  # type: ignore[union-attr]
                 input_qspec_map={
-                    input_act: act_qspec,
+                    input_act: input_act_qspec,
                 },
                 _annotated=True,
             )
             output_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                output_qspec=act_qspec,
+                output_qspec=output_act_qspec,
                 _input_output_share_observers=True,
                 _annotated=True,
             )
@@ -595,14 +604,15 @@ class QNNPackQuantizer(Quantizer):
             input_act = io_obs_sharing_node.args[0]
             assert isinstance(input_act, Node)
 
-            act_qspec = get_act_qspec(quantization_config)
+            input_act_qspec = get_input_act_qspec(quantization_config)
+            output_act_qspec = get_output_act_qspec(quantization_config)
             io_obs_sharing_node.meta[
                 "quantization_annotation"
             ] = QuantizationAnnotation(
                 input_qspec_map={
-                    input_act: act_qspec,
+                    input_act: input_act_qspec,
                 },
-                output_qspec=act_qspec,
+                output_qspec=output_act_qspec,
                 _input_output_share_observers=True,
                 _annotated=True,
             )
@@ -626,6 +636,12 @@ class QNNPackQuantizer(Quantizer):
             torch.nn.AdaptiveAvgPool2d, gm, quantization_config
         )
 
+    def _annotate_add_patterns(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        self._annotate_add_relu(gm, quantization_config)
+        self._annotate_add(gm, quantization_config)
+
     def _annotate_add_relu(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
@@ -642,23 +658,24 @@ class QNNPackQuantizer(Quantizer):
             if _is_annotated([relu_node, add_node]):
                 continue
 
-            act_qspec = get_act_qspec(quantization_config)
+            input_act_qspec = get_input_act_qspec(quantization_config)
+            output_act_qspec = get_output_act_qspec(quantization_config)
 
             input_qspec_map = {}
             input_act0 = add_node.args[0]
             if isinstance(input_act0, Node):
-                input_qspec_map[input_act0] = act_qspec
+                input_qspec_map[input_act0] = input_act_qspec
 
             input_act1 = add_node.args[1]
             if isinstance(input_act1, Node):
-                input_qspec_map[input_act1] = act_qspec
+                input_qspec_map[input_act1] = input_act_qspec
 
             add_node.meta["quantization_annotation"] = QuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
                 _annotated=True,
             )
             relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                output_qspec=act_qspec,
+                output_qspec=output_act_qspec,
                 _annotated=True,
             )
 
@@ -672,20 +689,21 @@ class QNNPackQuantizer(Quantizer):
             if _is_annotated([add_node]):
                 continue
 
-            act_qspec = get_act_qspec(quantization_config)
+            input_act_qspec = get_input_act_qspec(quantization_config)
+            output_act_qspec = get_output_act_qspec(quantization_config)
 
             input_qspec_map = {}
             input_act0 = add_node.args[0]
             if isinstance(input_act0, Node):
-                input_qspec_map[input_act0] = act_qspec
+                input_qspec_map[input_act0] = input_act_qspec
 
             input_act1 = add_node.args[1]
             if isinstance(input_act1, Node):
-                input_qspec_map[input_act1] = act_qspec
+                input_qspec_map[input_act1] = input_act_qspec
 
             add_node.meta["quantization_annotation"] = QuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
-                output_qspec=act_qspec,
+                output_qspec=output_act_qspec,
                 _annotated=True,
             )
 
