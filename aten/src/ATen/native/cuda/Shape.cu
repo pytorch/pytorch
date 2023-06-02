@@ -52,9 +52,9 @@ template<typename T>
 inline std::tuple<dim3, dim3> getCatGridContig(unsigned int max_elements_per_tensor,
   ptrdiff_t nTensors) {
   constexpr unsigned int threads_per_block = 128;
-  constexpr unsigned int ldg128_per_thread = 4;
+  constexpr unsigned int min_int4_per_thread = 1;
 
-  unsigned int elements_per_thread = 16 / sizeof(T) * ldg128_per_thread;
+  unsigned int elements_per_thread = sizeof(int4) / sizeof(T) * min_int4_per_thread;
   unsigned int max_threads = ceil_div(max_elements_per_tensor, elements_per_thread);
   dim3 block = dim3(threads_per_block);
   dim3 grid = dim3(ceil_div(max_threads, threads_per_block), (long long)nTensors);
@@ -78,7 +78,7 @@ struct CatArrIndexToOffset {
     // it is the linear index of the permuted contiguous tensor
     IndexType offset = 0;
 
-    // #pragma unroll
+    #pragma unroll
     for (int i = Dims - 1; i >= 1; --i) {
       IndexType curDimSize = i == concatDim ? dimSize : tensorSize[i];
       IndexType nextDimIndex = linearIndex / curDimSize;
@@ -332,7 +332,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     }
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-    if ((isContig) && (isAligned) && (2 < sizeof(scalar_t)) && (sizeof(scalar_t) <= 8)) {\
+    if ((isContig) && (isAligned) && (sizeof(scalar_t) >= 4) && (sizeof(scalar_t) <= 8)) {\
       CatArrayBatchedCopy_aligned16_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
               data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
