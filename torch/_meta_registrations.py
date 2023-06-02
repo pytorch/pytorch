@@ -1491,7 +1491,10 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
     )
-    return self.new_empty(self.shape)
+    memory_format = torch.contiguous_format
+    if is_channels_last(self):
+        memory_format = torch.channels_last
+    return self.new_empty(self.shape).to(memory_format=memory_format)
 
 
 @register_meta(aten.repeat_interleave.Tensor)
