@@ -10,7 +10,6 @@ from typing import Dict, Optional, Set
 import torch
 import torch._logging
 from torch._guards import tracing
-from torch._subclasses import fake_tensor
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,

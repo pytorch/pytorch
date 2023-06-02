@@ -28,7 +28,6 @@ from torch._guards import (
     Source,
     TracingContext,
 )
-from torch._subclasses import fake_tensor
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary
 

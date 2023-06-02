@@ -21,7 +21,6 @@ from unittest.mock import patch
 import torch
 import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
-from torch._subclasses import fake_tensor
 
 from . import (
     allowed_functions,
