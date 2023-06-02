@@ -1466,6 +1466,7 @@ class TestOptim(TestCase):
                 optim.ASGD(None, lr=1e-2, weight_decay=-0.5, foreach=foreach)
 
     @skipIfRocm
+    @skipIfTorchDynamo()
     def test_rprop(self):
         is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(
             0
@@ -1944,6 +1945,7 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+    @skipIfTorchDynamo()
     def test_rprop(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
