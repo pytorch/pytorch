@@ -528,7 +528,6 @@ class TestBypassFailures(TestCase):
         checks = get_classifications(
             checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
         )
-        print(json.dumps(checks))
         self.assertTrue(
             checks[
                 "trunk / win-vs2019-cpu-py3 / test (default, 1, 3, windows.4xlarge.nonephemeral, unstable)"
