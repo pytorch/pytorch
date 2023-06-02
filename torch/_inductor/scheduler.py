@@ -1033,7 +1033,7 @@ class Scheduler:
                     return cond0
 
                 names = node.get_names()
-                shortcut = all(n in combined_predecessors for n in names)
+                shortcut = names.issubset(combined_predecessors)
 
                 if shortcut:
                     return cond0
