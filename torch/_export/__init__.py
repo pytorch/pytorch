@@ -96,24 +96,31 @@ DECOMP_TABLE = core_aten_decompositions()
 
 def export(
     f: Callable,
-    args: Tuple[Any],
+    args: Tuple[Any] = None,
+    kwargs: OrderedDict[str, Any] = None,
     constraints: Optional[List[Constraint]] = None,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
     operations inside and produce a ExportedProgram.
 
-    Args:
-        m: the `nn.Module` or callable to trace.
+    Parameters:
+        m: The `nn.Module` or callable to trace.
 
-        args: Tracing example inputs.
+        args: A tuple of positional example inputs for tracing.
+
+        kwargs: An ordered dict of named example inputs for tracing.
 
         constraints: A list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
+            their possible range of their shapes.
 
     Returns:
         An ExportedProgram containing the traced method.
     """
+    if args is None:
+        args = ()
+    if kwargs is None:
+        kwargs = {}
     if constraints is None:
         constraints = []
 
@@ -124,6 +131,8 @@ def export(
                 *args,
                 constraints=constraints,
                 assume_static_by_default=True,
+                functionalize=True,
+                **kwargs,
             )
 
             params_buffers: "OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]]" = OrderedDict()
@@ -141,12 +150,12 @@ def export(
 
             fake_mode = detect_fake_mode(fake_inps)
 
-            fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
+            fake_args_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args + tuple(kwargs.values()))
 
             # Fix the graph output signature to be tuple if scalar
             # because aot_export expects a tuple as return type
-            return_val = f(*args)
-            flat_args, in_spec = pytree.tree_flatten(args)
+            return_val = f(*args, **kwargs)
+            flat_args_kwargs, in_spec = pytree.tree_flatten(args + tuple(kwargs.values()))
             out_spec = orig_out_spec = gm_torch_level._out_spec
             # this means it is scalar return value, so will make it tuple
             if not isinstance(return_val, (list, tuple, dict)):
@@ -163,7 +172,7 @@ def export(
             )
 
             gm_torch_level.recompile()
-            gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
+            gm, graph_signature = aot_export_module(gm_torch_level, fake_args_kwargs, decompositions=DECOMP_TABLE, trace_joint=False)
 
             export_backward_signature = ExportBackwardSignature(
                 gradients_to_parameters=graph_signature.backward_signature.gradients_to_parameters,
@@ -199,7 +208,7 @@ def export(
             range_constraints, equality_constraints = _process_constraints(
                 gm,
                 export_graph_signature,
-                flat_args,
+                flat_args_kwargs,
             )
             exported_program = ExportedProgram(
                 gm,
