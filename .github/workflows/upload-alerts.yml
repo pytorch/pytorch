@@ -29,11 +29,13 @@ jobs:
           echo "script-output=$output" >> "$GITHUB_OUTPUT"
         id: alert_creation_step
       - name: Upload alerts
-        uses: pytorch/test-infra/.github/actions/upload-alerts@73b2def303615d382bd42d8abd8b231bde6a3331
+        uses: pytorch/test-infra/.github/actions/upload-alerts@f763034f4fa84008c1eebe4aeadf4931b98b5b53
         with:
           alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
           organization: "pytorch"
           repo: "pytorch"
+        secrets:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
