@@ -519,14 +519,14 @@ class RelaxedUnspecConstraint(Constraint):
     unspecialized."  However, this constraint doesn't say very much about what
     specialization is permitted; for example, if we guard on a size being
     even, this would still be acceptable under an unspec constraint.  This
-    makes UnspecConstraint useful for eager mode, where your backend compiler
+    makes RelaxedUnspecConstraint useful for eager mode, where your backend compiler
     may add constraints to otherwise dynamic dimensions; we can't assert that
     there are NO guards as this is brittle because compilers should be able to
     add extra constraints.  If you want to assert that there are no guards,
     use StrictMinMaxConstraint with an unbounded ValueRanges.
     """
     def render(self, source: Source):
-        return f"UnspecConstraint({source.name()})"
+        return f"RelaxedUnspecConstraint({source.name()})"
 
 # NB: None here indicates the client constraint is whatever is implicitly
 # inferred by guards from tracing, and that a backend can add whatever guards
@@ -2285,9 +2285,21 @@ class ShapeEnv:
                 elif isinstance(-s, sympy.Symbol):
                     symbol_to_source[-s].append(NegateSource(source))
                 else:
-                    if constraint is not None:
-                        # TODO: Maybe non-strict constraint shouldn't error
-                        # here?  Check what happens in practice
+                    constraint_violated = False
+                    if isinstance(constraint, StrictMinMaxConstraint):
+                        constraint_violated = True
+                    elif isinstance(constraint, RelaxedUnspecConstraint):
+                        if s.free_symbols:
+                            # TODO: Maybe non-strict constraint shouldn't error
+                            # here?  Check what happens in practice
+                            constraint_violated = True
+                        else:
+                            i = int(s)
+                            # Don't complain about 0/1 specialization, we
+                            # expect to have to compile in this case anyway
+                            if i not in (0, 1):
+                                constraint_violated = True
+                    if constraint_violated:
                         def hint(s):
                             if s.free_symbols:
                                 return (
@@ -2315,12 +2327,19 @@ class ShapeEnv:
             else:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
-                if constraint is not None:
+                constraint_violated = False
+                if isinstance(constraint, StrictMinMaxConstraint):
+                    constraint_violated = True
+                elif isinstance(constraint, RelaxedUnspecConstraint):
+                    # Don't complain about 0/1 specialization, we
+                    # expect to have to compile in this case anyway
+                    if val not in (0, 1):
+                        constraint_violated = True
+                if constraint_violated:
                     msg = (
                         f"Could not validate constraint {constraint.render(source)} as "
-                        f"{source.name()} was inferred to be constant.  For more information "
-                        # TODO: fold this into TORCH_LOGS
-                        "about why it is constant, set torch._dynamo.config.print_specializations = True"
+                        f"{source.name()} was inferred to be constant ({val}).  For more information "
+                        "about why it is constant, run with TORCH_LOGS=dynamic"
                     )
                     record_constraint_violation(constraint.warn_only, msg)
 
