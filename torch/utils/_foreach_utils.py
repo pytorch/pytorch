@@ -9,13 +9,13 @@ def _get_foreach_kernels_supported_devices() -> List[str]:
     r"""
     Return the device type list that supports foreach kernels.
     """
-    return ["cuda", torch._C._get_privateuse1_backend_name()]
+    return ["cuda"]
 
 def _get_fused_kernels_supported_devices() -> List[str]:
     r"""
     Return the device type list that supports fused kernels in optimizer.
     """
-    return ["cuda", torch._C._get_privateuse1_backend_name()]
+    return ["cuda"]
 
 # This util function splits tensors into groups by device and dtype, which is useful before sending
 # tensors off to a foreach implementation, which requires tensors to be on one device and dtype.
