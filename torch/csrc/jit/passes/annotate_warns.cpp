@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-void AnnotateWarns(Block* b) {
+static void AnnotateWarns(Block* b) {
   static std::atomic<int64_t> idx(0);
   for (Node* n : b->nodes()) {
     for (Block* child_b : n->blocks()) {

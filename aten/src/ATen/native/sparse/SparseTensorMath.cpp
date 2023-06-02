@@ -79,20 +79,6 @@ namespace at::native {
 
 using namespace at::sparse;
 // --------------------------------------------------------------------
-// Utility functions
-// --------------------------------------------------------------------
-
-namespace {
-
-  inline SparseTensor get_result_tensor_for_unary_op(const SparseTensor& input) {
-    if (c10::isIntegralType(input.scalar_type(), /*includeBool=*/true)) {
-      return at::empty_like(input, input.options().dtype(c10::get_default_dtype()));
-    }
-    return at::empty_like(input);
-  }
-}
-
-// --------------------------------------------------------------------
 // zero_(SparseTensor)
 // --------------------------------------------------------------------
 
