@@ -1150,14 +1150,14 @@ static std::string reportProcessMemoryInfo(int device) {
           pci_id, &nvml_device));
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
-  unsigned int size = procs.size();
+  std::vector<decltype(nvmlProcessInfo_v1_t)>::size_type size = procs.size();
   nvmlReturn_t r;
   while ((r = DriverAPI::get()->nvmlDeviceGetComputeRunningProcesses_(
               nvml_device, &size, procs.data())) ==
          NVML_ERROR_INSUFFICIENT_SIZE) {
     procs.resize(size);
   }
-  unsigned int self_pid = getpid();
+  pid_t self_pid = getpid();
   std::stringstream ss;
   TORCH_INTERNAL_ASSERT(NVML_SUCCESS == r);
   ss << "";
