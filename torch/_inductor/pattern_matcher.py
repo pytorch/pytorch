@@ -26,6 +26,8 @@ from . import config
 from .decomposition import select_decomp_table
 from .lowering import fallback_node_due_to_unsupported_type
 
+from .virtualized import V
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
@@ -101,9 +103,11 @@ class Match:
     def replace_by_example(self, replacement_fn, args, trace_fn=None):
         if trace_fn is None:
             trace_fn = inference_graph
-        replacement = trace_fn(
-            replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
-        )
+        with V.fake_mode:
+            replacement = trace_fn(
+                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+            )
+
         ReplacementPatternEntry.replace_with_graph(
             self,
             self.ctx.graph,
@@ -699,12 +703,14 @@ def register_replacement(
                     device=args[i].device,
                     requires_grad=grad,
                 )
-        specific_graph = trace_fn(search_fn, args)
+        with V.fake_mode:
+            specific_graph = trace_fn(search_fn, args)
         specific_pattern = fx_to_pattern(specific_graph, argnames=argnames)
         specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
         if specific_pattern_match and extra_check(specific_pattern_match):
             # trace the pattern using the shapes form the user program
-            match.replacement_graph = trace_fn(replace_fn, args)
+            with V.fake_mode:
+                match.replacement_graph = trace_fn(replace_fn, args)
             return True
         return False
 
@@ -723,7 +729,8 @@ def register_replacement(
         requires_grad = [
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
         ]
-        search_gm = trace_fn(search_fn, example_inputs)
+        with V.fake_mode:
+            search_gm = trace_fn(search_fn, example_inputs)
         pattern = fx_to_pattern(
             search_gm,
             ignore_types=(int, float, list, torch.device, torch.dtype),
