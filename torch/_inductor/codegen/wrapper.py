@@ -839,7 +839,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.header.splice(
                 """
                 import torch
-                from torch.utils.cpp_extension import load_inline
+                from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
                 '''
@@ -915,32 +915,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return
 
         result.writeline("'''\n)")
-        # Generate load_inline to jit compile the generated cpp code and to use it in Python
-        shared = codecache.get_shared()
-        warning_all_flag = codecache.get_warning_all_flag()
-        cpp_flags = codecache.cpp_flags()
-        ipaths, lpaths, libs, macros = codecache.get_include_and_linking_paths(
-            vec_isa=codecache.pick_vec_isa(),
-            cuda=self.cuda,
-        )
-        optimization_flags = codecache.optimization_flags()
-        use_custom_generated_macros = codecache.use_custom_generated_macros()
-
-        extra_cflags = f"{cpp_flags} {optimization_flags} {warning_all_flag} {macros} {use_custom_generated_macros}"
-        extra_ldflags = f"{shared} {lpaths} {libs}"
-        extra_include_paths = f"{ipaths}"
-
         # get the hash of the wrapper code to name the extension
         wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
         result.splice(
             f"""
-            module = load_inline(
-                name='inline_extension_{wrapper_call_hash}',
-                cpp_sources=[cpp_wrapper_src],
-                functions=['{self.call_func_name}'],
-                extra_cflags=['{extra_cflags}'],
-                extra_ldflags=['{extra_ldflags}'],
-                extra_include_paths=['{extra_include_paths}'])
+            module = CppWrapperCodeCache.load(cpp_wrapper_src, '{self.call_func_name}', '{wrapper_call_hash}', {self.cuda})
             """
         )
 

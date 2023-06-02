@@ -2,7 +2,15 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec
+from torch.utils._pytree import (
+    tree_flatten,
+    tree_map,
+    tree_unflatten,
+    TreeSpec,
+    LeafSpec,
+    pytree_to_str,
+    str_to_pytree,
+)
 from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
 from torch.utils._pytree import tree_any, tree_all_only, tree_any_only
 from collections import namedtuple, OrderedDict
@@ -250,6 +258,42 @@ class TestPytree(TestCase):
             _, to_spec = tree_flatten(to_pytree)
             result = _broadcast_to_and_flatten(pytree, to_spec)
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
+
+    @parametrize("spec, str_spec", [
+        (TreeSpec(list, None, [LeafSpec()]), "L(*)"),
+        (TreeSpec(list, None, [LeafSpec(), LeafSpec()]), "L(*,*)"),
+        (TreeSpec(tuple, None, [LeafSpec(), LeafSpec(), LeafSpec()]), "T(*,*,*)"),
+        (
+            TreeSpec(dict, ['a', 'b', 'c'], [LeafSpec(), LeafSpec(), LeafSpec()]),
+            "D(a:*,b:*,c:*)"
+        ),
+        (TreeSpec(list, None, [
+            TreeSpec(tuple, None, [
+                LeafSpec(),
+                LeafSpec(),
+                TreeSpec(list, None, [
+                    LeafSpec(),
+                    LeafSpec(),
+                ]),
+            ]),
+        ]), "L(T(*,*,L(*,*)))"),
+    ], name_fn=lambda _, str_spec: str_spec)
+    def test_pytree_serialize(self, spec, str_spec):
+        self.assertEqual(pytree_to_str(spec), str_spec)
+        self.assertTrue(spec == str_to_pytree(str_spec))
+        self.assertTrue(spec == str_to_pytree(pytree_to_str(spec)))
+
+    def test_pytree_serialize_namedtuple(self):
+        Point = namedtuple("Point", ["x", "y"])
+        spec = TreeSpec(namedtuple, Point, [LeafSpec(), LeafSpec()])
+        str_spec = "N(Point(x, y),*,*)"
+
+        self.assertEqual(pytree_to_str(spec), str_spec)
+
+        roundtrip_spec = str_to_pytree(pytree_to_str(spec))
+        # The context in the namedtuple is different now because we recreated
+        # the namedtuple type.
+        self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
 
 
 instantiate_parametrized_tests(TestPytree)
