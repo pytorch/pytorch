@@ -309,10 +309,6 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
     data = json.dumps(
-            get_recurrently_failing_jobs_alerts(
-                args.repo, args.branch, args.job_name_regex
-            )
-        )
-    data = data.replace('"', '\\"')
+        get_recurrently_failing_jobs_alerts(args.repo, args.branch, args.job_name_regex)
+    )
     print(data)
-    

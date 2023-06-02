@@ -31,7 +31,7 @@ jobs:
       - name: Upload alerts
         uses: pytorch/test-infra/.github/actions/upload-alerts@b04d95f13edcdc42d72f06e5482294b866c0e1ea
         with:
-          alerts: ${{ steps.alert_creation_step.outputs.script-output }}
+          alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
           organization: "pytorch"
           repo: "pytorch"
 concurrency:
