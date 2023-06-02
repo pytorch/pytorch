@@ -969,7 +969,9 @@ def quantized_conv_transpose1d(
     bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
     output_padding = [0]
-    output = opset9.conv_transpose2d(g, input, weight, bias, stride, padding, output_padding, groups, dilation)
+    output = opset9.conv_transpose2d(
+        g, input, weight, bias, stride, padding, output_padding, groups, dilation
+    )
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
@@ -994,7 +996,9 @@ def quantized_conv_transpose2d(
     bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
     output_padding = [0, 0]
-    output = opset9.conv_transpose2d(g, input, weight, bias, stride, padding, output_padding, groups, dilation)
+    output = opset9.conv_transpose2d(
+        g, input, weight, bias, stride, padding, output_padding, groups, dilation
+    )
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
@@ -1019,7 +1023,9 @@ def quantized_conv_transpose3d(
     bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
     output_padding = [0, 0, 0]
-    output = opset9.conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, groups, dilation)
+    output = opset9.conv_transpose3d(
+        g, input, weight, bias, stride, padding, output_padding, groups, dilation
+    )
 
     return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 

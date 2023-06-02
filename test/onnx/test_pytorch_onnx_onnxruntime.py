@@ -27,10 +27,10 @@ from pytorch_test_common import (
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
     skipDtypeChecking,
+    skipIfQuantizationBackendQNNPack,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
-    skipIfQuantizationBackendQNNPack,
     skipScriptTest,
     skipShapeChecking,
     skipTraceTest,
@@ -12475,7 +12475,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipIfQuantizationBackendQNNPack
     def test_quantized_conv3d_relu(self):
-        model = torch.ao.nn.intrinsic.quantized.ConvReLU3d(16, 33, [2, 3, 4], stride=[3, 1, 2])
+        model = torch.ao.nn.intrinsic.quantized.ConvReLU3d(
+            16, 33, [2, 3, 4], stride=[3, 1, 2]
+        )
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
         q_weight = torch.quantize_per_tensor(
@@ -12518,7 +12520,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipIfQuantizationBackendQNNPack
     def test_quantized_conv_transpose3d(self):
-        model = torch.ao.nn.quantized.ConvTranspose3d(16, 33, [2, 3, 4], stride=[3, 1, 2])
+        model = torch.ao.nn.quantized.ConvTranspose3d(
+            16, 33, [2, 3, 4], stride=[3, 1, 2]
+        )
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
         q_weight = torch.quantize_per_tensor(
