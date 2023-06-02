@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import functools
-from typing import Callable, Dict, List, Sequence, Tuple, Union, TYPE_CHECKING
+from typing import Callable, Dict, List, Sequence, Tuple, Union
 
 import torch
 from functorch._C import dim as _C
 from ._parsing import AnonymousAxis, _ellipsis, comma_separate, parse_pattern, validate_rearrange_expressions
-
-if TYPE_CHECKING:
-    from functorch.dim.dim import Dim
 
 __all__ = ["rearrange"]
 
@@ -60,11 +57,11 @@ def _create_rearrange_callable(
         # an identity rearrangement on a 0-dimension tensor
         return lambda tensor: tensor
 
-    first_class_dims: Tuple[Dim, ...] = (dims(n_dims),) if n_dims == 1 else dims(n_dims)
-    identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[Dim, ...]] = {}
+    first_class_dims: Tuple[str, ...] = tuple(f"d{i}" for i in range(n_dims))
+    identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[str, ...]] = {}
     anon_axes: List[AnonymousAxis] = []
 
-    # map the left-hand side identifiers to first class dims
+    # map the left-hand side identifiers to strings representing first class dims
     dims_i = 0
     for dimension in left.composition:
         if isinstance(dimension, list):
@@ -89,9 +86,10 @@ def _create_rearrange_callable(
 
     def composition_to_dims(
         composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]]
-    ) -> List[Union[Dim, Tuple[Dim, ...]]]:
-        """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of first class dims."""
-        dim_composition: List[Union[Dim, Tuple[Dim, ...]]] = []
+    ) -> List[Union[str, Tuple[str, ...]]]:
+        """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of strings representing first
+        class dims."""
+        dim_composition: List[Union[str, Tuple[str, ...]]] = []
         for dimension in composition:
             if isinstance(dimension, list):
                 dim_composition.append(tuple(dim for identifier in dimension for dim in identifier_dim_map[identifier]))
@@ -118,7 +116,10 @@ def _create_rearrange_callable(
                 if specified_lengths else ""
             )
             + f"    tensor = tensor[{comma_separate(left_dims)}].order({comma_separate(right_dims)})\n"
-            + (f"    return tensor.sum({anon_dims}, keepdim=False)\n" if anon_dims else "    return tensor\n")
+            + (
+                f"    return tensor.sum({comma_separate([anon_dims])}, keepdim=False)\n"
+                if anon_dims else "    return tensor\n"
+            )
         )
     )
 
