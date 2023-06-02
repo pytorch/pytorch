@@ -26,9 +26,13 @@ namespace at::native {
 
 constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
-constexpr int ALIGNMENT = 16;
 
 namespace {
+
+inline bool is_aligned_vec4(const void* ptr) {
+  auto iptr = reinterpret_cast<uintptr_t>(ptr);
+  return !(iptr % alignof(int4));
+}
 
 inline bool getCatGrid(ptrdiff_t nTensors, dim3& grid) {
   const int numSM = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
@@ -277,7 +281,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
 
-      if (catMetaData.input[batchCounter] % ALIGNMENT != 0) {
+      if (!is_aligned_vec4(catMetaData.input[batchCounter])) {
         // We can't call the CatArrayBatchedCopy_aligned16_contig version
         isAligned = false;
       }
