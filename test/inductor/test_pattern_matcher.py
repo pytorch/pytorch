@@ -3,6 +3,7 @@ import copy
 import unittest
 
 import torch
+import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
@@ -140,8 +141,9 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        if not inductor_config.cpp_wrapper:
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
         counters.clear()
         args = [
@@ -151,8 +153,9 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        if not inductor_config.cpp_wrapper:
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
@@ -169,8 +172,9 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        if not inductor_config.cpp_wrapper:
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
     def test_pointless_convert(self):
         def fn1(x):

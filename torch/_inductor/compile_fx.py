@@ -193,7 +193,10 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                     "cpp_wrapper": False,
                     "cudagraphs": False,
                 }
-                compiled = inner_compile(gm, example_inputs, **kwargs_patched)
+                # deepcopy(gm) makes sure no graph modification from the first pass will
+                # leak to the second pass. It does increase memory pressure, but the problem
+                # can be alleviated once we have FakeModule.
+                compiled = inner_compile(deepcopy(gm), example_inputs, **kwargs_patched)
                 if detect_fake_mode(example_inputs):
 
                     def materialize(x):
