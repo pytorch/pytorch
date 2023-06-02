@@ -429,7 +429,6 @@ def break_graph_if_unsupported(*, push):
             self.restore_graphstate(state)
 
             self.output.compile_subgraph(self, reason=reason)
-
             cg = PyCodegen(self)
             cleanup: List[Instruction] = []
             # Reconstruct the context variables in the block stack
@@ -599,7 +598,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         """Process exactly one instruction, return False we should exit"""
         assert isinstance(self.instruction_pointer, int)
         inst = self.instructions[self.instruction_pointer]
-        # import pdb; pdb.set_trace()
         self.current_instruction = inst
         self.instruction_pointer += 1
         if self.instruction_pointer < len(self.instructions):

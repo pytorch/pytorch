@@ -898,7 +898,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 else:
                     # Register the free symbols as uses
                     arg = node.meta["grapharg"]
-
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
