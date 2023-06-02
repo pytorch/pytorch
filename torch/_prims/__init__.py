@@ -12,10 +12,10 @@ import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
+from torch._prims.debug_prims import register_debug_prims
 from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
-    check,
     Dim,
     DimsSequenceType,
     DimsType,
@@ -418,7 +418,7 @@ def _elementwise_meta(
 
 
 def _complex_only_elementwise_meta(*args, **kwargs):
-    utils.check(
+    torch._check(
         utils.is_complex_dtype(args[0].dtype), lambda: "Only complex dtype is supported"
     )
     return _elementwise_meta(*args, **kwargs)
@@ -577,7 +577,7 @@ bitwise_not = _make_elementwise_unary_prim(
 
 
 def _cbrt_aten(a: torch.Tensor) -> Tensor:
-    utils.check(
+    torch._check(
         not a.is_complex(),
         lambda: "cbrt: Complex inputs not supported. Consider calling torch.pow(a, 1.0/3.0)",
     )
@@ -1289,10 +1289,9 @@ def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
 
     # Verifies end is strictly greater than start
     # (Collapse requires a non-empty interval)
-    utils.check(
+    torch._check_value(
         end >= start,
         lambda: f"Attempting to collapse but end, {end}, is less than start, {start}!",
-        ValueError,
     )
 
 
@@ -1819,7 +1818,7 @@ def _as_strided_scatter_meta(
     utils.validate_strides(stride)
 
     required_size = utils.compute_required_storage_length(size, stride, storage_offset)
-    utils.check(
+    torch._check(
         input.numel() >= required_size,
         lambda: (
             f"as_strided_scatter: sizes {size}, strides {stride}, storage offset {storage_offset} "
@@ -1828,7 +1827,7 @@ def _as_strided_scatter_meta(
             f"for storage of size {input.numel() * input.element_size()}"
         ),
     )
-    utils.check(
+    torch._check(
         utils.is_same_shape(src.shape, size),
         lambda: f"expected src to have a size equal to the slice of self. src size = {src.shape}, slice size = {size}",
     )
@@ -2428,11 +2427,11 @@ def _iota_meta(
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    utils.check(
+    torch._check(
         utils.is_integer_dtype(dtype),
         lambda: "prims.iota only supports integer dtypes",
     )
-    utils.check(step != 0, lambda: "step must be nonzero")
+    torch._check(step != 0, lambda: "step must be nonzero")
     return torch.empty(
         length,
         dtype=dtype,
@@ -2528,7 +2527,7 @@ def _empty_permuted_meta(
 ) -> TensorLikeType:
     p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
     dim = len(shape)
-    utils.check(
+    torch._check(
         len(physical_layout) == dim,
         lambda: (
             "Number of dimensions in the tensor input does not match the "
@@ -2539,7 +2538,7 @@ def _empty_permuted_meta(
     strides = [0] * len(shape)
     seen_dims = set()
     for p, l in enumerate(physical_layout):
-        utils.check(
+        torch._check(
             0 <= l < dim,
             lambda: (
                 f"Dimension out of range (expected to be between 0 and {dim - 1}, but got "
@@ -2547,7 +2546,7 @@ def _empty_permuted_meta(
                 "not currently supported; file an issue if you want it."
             ),
         )
-        utils.check(l not in seen_dims, lambda: "Duplicate dim not allowed")
+        torch._check(l not in seen_dims, lambda: "Duplicate dim not allowed")
         strides[l] = p_strides[p]
         seen_dims.add(l)
     return TensorMeta(
@@ -2731,6 +2730,10 @@ def _svd_meta(
     is_cuda = A.device.type == "cuda"
     strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
+    # Also makes sure this is CUDA or HIP:
+    # https://pytorch.org/docs/stable/notes/hip.html#checking-for-hip
+    if A.numel() != 0 and Vh.is_complex() and torch.cuda.is_available():
+        Vh = Vh.conj()
     return U, S, Vh
 
 
@@ -2771,12 +2774,12 @@ def _normal_meta(
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    utils.check(
+    torch._check(
         std >= 0.0,
         lambda: f"expected non-negative standard deviation, but got std={std}",
     )
 
-    utils.check(
+    torch._check(
         utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
         lambda: f"expected a floating-point or complex dtype, but got dtype={dtype}",
     )
@@ -2988,3 +2991,4 @@ fft_c2r = _make_prim(
 
 register_nvprims()
 register_rng_prims()
+register_debug_prims()
