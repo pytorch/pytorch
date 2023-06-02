@@ -594,11 +594,6 @@ class ExplainOutput:
             output += f"  Guard {i+1}:\n"
             output += f"    {str(guard)}"
 
-        # This looks really ugly so far so not sure how I feel about adding it
-        # output += "Graphs:\n"
-        # for graph in self.graphs:
-        #     output += "  " + graph.print_readable() + "\n"
-
         output += f"Compile Times: {self.compile_times}\n"
         return output
 

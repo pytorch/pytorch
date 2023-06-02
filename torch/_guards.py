@@ -182,7 +182,7 @@ class Guard:
             return str(obj_weakref)
 
     def __str__(self):
-        output =  f"Name: {self.name}\n"
+        output = f"Name: {self.name}\n"
         output += f"    Source: {self.source}\n"
         output += f"    Create Function: {self.create_fn}\n"
         output += f"    Is Volatile: {self.is_volatile}\n"
