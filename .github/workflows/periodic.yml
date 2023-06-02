@@ -179,7 +179,7 @@ jobs:
     with:
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-latest" },
+          { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-20.04-16x" },
         ]}
 
   linux-vulkan-bionic-py3_11-clang9-build:
