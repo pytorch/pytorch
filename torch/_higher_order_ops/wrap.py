@@ -1,5 +1,7 @@
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint
+from itertools import count
+counter = count()
 
 # Used for testing the HigherOrderOperator mechanism
 class Wrap(HigherOrderOperator):
@@ -48,9 +50,10 @@ class TagActivationCheckpoint(HigherOrderOperator):
         # the forward nodes as recomputable. However, torch.utils.checkpoint
         # provides a custom function to selectively recompute. We will have to
         # figure out how to tag seletively.
+        unique_graph_id = next(counter)
         for node in gmod.graph.nodes:
             if node.op == "call_function":
-                node.meta["recompute"] = True
+                node.meta["recompute"] = unique_graph_id
         return gmod
 
     def __call__(self, gmod, *args, **kwargs):

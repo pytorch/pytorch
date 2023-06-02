@@ -577,6 +577,13 @@ def _extract_fwd_bwd_modules_special(joint_module: fx.GraphModule, saved_values,
     bwd_module = fx.GraphModule(joint_module, bwd_graph)
     return fwd_module, bwd_module
 
+def cleanup_recompute_tags(joint_module):
+    for node in joint_module.graph.nodes:
+        if is_recomputable(node):
+            for user in node.users:
+                if is_recomputable(user) and user.meta["recompute"] > node.meta["recompute"]:
+                    node.meta["recompute"] = 0
+    return joint_module
 
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None,
@@ -624,6 +631,14 @@ def min_cut_rematerialization_partition(
         cse_graph = fx_graph_cse(fx_g)
         joint_module.graph = cse_graph
     full_bw_graph = joint_module.graph
+
+    graph_has_recomputable_ops = has_recomputable_ops(joint_module)
+    graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
+    if graph_has_recomputable_ops:
+        joint_module = cleanup_recompute_tags(joint_module)
+
+    for node in joint_module.graph.nodes:
+        print(node, -1 if "recompute" not in node.meta else node.meta["recompute"])
 
     name_to_node = {}
     for node in joint_module.graph.nodes:
@@ -721,16 +736,6 @@ def min_cut_rematerialization_partition(
                     cur_nodes.add(user)
 
         return False
-
-    graph_has_recomputable_ops = has_recomputable_ops(joint_module)
-    graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
-    recomputable_rng_ops_map = dict()
-    for node in joint_module.graph.nodes:
-        if is_recomputable(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
-            # The map value will be set while creating the fwd pass
-            recomputable_rng_ops_map[node] = InvalidNode
-
-
 
     def ban_recomputation(node):
         if graph_has_recomputable_ops:

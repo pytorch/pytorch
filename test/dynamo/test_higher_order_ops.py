@@ -977,13 +977,17 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     @torch._inductor.config.patch(fallback_random=True)
     def test_tags_rand(self):
         def gn(x, y):
-            return torch.sigmoid(torch.rand_like(x) * y)
+            x = torch.mm(x, y)
+            x = torch.mm(x, y)
+            # x = torch.mm(x, y)
+            # x = torch.mm(x, y)
+            return x
 
         def fn(x, y):
             x = torch.sin(x)
             z = torch.utils.checkpoint.checkpoint(gn, x, y)
-            x = torch.sin(z)
-            z = torch.utils.checkpoint.checkpoint(gn, x, y)
+            # x = toch.sin(z)
+            z = torch.utils.checkpoint.checkpoint(gn, z, y)
             return z
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
@@ -995,7 +999,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         # )  # mm recomputed in the bwd
         # backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         # backend = "aot_eager"
-        backend = "aot_eager"
+        backend = "inductor"
         self._validate(fn, backend, x, y)
 
     @requires_cuda()
