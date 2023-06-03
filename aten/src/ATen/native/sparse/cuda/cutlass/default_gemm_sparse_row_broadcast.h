@@ -1,5 +1,5 @@
 /***************************************************************************************************
- * Copyright (c) 2017 - 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * Copyright (c) 2017 - 2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,10 +29,10 @@
  *
  **************************************************************************************************/
 /*! \file
-    \brief
+    \brief 
       Default kernel-level GEMM definitions combine threadblock-scoped matrix multiply-add with
       the appropriate threadblock-scoped epilogue.
-
+  
       Note, CUTLASS epilogues universally target row-major outputs. Column-major outputs are
       accommodated by exchanging A and B operands and assuming transposed layouts. Partial
       specializations here choose 'device::GemmTransposed' to implement this functionality.
@@ -40,34 +40,34 @@
 
 #pragma once
 
-#include <cutlass/cutlass.h>
+#include "cutlass/cutlass.h"
 
-#include <cutlass/layout/matrix.h>
-#include <cutlass/numeric_types.h>
-#include <cutlass/arch/wmma.h>
+#include "cutlass/layout/matrix.h"
+#include "cutlass/numeric_types.h"
+#include "cutlass/arch/wmma.h"
 
-#include <cutlass/epilogue/threadblock/epilogue.h>
-#include <cutlass/epilogue/thread/linear_combination.h>
+#include "cutlass/epilogue/threadblock/epilogue.h"
+#include "cutlass/epilogue/thread/linear_combination.h"
 
-#include <cutlass/gemm/gemm.h>
-#include <cutlass/gemm/kernel/gemm.h>
-#include <ATen/native/sparse/cuda/cutlass/custom_sparse_gemm.h>
-#include <cutlass/gemm/kernel/gemm_pipelined.h>
-#include <cutlass/gemm/threadblock/default_mma_core_sm75.h>
-#include <cutlass/gemm/threadblock/default_mma_core_sm70.h>
-#include <cutlass/gemm/threadblock/default_mma_core_sm80.h>
-#include <cutlass/gemm/threadblock/default_mma_core_sparse_sm80.h>
-#include <cutlass/gemm/threadblock/default_sparse_mma.h>
-#include <cutlass/gemm/threadblock/default_mma_core_simt.h>
-#include <cutlass/gemm/threadblock/threadblock_swizzle.h>
+#include "cutlass/gemm/gemm.h"
+#include "cutlass/gemm/kernel/gemm.h"
+#include <ATen/native/sparse/cuda/cutlass/sparse_gemm_row_broadcast.h>
+#include "cutlass/gemm/kernel/gemm_pipelined.h"
+#include "cutlass/gemm/threadblock/default_mma_core_sm75.h"
+#include "cutlass/gemm/threadblock/default_mma_core_sm70.h"
+#include "cutlass/gemm/threadblock/default_mma_core_sm80.h"
+#include "cutlass/gemm/threadblock/default_mma_core_sparse_sm80.h"
+#include "cutlass/gemm/threadblock/default_sparse_mma.h"
+#include "cutlass/gemm/threadblock/default_mma_core_simt.h"
+#include "cutlass/gemm/threadblock/threadblock_swizzle.h"
 
-#include <ATen/native/sparse/cuda/cutlass/custom_default_epilogue_tensor_op.h>
-#include <cutlass/epilogue/threadblock/default_epilogue_volta_tensor_op.h>
-#include <cutlass/epilogue/threadblock/default_epilogue_simt.h>
-#include <cutlass/transform/threadblock/predicated_tile_iterator.h>
+#include <ATen/native/sparse/cuda/cutlass/default_epilogue_tensor_op_row_broadcast.h>
+#include "cutlass/epilogue/threadblock/default_epilogue_volta_tensor_op.h"
+#include "cutlass/epilogue/threadblock/default_epilogue_simt.h"
+#include "cutlass/transform/threadblock/predicated_tile_iterator.h"
 
 #if defined(CUTLASS_ARCH_WMMA_ENABLED)
-#include <cutlass/epilogue/threadblock/default_epilogue_wmma_tensor_op.h>
+#include "cutlass/epilogue/threadblock/default_epilogue_wmma_tensor_op.h"
 #endif //CUTLASS_ARCH_WMMA_ENABLED
 
 
@@ -119,7 +119,7 @@ template <
     bool SplitKSerial,
     /// Operation performed by GEMM
     typename Operator>
-struct CustomDefaultSparseGemm;
+struct DefaultSparseGemmRowBroadcast;
 
 ////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
@@ -159,7 +159,7 @@ template <
     bool SplitKSerial,
     /// Operation performed by GEMM
     typename Operator>
-struct CustomDefaultSparseGemm<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB, ElementC,
+struct DefaultSparseGemmRowBroadcast<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB, ElementC,
                    layout::RowMajor, ElementAccumulator, arch::OpClassTensorOp,
                    arch::Sm80, ThreadblockShape, WarpShape, InstructionShape,
                    EpilogueOutputOp, ThreadblockSwizzle, Stages, SplitKSerial,
@@ -175,12 +175,12 @@ struct CustomDefaultSparseGemm<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB
 
   /// Define the epilogue
   using Epilogue =
-      typename cutlass::epilogue::threadblock::CustomDefaultEpilogueTensorOp<
+      typename cutlass::epilogue::threadblock::DefaultEpilogueTensorOpRowBroadcast<
           ThreadblockShape, typename Mma::Operator, kPartitionsK, EpilogueOutputOp,
           EpilogueOutputOp::kCount>::Epilogue;
 
   /// Define the kernel-level GEMM operator.
-  using GemmKernel = kernel::CustomSparseGemm<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
+  using GemmKernel = kernel::SparseGemmRowBroadcast<Mma, Epilogue, ThreadblockSwizzle, SplitKSerial>;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -188,3 +188,4 @@ struct CustomDefaultSparseGemm<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB
 }  // namespace kernel
 }  // namespace gemm
 }  // namespace cutlass
+
