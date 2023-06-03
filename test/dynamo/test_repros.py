@@ -1091,9 +1091,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertEqual(cnt.frame_count, 4)
+            self.assertEqual(cnt.frame_count, ifdyn(2, 4))
         else:
-            self.assertEqual(cnt.frame_count, 6)
+            self.assertEqual(cnt.frame_count, ifdyn(3, 6))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -2879,6 +2879,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros([])
         obj1 = MyObj(x, x)
         self.assertRaises(AttributeError, lambda: fn(x, obj1))
+
+    def test_attached_attribute_in_dir(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.linear(x))
+
+        mod = torch.compile(MyModule(), backend="eager")
+        mod.is_compiled = True
+        self.assertTrue("is_compiled" in dir(mod))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
