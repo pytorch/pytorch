@@ -112,8 +112,7 @@ FatalSignalHandler::FatalSignalHandler()
       writingCond(PTHREAD_COND_INITIALIZER),
       writingMutex(PTHREAD_MUTEX_INITIALIZER) {}
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
-// NOLINTNEXTLINE(modernize-avoid-c-arrays)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 FatalSignalHandler::signal_handler FatalSignalHandler::kSignalHandlers[] = {
     {"SIGABRT", SIGABRT, {}},
     {"SIGINT", SIGINT, {}},
