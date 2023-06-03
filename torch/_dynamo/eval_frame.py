@@ -955,14 +955,7 @@ def export(
         assert dim_constraints is not None
         dim_constraints.solve()
         msg = dim_constraints.prettify_results(original_signature)
-        forced_specializations = "\n".join([
-            (
-                f"\t{shape_env.var_to_sources[var][0].name()}, which was marked dynamic, "
-                f"must be specialized to {dim_constraints._substitutions[var]}."
-            )
-            for var in shape_env.var_to_range.keys()
-            if var in dim_constraints._substitutions
-        ])
+        forced_specializations = dim_constraints.forced_specializations()
         if forced_specializations:
             msg = (
                 "Some dynamic dimensions need to be specialized because "

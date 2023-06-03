@@ -1499,7 +1499,7 @@ class DimConstraints:
     Solutions are "static" values or simplified "dynamic" constraints.
     """
 
-    def __init__(self, symbol_to_source, var_to_val):
+    def __init__(self, symbol_to_source, var_to_val, marked_dynamic):
         # We try to solve systems of inequalities with 1 free variable.
         self._univariate_inequalities: Dict[sympy.Symbol, Set[sympy.Expr]] = defaultdict(set)
         # Among them, we prioritize solving for a free variable that has equalities.
@@ -1537,6 +1537,9 @@ class DimConstraints:
 
         # inconsistencies found on substituting with concrete values / static solutions
         self._inconsistencies: List[str] = []
+
+        # symbols that are marked dynamic
+        self._marked_dynamic = marked_dynamic
 
     def rewrite_with_congruences(self, s, expr):
         """
@@ -1779,6 +1782,15 @@ class DimConstraints:
         for source, expr in self._symbolic_equivalences:
             self._dynamic_results.add(f"{self._dcp.print_source(source)} == {self._dcp.doprint(expr)}")
 
+    def forced_specializations(self):
+        return "\n".join([
+            (
+                f"\t{self._dcp.symbol_to_source[s][0].name()}, which was marked dynamic, "
+                f"must be specialized to {val}."
+            )
+            for s, val in self._substitutions.items()
+            if s in self._marked_dynamic
+        ])
 
     def prettify_results(self, original_signature: inspect.Signature):
         # Note: Model inputs are wrapped as LocalSource in dynamo.
@@ -2382,7 +2394,11 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
-        self.dim_constraints = DimConstraints(symbol_to_source, self.var_to_val)
+        self.dim_constraints = DimConstraints(
+            symbol_to_source,
+            self.var_to_val,
+            set(symbol_to_constraints.keys()),
+        )
 
         if not _simplified:
             for source, expr in input_guards:
