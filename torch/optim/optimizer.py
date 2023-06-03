@@ -20,6 +20,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    cast,
     overload,
     runtime_checkable,
 )
@@ -380,14 +381,19 @@ class Optimizer:
         return wrapper
 
     @staticmethod
-    def _group_tensors_by_device_and_dtype(tensorlistlist, with_indices=False):
+    def _group_tensors_by_device_and_dtype(
+        tensorlistlist: List[List[torch.Tensor]],
+        with_indices: bool = False,
+    ) -> Union[
+        Dict[Tuple[None, None], List[Union[List[torch.Tensor], List[int]]]],
+        Dict[Tuple[torch.device, torch.dtype], List[Union[List[torch.Tensor], List[int]]]],
+    ]:
         """Groups a list of lists of tensors by device and dtype.
         Skips this step if we are compiling since this will occur during inductor lowering."""
         if is_compiling():
-            if with_indices:
-                indices = list(range(len(tensorlistlist[0])))
-                tensorlistlist.append(indices)
-            return {(None, None): tensorlistlist}
+            indices = list(range(len(tensorlistlist[0])))
+            grouped_tensors = cast(List[Union[List[torch.Tensor], List[int]]], tensorlistlist)
+            return {(None, None): (grouped_tensors + [indices]) if with_indices else grouped_tensors}
         else:
             return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
 
