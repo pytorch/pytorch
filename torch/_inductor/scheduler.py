@@ -1027,10 +1027,21 @@ class Scheduler:
         def check(node):
             if isinstance(node, FusedSchedulerNode) and node not in visited:
                 visited.add(node)
-                return bool(combined_names & node.recursive_predecessors) or any(
-                    check(self.name_to_fused_node[n])
-                    for n in node.recursive_predecessors - combined_predecessors
-                )
+                cond0 = bool(combined_names & node.recursive_predecessors)
+
+                if cond0:
+                    return cond0
+
+                names = node.get_names()
+                shortcut = names.issubset(combined_predecessors)
+
+                if shortcut:
+                    return cond0
+                else:
+                    return any(
+                        check(self.name_to_fused_node[n])
+                        for n in node.recursive_predecessors - combined_predecessors
+                    )
             return False
 
         visited = set()
