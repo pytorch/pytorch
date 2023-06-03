@@ -63,7 +63,8 @@ static inline int Fls64(uint64_t n) {
   STEP(uint32_t, n32, pos, 0x10);
   STEP(uint32_t, n32, pos, 0x08);
   STEP(uint32_t, n32, pos, 0x04);
-  return static_cast<int>(pos + ((uint64_t{0x3333333322221100u} >> (n32 << 2)) & 0x3));
+  return static_cast<int>(
+      pos + ((uint64_t{0x3333333322221100u} >> (n32 << 2)) & 0x3));
 }
 #undef STEP
 
