@@ -34,11 +34,11 @@
 
 #pragma once
 
-#include "cutlass/cutlass.h"
+#include <cutlass/cutlass.h>
 
-#include "cutlass/gemm/gemm.h"
-#include "cutlass/matrix_coord.h"
-#include "cutlass/semaphore.h"
+#include <cutlass/gemm/gemm.h>
+#include <cutlass/matrix_coord.h>
+#include <cutlass/semaphore.h>
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -49,7 +49,7 @@ namespace kernel {
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 template <
-  typename Mma_,                  ///! Threadblock-scoped matrix multiply-accumulate 
+  typename Mma_,                  ///! Threadblock-scoped matrix multiply-accumulate
   typename Epilogue_,             ///! Epilogue
   typename ThreadblockSwizzle_,   ///! Threadblock swizzling function
   bool SplitKSerial               ///! If true, code supporting split-K via serial reduction is enabled.
@@ -130,7 +130,7 @@ struct SparseGemmRowBroadcast {
 
       int total_gemm_k_iterations = (problem_size.k() + Mma::Shape::kK - 1) / Mma::Shape::kK;
       int gemm_k_iterations = (total_gemm_k_iterations + grid_tiled_shape.k() - 1) / grid_tiled_shape.k();
-      
+
       gemm_k_size = gemm_k_iterations * Mma::Shape::kK;
 
     semaphore = workspace;
@@ -148,7 +148,7 @@ struct SparseGemmRowBroadcast {
   //
 
   CUTLASS_HOST_DEVICE
-  SparseGemmRowBroadcast() { } 
+  SparseGemmRowBroadcast() { }
 
   /// Determines whether kernel satisfies alignment
   static Status can_implement(
@@ -202,7 +202,7 @@ struct SparseGemmRowBroadcast {
       return Status::kErrorMisalignedOperand;
     }
 
-    // M dimension has to be multiple of 32 (sparse float) or 16 (sparse int) 
+    // M dimension has to be multiple of 32 (sparse float) or 16 (sparse int)
     // because of the row reordering of operand E
     static int const kAlignmentM = (sizeof(ElementE) == 2) ? 32 : 16;
 
@@ -248,7 +248,7 @@ struct SparseGemmRowBroadcast {
 
     // Problem size is a function of threadblock index in the K dimension
     int problem_size_k = min(
-      params.problem_size.k(), 
+      params.problem_size.k(),
       (threadblock_tile_offset.k() + 1) * params.gemm_k_size);
 
     // Compute threadblock-scoped matrix multiply-add
@@ -325,7 +325,7 @@ struct SparseGemmRowBroadcast {
 
     // If performing a reduction via split-K, fetch the initial synchronization
     if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
-      
+
       // Fetch the synchronization lock initially but do not block.
       semaphore.fetch();
 
@@ -352,14 +352,14 @@ struct SparseGemmRowBroadcast {
     );
 
     Epilogue epilogue(
-      shared_storage.epilogue, 
-      thread_idx, 
-      warp_idx, 
+      shared_storage.epilogue,
+      thread_idx,
+      warp_idx,
       lane_idx);
 
     // Wait on the semaphore - this latency may have been covered by iterator construction
     if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
-        
+
       // For subsequent threadblocks, the source matrix is held in the 'D' tensor.
       if (threadblock_tile_offset.k()) {
         iterator_C = iterator_D;
@@ -371,14 +371,14 @@ struct SparseGemmRowBroadcast {
     }
 
     // Execute the epilogue operator to update the destination tensor.
-    epilogue(output_op, iterator_D, accumulators, iterator_C); 
-    
+    epilogue(output_op, iterator_D, accumulators, iterator_C);
+
     //
     // Release the semaphore
     //
 
     if (kSplitKSerial && params.grid_tiled_shape.k() > 1) {
-      
+
       int lock = 0;
       if (params.grid_tiled_shape.k() == threadblock_tile_offset.k() + 1) {
 

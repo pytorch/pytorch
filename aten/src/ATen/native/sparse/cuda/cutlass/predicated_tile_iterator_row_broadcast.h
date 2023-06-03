@@ -38,19 +38,19 @@
 
 #pragma once
 
-#include "cutlass/cutlass.h"
-#include "cutlass/numeric_types.h"
-#include "cutlass/array.h"
-#include "cutlass/layout/matrix.h"
-#include "cutlass/layout/tensor.h"
-#include "cutlass/layout/permute.h"
-#include "cutlass/matrix_shape.h"
-#include "cutlass/tensor_ref.h"
-#include "cutlass/transform/pitch_linear_thread_map.h"
-#include "cutlass/epilogue/threadblock/output_tile_thread_map.h"
-#include "cutlass/arch/arch.h"
-#include "cutlass/arch/memory.h"
-#include "cutlass/epilogue/threadblock/predicated_tile_iterator_params.h"
+#include <cutlass/cutlass.h>
+#include <cutlass/numeric_types.h>
+#include <cutlass/array.h>
+#include <cutlass/layout/matrix.h>
+#include <cutlass/layout/tensor.h>
+#include <cutlass/layout/permute.h>
+#include <cutlass/matrix_shape.h>
+#include <cutlass/tensor_ref.h>
+#include <cutlass/transform/pitch_linear_thread_map.h>
+#include <cutlass/epilogue/threadblock/output_tile_thread_map.h>
+#include <cutlass/arch/arch.h>
+#include <cutlass/arch/memory.h>
+#include <cutlass/epilogue/threadblock/predicated_tile_iterator_params.h>
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -103,10 +103,10 @@ public:
 
   /// Fragment object
   using Fragment = Array<
-    Element, 
-    ThreadMap::Iterations::kColumn * 
-    ThreadMap::Iterations::kRow * 
-    ThreadMap::Iterations::kGroup * 
+    Element,
+    ThreadMap::Iterations::kColumn *
+    ThreadMap::Iterations::kRow *
+    ThreadMap::Iterations::kGroup *
     ThreadMap::Iterations::kCluster * ThreadMap::kElementsPerAccess>;
 
   /// Memory access size
@@ -124,15 +124,15 @@ public:
     Params() { }
 
     CUTLASS_HOST_DEVICE
-    Params(Layout const &layout): 
+    Params(Layout const &layout):
       PredicatedTileIteratorParams(
         layout.stride(0) * int(sizeof(AccessType)) / kElementsPerAccess,
         make_OutputTileThreadMapDesc<ThreadMap>()
-      ) 
+      )
     { }
 
     CUTLASS_HOST_DEVICE
-    Params(Base const &base) : 
+    Params(Base const &base) :
       Base(base) { }
   };
 
@@ -231,7 +231,7 @@ public:
     int thread_idx,
     TensorCoord threadblock_offset = TensorCoord(),
     int const *indices = nullptr
-  ): 
+  ):
     params_(params)
   {
 
@@ -247,7 +247,7 @@ public:
     CUTLASS_PRAGMA_UNROLL
     for (int c = 0; c < ThreadMap::Iterations::kColumn; ++c) {
 
-      mask_.predicates[c] = ((thread_offset.column() 
+      mask_.predicates[c] = ((thread_offset.column()
         + ThreadMap::Delta::kColumn * c) < extent.column());
     }
 
@@ -257,8 +257,8 @@ public:
     }
 
     // Initialize byte_pointer_
-    byte_pointer_ = reinterpret_cast<uint8_t *>(pointer) + 
-      LongIndex(thread_offset.row()) * LongIndex(params_.stride) + 
+    byte_pointer_ = reinterpret_cast<uint8_t *>(pointer) +
+      LongIndex(thread_offset.row()) * LongIndex(params_.stride) +
       LongIndex(thread_offset.column()) * sizeof(AccessType) / kElementsPerAccess;
 
     // store_byte_pointer_ is set to be the same with byte_pointer_ unless PermuteD is used.
@@ -268,7 +268,7 @@ public:
     state_[0] = state_[1] = state_[2] = 0;
 
     // NOTE: Changed!
-    byte_pointer_ = reinterpret_cast<uint8_t *>(pointer) + 
+    byte_pointer_ = reinterpret_cast<uint8_t *>(pointer) +
       LongIndex(thread_offset.row()) * LongIndex(params_.stride);
   }
 
@@ -295,11 +295,11 @@ public:
         CUTLASS_PRAGMA_UNROLL
         for (int row = 0; row < ThreadMap::Iterations::kRow; ++row) {
 
-          int frag_row_idx = 
+          int frag_row_idx =
             (row + ThreadMap::Iterations::kRow * (group + ThreadMap::Iterations::kGroup * cluster));
 
-          int row_offset = row * ThreadMap::Delta::kRow 
-            + group * ThreadMap::Delta::kGroup 
+          int row_offset = row * ThreadMap::Delta::kRow
+            + group * ThreadMap::Delta::kGroup
             + cluster * ThreadMap::Delta::kCluster;
 
           bool row_guard = ((row_offset + thread_start_row_) < extent_row_);
@@ -317,7 +317,7 @@ public:
             // NOTE: Changed!
             /*
             cutlass::arch::global_load<
-              AccessType, 
+              AccessType,
               sizeof(AccessType)
             >(
                 frag_ptr[frag_row_idx * ThreadMap::Iterations::kColumn +
@@ -370,11 +370,11 @@ public:
         CUTLASS_PRAGMA_UNROLL
         for (int row = 0; row < ThreadMap::Iterations::kRow; ++row) {
 
-          int frag_row_idx = 
+          int frag_row_idx =
             (row + ThreadMap::Iterations::kRow * (group + ThreadMap::Iterations::kGroup * cluster));
 
-          int row_offset = row * ThreadMap::Delta::kRow 
-            + group * ThreadMap::Delta::kGroup 
+          int row_offset = row * ThreadMap::Delta::kRow
+            + group * ThreadMap::Delta::kGroup
             + cluster * ThreadMap::Delta::kCluster;
 
           bool row_guard = ((row_offset + thread_start_row_) < extent_row_);
@@ -387,7 +387,7 @@ public:
             bool guard = row_guard && mask_.predicates[column];
 
             int col_offset = column * ThreadMap::Delta::kColumn;
-            
+
             if (UseCUDAStore) {
               if (guard) {
                 memory_pointer[0] =
@@ -399,7 +399,7 @@ public:
                   (void *)&memory_pointer[0],
                   guard);
             }
-            
+
             memory_pointer += (ThreadMap::Delta::kColumn / kElementsPerAccess);
           }
 
@@ -466,7 +466,7 @@ public:
     byte_pointer_ += params_.advance_row;
 
     thread_start_row_ += ThreadMap::Shape::kRow;
-    
+
     if (state_[0] == ThreadMap::Count::kRow) {
 
       state_[0] = 0;
@@ -474,7 +474,7 @@ public:
       byte_pointer_ += params_.advance_group;
       store_byte_pointer_ += params_.advance_group;
 
-      thread_start_row_ += (ThreadMap::Shape::kGroup - 1) * 
+      thread_start_row_ += (ThreadMap::Shape::kGroup - 1) *
         ThreadMap::Shape::kRow * ThreadMap::Count::kRow;
 
       if (state_[1] == ThreadMap::Count::kGroup) {
@@ -484,7 +484,7 @@ public:
         byte_pointer_ += params_.advance_cluster;
         store_byte_pointer_ += params_.advance_cluster;
 
-        thread_start_row_ += ThreadMap::Count::kGroup * 
+        thread_start_row_ += ThreadMap::Count::kGroup *
           ThreadMap::Shape::kGroup * ThreadMap::Count::kRow * ThreadMap::Shape::kRow;
 
         if (state_[2] == ThreadMap::Count::kCluster) {

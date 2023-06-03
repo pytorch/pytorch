@@ -2,6 +2,8 @@ name: Lint
 
 on:
   pull_request:
+    branches-ignore:
+      - nightly
   push:
     branches:
       - main
