@@ -703,27 +703,8 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return set_inner<1, size()>(a, b, count);
   }
 
-  const ElementType& operator[](int idx) const {
-    if (idx < size() / 2)
-    {
-      return _vec0[idx];
-    }
-    else
-    {
-      return _vec1[idx - (size() / 2)];
-    }
-  }
-
-  ElementType& operator[](int idx) {
-    if (idx < size() / 2)
-    {
-      return _vec0[idx];
-    }
-    else
-    {
-      return _vec1[idx - (size() / 2)];
-    }
-  }
+  const ElementType& operator[](int idx) const = delete;
+  ElementType& operator[](int idx) = delete;
 
   Vectorized<T> C10_ALWAYS_INLINE operator+(const Vectorized<T>& other) const {
     return Vectorized<T>{_vec0 + other._vec0, _vec1 + other._vec1};
@@ -754,6 +735,51 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   Vectorized<T> C10_ALWAYS_INLINE operator^(const Vectorized<T>& other) const {
     return Vectorized<T>{
         (vtype)(vecb0() ^ other.vecb0()), (vtype)(vecb1() ^ other.vecb1())};
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator<<(const Vectorized<T> &other) const {
+    constexpr ElementType max_shift = sizeof(ElementType) * CHAR_BIT;
+
+    ElementType a_array[Vectorized<T>::size()];
+    ElementType b_array[Vectorized<T>::size()];
+    ElementType c_array[Vectorized<T>::size()];
+
+    store(a_array);
+    other.store(b_array);
+
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      T shift = b_array[i];
+      if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+        c_array[i] = 0;
+      } else {
+        c_array[i] = static_cast<std::make_unsigned_t<T>>(a_array[i]) << shift;
+      }
+   }
+
+    return loadu(c_array);
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator>>(const Vectorized<T> &other) const {
+    // right shift value to retain sign bit for signed and no bits for unsigned
+    constexpr ElementType max_shift = sizeof(T) * CHAR_BIT - std::is_signed_v<T>;
+
+    ElementType a_array[Vectorized<T>::size()];
+    ElementType b_array[Vectorized<T>::size()];
+    ElementType c_array[Vectorized<T>::size()];
+
+    store(a_array);
+    other.store(b_array);
+
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      T shift = b_array[i];
+      if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+        c_array[i] = a_array[i] >> max_shift;
+      } else {
+        c_array[i] = a_array[i] >> shift;
+      }
+    }
+
+    return loadu(c_array);
   }
 
   Vectorized<T> _not() const {
