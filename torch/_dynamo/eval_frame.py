@@ -1267,9 +1267,6 @@ class TorchPatcher:
             if opt in excluded_opts:
                 opt.step = disable(opt.step)
 
-            opt._cuda_graph_capture_health_check = disable(
-                opt._cuda_graph_capture_health_check
-            )
             opt.zero_grad = disable(opt.zero_grad)
 
             if hasattr(opt, "_init_group"):
