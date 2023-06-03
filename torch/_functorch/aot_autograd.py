@@ -738,7 +738,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata = True
                 else:
                     mutates_data = True
-                    mutates_metadata = not has_same_metadata(arg, new_arg)
+                    mutates_metadata = torch._functionalize_has_metadata_mutation(f_arg)
                 # Only track requires_grad info on *mutated* inputs,
                 # because they show up in the autograd.Function.forward as outputs
                 input_requires_grad_info.append(
