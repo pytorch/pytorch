@@ -256,8 +256,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "fft.rfft": {f16, f32, f64, b8, i32, i64},
     "fft.rfft2": {b8, f16, f32, f64, i32, i64},
     "fft.rfftn": {b8, f16, f32, f64, i32, i64},
-    # AssertionError: Scalars are not close!
-    "empty_strided": {b8, i32, i64, f16, f32, f64},
     # These return complex tensors
     "cdouble": {b8, i32, i64, f16, f32, f64},
     "cfloat": {b8, i32, i64, f16, f32, f64},
@@ -373,15 +371,12 @@ inductor_expected_failures_single_sample["cuda"] = {
     "complex": {f16, f32, f64},
 }
 
-if TEST_WITH_ROCM:
-    # AssertionError: expected size 5==5, stride 5==1 at dim=0
-    inductor_expected_failures_single_sample["cuda"][("norm", "nuc")] = {f32, f64}
-
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "asin": {f16},
+    "atanh": {f16, f32},
     "cumprod": {f16},
     "linalg.vector_norm": {f64, f64},
     "kron": {f16},
@@ -470,6 +465,7 @@ inductor_override_kwargs = {
     "empty_permuted": {"assert_equal": False},
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
+    "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
