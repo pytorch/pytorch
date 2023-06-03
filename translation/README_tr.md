@@ -33,8 +33,8 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
     - [Ön Koşullar](#Ön-Koşullar)
     - [Bağımlılıkları Kurun](#Bağımlılıkları-Kurun)
     - [PyTorch Kaynak Kodunu Edinin](#PyTorch-Kaynak-Kodunu-Edinin)
-    - [PyTorch'u Kurma](#PyTorch-'-u-Kurma)
-      - [Yapılandırma Seçeneklerini Ayarlama (İsteğe Bağlı)](#Yapılandırma-Seçeneklerini-Ayarlama-(İsteğe-Bağlı))
+    - [PyTorch Kurma](#PyTorch-Kurma)
+      - [Yapılandırma Seçeneklerini Ayarlama (İsteğe Bağlı)](#Yapılandırma-Seçenekleri-Ayarlama-İsteğe-bağlı)
   - [Docker Görüntüsü](#docker-görüntüsü)
     - [Önceden oluşturulmuş görüntüleri kullanma](#Önceden-oluşturulmuş-görüntüleri-kullanma)
     - [Görüntüyü kendiniz oluşturma](#Görüntüyü-kendiniz-oluşturma)
@@ -227,7 +227,7 @@ git submodule sync
 git submodule update --init --recursive
 ```
 
-#### Pytorch'u Kurma
+#### Pytorch Kurma
 **Linux için**
 
 Eğer AMD ROCm için derleme yapıyorsanız, önce bu komutu çalıştırın.:
