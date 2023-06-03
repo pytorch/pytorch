@@ -540,7 +540,8 @@ struct ConvParams {
            !transposed &&   // or transposed tensors
            input.ndimension() == 4 && // must be in NCHW format
            weight.ndimension() == 4 &&
-           (at::symint::size<T>(weight, 2) < 17) && (at::symint::size<T>(weight, 3) < 17) // NNPACK only supports kernels up to 16x16
+           (at::symint::size<T>(weight, 2) < 17) && (at::symint::size<T>(weight, 3) < 17) && // NNPACK only supports kernels up to 16x16
+           (padding[0] < at::symint::size<T>(weight, 2)) && (padding[1] < at::symint::size<T>(weight, 3)) // NNPACK only supports padding < kernel_size. See https://github.com/pytorch/pytorch/issues/90142.
 #if !defined(C10_MOBILE)
            && at::symint::size<T>(input, 0) >= 16 // ensure large enough batch size to ensure perf, tuneable
 #endif
@@ -770,6 +771,7 @@ static void check_input_same_type_as_parameters(
   check_input_same_type_as_parameters(input, weight, /*bias=*/ Tensor());
 }
 
+#if AT_MKLDNN_ENABLED()
 static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
@@ -788,6 +790,7 @@ static void check_input_same_type_as_parameters(
     check_input_same_type_as_parameters(input, weight, bias);
   }
 }
+#endif
 
 static auto view4d(const at::Tensor& tensor) -> at::Tensor {
   TORCH_CHECK(tensor.ndimension() == 3,
