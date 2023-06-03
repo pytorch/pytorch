@@ -724,6 +724,10 @@ class Scheduler:
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
+        from .debug import draw_buffers
+        from .utils import is_local
+        if is_local():
+            draw_buffers(self.nodes, fname='pre_fused.svg')
 
         comms.decide_global_ordering_comms(self.nodes)
 
@@ -736,6 +740,8 @@ class Scheduler:
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
+        if is_local():
+            draw_buffers(self.nodes, fname='post_fused.svg')
         self.debug_draw_graph()
 
         # used during codegen:

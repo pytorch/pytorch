@@ -285,11 +285,62 @@ def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
 
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._pytree import tree_map
+
+class CachingTorchDispatchMode(TorchDispatchMode):
+    def __init__(self, policy_fn, storage):
+        self.policy_fn = policy_fn
+        self.storage = storage
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        if self.policy_fn(func, *args, **kwargs):
+            out = func(*args, **kwargs)
+            self.storage.append(out)
+            return out
+        return func(*args, **kwargs)
+
+
+class CachedTorchDispatchMode(TorchDispatchMode):
+    def __init__(self, policy_fn, storage):
+        self.policy_fn = policy_fn
+        self.storage = storage
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        if self.policy_fn(func, *args, **kwargs):
+            out = self.storage.pop(0)
+            return out
+        return func(*args, **kwargs)
+
+def _get_default_policy(allow_list=None):
+    _default_allow_list = [
+        torch.ops.aten.addmm.default,
+        torch.ops.aten.mm.default,
+    ]
+    if allow_list is None:
+        allow_list = _default_allow_list
+
+    def _default_policy(func, *args, **kwargs):
+        return func in allow_list
+
+    return _default_policy
+
+def selective_checkpointing_context():
+    return noop_context_fn()
+    storage = []
+    caching_mode = CachingTorchDispatchMode(_get_default_policy(), storage)
+    cached_mode = CachedTorchDispatchMode(_get_default_policy(), storage)
+    return caching_mode, cached_mode
+
 def checkpoint(
     function,
     *args,
     use_reentrant: Optional[bool] = None,
-    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = selective_checkpointing_context,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model

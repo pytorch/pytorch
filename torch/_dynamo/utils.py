@@ -1635,6 +1635,7 @@ def get_higher_order_op(obj):
     if (
         obj is torch.utils.checkpoint.checkpoint
         and not torch._functorch.config.functionalize_rng_ops
+        and False
     ):
         from .exc import unimplemented
 
