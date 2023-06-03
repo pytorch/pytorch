@@ -30,6 +30,7 @@ from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
+    requires_numpy_pytorch_interop,
     requires_static_shapes,
     same,
     skipIfNotPy311,
@@ -1215,6 +1216,80 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(*args), correct))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    @requires_numpy_pytorch_interop
+    def test_numpy_ndarray_graph_break(self):
+        def fn(x):
+            a = x.numpy()
+            b = a.real
+            torch._dynamo.graph_break()
+            c = np.multiply(b, 2.0)
+            return c
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.randn(3)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @requires_numpy_pytorch_interop
+    def test_numpy_ndarray_graph_break_with_multiple_outputs(self):
+        def fn(x, y):
+            a = x.numpy()
+            b = y.numpy()
+            torch._dynamo.graph_break()
+            return np.add(a, 1), np.add(b, 1)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.randn([1, 3])
+            y = torch.randn([1, 3])
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @requires_numpy_pytorch_interop
+    def test_tensor_interacts_with_numpy_ndarray(self):
+        def fn(x, y):
+            a = x.numpy()
+            b = y.numpy()
+            c = np.ones_like(a)
+            d = np.ones_like(b)
+            torch._dynamo.graph_break()
+            return np.add(a, c), np.add(b, d)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.randn([1, 3])
+            y = torch.randn([1, 3])
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_(self):
+        def fn(x: torch.Tensor, y: int):
+            z = x.detach()
+            w = y + 1
+            torch._dynamo.graph_break()
+            return z + w
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.randn([1, 3])
+            y = 5
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input

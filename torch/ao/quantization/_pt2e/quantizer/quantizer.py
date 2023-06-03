@@ -112,7 +112,8 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
 # In the absence of better name, just winging it with QuantizationConfig
 @dataclass(eq=True, frozen=True)
 class QuantizationConfig:
-    activation: Optional[QuantizationSpec]
+    input_activation: Optional[QuantizationSpec]
+    output_activation: Optional[QuantizationSpec]
     weight: Optional[QuantizationSpec]
     bias: Optional[QuantizationSpec]
     # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
