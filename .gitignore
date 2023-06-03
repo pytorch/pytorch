@@ -363,3 +363,6 @@ venv/
 # Log files
 *.log
 sweep/
+
+# Conda envnironment file
+env.yml
