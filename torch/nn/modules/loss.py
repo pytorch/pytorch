@@ -1764,3 +1764,200 @@ class CTCLoss(_Loss):
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight
 # TODO: ClassSimplexCriterion
+
+import torch
+from typing import Optional, Tuple
+class BaseMaskedLoss(_Loss):
+    r"""Base class for masked loss functions that handle masking based on sequence lengths.
+
+    Args:
+        reduction (str, optional): Specifies the reduction to apply to the output:
+            `'none'` | `'mean'` | `'sum'`. `'none'`: no reduction will be applied,
+            `'mean'`: the sum of the output will be divided by the number of
+            elements in the output, `'sum'`: the output will be summed. Default: `'mean'`
+        ignore_zeros (bool, optional): If `True`, ignores zero values when calculating
+            the loss. This can be useful when dealing with sparse targets. Default: `True`
+
+    Shape:
+        - Output: (*), same shape as the input `output`.
+        - Target: (*), same shape as the input `output`.
+        - Lengths: (batch_size,), where `batch_size` is the number of sequences in the batch.
+
+    Examples::
+
+        >>> loss = BaseMaskedLoss()
+        >>> output = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> lengths = torch.tensor([3, 4, 5])
+        >>> masked_output, masked_target, mask = loss.forward(output, target, lengths)
+    """
+
+    def __init__(self, reduction: str = 'mean', ignore_zeros: bool = True):
+        super().__init__(reduction=reduction)
+        self.reduction = reduction
+        self.ignore_zeros = ignore_zeros
+    
+    @staticmethod
+    def arange(target: Tensor) -> Tensor:
+        return torch.arange(target.size(1)).unsqueeze(0).to(target.device)
+    
+    @staticmethod
+    def make_mask(target: Tensor, lens: Tensor) -> Tensor:        
+        # move `lens` to the same device as the target tensor and 
+        # add extra dimension to `lengths` at index 1: shape [batch_size, 1]
+        lens = lens.clone().to(target.device).unsqueeze(1)
+
+        arange = torch.arange(target.size(1)).unsqueeze(0).to(target.device)
+
+        mask = (arange < lens)
+        mask = mask.to(target.device).unsqueeze(-1)
+        return mask
+
+    def forward(
+        self, output: Tensor, target: Tensor, lens: Tensor
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        mask = BaseMaskedLoss.make_mask(target, lens)
+
+        # Apply the mask to the output and target
+        if hasattr(target, 'is_mps') and target.is_mps:
+            # NOTE: `masked_select` not supported on MPS tensors
+            device = target.device # <--- 'mps' due to if statement
+            masked_output = output.cpu().masked_select(mask.bool().cpu()).to(device)
+            masked_target = target.cpu().masked_select(mask.bool().cpu()).to(device)
+
+        else:            
+            masked_output = output * mask
+            masked_target = target * mask
+        
+        return masked_output, masked_target, mask
+    
+class MaskedMSELoss(BaseMaskedLoss):    
+    r"""Creates a masked mean squared error loss (squared L2 norm) criterion that measures
+    the mean squared error between each element in the input `output` and target `target`,
+    taking into account a mask based on the lengths `lens`.
+
+    The loss is calculated by applying a mask to the output and target tensors, where the
+    mask is created based on the lengths tensor. The mask ensures that only valid elements
+    are considered for the loss calculation, effectively ignoring padded or masked values.
+
+    Args:
+        reduction (str, optional): Specifies the reduction to apply to the output:
+            `'none'` | `'mean'` | `'sum'`. `'none'`: no reduction will be applied,
+            `'mean'`: the sum of the output will be divided by the number of
+            elements in the output, `'sum'`: the output will be summed. Default: `'mean'`
+        ignore_zeros (bool, optional): If `True`, ignores zero values when calculating
+            the loss. This can be useful when dealing with sparse targets. Default: `True`
+
+    Shape:
+        - Output: (*), same shape as the input `output`.
+        - Target: (*), same shape as the input `output`.
+        - Lengths: (batch_size,), where `batch_size` is the number of sequences in the batch.
+
+    Examples::
+
+        >>> loss = MaskedMSELoss()
+        >>> output = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> lengths = torch.tensor([3, 4, 5])
+        >>> masked_output, masked_target, mask = loss.forward(output, target, lengths)
+        >>> loss_value = loss(output, target, lengths)
+        >>> loss_value.backward()
+    
+    NOTE:
+        - See `..functional.mse_loss`. This likely still needs something like:
+
+        ```
+        if size_average is not None or reduce is not None:
+            reduction = _Reduction.legacy_get_string(size_average, reduce)
+        
+        expanded_input, expanded_target = torch.broadcast_tensors(input, target)    
+        ```
+    """
+    def forward(self, output: Tensor, target: Tensor, lens: Tensor) -> torch.float:
+        masked_output, masked_target, mask = super().forward(output, target, lens)
+
+        if self.ignore_zeros:
+            num_non_zero_elements = torch.sum(mask) + 1e-8
+            # loss = F.mse_loss(masked_output, masked_target, reduction=self.reduction)
+            loss = torch.sum((masked_output - masked_target) ** 2) / num_non_zero_elements  
+
+        else:
+            # loss = F.mse_loss(masked_output, masked_target, reduction=self.reduction)
+            loss = torch.mean((masked_output - masked_target) ** 2)
+
+        return loss
+    
+class MaskedL1Loss(BaseMaskedLoss):
+    r"""Creates a masked mean absolute error loss (MAE) criterion that measures the mean
+    absolute error between each element in the input `output` and target `target`, taking
+    into account a mask based on the lengths `lens`.
+
+    The loss is calculated by applying a mask to the output and target tensors, where the
+    mask is created based on the lengths tensor. The mask ensures that only valid elements
+    are considered for the loss calculation, effectively ignoring padded or masked values.
+
+    Args:
+        reduction (str, optional): Specifies the reduction to apply to the output:
+            `'none'` | `'mean'` | `'sum'`. `'none'`: no reduction will be applied,
+            `'mean'`: the sum of the output will be divided by the number of
+            elements in the output, `'sum'`: the output will be summed. Default: `'mean'`
+        ignore_zeros (bool, optional): If `True`, ignores zero values when calculating
+            the loss. This can be useful when dealing with sparse targets. Default: `True`
+
+    Shape:
+        - Output: (*), same shape as the input `output`.
+        - Target: (*), same shape as the input `output`.
+        - Lengths: (batch_size,), where `batch_size` is the number of sequences in the batch.
+
+    Examples::
+
+        >>> loss = MaskedL1Loss()
+        >>> output = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> lengths = torch.tensor([3, 4, 5])
+        >>> masked_output, masked_target, mask = loss.forward(output, target, lengths)
+        >>> loss_value = loss(output, target, lengths)
+        >>> loss_value.backward()
+
+    NOTE:
+        - See `..functional.l1_loss`. This likely still needs something like:
+
+        ```
+        if size_average is not None or reduce is not None:
+            reduction = _Reduction.legacy_get_string(size_average, reduce)
+        
+        expanded_input, expanded_target = torch.broadcast_tensors(input, target)    
+        ```
+    """
+    def forward(self, output: Tensor, target: Tensor, lens: Tensor) -> torch.float:
+        masked_output, masked_target, _ = super().forward(output, target, lens)
+
+        if self.ignore_zeros:
+            non_zero_mask = (masked_target != 0)
+            
+            if hasattr(target, 'is_mps') and target.is_mps:
+                # NOTE: `masked_select` not supported on MPS tensors
+                device = target.device                
+                masked_output = masked_output.cpu().masked_fill_(
+                    ~non_zero_mask.bool().cpu(), torch.tensor(0.0).cpu()
+                ).to(device)
+                masked_target = masked_target.cpu().masked_fill_(
+                    ~non_zero_mask.bool().cpu(), torch.tensor(0.0).cpu()
+                ).to(device)
+            
+            else:                
+                masked_output = masked_output[non_zero_mask]
+                masked_target = masked_target[non_zero_mask]
+
+            # Compute the L1 loss only over the non-zero parts
+            num_non_zero_elements = non_zero_mask.sum().item()  
+
+            # loss = F.l1_loss(masked_output, masked_target, reduction=self.reduction)
+            loss = torch.sum(torch.abs(masked_output - masked_target)) / num_non_zero_elements
+        
+        else:
+            # Compute the L1 loss            
+            # loss = F.l1_loss(masked_output, masked_target, reduction=self.reduction)
+            loss = torch.mean(torch.abs(masked_output - masked_target))
+
+        return loss
