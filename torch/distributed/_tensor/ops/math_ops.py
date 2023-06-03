@@ -101,7 +101,7 @@ def mean_rule(op_schema: OpSchema) -> OutputSharding:
         for placement in output_sharding.output_spec.placements:
             if placement.is_partial():
                 partial_placement = cast(_Partial, placement)
-                partial_placement.reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
+                partial_placement.reduce_op = c10d.ReduceOp.AVG
 
     return output_sharding
 
