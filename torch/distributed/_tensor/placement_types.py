@@ -40,13 +40,15 @@ class Shard(Placement):
         with_padding: bool = True,
         contiguous: bool = True,
     ) -> Tuple[List[torch.Tensor], List[int]]:
-        # NOTE: For with_padding option, we pad the tensor on each rank before calling
-        # the collectives (i.e. scatter/all_gather, etc.). This is because for gloo
-        # backend, it does not support uneven collectives, nccl supports some, but
-        # it might be slow compared to even size collective, we need to pad tensor
-        # before really calling the collective, and unpad/narrow it afterwards
-        # TODO: consider if we should remove this logic once ProcessGroupGloo
-        # support uneven list, and collective performance on par
+        """
+        This function uses torch.chunk to split a tensor into num_chunks shards along
+        the Shard placement dimension, and return a list of shards with their pad sizes.
+
+        Keyword args:
+            with_padding (bool, optional): when True, we pad the tensor on the last
+            few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
+            This is because collectives usually require equal size tensor inputs
+        """
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"

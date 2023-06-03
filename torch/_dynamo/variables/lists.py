@@ -84,8 +84,8 @@ class BaseListVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
@@ -218,8 +218,8 @@ class CommonListMethodsVariable(BaseListVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "append" and self.mutable_local:
@@ -317,8 +317,8 @@ class ListVariable(CommonListMethodsVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if (
@@ -360,8 +360,8 @@ class DequeVariable(CommonListMethodsVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if (
@@ -416,8 +416,8 @@ class TupleVariable(BaseListVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
 
@@ -496,8 +496,8 @@ class SizeVariable(TupleVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
