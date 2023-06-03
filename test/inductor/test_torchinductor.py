@@ -25,7 +25,7 @@ import torch._dynamo
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
-from torch._inductor.codegen.common import _data_type_propagation, OptimizationContext
+from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
@@ -449,6 +449,35 @@ def check_model_cuda(
         )
 
 
+def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
+    result, source_codes = run_and_get_code(func, *args, **kwargs)
+
+    for code in source_codes:
+        for line in code.split("\n"):
+            stmt = None
+            # Find indexing expressions
+            if ".load(" in line:
+                stmt = line.split(".load")[-1]
+            elif "tl.store" in line:
+                stmt = line.split(".store")[-1]
+                stmt = ",".join(stmt.split(",")[:-2])  # Remove store value and mask
+            elif ".store" in line:
+                stmt = line.split(".store")[-1]
+            elif "[" in line:
+                stmt = line.split("[")[-1].split("]")[0]
+
+            if stmt is None:
+                continue
+
+            # indirect indexing involves a `tmp` variable
+            test_case.assertTrue(
+                "tmp" not in stmt,
+                msg=f"Found indirect indexing in statement '{stmt}' from code:\n{code}",
+            )
+
+    return result
+
+
 class SweepInputs2:
     input_gen_types1 = [
         "dense",
@@ -673,6 +702,59 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count,
             1 if self.device == "cuda" else 3,
         )
+
+    def test_index_propagation(self):
+        def flip(x):
+            i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
+            return x[i]
+
+        x = torch.randn(8, device=self.device)
+        flip_opt = torch._dynamo.optimize("inductor")(flip)
+
+        expect = flip(x)
+        actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
+        self.assertEqual(expect, actual)
+
+    def test_index_propagation_floordiv(self):
+        def repeat_interleave(x, n):
+            # e.g. x=[1, 2, 3], n=2 => returns [1, 1, 2, 2, 3, 3]
+            i = torch.arange(x.shape[0] * n, device=x.device)
+            return x[i // n]
+
+        x = torch.randn(8, device=self.device)
+        repeat_interleave_opt = torch._dynamo.optimize("inductor")(repeat_interleave)
+        # this should be collapsed to direct indexing
+        actual = _run_and_assert_no_indirect_indexing(self, repeat_interleave_opt, x, 3)
+        expect = torch.repeat_interleave(x, 3)
+        self.assertEqual(expect, actual)
+        self.assertEqual(actual, repeat_interleave(x, 3))
+
+    def test_index_propagation_remainder(self):
+        def repeat(x, n):
+            # e.g. x=[1, 2, 3], n=2 => returns [1, 2, 3, 1, 2, 3]
+            i = torch.arange(x.shape[0] * n, device=x.device)
+            return x[i % x.shape[0]]
+
+        x = torch.randn(8, device=self.device)
+        repeat_opt = torch._dynamo.optimize("inductor")(repeat)
+
+        # this should be collapsed to direct indexing
+        actual = _run_and_assert_no_indirect_indexing(self, repeat_opt, x, 3)
+        expect = x.repeat(3)
+        self.assertEqual(expect, actual)
+        self.assertEqual(actual, repeat(x, 3))
+
+    def test_computed_buffer_inlining(self):
+        def flip(x):
+            idx = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
+            return x[idx], idx
+
+        flip_opt = torch._dynamo.optimize("inductor")(flip)
+        x = torch.randn(8, device=self.device)
+
+        expect = flip(x)
+        actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
+        self.assertEqual(expect, actual)
 
     def test_sum1(self):
         def fn(a, b):
@@ -1809,36 +1891,6 @@ class CommonTemplate:
                 (v1, v2),
             )
 
-    def test_linear_buffer_reuse(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = torch.nn.Linear(16, 16)
-                self.tanh = torch.nn.Tanh()
-                self.linear2 = torch.nn.Linear(16, 16)
-
-            def forward(self, x):
-                x = self.linear1(x)
-                x = self.tanh(x)
-                x = self.linear2(x)
-                return x
-
-        mod = M().eval()
-        v = torch.randn(1, 16)
-
-        with torch.no_grad():
-
-            def compile_fx_wrapper(model_, example_inputs_):
-                return compile_fx(model_, example_inputs_)
-
-            def run(*ex, **kwargs):
-                return mod(*ex, **kwargs)
-
-            run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, v)
-            self.assertFalse("= as_strided(" in code)
-            self.assertEqual(run(*v), mod(*v))
-
     def test_aliased_buffer_reuse(self):
         def fn(x, y):
             x = 2 * x
@@ -2060,6 +2112,9 @@ class CommonTemplate:
 
     @requires_multigpu()
     def test_multi_gpu_device(self):
+        # TODO: https://github.com/pytorch/pytorch/issues/92627
+        x = torch.rand([4], device="cuda")
+
         def fn(x, y):
             r = torch.ops.aten.div(x, y)
             r = r.to("cuda:1")
@@ -2571,6 +2626,19 @@ class CommonTemplate:
                 x.repeat(2, 2, 3, 1),
                 x.repeat(8, 1, 1, 1),
                 x.repeat(2, 1, 1, 1, 1, 1),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]),),
+        )
+
+    def test_repeat_interleave(self):
+        def fn(x):
+            return (
+                x.repeat_interleave(2),
+                x.repeat_interleave(3, dim=0),
+                x.repeat_interleave(x.size(1), dim=1),
             )
 
         self.common(
@@ -5007,6 +5075,12 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    def test_issue102546(self):
+        def fn(x):
+            return x.mean(0)
+
+        self.common(fn, [torch.rand(())])
+
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -5208,7 +5282,7 @@ class CommonTemplate:
             lambda: run(torch.randn([8, 32], device=self.device))
         )
         if self.device == "cuda":
-            self.assertEqual(fw_code.count("tl.rand"), 2)
+            self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
             expected_kernel = 4
         else:
@@ -5217,6 +5291,19 @@ class CommonTemplate:
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
+
+    def test_randint_kernel_count(self):
+        @torch._dynamo.optimize_assert("inductor")
+        def fn1():
+            random_tensor1 = torch.randint(10, [32], device=self.device)
+            random_tensor2 = torch.randint(10, [32], device=self.device)
+            random_tensor3 = torch.randint(10, [32], device=self.device)
+            return random_tensor1, random_tensor2, random_tensor3
+
+        _, source_codes = run_and_get_code(fn1)
+        if self.device == "cuda":
+            self.assertEqual(len(source_codes), 1)
+            self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
 
     def test_roll(self):
         def fn(a):
@@ -5840,18 +5927,6 @@ class CommonTemplate:
             [x],
         )
 
-    @config.patch(inplace_buffers=True)
-    def test_in_out_buffer(self):
-        def fn(x, y):
-            z = torch.matmul(x, y.transpose(-1, -2)) / 8.0
-            return z
-
-        inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, *inps)
-        self.assertTrue("in_out_ptr" in code)
-        self.assertEqual(fn_opt(*inps), fn(*inps))
-
     @config.patch(profiler_mark_wrapper_call=True)
     def test_profiler_mark_wrapper_call(self):
         from torch.profiler import profile
@@ -6067,7 +6142,7 @@ class CommonTemplate:
             args=(
                 ops,
                 "buf",
-                torch.float,
+                torch.int64,
                 torch.int64,
                 "argmin",
                 get_index,
@@ -6080,7 +6155,7 @@ class CommonTemplate:
             args=(
                 ops,
                 "buf",
-                torch.float,
+                torch.bool,
                 torch.bool,
                 "any",
                 get_index,
@@ -6113,7 +6188,7 @@ class CommonTemplate:
                 bitwise_not,
             ),
         )
-        _data_type_propagation(_graph)
+        DataTypePropagation.propagate_graph(_graph)
 
         def get_data_type(node: torch.fx.Node):
             if OptimizationContext.key in node.meta:
@@ -6195,6 +6270,14 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    def test_erfinv(self):
+        def fn(x):
+            return torch.erfinv(x)
+
+        # domain for erfinv is (-1, 1)
+        x = torch.empty(8, 8).uniform_(-1, 1)
+        self.common(fn, (x,))
+
     def test_uint(self):
         def fn(z):
             x = torch.tensor(5, device=z.device, dtype=torch.uint8)
@@ -6202,6 +6285,27 @@ class CommonTemplate:
             return x < y
 
         self.common(fn, (torch.randn(26),))
+
+    @skipIfRocm
+    def test_scaled_dot_product_efficient_attention(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(q, k, v, compute_log_sumexp):
+            return aten._scaled_dot_product_efficient_attention(
+                q, k, v, compute_log_sumexp
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                False,
+            ),
+            check_lowp=False,
+        )
 
 
 @dataclasses.dataclass
@@ -6460,27 +6564,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # load should be masked
             self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask)" in code)
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
-
-        def test_index_propagation(self):
-            def flip(x):
-                i = torch.arange(x.size(0) - 1, -1, -1, device=x.device)
-                return x[i]
-
-            x = torch.randn(8, device="cuda")
-            flip_opt = torch._dynamo.optimize("inductor")(flip)
-            code = run_and_get_triton_code(flip_opt, x)
-
-            # this should be collapsed to direct indexing, so the index
-            # calculation shouldn't contain a `tmp` variable
-            load_line = [line for line in code.split("\n") if "tl.load" in line]
-            self.assertEqual(len(load_line), 1)
-            load_stmt = load_line[0].split("=")[-1]
-            self.assertTrue(
-                "tmp" not in load_stmt,
-                msg=f"Found indirect indexing in code:\n{code}",
-            )
-
-            self.assertEqual(flip_opt(x), flip(x))
 
         def test_kernel_names_descriptive(self):
             @torch._dynamo.optimize("inductor")
