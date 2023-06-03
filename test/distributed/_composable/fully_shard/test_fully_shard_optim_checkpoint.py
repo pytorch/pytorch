@@ -82,7 +82,6 @@ class TestOptimStateCheckpointing(FSDPTest):
                 self.assertEqual(k1, k2, f"Mismatched keys: {k1} vs {k2}")
                 self.assertEqual(v1, v2, f"Mismatched values {v1} vs {v2}")
 
-
     @skip_if_lt_x_gpu(2)
     def test_optim_state_dict_save_load(self):
         orig_model = CompositeParamModel(device=torch.device("cuda"))
