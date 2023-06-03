@@ -186,7 +186,7 @@ union storage_t {
   constexpr storage_t(Args&&... args)
       : value_(constexpr_forward<Args>(args)...) {}
 
-  ~storage_t() = default;
+  ~storage_t() {}
 };
 
 template <class T>
