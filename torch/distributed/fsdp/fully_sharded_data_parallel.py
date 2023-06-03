@@ -749,8 +749,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Args:
             module (torch.nn.Module): Root module.
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
-            state_dict_config (Optional[StateDictConfig]): the configuration for the
-                target ``state_dict_type``.
+            state_dict_config (Optional[StateDictConfig]): the model ``state_dict``
+                configuration for the target ``state_dict_type``.
+            optim_state_dict_config (Optional[OptimStateDictConfig]): the optimizer
+               ``state_dict`` configuration for the target ``state_dict_type``.
         """
         prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
             module,
