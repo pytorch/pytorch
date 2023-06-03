@@ -96,8 +96,8 @@ DECOMP_TABLE = core_aten_decompositions()
 
 def export(
     f: Callable,
-    args: Tuple[Any] = None,
-    kwargs: OrderedDict[str, Any] = None,
+    args: Optional[Tuple[Any]] = None,
+    kwargs: "Optional[OrderedDict[str, Any]]" = None,
     constraints: Optional[List[Constraint]] = None,
 ) -> ExportedProgram:
     """
@@ -131,7 +131,6 @@ def export(
                 *args,
                 constraints=constraints,
                 assume_static_by_default=True,
-                functionalize=True,
                 **kwargs,
             )
 
