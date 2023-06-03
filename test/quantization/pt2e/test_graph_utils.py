@@ -99,6 +99,7 @@ class TestGraphUtils(TestCase):
         )
         self.assertEqual(len(fused_partitions), 0)
 
+    @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
     def test_customized_equivalet_types_dict(self):
         _CUSTOMIZED_EQUIVALENT_TYPES: List[Set] = [
             {torch.nn.Conv2d, torch.nn.functional.conv2d},
