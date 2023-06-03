@@ -1,16 +1,17 @@
 from collections import defaultdict
 from typing import List
+import os
 
 import torch.fx as fx
 from . import ir, scheduler
 from .analysis import get_runtime_snode
 from .dependencies import WeakDep
-from .utils import is_local, print2
+from .debug import printd
 
 
 # Used to ensure that iterating over a set is deterministic
 def tuple_sorted(x):
-    return sorted(tuple(x), key=lambda x: x.name)
+    return sorted(x, key=lambda x: x.name)
 
 
 def sink_waits(result: List[fx.Node]) -> List[fx.Node]:
@@ -107,10 +108,9 @@ def dumb_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
 
 
 def debug_print(s=""):
-    import os
 
     if os.environ.get("INDUCTOR_COMM_DEBUG") == "1":
-        print2(s)
+        printd(s)
 
 
 def smart_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
@@ -258,5 +258,5 @@ def smart_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
     result = sink_waits(result)
     result = raise_comms(result)
 
-    print2(result)
+    printd(result)
     return result
