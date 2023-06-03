@@ -38,6 +38,17 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def map_grads_to_sources(self):
+        """Map the optimizer's grads to their sources"""
+        self.grad_to_source = {}
+        for g_ind, group in enumerate(self.value.param_groups):
+            group_source = GetItemSource(AttrSource(self.source, "param_groups"), g_ind)
+            for p_ind, p in enumerate(group["params"]):
+                if p.grad is not None:
+                    self.grad_to_source[p.grad] = GetItemSource(
+                        GetItemSource(group_source, "params"), p_ind
+                    )
+
     def var_getattr(self, tx, name):
         if name == "_init_group":
             return GetAttrVariable(self, name)
@@ -84,13 +95,19 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Wrap state tensor in a TensorVariable"""
         from .builder import VariableBuilder
 
-        tx.store_dict_key(global_key_name(tensor_value), tensor_value)
-        return VariableBuilder(tx, GlobalWeakRefSource(global_key_name(tensor_value)))(
-            tensor_value
-        )
+        # don't add weakref guards for grads, they will possibly change on
+        # each iteration
+        if tensor_value in self.grad_to_source:
+            return VariableBuilder(tx, self.grad_to_source[tensor_value])(tensor_value)
+        else:
+            tx.store_dict_key(global_key_name(tensor_value), tensor_value)
+            return VariableBuilder(
+                tx, GlobalWeakRefSource(global_key_name(tensor_value))
+            )(tensor_value)
 
     def update_list_args(self, tx, args, kwargs, py_args, py_kwargs):
         """Update the args and kwargs to the traced optimizer call"""
+        self.map_grads_to_sources()
         for arg, py_arg in zip(args, py_args):
             if isinstance(arg, ListVariable) and all(
                 isinstance(t, torch.Tensor) for t in py_arg
