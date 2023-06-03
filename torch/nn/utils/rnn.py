@@ -518,3 +518,66 @@ def unpack_sequence(packed_sequences: PackedSequence) -> List[Tensor]:
     padded_sequences, lengths = pad_packed_sequence(packed_sequences, batch_first=True)
     unpacked_sequences = unpad_sequence(padded_sequences, lengths, batch_first=True)
     return unpacked_sequences
+
+import torch.nn.functional as F
+import numpy as np
+def unpadded_sequence_len(padded: Tensor) -> Tensor:
+    
+    r"""Compute the length of unpadded sequences in a padded tensor.
+
+    This function takes a padded tensor of sequences and returns a tensor containing
+    the length of each unpadded sequence. The unpadded length is determined by finding
+    the index of the first all-zero row for each sequence in the tensor.
+
+    Args:
+        padded (Tensor): A padded tensor of sequences. Dimensions should be [batch_size, max_sequence_length, *].
+
+    Returns:
+        Tensor: A tensor of shape [batch_size] containing the length of each unpadded sequence.
+
+    Examples:
+        >>> padded = torch.tensor([
+        ...     [[1, 2, 3], [4, 5, 6], [0, 0, 0]],      # ---> len = 2
+        ...     [[7, 8, 9], [10, 0, 0], [0, 0, 0]],     # ---> len = 2
+        ...     [[11, 12, 13], [14, 15, 0], [16, 0, 0]] # ---> len = 3
+        ... ])
+        >>> lengths = unpadded_sequence_len(padded)
+        >>> print(lengths)
+        tensor([2, 2, 3])
+
+         >>> padded = torch.tensor([
+        ...     [[1, 2, 3], [4, 5, 6], [0, 0, 0]],       # ---> len = 2
+        ...     [[7, 8, 9], [0, 0, 0], [0, 0, 0]],       # ---> len = 1
+        ...     [[11, 12, 13], [0, 0, 0], [0, 0, 0]],    # ---> len = 1
+        ...     [[0, 0, 0], [0, 0, 0], [0, 0, 0]]        # ---> len = 0
+        ... ])
+        >>> lengths = unpadded_sequence_len(padded)
+        >>> print(lengths)
+        tensor([2, 1, 1, 0])
+    """
+    # Find all-zero rows: returns a 2D mask tensor of shape [batch_size, max_sequence_length]
+    all_zero_rows = (padded == 0.0).all(dim=-1)
+    
+    # Add an additional false value to the end of each sequence in the mask
+    # This ensures that if a sequence is fully populated (i.e., it doesn't contain any 
+    # all-zero vectors), the returned length will be equal to the original sequence 
+    # length (as the additional False value will have the maximum index).
+    all_zero_rows = F.pad(all_zero_rows, (0, 1), value=False)
+    
+    # Find the index of the first all-zero row for each sequence.
+    if padded.device.type == 'cpu':        
+        # NOTE: argmax not implemented for boolean CPU tensors
+        all_zero_rows = all_zero_rows.cpu().numpy()
+        # NOTE: needed as argmax will return first instance of False if all False
+        all_false = np.where(np.all(all_zero_rows == False, axis=-1))[0]
+
+        # adjust sequences that are already the max length
+        non_zero_idxs = np.argmax(all_zero_rows, axis=-1)
+        non_zero_idxs[all_false] = padded.size(1)
+        
+        non_zero_idxs = torch.from_numpy(non_zero_idxs)
+        
+    else:        
+        non_zero_idxs = all_zero_rows.argmax(dim=-1)
+        
+    return non_zero_idxs
