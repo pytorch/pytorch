@@ -160,7 +160,7 @@ else:
 kernel_name_max_ops = 10
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
-shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
+shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -231,6 +231,9 @@ class cpp:
 
     # similar to config.triton.descriptive_names
     descriptive_names = "original_aten"
+
+    # how many nodes to allow into a single horizontal fusion
+    max_horizontal_fusion_size = 16
 
 
 # config specific to codegen/triton.py

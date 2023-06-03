@@ -8,6 +8,7 @@ import tempfile
 import time
 from collections import namedtuple, OrderedDict
 from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple, Callable, Any
@@ -385,16 +386,10 @@ CUSTOM_PG_TIMEOUT = {
     # This test has a short timeout since it tests being taken down by
     # NCCL_ASYNC_ERROR_HANDLING which we want to happen quickly.
     "test_ddp_model_diff_across_ranks": 5,
+    # This test has a short timeout since it tests being taken down by
+    # NCCL_ASYNC_ERROR_HANDLING which we want to happen quickly.
+    "test_ddp_has_finalized": 5,
 }
-
-
-def require_backend(backends):
-    if BACKEND not in backends:
-        return skip_but_pass_in_sandcastle(
-            f"Test requires backend {BACKEND} to be one of {backends}"
-        )
-    return lambda func: func
-
 
 def require_backend_is_available(backends):
     def check(backend):
@@ -409,6 +404,11 @@ def require_backend_is_available(backends):
         if backend in DistTestCases.backend_feature["plugin"]:
             return True
         return False
+
+    if BACKEND not in backends:
+        return skip_but_pass_in_sandcastle(
+            f"Test requires backend {BACKEND} to be one of {backends}"
+        )
 
     if not check(dist.Backend(BACKEND)):
         return skip_but_pass_in_sandcastle(
@@ -544,7 +544,7 @@ class TestDistBackend(MultiProcessTestCase):
         Barrier.init()
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
-        self.skip_return_code_checks = []
+        self.skip_return_code_checks = [self.test_ddp_has_finalized.__wrapped__]
 
     def tearDown(self):
         cleanup_temp_dir()
@@ -868,14 +868,12 @@ class DistributedTest:
             dist.broadcast(tensor, src=group[0], group=group_id)
             self.assertEqual(_build_tensor(2, value=0), tensor.to("cpu"))
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_world_size(3)
         @skip_if_lt_x_gpu(2)
         def test_backend_group(self):
             self._test_group_override_backend(self._init_group_test)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(3)
         def test_backend_full_group(self):
@@ -2516,7 +2514,7 @@ class DistributedTest:
             self._barrier()
 
         @skip_if_no_gpu
-        @require_backend(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         def test_all_reduce_result_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -3065,7 +3063,7 @@ class DistributedTest:
 
             self._barrier()
 
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_sum(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_coalesced_helper(
@@ -3077,7 +3075,7 @@ class DistributedTest:
                 rank_to_GPU=None,
             )
 
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_product(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_coalesced_helper(
@@ -3089,7 +3087,7 @@ class DistributedTest:
                 rank_to_GPU=None,
             )
 
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_min(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_coalesced_helper(
@@ -3101,7 +3099,7 @@ class DistributedTest:
                 rank_to_GPU=None,
             )
 
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_max(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_coalesced_helper(
@@ -3109,7 +3107,7 @@ class DistributedTest:
             )
 
         @skip_if_small_worldsize
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_group_sum(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_reduce_coalesced_helper(
@@ -3117,7 +3115,7 @@ class DistributedTest:
             )
 
         @skip_if_small_worldsize
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_group_product(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_reduce_coalesced_helper(
@@ -3130,7 +3128,7 @@ class DistributedTest:
             )
 
         @skip_if_small_worldsize
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_group_min(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_reduce_coalesced_helper(
@@ -3138,21 +3136,21 @@ class DistributedTest:
             )
 
         @skip_if_small_worldsize
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_group_max(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_reduce_coalesced_helper(
                 group, group_id, rank, dist.ReduceOp.MAX, cuda=False, rank_to_GPU=None
             )
 
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_full_group_sum(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_reduce_coalesced_helper(
                 group, group_id, rank, dist.ReduceOp.SUM, cuda=False, rank_to_GPU=None
             )
 
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_full_group_product(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_reduce_coalesced_helper(
@@ -3164,7 +3162,7 @@ class DistributedTest:
                 rank_to_GPU=None,
             )
 
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_full_group_min(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_reduce_coalesced_helper(
@@ -3176,7 +3174,7 @@ class DistributedTest:
                 rank_to_GPU=None,
             )
 
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_all_reduce_coalesced_full_group_max(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_reduce_coalesced_helper(
@@ -6654,7 +6652,6 @@ class DistributedTest:
                 reduction_fn(tensor, op)
                 self.assertEqual(tensor, expected_tensor)
 
-        @require_backend({"nccl"})
         @require_backend_is_available({"nccl"})
         @skip_if_lt_x_gpu(2)
         def test_nccl_backend_bool_allreduce(self):
@@ -6682,7 +6679,6 @@ class DistributedTest:
             # (see https://github.com/pytorch/pytorch/issues/41362). Add tests for
             # these once it is supported.
 
-        @require_backend({"nccl"})
         @require_backend_is_available({"nccl"})
         @skip_if_lt_x_gpu(2)
         def test_nccl_backend_bool_allgather(self):
@@ -6705,7 +6701,6 @@ class DistributedTest:
             # does not modify its input.
             self.assertEqual(input_tensor_copy, input_tensor)
 
-        @require_backend({"nccl"})
         @require_backend_is_available({"nccl"})
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_nccl_backend_bool_reduce(self):
@@ -6733,7 +6728,6 @@ class DistributedTest:
                 )
                 self._run_reduction_test(input_tensor, expected, op, dist.reduce, dst=0)
 
-        @require_backend({"nccl"})
         @require_backend_is_available({"nccl"})
         @skip_if_lt_x_gpu(2)
         def test_nccl_backend_bool_broadcast(self):
@@ -6864,7 +6858,7 @@ class DistributedTest:
                 expected = gather_objects[i % len(gather_objects)]
                 self.assertEqual(val, expected)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
         )
@@ -6872,7 +6866,7 @@ class DistributedTest:
         def test_all_gather_object_default_pg(self):
             return self._test_allgather_object()
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
         )
@@ -6933,7 +6927,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
         )
-        @require_backend(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object(self):
             return self._test_gather_object()
@@ -6941,7 +6935,7 @@ class DistributedTest:
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc", "CPU tensor ops not supported by UCP TL"
         )
-        @require_backend(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
         def test_gather_object_subgroup(self):
             default = _get_default_group()
@@ -7127,14 +7121,12 @@ class DistributedTest:
             events = get_profiling_event("search_unused_parameters", prof)
             self.assertEqual(len(events), 1)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_profiling_autograd_profiler(self):
             autograd_profiler_ctx = torch.autograd.profiler.profile()
             return self._test_ddp_profiling(profiler_ctx=autograd_profiler_ctx)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(IS_FBCODE, "Kineto in fbcode code causes hang")
@@ -7694,7 +7686,7 @@ class DistributedTest:
             dist.broadcast_object_list(objects, src=0, group=group)
             self.assertEqual(objects, gather_objects)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
         )
@@ -7702,7 +7694,7 @@ class DistributedTest:
         def test_broadcast_object_list(self):
             return self._test_broadcast_object_list()
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
+        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @require_n_gpus_for_nccl_backend(
             int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
         )
@@ -7802,7 +7794,6 @@ class DistributedTest:
                 # isolate failure hangs.
                 torch.cuda.synchronize(device=self.rank)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_ignore_params_arg(self):
@@ -7810,7 +7801,6 @@ class DistributedTest:
             self._test_ddp_ignore_params_arg(static_graph=True)
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_unused_params_rebuild_buckets_exception(self):
@@ -7863,7 +7853,6 @@ class DistributedTest:
 
             dist.barrier()
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_shared_grad_acc_unused_params(self):
@@ -7900,7 +7889,6 @@ class DistributedTest:
                     loss /= 10
                     loss.backward()
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_device(self):
@@ -8005,7 +7993,6 @@ class DistributedTest:
             }
             train_iter(inp, type(inp))
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_namedtuple(self):
@@ -8042,7 +8029,6 @@ class DistributedTest:
             model(inp, type(inp))
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_control_flow_same_across_ranks(self):
@@ -8125,7 +8111,6 @@ class DistributedTest:
 
             dist.barrier()
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_invalid_static_graph(self):
@@ -8175,7 +8160,6 @@ class DistributedTest:
             verify_ddp_error_logged(model, "Expected to have finished reduction")
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_control_flow_different_across_ranks(self):
@@ -8279,7 +8263,7 @@ class DistributedTest:
 
             dist.barrier()
 
-        @require_backend({"gloo"})
+        @require_backend_is_available({"gloo"})
         def test_scatter_object_list(self):
             src_rank = 0
             scatter_list = (
@@ -8364,13 +8348,11 @@ class DistributedTest:
             # early which causes failure with Barrier.sync.
             dist.barrier(group_gloo)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_compute_bucket_assignment_by_size_sparse_error_without_logger(self):
             self._test_compute_bucket_assignment_by_size(use_logger=False)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_compute_bucket_assignment_by_size_sparse_error_with_logger(self):
@@ -8459,7 +8441,6 @@ class DistributedTest:
             # early which causes failure with Barrier.sync.
             dist.barrier(group_gloo)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -8468,7 +8449,6 @@ class DistributedTest:
         def test_verify_model_across_rank_with_logger(self):
             self._test_verify_model_across_rank(use_logger=True)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -8492,7 +8472,6 @@ class DistributedTest:
             # early which causes failure with Barrier.sync.
             dist.barrier(group_gloo)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -8519,7 +8498,6 @@ class DistributedTest:
                 ctx, net, group_to_use, group_gloo
             )
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_but_pass_in_sandcastle_if(
             BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
@@ -8737,7 +8715,6 @@ class DistributedTest:
                 loss.backward()
             return ddp_model
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_different_graph_across_ranks(self):
@@ -8754,7 +8731,6 @@ class DistributedTest:
             for i, j in zip(base_model.parameters(), static_model.parameters()):
                 self.assertEqual(i, j)
 
-        @require_backend({"gloo"})
         @require_backend_is_available({"gloo"})
         @skip_but_pass_in_sandcastle_if(
             IS_MACOS or IS_WINDOWS,
@@ -8795,7 +8771,6 @@ class DistributedTest:
             # and cause a timeout.
             self._barrier(timeout=30)
 
-        @require_backend({"gloo"})
         @require_backend_is_available({"gloo"})
         def test_monitored_barrier_gloo_subgroup(self):
             # Tests that monitored_barrier works as expected on non-default
@@ -8872,7 +8847,6 @@ class DistributedTest:
             self._barrier(timeout=30)
 
         @with_nccl_blocking_wait
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang(self):
@@ -8881,7 +8855,6 @@ class DistributedTest:
             self._test_monitored_barrier_allreduce_hang(wait_all_ranks=False)
 
         @with_nccl_blocking_wait
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_monitored_barrier_allreduce_hang_wait_all_ranks(self):
@@ -8889,7 +8862,6 @@ class DistributedTest:
             # report all timed out ranks.
             self._test_monitored_barrier_allreduce_hang(wait_all_ranks=True)
 
-        @require_backend({"gloo"})
         @require_backend_is_available({"gloo"})
         def test_monitored_barrier_gloo_rank_0_timeout(self):
             # tests error when rank 0 exhausts its given timeout.
@@ -8901,7 +8873,6 @@ class DistributedTest:
                 ):
                     process_group.monitored_barrier(timeout)
 
-        @require_backend({"gloo"})
         @require_backend_is_available({"gloo"})
         @skip_if_small_worldsize
         @skip_but_pass_in_sandcastle_if(
@@ -8929,7 +8900,6 @@ class DistributedTest:
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout)
 
-        @require_backend({"gloo"})
         @require_backend_is_available({"gloo"})
         @skip_if_small_worldsize
         def test_monitored_barrier_wait_all_ranks(self):
@@ -8942,7 +8912,6 @@ class DistributedTest:
                 with self.assertRaisesRegex(RuntimeError, err_regex):
                     dist.monitored_barrier(timeout=timeout, wait_all_ranks=True)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @with_dist_debug_levels(levels=["INFO"])
         @skip_if_lt_x_gpu(2)
@@ -9152,14 +9121,12 @@ class DistributedTest:
                         self.assertTrue(False, "Expected error was not raised!")
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_multiple_nested_unused_params_error(self):
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=False)
 
         @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_multiple_nested_unused_params_err_ignore_params(self):
@@ -9713,6 +9680,58 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel",
         )
+        def test_ddp_has_finalized(self):
+
+            @dataclass
+            class MyClass():
+                obj: torch.Tensor
+
+            class MyModel(nn.Module):
+                def __init__(self, rank):
+                    super(MyModel, self).__init__()
+                    self.rank = rank
+                    self.fc1 = nn.Linear(1024, 1024).cuda(rank)
+                    self.fc2 = nn.Linear(1024, 2 * 1024).cuda(rank)
+
+                def forward(self, inp):
+                    if self.rank == 0:
+                        return self.fc1(inp), MyClass(self.fc2(inp))
+                    else:
+                        return self.fc1(inp), self.fc2(inp)
+
+            model = MyModel(self.rank)
+            input = torch.rand(10, 1024, requires_grad=True).cuda(self.rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+                find_unused_parameters=True,
+                bucket_cap_mb=(1024 * 4 / 1024 / 1024),  # One bucket per parameter.
+            )
+
+            if self.rank == 0:
+                out1, _ = ddp(input)
+                out1.sum().backward()
+            else:
+                out1, out2 = ddp(input)
+                (out1.sum() + out2.sum()).backward()
+
+            if self.rank == 0:
+                with self.assertRaisesRegex(RuntimeError, "Expected to have finished reduction in the prior iteration"):
+                    ddp._check_reducer_finalized()
+
+                with self.assertRaisesRegex(RuntimeError, "Expected to have finished reduction in the prior iteration"):
+                    ddp(input)
+            else:
+                ddp._check_reducer_finalized()
+                ddp(input)
+
+
+
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
         def test_ddp_broadcast_buffer(self):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -9826,7 +9845,6 @@ class DistributedTest:
             self.assertIsNone(module.module.l1.bias.grad)
             self.assertIsNone(module.module.buffer.grad)
 
-        @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backend_is_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_ddp_forward_backward_hook(self):
