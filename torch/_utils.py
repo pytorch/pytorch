@@ -812,3 +812,15 @@ def classproperty(func):
 # Whether we are compiling with torch.compile or not
 def is_compiling():
     return False
+
+
+def get_device_of_module(module:torch.nn.Module) -> torch.types.Device:
+    # NOTE: `torch.get_device()` is only valid for Tensors
+    try:
+        device = next(module.parameters()).device 
+
+    except Exception as err:
+        # NOTE: use default device if no parameters are found
+        device = torch.empty([]).device
+
+    return device  

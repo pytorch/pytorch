@@ -956,6 +956,42 @@ class Module:
             Module: self
         """
         return self._apply(lambda t: t.cpu())
+    
+    # TODO: add support for `MPS` and other devices
+    def mps(self: T) -> T:
+        r"""Moves all model parameters and buffers to the MPS.
+
+        .. note::
+            This method modifies the module in-place.
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: t.mps())
+    
+    
+    @property
+    def device(self) -> torch.types.Device:
+        r"""Moves all model parameters and buffers to the MPS.
+
+        .. note::
+            This method modifies the module in-place.
+
+        Returns:
+            Module: self
+        """
+        try:
+            return self._device
+        
+        except AttributeError:
+            # NOTE: `torch.get_device(...)` is only valid for Tensors
+            try:
+                device = next(self.parameters()).device            
+            except Exception as err:
+                # NOTE: use default device if no parameters are found
+                self._device = torch.empty([]).device
+            self._device = device 
+            return device            
 
     def type(self: T, dst_type: Union[dtype, str]) -> T:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
