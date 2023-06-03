@@ -567,3 +567,67 @@ kaiming_uniform = _make_deprecate(kaiming_uniform_)
 kaiming_normal = _make_deprecate(kaiming_normal_)
 orthogonal = _make_deprecate(orthogonal_)
 sparse = _make_deprecate(sparse_)
+
+
+
+'''
+NOTE: create decorators for switching the default init function
+For example, if we want to use xavier_normal as the default init function for a certain layer:
+
+    ```python
+    @kaiming_init
+    class KGRU(nn.GRU):
+        pass
+
+    @kaiming_init
+    class KLSTM(nn.LSTM):
+        pass
+
+    @kaiming_init
+    class KLinear(nn.Linear):
+        pass
+    ```
+'''
+from typing import Callable
+def _apply_init_to_layer(
+    torch_layer: torch.nn.Module, init_func:Callable[[torch.nn.Module], torch.nn.Module],
+    *args, **kwargs
+):
+    layer = torch_layer(*args, **kwargs)
+    layer.apply(init_func)
+    return layer
+
+def _apply_xavier_init(layer: torch.nn.Module):
+    for name, param in layer.named_parameters():
+        if 'weight' in name:
+            xavier_normal_(param.data)
+        elif 'bias' in name:
+            param.data.fill_(0)
+
+
+def _apply_kaiming_init(layer: torch.nn.Module):
+    for name, param in layer.named_parameters():
+        if 'weight' in name:
+            kaiming_normal_(param.data)
+        elif 'bias' in name:
+            param.data.fill_(0)
+
+def _apply_orthogonal_init(layer: torch.nn.Module):
+    for name, param in layer.named_parameters():
+        if 'weight' in name:
+            orthogonal_(param.data)
+        elif 'bias' in name:
+            param.data.fill_(0)
+
+def kaiming_init(torch_layer:torch.nn.Module) -> Callable[..., torch.nn.Module]:
+    def init_layer(*args, **kwargs) -> torch.nn.Module:
+        layer = _apply_init_to_layer(torch_layer, _apply_kaiming_init, *args, **kwargs)
+        return layer
+    return init_layer
+
+def orthogonal_init(torch_layer:torch.nn.Module) -> Callable[..., torch.nn.Module]:
+    def init_layer(*args, **kwargs) -> torch.nn.Module:
+        layer = _apply_init_to_layer(torch_layer, _apply_orthogonal_init, *args, **kwargs)
+        return layer
+    return init_layer
+
