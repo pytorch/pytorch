@@ -458,6 +458,25 @@ def forward(self, primals_1):
             out_test = f_compiled(*inp)
             self.assertEqual(out_ref, out_test)
 
+    # https://github.com/pytorch/pytorch/issues/93363
+    def test_mutates_input_noncontiguous(self):
+        def f(a):
+            a.add_(1)
+            return ()
+
+        f_compiled = aot_function(f, nop)
+        ref = torch.ones(4, requires_grad=True) + 0
+        ref_view = ref[0::2]
+
+        test = torch.ones(4, requires_grad=True) + 0
+        test_view = test[0::2]
+
+        out_ref = f(ref_view)
+        out_test = f_compiled(test_view)
+        print(ref)
+        print(test)
+        self.assertEqual(ref, test)
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):
@@ -1744,13 +1763,10 @@ def forward(self, tangents_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_autocast_disable_guard(self):
-        guard = torch._C._DisableAutocast()
-        try:
+        with torch._C._DisableAutocast():
             x = torch.rand([4, 4]).cuda()
             y = x @ x
             self.assertEqual(y.dtype, torch.float32)
-        finally:
-            del guard
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_nonidempotent_amp(self):
@@ -2786,8 +2802,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.slogdet', ''),  # aten._linalg_slogdet.default - couldn't find symbolic meta function/decom...
-    xfail('linalg.solve', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomp...
-    xfail('linalg.solve_ex', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/dec...
     xfail('linalg.vander', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
     xfail('logdet', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
