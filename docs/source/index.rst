@@ -99,7 +99,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.tensor.parallel <distributed.tensor.parallel>
    torch.distributed.checkpoint <distributed.checkpoint>
    torch.distributions <distributions>
-   torch._dynamo <_dynamo>
+   torch.compiler <compiler>
    torch.fft <fft>
    torch.func <func>
    futures

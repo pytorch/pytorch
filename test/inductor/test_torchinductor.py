@@ -2633,6 +2633,19 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    def test_repeat_interleave(self):
+        def fn(x):
+            return (
+                x.repeat_interleave(2),
+                x.repeat_interleave(3, dim=0),
+                x.repeat_interleave(x.size(1), dim=1),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]),),
+        )
+
     def test_embedding(self):
         m = torch.nn.Sequential(
             torch.nn.Embedding(10, 4, padding_idx=0),
@@ -6272,6 +6285,27 @@ class CommonTemplate:
             return x < y
 
         self.common(fn, (torch.randn(26),))
+
+    @skipIfRocm
+    def test_scaled_dot_product_efficient_attention(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(q, k, v, compute_log_sumexp):
+            return aten._scaled_dot_product_efficient_attention(
+                q, k, v, compute_log_sumexp
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                False,
+            ),
+            check_lowp=False,
+        )
 
 
 @dataclasses.dataclass
