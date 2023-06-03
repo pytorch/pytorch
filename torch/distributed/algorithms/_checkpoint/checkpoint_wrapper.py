@@ -1,3 +1,4 @@
+import warnings
 from enum import auto, Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
@@ -226,6 +227,13 @@ def checkpoint_wrapper(
             Wrapped module
     """
 
+    if checkpoint_impl == CheckpointImpl.REENTRANT:
+        warnings.warn(
+            f"Please specify {CheckpointImpl.NO_REENTRANT} as "
+            f"{CheckpointImpl.REENTRANT} will soon be removed as "
+            "the default and eventually deprecated.",
+            stacklevel=1,
+        )
     return CheckpointWrapper(
         module,
         checkpoint_impl,
