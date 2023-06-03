@@ -291,11 +291,11 @@ def apply_activation_checkpointing(
         else partial(lambda_auto_wrap_policy, lambda_fn=check_fn)
     )
     if not callable(policy):
-        if not hasattr(policy, "policy") or not callable(policy.policy):
+        if not hasattr(policy, "policy") or not callable(policy.policy):  # type: ignore[attr-defined]
             raise RuntimeError(
                 f"Expected {policy} to be callable or have a callable ``policy`` attribute."
             )
-        policy = policy.policy
+        policy = policy.policy  # type: ignore[attr-defined]
 
     _recursive_wrap(
         module=model,
