@@ -132,7 +132,9 @@ class DataTypePropagation:
 
     def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node):
         sub_graph = self.graphs[node.target]
-        return self.propagate_graph(sub_graph)
+        dtype = self.propagate_graph(sub_graph)
+        assert dtype
+        return dtype
 
     def deduce_node_dtype(self, node: torch.fx.Node):
         if node.target in OpDtypeClassifier.boolean_ops():
@@ -166,6 +168,7 @@ class DataTypePropagation:
         return self.deduce_node_dtype_by_inputs(node)
 
     def propagate_graph(self, graph: torch.fx.Graph):
+        assert graph.nodes
         for node in graph.nodes:
             if OptimizationContext.key in node.meta:
                 opt_ctx = node.meta[OptimizationContext.key]
