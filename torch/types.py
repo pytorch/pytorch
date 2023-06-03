@@ -77,3 +77,46 @@ class Storage:
         ...
 
     ...
+
+# Expanding the provided convenience aliases for those who would like 
+# increased readability. This lets users specify the type of a tensor
+# that they might be using in a function signature or elsewhere. For example
+# in a custom RNN architecture, the user might want to specify that arguments
+# of a function are the hidden / cell states of an LSTM.
+from typing import Literal, TypeAlias
+from torch.nn import Module
+# NOTE: devices listed by PyTorch when `torch.device(str)` raises a `RuntimeError`
+TorchDeviceTypes = Union[
+    Literal['cpu'], Literal['cuda'], Literal['ipu'], Literal['xpu'], 
+    Literal['mkldnn'], Literal['opengl'], Literal['opencl'], Literal['ideep'], 
+    Literal['hip'], Literal['ve'], Literal['fpga'], Literal['ort'], Literal['xla'], 
+    Literal['lazy'], Literal['vulkan'], Literal['mps'], Literal['meta'], Literal['hpu'], 
+    Literal['privateuseone']
+]
+
+TorchDevice: TypeAlias = Union[Device, TorchDeviceTypes]
+
+
+TorchTensor: TypeAlias = Union[tuple(torch._tensor_classes)]
+TorchTensors: TypeAlias = Sequence[TorchTensor]
+
+# NOTE: PyTorch does not provide a type alias for `torch.nn.Module` and 
+# while `nn.Loss` does inherit from `_Loss` (e.g. MSELoss --> _Loss --> Module)
+# it is recommend for users to implement their own loss function with `nn.Module` rather
+# than `_Loss` (see https://pytorch.org/docs/stable/generated/torch.nn._Loss.html#torch.nn._Loss)
+TorchLayer: TypeAlias = torch.nn.Module
+TorchLayers: TypeAlias = Sequence[TorchLayer]
+
+TorchLoss: TypeAlias = torch.nn.Module
+TorchLosses: TypeAlias = Sequence[TorchLoss]
+
+StateDict: TypeAlias = dict
+MaskTensor: TypeAlias = Union[torch.BoolTensor, torch.IntTensor]
+
+HiddenState: TypeAlias = TorchTensor
+CellState: TypeAlias = TorchTensor
+
+GRUState: TypeAlias = HiddenState
+LSTMStates: TypeAlias = Tuple[HiddenState, CellState]
+
+RNNStates: TypeAlias = Union[GRUState, LSTMStates]
