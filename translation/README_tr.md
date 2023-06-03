@@ -33,7 +33,7 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
     - [Ön Koşullar](#Ön-Koşullar)
     - [Bağımlılıkları Kurun](#Bağımlılıkları-Kurun)
     - [PyTorch Kaynak Kodunu Edinin](#PyTorch-Kaynak-Kodunu-Edinin)
-    - [PyTorch'u Kurma](#PyTorch-Kurma)
+    - [PyTorch'u Kurma](#PyTorch-u-Kurma)
       - [Yapılandırma Seçeneklerini Ayarlama (İsteğe Bağlı)](#Yapılandırma-Seçeneklerini-Ayarlama-(İsteğe-Bağlı))
   - [Docker Görüntüsü](#docker-görüntüsü)
     - [Önceden oluşturulmuş görüntüleri kullanma](#Önceden-oluşturulmuş-görüntüleri-kullanma)
