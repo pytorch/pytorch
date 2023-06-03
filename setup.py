@@ -27,7 +27,7 @@
 #
 #   DEBUG_CUDA=1
 #     if used in conjunction with DEBUG or REL_WITH_DEB_INFO, will also
-#     build CUDA kernels with -g -lineinfo --source-in-ptx.  Note that
+#     build CUDA kernels with -lineinfo --source-in-ptx.  Note that
 #     on CUDA 12 this may cause nvcc to OOM, so this is disabled by default.
 #
 #   USE_CUDNN=0
@@ -1152,6 +1152,7 @@ def main():
         'include/torch/csrc/distributed/autograd/context/*.h',
         'include/torch/csrc/distributed/autograd/functions/*.h',
         'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
+        'include/torch/csrc/dynamo/eval_frame.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',
@@ -1181,6 +1182,7 @@ def main():
         'include/torch/csrc/lazy/core/*.h',
         'include/torch/csrc/lazy/core/internal_ops/*.h',
         'include/torch/csrc/lazy/core/ops/*.h',
+        'include/torch/csrc/lazy/python/python_util.h',
         'include/torch/csrc/lazy/ts_backend/*.h',
         'include/pybind11/*.h',
         'include/pybind11/detail/*.h',
