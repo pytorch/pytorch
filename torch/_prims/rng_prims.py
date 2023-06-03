@@ -164,7 +164,7 @@ def register_run_and_save_rng_state_op():
     def impl_backend_select(op, *args, **kwargs):
         # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
         if kwargs.get("device"):
-            device_type = kwargs.get("device").type
+            device_type = kwargs.get("device").type  # type: ignore[union-attr]
             if "cuda" in device_type:
                 impl = impl_cuda
             elif "cpu" in device_type:
@@ -237,7 +237,7 @@ def register_run_with_rng_state_op():
     def impl_backend_select(rng_state, op, *args, **kwargs):
         # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
         if kwargs.get("device"):
-            device_type = kwargs.get("device").type
+            device_type = kwargs.get("device").type  # type: ignore[union-attr]
             if "cuda" in device_type:
                 impl = impl_cuda
             elif "cpu" in device_type:
