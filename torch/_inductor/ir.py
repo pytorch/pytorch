@@ -3277,7 +3277,7 @@ class FallbackKernel(ExternKernelAlloc):
         if isinstance(example_output, torch.Tensor):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
-            devices = set([FallbackKernel.find_device(None, x) for x in example_output])
+            devices = {FallbackKernel.find_device(None, x) for x in example_output}
             # Remove None
             devices = [device for device in devices if device]
             if len(devices) == 1:

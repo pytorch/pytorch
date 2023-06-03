@@ -2,6 +2,8 @@ from typing import Optional, Tuple
 
 import torch
 from torch import _prims
+from torch._C import DispatchKey
+from torch._guards import detect_fake_mode
 from torch._ops import HigherOrderOperator
 
 from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
@@ -9,9 +11,10 @@ from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 from torch.types import _device, _dtype
-from torch.utils._python_dispatch import _get_current_dispatch_mode, _pop_mode_temporarily
-from torch._guards import detect_fake_mode
-from torch._C import DispatchKey, DispatchKeySet, _ExcludeDispatchKeyGuard
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode,
+    _pop_mode_temporarily,
+)
 
 rngprim_namespace = "rngprims"
 rngprim = torch.library.Library(rngprim_namespace, "DEF")
@@ -138,131 +141,136 @@ def register_philox_rand():
     )
 
 
-run_and_save_rng_state = HigherOrderOperator("run_and_save_rng_state")
+def register_run_and_save_rng_state_op():
+    run_and_save_rng_state = HigherOrderOperator("run_and_save_rng_state")
 
+    run_and_save_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
+    run_and_save_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
 
-@run_and_save_rng_state.py_impl(DispatchKey.Autograd)
-def run_and_save_rng_state_impl_autograd(op, *args, **kwargs):
-    with torch._C._AutoDispatchBelowAutograd():
-        return run_and_save_rng_state(op, *args, **kwargs)
+    @run_and_save_rng_state.py_impl(DispatchKey.Autograd)
+    def impl_autograd(op, *args, **kwargs):
+        with torch._C._AutoDispatchBelowAutograd():
+            return run_and_save_rng_state(op, *args, **kwargs)
 
+    @run_and_save_rng_state.py_impl(DispatchKey.CUDA)
+    def impl_cuda(op, *args, **kwargs):
+        return torch.cuda.get_rng_state(), op(*args, **kwargs)
 
-@run_and_save_rng_state.py_impl(DispatchKey.CUDA)
-def run_and_save_rng_state_impl_cuda(op, *args, **kwargs):
-    return torch.cuda.get_rng_state(), op(*args, **kwargs)
+    @run_and_save_rng_state.py_impl(DispatchKey.CPU)
+    def impl_cpu(op, *args, **kwargs):
+        return torch.get_rng_state(), op(*args, **kwargs)
 
-
-@run_and_save_rng_state.py_impl(DispatchKey.CPU)
-def run_and_save_rng_state_impl_cpu(op, *args, **kwargs):
-    return torch.get_rng_state(), op(*args, **kwargs)
-
-
-@run_and_save_rng_state.py_impl(DispatchKey.BackendSelect)
-def run_and_save_rng_impl_backend_select(op, *args, **kwargs):
-    # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
-    if kwargs.get("device"):
-        device_type = kwargs.get("device").type
-        if "cuda" in device_type:
-            impl = run_and_save_rng_state_impl_cuda
-        elif "cpu" in device_type:
-            impl = run_and_save_rng_state_impl_cpu
+    @run_and_save_rng_state.py_impl(DispatchKey.BackendSelect)
+    def impl_backend_select(op, *args, **kwargs):
+        # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
+        if kwargs.get("device"):
+            device_type = kwargs.get("device").type
+            if "cuda" in device_type:
+                impl = impl_cuda
+            elif "cpu" in device_type:
+                impl = impl_cpu
+            else:
+                raise NotImplementedError(
+                    f"Backend not available for device {device_type}"
+                )
         else:
-            raise NotImplementedError(f"Backend not available for device {device_type}")
+            devices = {arg.device.type for arg in args if isinstance(arg, torch.Tensor)}
+            if any("cuda" in dev for dev in devices):
+                impl = impl_cuda
+            elif any("cpu" in dev for dev in devices):
+                impl = impl_cpu
+            else:
+                raise NotImplementedError(
+                    f"Backend not available for device {device_type}"
+                )
         return impl(op, *args, **kwargs)
-    else:
-        devices = set([arg.device.type for arg in args if isinstance(arg, torch.Tensor)])
-        if any(["cuda" in dev for dev in devices]):
-            impl = run_and_save_rng_state_impl_cuda
-        elif any(["cpu" in dev for dev in devices]):
-            impl = run_and_save_rng_state_impl_cpu
+
+    @run_and_save_rng_state.py_impl(FakeTensorMode)
+    def impl_fake_tensor_mode(op, *args, **kwargs):
+        # Check device to call the right impl
+        with detect_fake_mode():
+            return impl_backend_select(op, *args, **kwargs)
+
+    @run_and_save_rng_state.py_impl(ProxyTorchDispatchMode)
+    def impl_proxy_dispatch_mode(op, *args, **kwargs):
+        mode = _get_current_dispatch_mode()
+        assert mode is not None
+        with _pop_mode_temporarily() as mode:
+            return run_and_save_rng_state(op, *args, **kwargs)
+
+
+def register_run_with_rng_state_op():
+    run_with_rng_state = HigherOrderOperator("run_with_rng_state")
+
+    run_with_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
+    run_with_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
+
+    @run_with_rng_state.py_impl(DispatchKey.Autograd)
+    def impl_autograd(rng_state, op, *args, **kwargs):
+        with torch._C._AutoDispatchBelowAutograd():
+            return run_with_rng_state(rng_state, op, *args, **kwargs)
+
+    @run_with_rng_state.py_impl(DispatchKey.CUDA)
+    def impl_cuda(rng_state, op, *args, **kwargs):
+        current_state = torch.cuda.get_rng_state()
+        torch.cuda.set_rng_state(rng_state.cpu())
+        out = op(*args, **kwargs)
+        torch.cuda.set_rng_state(current_state)
+        return out
+
+    @run_with_rng_state.py_impl(DispatchKey.CPU)
+    def impl_cpu(rng_state, op, *args, **kwargs):
+        current_state = torch.get_rng_state()
+        torch.set_rng_state(rng_state)
+        out = op(*args, **kwargs)
+        torch.set_rng_state(current_state)
+        return out
+
+    @run_with_rng_state.py_impl(ProxyTorchDispatchMode)
+    def impl_proxy_dispatch_mode(rng_state, op, *args, **kwargs):
+        mode = _get_current_dispatch_mode()
+        assert mode is not None
+        with _pop_mode_temporarily() as mode:
+            return run_with_rng_state(rng_state, op, *args, **kwargs)
+
+    @run_with_rng_state.py_impl(DispatchKey.BackendSelect)
+    def impl_backend_select(rng_state, op, *args, **kwargs):
+        # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
+        if kwargs.get("device"):
+            device_type = kwargs.get("device").type
+            if "cuda" in device_type:
+                impl = impl_cuda
+            elif "cpu" in device_type:
+                impl = impl_cpu
+            else:
+                raise NotImplementedError(
+                    f"Backend not available for device {device_type}"
+                )
         else:
-            raise NotImplementedError(f"Backend not available for device {device_type}")
-        return impl(op, *args, **kwargs)
-
-
-@run_and_save_rng_state.py_impl(FakeTensorMode)
-def f(op, *args, **kwargs):
-    # Check device to call the right impl
-    with detect_fake_mode():
-        return run_and_save_rng_impl_backend_select(op, *args, **kwargs)
-
-run_and_save_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
-run_and_save_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
-
-
-@run_and_save_rng_state.py_impl(ProxyTorchDispatchMode)
-def run_and_save_rng_state_impl_dispatch(op, *args, **kwargs):
-    mode = _get_current_dispatch_mode()
-    assert mode is not None
-    with _pop_mode_temporarily() as mode:
-        return run_and_save_rng_state(op, *args, **kwargs)
-
-
-run_with_rng_state = HigherOrderOperator("run_with_rng_state")
-
-
-@run_with_rng_state.py_impl(DispatchKey.Autograd)
-def run_with_rng_state_impl_autograd(rng_state, op, *args, **kwargs):
-    with torch._C._AutoDispatchBelowAutograd():
-        return run_with_rng_state(rng_state, op, *args, **kwargs)
-
-
-@run_with_rng_state.py_impl(DispatchKey.CUDA)
-def run_with_rng_state_impl_cuda(rng_state, op, *args, **kwargs):
-    current_state = torch.cuda.get_rng_state()
-    torch.cuda.set_rng_state(rng_state.cpu())
-    out = op(*args, **kwargs)
-    torch.cuda.set_rng_state(current_state)
-    return out
-
-
-@run_with_rng_state.py_impl(DispatchKey.CPU)
-def run_with_rng_state_impl_cpu(rng_state, op, *args, **kwargs):
-    current_state = torch.get_rng_state()
-    torch.set_rng_state(rng_state)
-    out = op(*args, **kwargs)
-    torch.set_rng_state(current_state)
-    return out
-
-
-@run_with_rng_state.py_impl(ProxyTorchDispatchMode)
-def run_with_rng_state_impl_dispatch(rng_state, op, *args, **kwargs):
-    raise NotImplementedError()
-
-
-@run_with_rng_state.py_impl(DispatchKey.BackendSelect)
-def run_with_rng_state_impl_backend_select(rng_state, op, *args, **kwargs):
-    # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
-    if kwargs.get("device"):
-        device_type = kwargs.get("device").type
-        if "cuda" in device_type:
-            impl = run_with_rng_state_impl_cuda
-        elif "cpu" in device_type:
-            impl = run_with_rng_state_impl_cpu
-        else:
-            raise NotImplementedError(f"Backend not available for device {device_type}")
-        return impl(rng_state, op, *args, **kwargs)
-    else:
-        devices = set([arg.device.type for arg in args if isinstance(arg, torch.Tensor)])
-        if any(["cuda" in dev for dev in devices]):
-            impl = run_with_rng_state_impl_cuda
-        elif any(["cpu" in dev for dev in devices]):
-            impl = run_with_rng_state_impl_cpu
-        else:
-            raise NotImplementedError(f"Backend not available for device {device_type}")
+            devices = {arg.device.type for arg in args if isinstance(arg, torch.Tensor)}
+            if any("cuda" in dev for dev in devices):
+                impl = impl_cuda
+            elif any("cpu" in dev for dev in devices):
+                impl = impl_cpu
+            else:
+                raise NotImplementedError(
+                    f"Backend not available for device {device_type}"
+                )
         return impl(rng_state, op, *args, **kwargs)
 
+    @run_with_rng_state.py_impl(FakeTensorMode)
+    def impl_fake_tensor_mode(rng_state, op, *args, **kwargs):
+        # Skip setting the set_rng_state as it does not work well with fake tensors.
+        # And it does not matter for the fake tensor mode.
+        with detect_fake_mode():
+            return op(*args, **kwargs)
 
-@run_with_rng_state.py_impl(FakeTensorMode)
-def f(rng_state, op, *args, **kwargs):
-    # Skip setting the set_rng_state as it does not work well with fake tensors.
-    # And it does not matter for the fake tensor mode.
-    with detect_fake_mode():
-        return op(*args, **kwargs)
 
-run_with_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
-run_with_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
+def register_functional_rng_wrappers():
+    register_run_and_save_rng_state_op()
+    register_run_with_rng_state_op()
 
 
 def register_rng_prims():
     register_philox_rand()
+    register_functional_rng_wrappers()
