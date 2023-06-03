@@ -45,8 +45,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
             group_source = GetItemSource(AttrSource(self.source, "param_groups"), g_ind)
             for p_ind, p in enumerate(group["params"]):
                 if p.grad is not None:
-                    self.grad_to_source[p.grad] = GetItemSource(
-                        GetItemSource(group_source, "params"), p_ind
+                    self.grad_to_source[p.grad] = AttrSource(
+                        GetItemSource(GetItemSource(group_source, "params"), p_ind),
+                        "grad",
                     )
 
     def var_getattr(self, tx, name):
