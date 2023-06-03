@@ -250,7 +250,7 @@ class SymPyValueRangeAnalysis:
         def safe_mul(a, b):
             if a == 0 or a == sympy.false:
                 return zero(b)
-            elif b == 0 b == sympy.false:
+            elif b == 0 or b == sympy.false:
                 return zero(a)
             # TODO this is not the right fix, but let's see if it unblocks
             elif a == sympy.true:
