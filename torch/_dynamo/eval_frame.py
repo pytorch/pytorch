@@ -955,15 +955,32 @@ def export(
         assert dim_constraints is not None
         dim_constraints.solve()
         msg = dim_constraints.prettify_results(original_signature)
+        forced_specializations = "\n".join([
+            (
+                f"\t{shape_env.var_to_sources[var][0].name()}, which was marked dynamic, "
+                f"must be specialized to {dim_constraints._substitutions[var]}."
+            )
+            for var in shape_env.var_to_range.keys()
+            if var in dim_constraints._substitutions
+        ])
+        if forced_specializations:
+            msg = (
+                "Some dynamic dimensions need to be specialized because "
+                "the constraints inferred for them are too complex to specify.\n"
+                f"{forced_specializations}\n{msg}"
+            )
         if constraint_violation_error:
             constraint_violation_error.args = (
                 constraint_violation_error.args[0] + msg,
             )
         else:
-            log.info(
-                "Summary of dimension constraints:%s",
-                msg,
-            )
+            if forced_specializations:
+                constraint_violation_error = ConstraintViolationError(msg)
+            else:
+                log.info(
+                    "Summary of dimension constraints:%s",
+                    msg,
+                )
 
         # Error if we have any constraints on static values
         for k in shape_env.var_to_range.keys():
