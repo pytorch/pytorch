@@ -211,7 +211,7 @@ class TestExport(TestCase):
             torchdynamo.exc.UserError, "It appears that you're trying to set a constraint " +
             "on a value which we evaluated to have a static value of 3. "
         ):
-            export(f, example_inputs, constraints)
+            export(f, example_inputs, constraints=constraints)
 
 
 if __name__ == '__main__':
