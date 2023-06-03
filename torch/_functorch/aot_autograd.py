@@ -2765,6 +2765,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # We are not clearing flat_args here because
                 # 1) There is a check in the the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
+
+            # the compiler need to use this field to find the original modol outputs
+            # from the AOTAutograd fwd module's outputs. Thus compiler can make sure
+            # optimizations like layout optimization does not change those tensors'
+            # layout.
+            # TODO once https://github.com/pytorch/pytorch/pull/100652/files#r1212002707 is in
+            # change to access fw_metadata from the global tracing context.
+            fw_module.meta["original_output_start_index"] = fw_metadata.num_mutated_inputs
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, adjusted_flat_args
             )
@@ -2981,9 +2989,24 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 if CompiledFunction.compiled_bw is None:
                     assert all(a is not None for a in all_args)
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
+
+                    placeholder_list = fx_placeholder_vals(bw_module)
+
+                    # saved activations can have different stride to eager if
+                    # the compiler does layout optimization. We should restride the
+                    # tensor passed in for compiling the backward graph using the
+                    # saved tensor's stride.
+                    for i in range(len(placeholder_list)):
+                        ph_arg = placeholder_list[i]
+                        real_arg = all_args[i]
+                        if not isinstance(ph_arg, torch.Tensor):
+                            continue
+                        if ph_arg.stride() != real_arg.stride():
+                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
+
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, fx_placeholder_vals(bw_module)
+                            bw_module, placeholder_list
                         )
 
                 ctx.maybe_clear_saved_tensors()

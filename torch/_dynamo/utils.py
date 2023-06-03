@@ -1579,16 +1579,48 @@ def nnmodule_has_hooks(
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
 
 
-def to_numpy_helper(___tmp_0):
-    def convert(obj):
-        if isinstance(obj, torch_np.ndarray):
-            return obj.tensor.numpy()
-        else:
-            return obj
+def to_numpy_helper(value):
+    """Convert tensor and torch_np.ndarray to numpy.ndarray."""
+    if isinstance(value, torch_np.ndarray):
+        return value.tensor.numpy()
+    elif isinstance(value, torch.Tensor):
+        return value.numpy()
+    elif isinstance(value, (tuple, list)):
+        return type(value)(to_numpy_helper(obj) for obj in value)
+    else:
+        return value
 
-    if isinstance(___tmp_0, tuple):
-        return tuple([convert(obj) for obj in ___tmp_0])
-    return convert(___tmp_0)
+
+def numpy_to_tensor(value):
+    """Convert torch_np.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
+    if isinstance(value, torch_np.ndarray):
+        return value.tensor
+    elif isinstance(value, (tuple, list)):
+        return type(value)(numpy_to_tensor(obj) for obj in value)
+    else:
+        return value
+
+
+class numpy_to_tensor_wrapper:
+    def __init__(self, f):
+        self.f = f
+        self.__name__ = "wrapped_" + self.f.__name__
+
+    def __repr__(self):
+        return f"<Wrapped function <original {self.f.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        out = self.f(*args, **kwargs)
+        return numpy_to_tensor(out)
+
+
+def numpy_attr_wrapper(obj, name):
+    if isinstance(obj, torch_np.ndarray):
+        out = getattr(obj, name)
+        return numpy_to_tensor(out)
+    elif isinstance(obj, torch.Tensor):
+        out = getattr(torch_np.ndarray(obj), name)
+        return numpy_to_tensor(out)
 
 
 def defake(x):
