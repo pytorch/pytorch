@@ -2526,7 +2526,6 @@ class ShapeEnv:
             elif len(warn_msgs) > 0:
                 log.debug("%s Warning only constraints violated", len(warn_msgs))
 
-        print(f"symbol_to_constraints={symbol_to_constraints}")
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
