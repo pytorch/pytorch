@@ -19,6 +19,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+import torch.distributed as dist
 
 from . import config, ir  # noqa: F811, this is needed
 from .analysis import create_fx_from_snodes
@@ -289,3 +290,15 @@ class DebugFormatter:
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
+
+def is_local():
+    return os.environ.get("LOCAL_RANK", "0") == "0"
+
+def printd(*args):
+    if is_local():
+        print(*args)
+
+def breakpointd():
+    if is_local():
+        breakpoint()
+    dist.barrier()

@@ -680,14 +680,6 @@ def run_and_get_code(fn, *args, **kwargs):
     return result, source_codes
 
 
-def print2(*args):
-    if os.environ.get("LOCAL_RANK", -1) == "0":
-        print(*args)
-
-
-def is_local():
-    return os.environ.get("LOCAL_RANK", -1) == "0"
-
 
 def run_and_get_triton_code(fn, *args, **kwargs):
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
