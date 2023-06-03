@@ -21,7 +21,7 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
 
 - [PyTorch Hakkında Daha Fazlası](#Pytorch-Hakkında-Daha-Fazlası)
   - [GPU'ya Hazır Bir Python Kütüphanesi](#a-gpu-ready-tensor-library)
-  - [Dinamik Sinir Ağları: Bant Tabanlı Otograd](#dynamic-neural-networks-tape-based-autograd)
+  - [Dinamik Sinir Ağları: Bant Tabanlı Otograd](#Dinamik-Sinir-Ağları:-Bant-Tabanlı-Otograd)
   - [Python First](#python-first)
   - [Zorunlu Deneyimler](#imperative-experiences)
   - [Hızlı ve Yalın](#fast-and-lean)
