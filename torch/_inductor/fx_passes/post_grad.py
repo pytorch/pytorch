@@ -400,3 +400,12 @@ def is_valid_splitwithsizes_cat(match):
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
+
+
+def view_to_reshape(gm):
+    """
+    Replace view ops in the GraphModule to reshape ops.
+    """
+    for nd in gm.graph.nodes:
+        if nd.target == torch.ops.aten.view.default:
+            nd.target = torch.ops.aten.reshape.default
