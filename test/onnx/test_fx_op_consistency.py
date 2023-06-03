@@ -107,6 +107,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "full",
         "full_like",
         "index_put",
+        "logit",
         # "new_empty",  non-deterministic
         # "new_empty_strided",  non-deterministic
         "new_full",
@@ -402,6 +403,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "index_put",
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
+    ),
+    xfail(
+        "logit",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Log", "bool, int"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool1d",
