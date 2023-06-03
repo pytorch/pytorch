@@ -1,5 +1,5 @@
 import torch
-from torch._prims_common import Tensor, check
+from torch._prims_common import Tensor
 from torch._refs import _broadcast_shapes
 from typing import Optional, Tuple, List
 
@@ -9,12 +9,12 @@ def checkFloatingOrComplex(
     t: Tensor, f_name: str, allow_low_precision_dtypes: bool = True
 ):
     dtype = t.dtype
-    check(
+    torch._check(
         t.is_floating_point() or t.is_complex(),
         lambda: f"{f_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
     if allow_low_precision_dtypes:
-        check(
+        torch._check(
             dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
             lambda: f"{f_name}: Low precision dtypes not supported. Got {dtype}",
         )
@@ -32,7 +32,7 @@ def squareCheckInputs(self: Tensor, f_name: str):
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def checkIsMatrix(A: Tensor, f_name: str, arg_name: str = "A"):
-    check(
+    torch._check(
         A.dim() >= 2,
         lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
     )
@@ -46,7 +46,7 @@ def checkInputsSolver(
 ):
     squareCheckInputs(A, f_name)
     checkIsMatrix(B, f_name)
-    check(
+    torch._check(
         A.size(-2) == B.size(-2) if left else A.size(-1) == B.size(-1),
         lambda: (
             f"{f_name}: Incompatible shapes of A and B for the equation "
@@ -64,7 +64,7 @@ def linearSolveCheckInputs(
     A: Tensor,
     name: str,
 ):
-    check(
+    torch._check(
         self.device == A.device,
         lambda: (
             f"Expected b and A to be on the same device, but found b on "
@@ -72,7 +72,7 @@ def linearSolveCheckInputs(
         ),
     )
 
-    check(
+    torch._check(
         self.dtype == A.dtype,
         lambda: (
             f"Expected b and A to have the same dtype, but found b of type "
@@ -80,7 +80,7 @@ def linearSolveCheckInputs(
         ),
     )
 
-    check(
+    torch._check(
         A.size(-1) == A.size(-2),
         lambda: (
             f"A must be batches of square matrices, "
@@ -88,7 +88,7 @@ def linearSolveCheckInputs(
         ),
     )
 
-    check(
+    torch._check(
         A.size(-1) == self.size(-2),
         lambda: (
             f"Incompatible matrix sizes for {name}: each A "
