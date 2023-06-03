@@ -202,10 +202,10 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
 
     // Determine PyTorch datatype for the output matrix.
     auto tensor_d_dtype = at::kChar;
-    if (std::is_same<ElementOutput, int32_t>::value) {
+    if constexpr (std::is_same_v<ElementOutput, int32_t>) {
         tensor_d_dtype = at::kInt;
     }
-    else if (std::is_same<ElementOutput, cutlass::half_t>::value) {
+    else if constexpr (std::is_same_v<ElementOutput, cutlass::half_t>) {
         tensor_d_dtype = at::kHalf;
     }
     else {
