@@ -22,7 +22,7 @@ dce = False
 static_weight_shapes = True
 
 # put correctness assertions in generated code
-size_asserts = True
+size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -66,10 +66,20 @@ search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") ==
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
-
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
 )
+
+layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
+
+# Whether to keep the output strides the same as eager after layout optimization.
+keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
+
+# Enabling this will let compiler print warning messages if a generated triton
+# kernel has inputs with mixed layouts.  This is helpful for perf debugging
+# since kernel with mixed layout inputs may run much slower then one whose inputs
+# have uniform layouts.
+warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematerialization can lead to exponential blowup. So, have
