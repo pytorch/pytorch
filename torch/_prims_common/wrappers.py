@@ -5,13 +5,12 @@ from torch._prims_common import (
     TensorLike,
     TensorLikeType,
     ShapeType,
-    StrideType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
 )
 import torch._prims_common as utils
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
-from typing import Callable, Sequence, Tuple, NamedTuple, Optional, overload
+from typing import Callable, Sequence, Tuple, NamedTuple, overload
 import inspect
 from functools import wraps
 import warnings
@@ -158,17 +157,9 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
 
 
 # TODO: handle tuples of tensors
-def _maybe_resize_out(
-    out: TensorLikeType,
-    shape: ShapeType,
-    stride: Optional[StrideType] = None,
-    is_copy: bool = False
-) -> TensorLikeType:
+def _maybe_resize_out(out: TensorLikeType, shape: ShapeType):
     if _resize_output_check(out, shape):
-        out = out.resize_(shape)
-        if stride is not None and not is_copy:
-            out = out.as_strided_(shape, stride)
-        return out
+        return out.resize_(shape)
     else:
         return out
 
@@ -185,13 +176,13 @@ def _safe_copy_out(
 
     # Checks safe cast
     if exact_dtype:
-        utils.check(
+        torch._check(
             copy_from.dtype == copy_to.dtype,
             lambda: f"Expected out tensor to have dtype {copy_from.dtype} "
             f"but got {copy_to.dtype} instead",
         )
     else:
-        utils.check(
+        torch._check(
             utils.can_safe_cast_to(cast_from=copy_from.dtype, cast_to=copy_to.dtype),
             lambda: f"Attempting to cast from {copy_from.dtype} to out tensor with dtype {copy_to.dtype}, "
             "but this can't be cast because it is not safe!",
@@ -200,7 +191,7 @@ def _safe_copy_out(
     return copy_to.copy_(copy_from)
 
 
-def out_wrapper(*out_names: str, exact_dtype: bool = False, is_copy: bool = False):
+def out_wrapper(*out_names: str, exact_dtype: bool = False):
     is_tensor = len(out_names) == 0
     assert is_tensor or len(out_names) >= 2
 
@@ -260,18 +251,17 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False, is_copy: bool = Fals
                 if is_tensor:
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
-                    _maybe_resize_out(out, result.shape, result.stride(), is_copy=is_copy)
+                    _maybe_resize_out(out, result.shape)
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
-                    utils.check(
+                    torch._check_type(
                         len(out) == len(result),
                         lambda: f"expected tuple of {len(result)} elements but got {len(out)}",
-                        TypeError,
                     )
                     for r, o in zip(result, out):
                         # These two operations are done in-place
-                        _maybe_resize_out(o, r.shape, r.stride(), is_copy=is_copy)
+                        _maybe_resize_out(o, r.shape)
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
             else:
                 out = result
@@ -300,12 +290,9 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False, is_copy: bool = Fals
 
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
-        g = torch._C._AutoDispatchBelowAutograd()
-        try:
+        with torch._C._AutoDispatchBelowAutograd():
             old = torch._C._dispatch_tls_is_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView)
             return prim(*args, **kwargs)
-        finally:
-            del g
 
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
