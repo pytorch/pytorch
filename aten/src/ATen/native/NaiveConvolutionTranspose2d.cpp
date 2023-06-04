@@ -322,12 +322,12 @@ void slow_conv_transpose2d_out_cpu_template(
               n,
               k,
               static_cast<scalar_t>(1),
-              weight_.data_ptr<scalar_t>(),
+              weight_.const_data_ptr<scalar_t>(),
               m,
-              input_n.data_ptr<scalar_t>(),
+              input_n.const_data_ptr<scalar_t>(),
               k,
               static_cast<scalar_t>(0),
-              columns_n.data_ptr<scalar_t>(),
+              columns_n.mutable_data_ptr<scalar_t>(),
               m);
         } else {
           int64_t m = input_height * input_width;
@@ -342,12 +342,12 @@ void slow_conv_transpose2d_out_cpu_template(
               n,
               k,
               static_cast<scalar_t>(1),
-              input_n.data_ptr<scalar_t>(),
+              input_n.const_data_ptr<scalar_t>(),
               m,
-              weight_.data_ptr<scalar_t>(),
+              weight_.const_data_ptr<scalar_t>(),
               n,
               static_cast<scalar_t>(0),
-              columns_n.data_ptr<scalar_t>(),
+              columns_n.mutable_data_ptr<scalar_t>(),
               m);
         }
 
@@ -542,12 +542,12 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
                 n,
                 k,
                 static_cast<scalar_t>(1),
-                weight.data_ptr<scalar_t>(),
+                weight.const_data_ptr<scalar_t>(),
                 k,
                 gemm_in_ptr,
                 k,
                 static_cast<scalar_t>(0),
-                grad_input_n.data_ptr<scalar_t>(),
+                grad_input_n.mutable_data_ptr<scalar_t>(),
                 m);
 
           } else {
@@ -565,10 +565,10 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
                 static_cast<scalar_t>(1),
                 gemm_in_ptr,
                 m,
-                weight.data_ptr<scalar_t>(),
+                weight.const_data_ptr<scalar_t>(),
                 k,
                 static_cast<scalar_t>(0),
-                grad_input_n.data_ptr<scalar_t>(),
+                grad_input_n.mutable_data_ptr<scalar_t>(),
                 m);
           }
         }
@@ -742,10 +742,10 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                   static_cast<scalar_t>(scale),
                   gemm_in_ptr,
                   m,
-                  input_n.data_ptr<scalar_t>(),
+                  input_n.const_data_ptr<scalar_t>(),
                   n,
                   static_cast<scalar_t>(1),
-                  grad_weight.data_ptr<scalar_t>(),
+                  grad_weight.mutable_data_ptr<scalar_t>(),
                   m);
             } else {
               int64_t m = n_output_plane * kernel_height * kernel_width;
@@ -762,10 +762,10 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                   static_cast<scalar_t>(scale),
                   gemm_in_ptr,
                   k,
-                  input_n.data_ptr<scalar_t>(),
+                  input_n.const_data_ptr<scalar_t>(),
                   k,
                   static_cast<scalar_t>(1),
-                  grad_weight.data_ptr<scalar_t>(),
+                  grad_weight.mutable_data_ptr<scalar_t>(),
                   m);
             }
           }
@@ -848,7 +848,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(con
       grad_input, grad_weight, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
+static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,

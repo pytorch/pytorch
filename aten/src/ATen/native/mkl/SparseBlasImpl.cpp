@@ -32,6 +32,7 @@ namespace mkl {
 
 namespace {
 
+#if AT_USE_MKL_SPARSE()
 c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
     const Tensor& tensor) {
   if (tensor.is_non_overlapping_and_dense() ||
@@ -110,7 +111,6 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
 /*
   Resizes `input` tensor and fills it with the data from MKL.
 */
-#if AT_USE_MKL_SPARSE()
 template <typename scalar_t>
 void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
   sparse_index_base_t indexing = SPARSE_INDEX_BASE_ZERO;
@@ -146,15 +146,15 @@ void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
     // MKL Sparse Inspector-Executor doesn't have a way to provide external
     // buffers So we have to copy the memory allocated by MKL
     std::memcpy(
-        input_values.data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
+        input_values.mutable_data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
     std::memcpy(
-        col_indices.data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
+        col_indices.mutable_data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
   }
   if (rows > 0) {
     std::memcpy(
-        crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
+        crow_indices.mutable_data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
   }
-  crow_indices.data_ptr<MKL_INT>()[rows] = nnz;
+  crow_indices.mutable_data_ptr<MKL_INT>()[rows] = nnz;
 }
 #endif
 

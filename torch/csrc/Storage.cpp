@@ -51,6 +51,69 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
   Py_TYPE(_self)->tp_free(self);
 }
 
+c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
+    c10::StorageImpl::use_byte_size_t use_byte_size,
+    c10::SymInt size_bytes,
+    c10::Allocator* allocator,
+    bool resizable,
+    c10::optional<int64_t> allocator_opt,
+    c10::optional<at::Device> device_opt) {
+  at::OptionalDeviceGuard device_guard;
+  // This will be non-nullptr only when there is a custom StorageImpl
+  // constructor for the given device
+  c10::StorageImplCreateHelper fptr = nullptr;
+  // For directly passing allocator scenarios, only c10::StorageImpl objects can
+  // be created. If you need to create a storageimpl object of a subclass, you
+  // need to pass in the device information.
+  if (allocator_opt.has_value()) {
+    allocator = reinterpret_cast<c10::Allocator*>(allocator_opt.value());
+  } else if (device_opt.has_value()) {
+    at::Device device = device_opt.value();
+    // We only need to check this here as this is the only case where we can
+    // have a device that is not CPU (and thus for which the StorageImpl
+    // constructor can be overwritten).
+    fptr = c10::GetStorageImplCreate(device.type());
+    if (device.type() == at::kCPU) {
+      allocator = c10::GetDefaultCPUAllocator();
+#ifdef USE_CUDA
+    } else if (device.type() == at::kCUDA) {
+      at::globalContext().lazyInitCUDA();
+      allocator = c10::cuda::CUDACachingAllocator::get();
+#endif
+#ifdef USE_MPS
+    } else if (device.type() == at::kMPS) {
+      allocator = at::mps::GetMPSAllocator();
+#endif
+    } else if (device.type() == at::DeviceType::XPU) {
+      allocator = c10::GetAllocator(device.type());
+    } else if (device.type() == at::DeviceType::HPU) {
+      allocator = c10::GetAllocator(device.type());
+    } else if (device.type() == at::DeviceType::Meta) {
+      allocator = c10::GetAllocator(device.type());
+    } else if (device.type() == at::DeviceType::PrivateUse1) {
+      allocator = c10::GetAllocator(device.type());
+
+    } else {
+      TORCH_CHECK(
+          false,
+          THPStorageStr,
+          "(): Storage device not recognized: ",
+          device.type());
+    }
+    device_guard.reset_device(device);
+  } else {
+    allocator = c10::GetDefaultCPUAllocator();
+  }
+
+  if (fptr != nullptr) {
+    return fptr(use_byte_size, std::move(size_bytes), allocator, resizable);
+  }
+
+  // Create a c10::StorageImpl object.
+  return c10::make_intrusive<c10::StorageImpl>(
+      use_byte_size, std::move(size_bytes), allocator, resizable);
+}
+
 static PyObject* THPStorage_pynew(
     PyTypeObject* type,
     PyObject* args,
@@ -89,58 +152,28 @@ static PyObject* THPStorage_pynew(
   THPStoragePtr self((THPStorage*)type->tp_alloc(type, 0));
   THPUtils_assert(self, "failed to allocate a " THPStorageStr " object");
   c10::Allocator* allocator = nullptr;
-  at::OptionalDeviceGuard device_guard;
-
-  if (allocator_opt.has_value()) {
-    allocator = reinterpret_cast<c10::Allocator*>(allocator_opt.value());
-  } else if (device_opt.has_value()) {
-    at::Device device = device_opt.value();
-    if (device.type() == at::kCPU) {
-      allocator = c10::GetDefaultCPUAllocator();
-#ifdef USE_CUDA
-    } else if (device.type() == at::kCUDA) {
-      at::globalContext().lazyInitCUDA();
-      allocator = c10::cuda::CUDACachingAllocator::get();
-#endif
-#ifdef USE_MPS
-    } else if (device.type() == at::kMPS) {
-      allocator = at::mps::GetMPSAllocator();
-#endif
-    } else if (device.type() == at::DeviceType::XPU) {
-      allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::Meta) {
-      allocator = c10::GetAllocator(device.type());
-    } else {
-      TORCH_CHECK(
-          false,
-          THPStorageStr,
-          "(): Storage device not recognized: ",
-          device.type());
-    }
-    device_guard.reset_device(device);
-  } else {
-    allocator = c10::GetDefaultCPUAllocator();
-  }
 
   // torch.Storage(*, ...)
   if (r.idx == 0) {
-    self->cdata = c10::MaybeOwned<c10::Storage>::owned(
-        c10::make_intrusive<c10::StorageImpl>(
-            c10::StorageImpl::use_byte_size_t(),
-            0,
-            allocator,
-            /*resizable=*/true));
+    self->cdata = c10::MaybeOwned<c10::Storage>::owned(make_storage_impl(
+        c10::StorageImpl::use_byte_size_t(),
+        0,
+        allocator,
+        /*resizable=*/true,
+        allocator_opt,
+        device_opt));
     return (PyObject*)self.release();
 
     // torch.Storage(size, *, ...)
   } else if (r.idx == 1) {
     int64_t size = r.toInt64(0);
-    self->cdata = c10::MaybeOwned<c10::Storage>::owned(
-        c10::make_intrusive<c10::StorageImpl>(
-            c10::StorageImpl::use_byte_size_t(),
-            size,
-            allocator,
-            /*resizable=*/true));
+    self->cdata = c10::MaybeOwned<c10::Storage>::owned(make_storage_impl(
+        c10::StorageImpl::use_byte_size_t(),
+        size,
+        allocator,
+        /*resizable=*/true,
+        allocator_opt,
+        device_opt));
     return (PyObject*)self.release();
 
     // torch.Storage(sequence, *, ...)
@@ -157,12 +190,13 @@ static PyObject* THPStorage_pynew(
         THPStorageStr,
         "(): Could not obtain the length of sequence of type ",
         THPUtils_typename(sequence));
-    self->cdata = c10::MaybeOwned<c10::Storage>::owned(
-        c10::make_intrusive<c10::StorageImpl>(
-            c10::StorageImpl::use_byte_size_t(),
-            length,
-            allocator,
-            /*resizable=*/true));
+    self->cdata = c10::MaybeOwned<c10::Storage>::owned(make_storage_impl(
+        c10::StorageImpl::use_byte_size_t(),
+        length,
+        allocator,
+        /*resizable=*/true,
+        allocator_opt,
+        device_opt));
     THPObjectPtr item;
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
@@ -171,7 +205,7 @@ static PyObject* THPStorage_pynew(
         uint8_t value = THPByteUtils_unpackReal(item.get());
         const auto& storage = THPStorage_Unpack(self);
         if (allocator == c10::GetDefaultCPUAllocator()) {
-          storage.unsafe_data<uint8_t>()[i] = value;
+          static_cast<uint8_t*>(storage.mutable_data())[i] = value;
         } else {
           // TODO: this might be slow - consider batched updates?
           storage_set(storage, i, value);
@@ -234,7 +268,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     }
 
     const auto& storage = THPStorage_Unpack(self);
-    uint8_t* data = storage.data<uint8_t>();
+    auto data = static_cast<uint8_t*>(storage.mutable_data());
 
     at::StorageImpl* old_storage_impl = storage.unsafeGetStorageImpl();
     c10::raw::intrusive_ptr::incref(old_storage_impl);

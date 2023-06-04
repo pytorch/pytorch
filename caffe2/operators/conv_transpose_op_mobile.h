@@ -31,7 +31,7 @@ class ConvTransposeMobileOp final : public ConvTransposeUnpoolBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  // We store a numThreasds per-worker  tiles of Y, and numThreads per-worker
+  // We store a numThreads per-worker  tiles of Y, and numThreads per-worker
   // threadBuffer for the gemm output, laid out in that order.
   Tensor threadBuffer_{CPU};
 

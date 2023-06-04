@@ -38,9 +38,19 @@ from gitutils import (
     get_git_repo_dir,
     GitRepo,
     patterns_to_regex,
+    retries_decorator,
 )
-from label_utils import gh_add_labels, has_required_labels, LABEL_ERR_MSG
+from label_utils import (
+    gh_add_labels,
+    gh_remove_label,
+    has_required_labels,
+    LABEL_ERR_MSG,
+)
 from trymerge_explainer import get_revert_message, TryMergeExplainer
+
+# labels
+MERGE_IN_PROGRESS_LABEL = "merging"
+MERGE_COMPLETE_LABEL = "merged"
 
 
 class JobCheckState(NamedTuple):
@@ -73,12 +83,12 @@ class FlakyRule:
             and self.name in job.get("name", "")
             and job.get("failure_captures") is not None
             and all(
-                [
-                    capture in job.get("failure_captures", [])
-                    for capture in self.captures
-                ]
+                capture in job.get("failure_captures", []) for capture in self.captures
             )
         )
+
+    def __repr__(self) -> str:
+        return f"FlakyRule[name='{self.name}', captures={self.captures}]"
 
 
 GH_PR_REVIEWS_FRAGMENT = """
@@ -173,6 +183,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         nameWithOwner
       }
       baseRefName
+      baseRefOid
       baseRepository {
         nameWithOwner
         isPrivate
@@ -230,6 +241,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
             login
           }
           databaseId
+          url
         }
         pageInfo {
           startCursor
@@ -337,6 +349,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
             login
           }
           databaseId
+          url
         }
         pageInfo {
           startCursor
@@ -427,7 +440,7 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
-REMOTE_MAIN_BRANCH = "origin/master"
+REMOTE_MAIN_BRANCH = "origin/main"
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -627,7 +640,7 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
         if not are_ghstack_branches_in_sync(repo, stacked_pr.head_ref()):
             raise RuntimeError(
                 f"PR {stacked_pr.pr_num} is out of sync with the corresponding revision {rev} on "
-                + f"branch {orig_ref} that would be merged into master.  "
+                + f"branch {orig_ref} that would be merged into main.  "
                 + "This usually happens because there is a non ghstack change in the PR.  "
                 + f"Please sync them and try again (ex. make the changes on {orig_ref} and run ghstack)."
             )
@@ -683,27 +696,8 @@ class GitHubPR:
     def last_commit(self) -> Any:
         return self.info["commits"]["nodes"][-1]["commit"]
 
-    def fetch(self, branch_name: Optional[str] = None) -> None:
-        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        if branch_name is None:
-            branch_name = f"__pull-request-{self.pr_num}__init__"
-        try:
-            r = repo._run_git("rev-parse", branch_name)
-            if r.strip() == self.last_commit()["oid"]:
-                return
-        except Exception:
-            pass
-        repo.fetch(f"pull/{self.pr_num}/head", branch_name)
-
     def get_merge_base(self) -> str:
-        if self.merge_base is not None:
-            return self.merge_base
-        self.fetch()
-        gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.merge_base = gitrepo.get_merge_base(
-            REMOTE_MAIN_BRANCH, self.last_commit()["oid"]
-        )
-        return self.merge_base
+        return cast(str, self.info["baseRefOid"])
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -937,6 +931,7 @@ class GitHubPR:
             author_association=node["authorAssociation"],
             editor_login=editor["login"] if editor else None,
             database_id=node["databaseId"],
+            url=node["url"],
         )
 
     def get_comments(self) -> List[GitHubComment]:
@@ -1031,12 +1026,14 @@ class GitHubPR:
         return msg
 
     def add_numbered_label(self, label_base: str) -> None:
-        labels = self.get_labels()
-        label = label_base
-        for i in range(len(labels) if labels is not None else 0):
-            if label in labels:
-                label = f"{label_base}X{i+2}"
-        gh_add_labels(self.org, self.project, self.pr_num, [label])
+        labels = self.get_labels() if self.labels is not None else []
+        full_label = label_base
+        count = 0
+        for label in labels:
+            if label_base in label:
+                count += 1
+                full_label = f"{label_base}X{count}"
+        gh_add_labels(self.org, self.project, self.pr_num, [full_label])
 
     def merge_into(
         self,
@@ -1061,9 +1058,9 @@ class GitHubPR:
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
-            self.add_numbered_label("merged")
+            self.add_numbered_label(MERGE_COMPLETE_LABEL)
             for pr in additional_merged_prs:
-                pr.add_numbered_label("merged")
+                pr.add_numbered_label(MERGE_COMPLETE_LABEL)
 
         if comment_id and self.pr_num:
             # When the merge process reaches this part, we can assume that the commit
@@ -1106,7 +1103,7 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
-            self.fetch(pr_branch_name)
+            repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f'--author="{self.get_author()}"', "-m", msg)
             return []
@@ -1179,6 +1176,7 @@ def read_merge_rules(
         return [MergeRule(**x) for x in rc]
 
 
+@lru_cache(maxsize=None)
 def read_flaky_rules() -> List[FlakyRule]:
     # NOTE: This is currently hardcoded, can be extended to do per repo rules
     FLAKY_RULES_URL = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/flaky-rules.json"
@@ -1264,9 +1262,9 @@ def find_matching_merge_rule(
                 reject_reason_score = num_matching_files
                 reject_reason = "\n".join(
                     (
-                        f"Not all files match rule `{rule_name}`."
-                        f"{num_matching_files} files matched, but there are still non-matching files:"
-                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}"
+                        f"Not all files match rule `{rule_name}`.",
+                        f"{num_matching_files} files matched, but there are still non-matching files:",
+                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}",
                     )
                 )
             continue
@@ -1371,16 +1369,12 @@ def checks_to_markdown_bullets(
     ]
 
 
-def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
-    try:
-        return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
-    except Exception as e:
-        print(f"Could not download {url} because: {e}.")
-        if num_retries > 0:
-            return _get_flaky_rules(url, num_retries=num_retries - 1)
-        return []
+@retries_decorator(rc=[])
+def _get_flaky_rules(url: str) -> List[FlakyRule]:
+    return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
 
 
+@retries_decorator()
 def save_merge_record(
     collection: str,
     comment_id: int,
@@ -1399,7 +1393,6 @@ def save_merge_record(
     ignore_current: bool = False,
     error: str = "",
     workspace: str = "commons",
-    num_retries: int = 3,
 ) -> None:
     """
     This saves the merge records into Rockset, so we can query them (for fun and profit)
@@ -1445,35 +1438,9 @@ def save_merge_record(
         print("Rockset is missing, no record will be saved")
         return
 
-    except Exception as e:
-        if num_retries > 0:
-            print(f"Could not upload to Rockset ({num_retries - 1} tries left): {e}")
-            return save_merge_record(
-                collection=collection,
-                comment_id=comment_id,
-                pr_num=pr_num,
-                owner=owner,
-                project=project,
-                author=author,
-                pending_checks=pending_checks,
-                failed_checks=failed_checks,
-                last_commit_sha=last_commit_sha,
-                merge_base_sha=merge_base_sha,
-                merge_commit_sha=merge_commit_sha,
-                is_failed=is_failed,
-                dry_run=dry_run,
-                skip_mandatory_checks=skip_mandatory_checks,
-                ignore_current=ignore_current,
-                error=error,
-                workspace=workspace,
-                num_retries=num_retries - 1,
-            )
-        print(f"Could not upload to Rockset ({num_retries} tries left): {e}")
 
-
-def get_rockset_results(
-    head_sha: str, merge_base: str, num_retries: int = 3
-) -> List[Dict[str, Any]]:
+@retries_decorator(rc=[])
+def get_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
     query = f"""
 SELECT
     w.name as workflow_name,
@@ -1499,13 +1466,6 @@ where
         return cast(List[Dict[str, Any]], res.results)
     except ModuleNotFoundError:
         print("Could not use RockSet as rocket dependency is missing")
-        return []
-    except Exception as e:
-        print(f"Could not download rockset data because: {e}.")
-        if num_retries > 0:
-            return get_rockset_results(
-                head_sha, merge_base, num_retries=num_retries - 1
-            )
         return []
 
 
@@ -1549,6 +1509,11 @@ def get_classifications(
                 check.job_id,
             )
             continue
+        if "unstable" in name:
+            checks_with_classifications[name] = JobCheckState(
+                check.name, check.url, check.status, "UNSTABLE", check.job_id
+            )
+            continue
         head_sha_job = head_sha_jobs.get(name)
         merge_base_job = merge_base_jobs.get(name)
         if (
@@ -1560,7 +1525,7 @@ def get_classifications(
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "BROKEN_TRUNK", check.job_id
             )
-        elif any([rule.matches(head_sha_job) for rule in flaky_rules]):
+        elif any(rule.matches(head_sha_job) for rule in flaky_rules):
             checks_with_classifications[name] = JobCheckState(
                 check.name, check.url, check.status, "FLAKY", check.job_id
             )
@@ -1634,7 +1599,12 @@ def try_revert(
     except PostCommentError as e:
         return post_comment(str(e))
     revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
-    revert_msg += f" due to {reason}\n" if reason is not None else "\n"
+    revert_msg += f" due to {reason}" if reason is not None else ""
+    revert_msg += (
+        f" ([comment]({pr.get_comment_by_id(comment_id).url}))\n"
+        if comment_id is not None
+        else "\n"
+    )
     repo.checkout(pr.default_branch())
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
@@ -1666,7 +1636,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
     )
     if response["total_count"] != 0:
         for item in response["items"]:
-            if "merge blocking" in item["body"].lower():
+            if "MERGE BLOCKING" in item["body"]:
                 raise RuntimeError(
                     "Not merging any PRs at the moment because there is a "
                     + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
@@ -1695,11 +1665,11 @@ def categorize_checks(
     relevant_checknames = [
         name
         for name in check_runs.keys()
-        if not required_checks or any([x in name for x in required_checks])
+        if not required_checks or any(x in name for x in required_checks)
     ]
 
     for checkname in required_checks:
-        if all([checkname not in x for x in check_runs.keys()]):
+        if all(checkname not in x for x in check_runs.keys()):
             pending_checks.append((checkname, None, None))
 
     for checkname in relevant_checknames:
@@ -1713,13 +1683,15 @@ def categorize_checks(
         elif not is_passing_status(check_runs[checkname].status):
             if classification == "IGNORE_CURRENT_CHECK":
                 pass
+            elif classification == "UNSTABLE":
+                pass
             elif classification in ("BROKEN_TRUNK", "FLAKY"):
                 ok_failed_checks.append((checkname, url, job_id))
             else:
                 failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
-        print(
+        warn(
             f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: "
             + ", ".join([x[0] for x in ok_failed_checks])
             + (
@@ -1736,7 +1708,7 @@ def categorize_checks(
 
 
 def merge(
-    pr_num: int,
+    pr: GitHubPR,
     repo: GitRepo,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
@@ -1745,14 +1717,19 @@ def merge(
     stale_pr_days: int = 3,
     ignore_current: bool = False,
 ) -> None:
-    repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-    org, project = repo.gh_owner_and_name()
-    pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()["oid"]
     print(f"Attempting merge of {initial_commit_sha}")
 
+    if MERGE_IN_PROGRESS_LABEL not in pr.get_labels():
+        gh_add_labels(pr.org, pr.project, pr.pr_num, [MERGE_IN_PROGRESS_LABEL])
+
     explainer = TryMergeExplainer(
-        skip_mandatory_checks, pr.get_labels(), pr.pr_num, org, project, ignore_current
+        skip_mandatory_checks,
+        pr.get_labels(),
+        pr.pr_num,
+        pr.org,
+        pr.project,
+        ignore_current,
     )
 
     # probably a bad name, but this is a list of current checks that should be
@@ -1762,12 +1739,16 @@ def merge(
     if pr.is_ghstack_pr():
         get_ghstack_prs(repo, pr)  # raises error if out of sync
 
-    check_for_sev(org, project, skip_mandatory_checks)
+    check_for_sev(pr.org, pr.project, skip_mandatory_checks)
 
     if skip_mandatory_checks or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
         gh_post_pr_comment(
-            org, project, pr.pr_num, explainer.get_merge_message(), dry_run=dry_run
+            pr.org,
+            pr.project,
+            pr.pr_num,
+            explainer.get_merge_message(),
+            dry_run=dry_run,
         )
         return pr.merge_into(
             repo,
@@ -1788,8 +1769,8 @@ def merge(
         ignore_current_checks_info = failing
 
     gh_post_pr_comment(
-        org,
-        project,
+        pr.org,
+        pr.project,
         pr.pr_num,
         explainer.get_merge_message(ignore_current_checks_info),
         dry_run=dry_run,
@@ -1815,13 +1796,13 @@ def merge(
         x[0] for x in ignore_current_checks_info
     ]  # convert to List[str] for convenience
     while elapsed_time < timeout_minutes * 60:
-        check_for_sev(org, project, skip_mandatory_checks)
+        check_for_sev(pr.org, pr.project, skip_mandatory_checks)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(
-            f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)"
+            f"Attempting merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} ({elapsed_time / 60} minutes elapsed)"
         )
-        pr = GitHubPR(org, project, pr_num)
+        pr = GitHubPR(pr.org, pr.project, pr.pr_num)
         if initial_commit_sha != pr.last_commit()["oid"]:
             raise RuntimeError(
                 "New commits were pushed while merging. Please rerun the merge command."
@@ -1890,14 +1871,14 @@ def merge(
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(
-                f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min"
+                f"Merge of https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num} failed due to: {ex}. Retrying in 5 min"
             )
             time.sleep(5 * 60)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
     if not dry_run:
-        gh_add_labels(org, project, pr_num, ["land-failed"])
+        gh_add_labels(pr.org, pr.project, pr.pr_num, ["land-failed"])
     raise RuntimeError(msg)
 
 
@@ -1983,10 +1964,9 @@ def main() -> None:
         message += '\nIf those updates are intentional, please add "submodule" keyword to PR title/description.'
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
-
     try:
         merge(
-            args.pr_num,
+            pr,
             repo,
             dry_run=args.dry_run,
             skip_mandatory_checks=args.force,
@@ -2020,6 +2000,8 @@ def main() -> None:
             )
         else:
             print("Missing comment ID or PR number, couldn't upload to Rockset")
+    finally:
+        gh_remove_label(org, project, args.pr_num, MERGE_IN_PROGRESS_LABEL)
 
 
 if __name__ == "__main__":

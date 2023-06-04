@@ -128,7 +128,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
           continue;
         }
         if (rangeLength != lengths_[j]) {
-          // Range lengths missmatch for output #, will be filled with zeros
+          // Range lengths mismatch for output #, will be filled with zeros
           // Note, empty ranges are not counted as mismatched because empty
           // are more common and more tolerable.
           mismatchedRanges_[j]++;
@@ -227,7 +227,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   vector<set<int>> mismatchedLengths_;
   // To avoid false alarm due to insufficient sample (e.g., first batch being
   // mismatched and causing 100% to be mismatched), use a threshold to ensure
-  // enough samples are gathered before decideding whether there is an alarm or
+  // enough samples are gathered before deciding whether there is an alarm or
   // not.
   int64_t minObservation_ = 0;
   float maxMismatchedRatio_ = 0;

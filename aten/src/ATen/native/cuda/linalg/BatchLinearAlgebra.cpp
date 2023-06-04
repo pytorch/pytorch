@@ -1030,7 +1030,7 @@ magma_trans_t to_magma(TransposeType trans) {
 
 #define ALLOCATE_ARRAY(name, type, size) \
   auto storage_##name = pin_memory<type>(size); \
-  name = static_cast<type*>(storage_##name.data());
+  name = static_cast<type*>(storage_##name.mutable_data());
 
 namespace {
 
@@ -1054,13 +1054,13 @@ void apply_ldl_factor_magma(
   auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
   auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
 
-  auto a_data = A.data_ptr<scalar_t>();
+  auto a_data = A.mutable_data_ptr<scalar_t>();
   Tensor pivots_cpu =
       at::empty_like(pivots, pivots.options().device(kCPU).pinned_memory(true));
-  auto pivots_data = pivots_cpu.data_ptr<magma_int_t>();
+  auto pivots_data = pivots_cpu.mutable_data_ptr<magma_int_t>();
   Tensor info_cpu =
       at::empty_like(info, info.options().device(kCPU).pinned_memory(true));
-  auto info_data = info_cpu.data_ptr<magma_int_t>();
+  auto info_data = info_cpu.mutable_data_ptr<magma_int_t>();
 
   for (const auto i : c10::irange(batch_size)) {
     scalar_t* a_working_ptr = &a_data[i * a_stride];
@@ -1116,7 +1116,7 @@ void ldl_factor_kernel(
     // By default use cusolver if available and magma otherwise.
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
     // call magma for complex inputs
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
 #if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 254)
       if (LD.is_complex() && hermitian) {
         return ldl_factor_magma(
@@ -1238,7 +1238,7 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
 // Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
 //     Batched cholesky_solve is dispatched to magma.
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
@@ -1352,7 +1352,7 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
 }
 
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
@@ -1370,7 +1370,7 @@ static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper)
   }
 #else
   cholesky_helper_magma(input, upper, info);
-#endif // USE_CUSOLVER
+#endif // USE_LINALG_SOLVER
 }
 
 REGISTER_CUDA_DISPATCH(cholesky_stub, &cholesky_kernel)
@@ -1433,7 +1433,7 @@ Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) 
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
   // the content of result is overwritten by 'apply_cholesky_inverse'
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
@@ -1483,7 +1483,7 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
   Tensor infos_cpu = at::empty_like(infos, infos.options().device(kCPU).pinned_memory(true));
 
   auto input_data = input.data_ptr<scalar_t>();
-  auto infos_data = infos_cpu.data_ptr<magma_int_t>();
+  auto infos_data = infos_cpu.mutable_data_ptr<magma_int_t>();
   auto input_matrix_stride = matrixStride(input);
   auto pivots_stride = pivots.size(-1);
   auto batch_size = batchCount(input);
@@ -1493,7 +1493,7 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
 
   if (compute_pivots) {
     Tensor pivots_cpu = at::empty_like(pivots, pivots.options().device(kCPU).pinned_memory(true));
-    auto pivots_data = pivots_cpu.data_ptr<magma_int_t>();
+    auto pivots_data = pivots_cpu.mutable_data_ptr<magma_int_t>();
     for (decltype(batch_size) i = 0; i < batch_size; i++) {
       scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
       int* pivots_working_ptr = &pivots_data[i * pivots_stride];
@@ -1613,7 +1613,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   };
 
   const auto preferred_backend = at::globalContext().linalgPreferredBackend();
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
   const auto lu_factor_cusolver = [batch_size, m, n](const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
     // In CUDA 10.2, lu_factor_looped_cusolver does not finish the computations when the input
     // matrix is exactly singular. The returned pivots contain garbage. This breaks linalg.det
@@ -1630,11 +1630,11 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   if (preferred_backend == at::LinalgBackend::Cusolver) {
     lu_factor_cusolver(input, pivots, infos, compute_pivots);
   } else
-#endif // ifdef USE_CUSOLVER
+#endif // ifdef USE_LINALG_SOLVER && !USE_ROCM
   if (preferred_backend == at::LinalgBackend::Magma) {
     lu_factor_magma(input, pivots, infos, compute_pivots);
   } else {  // preferred backend == default
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
 #if AT_MAGMA_ENABLED()
     // If magma batched is buggy, we use cusolver
     // otherwise, lu_factor just works for square matrices, for non-square matrices magma batched is the fastest
@@ -1644,10 +1644,10 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
     } else {
       lu_factor_batched_magma(input, pivots, infos, compute_pivots);
     }
-#else // USE_CUSOLVER && !AT_MAGMA_ENABLED
+#else // USE_LINALG_SOLVER && !AT_MAGMA_ENABLED
     lu_factor_cusolver(input, pivots, infos, compute_pivots);
 #endif
-#else // !USE_CUSOLVER
+#else // !USE_LINALG_SOLVER
     lu_factor_magma(input, pivots, infos, compute_pivots);
 #endif
   }
@@ -1764,7 +1764,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
   // See discussions in https://github.com/pytorch/pytorch/pull/51348 for comparison of cuSOLVER-MAGMA
   // and Windows failure.
   // For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983
-#if defined(USE_CUSOLVER)
+#if defined(USE_LINALG_SOLVER)
   return orgqr_helper_cusolver(result, tau); // cusolver
 #else
   TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
@@ -1775,7 +1775,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
 REGISTER_CUDA_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
 void ormqr_kernel(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
-#if defined(USE_CUSOLVER)
+#if defined(USE_LINALG_SOLVER)
   ormqr_cusolver(input, tau, other, left, transpose);
 #else
   TORCH_CHECK(false,
@@ -1809,7 +1809,7 @@ static void apply_geqrf(const Tensor& input, const Tensor& tau) {
   // magmaGeqrf uses a hybrid CPU-GPU algorithm to compute the elementary reflectors.
   // The driver routine geqrf2_gpu accepts a tensor on the CPU for elementary reflectors.
   Tensor tau_cpu = at::empty(tau.sizes(), tau.options().device(at::kCPU).pinned_memory(true));
-  scalar_t* tau_data = tau_cpu.data_ptr<scalar_t>();
+  scalar_t* tau_data = tau_cpu.mutable_data_ptr<scalar_t>();
   scalar_t* work_data = nullptr; // workspace is not needed for geqrf2_gpu
 
   magma_int_t info = 0;
@@ -1836,7 +1836,7 @@ void geqrf_magma(const Tensor& input, const Tensor& tau) {
 void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 #ifdef CUDART_VERSION
   auto geqrf_cusolver_backend = [](const Tensor& input, const Tensor& tau) {
-    #if defined(USE_CUSOLVER)
+    #if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
       // For the benchmarks see
       // https://github.com/pytorch/pytorch/pull/56253#discussion_r622851107
       if (input.size(-2) <= 256 && batchCount(input) >= std::max<int64_t>(2, input.size(-2) / 16)) {
@@ -1927,7 +1927,7 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
   if (vectors.is_complex()) {
     lrwork = magma_int_cast(std::max<int64_t>(1, rwkopt), "rwork_size");
     storage_rwork = pin_memory<value_t>(lrwork);
-    rwork = static_cast<value_t*>(storage_rwork.data());
+    rwork = static_cast<value_t*>(storage_rwork.mutable_data());
   }
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
@@ -1984,7 +1984,7 @@ void linalg_eigh_magma(const Tensor& eigenvalues, const Tensor& eigenvectors, co
 }
 
 void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-#if defined(USE_CUSOLVER)
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Magma:
@@ -2044,7 +2044,7 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
   if (input.is_complex()) {
     ScalarType real_dtype = toRealValueType(input.scalar_type());
     rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
-    rwork_data = rwork.data_ptr<value_t>();
+    rwork_data = rwork.mutable_data_ptr<value_t>();
   }
 
   // call magmaEig once to get the optimal size of work_data
@@ -2054,7 +2054,7 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
 
   magma_int_t lwork = std::max<magma_int_t>(1, static_cast<magma_int_t>(real_impl<scalar_t, value_t>(work_query)));
   Tensor work = at::empty({lwork}, input.dtype());
-  auto work_data = work.data_ptr<scalar_t>();
+  auto work_data = work.mutable_data_ptr<scalar_t>();
 
   for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
@@ -2125,7 +2125,7 @@ AT_ERROR("linalg.svd: MAGMA library not found in "
   if (A.is_complex()) {
     auto lrwork = computeLRWorkDim(compute_uv ? (full_matrices ? 'A' : 'S') : 'N', m, n);
     storage_rwork = pin_memory<value_t>(lrwork);
-    rwork = static_cast<value_t*>(storage_rwork.data());
+    rwork = static_cast<value_t*>(storage_rwork.mutable_data());
   }
 
   magma_int_t* iwork;
@@ -2207,9 +2207,23 @@ void svd_kernel(const Tensor& A,
                 const Tensor& S,
                 const Tensor& Vh,
                 const Tensor& info) {
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER)
   // We always use cuSOLVER unless the user has specified they want to use MAGMA
-  if (at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma) {
+  bool use_magma = at::globalContext().linalgPreferredBackend() == at::LinalgBackend::Magma;
+#ifdef USE_ROCM
+  // However for current hipSOLVER, MAGMA is preferred for larger matrices due to
+  // performance. Here are a few performance numbers on MI200, ROCM 5.3.22000:
+  //    Size       MAGMA     hipSOLVER
+  //  100x100      0.127s      0.428s
+  //  200x200      0.113s      3.35s
+  //  300x300      0.111s      10.9s
+  //  400x400      0.126s      25.9s
+  //  500x500      0.146s      > 10 minutes, have to kill with SIGTERM
+  //
+  // TODO: Fix this when hipSOLVER has better performance numbers
+  use_magma = use_magma || (A.size(-1) >= 50 && A.size(-2) >= 50);
+#endif
+  if (use_magma) {
     svd_magma(A, full_matrices, compute_uv, U, S, Vh, info);
   } else {
     // svd_cusolver computes V rather than Vh, so we pass a view of Vh.mT
@@ -2479,7 +2493,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
 
   // Preferred Backend
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
   if (preferred_backend == at::LinalgBackend::Cusolver) {
     if (b <= 2 && n >= 64) {
       lu_solve_looped_cusolver(LU, pivots, B, trans);
@@ -2488,7 +2502,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     }
     return;
   } else
-#endif // ifdef USE_CUSOLVER
+#endif // ifdef USE_LINALG_SOLVER && !USE_ROCM
   if (preferred_backend == at::LinalgBackend::Magma) {
     // Looped magma is very slow, but batched magma is buggy in these two cases
     if (!over_batched_magma_dim_limit && trans == TransposeType::NoTranspose) {
@@ -2539,7 +2553,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   }
 
 #ifdef CUDART_VERSION
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
 if (n <= 8) {
   if (use_magma_ && !over_batched_magma_dim_limit && trans == TransposeType::NoTranspose && k >= 256) {
     lu_solve_batched_magma_fn(LU, pivots, B, trans);
@@ -2565,7 +2579,7 @@ if (n <= 8) {
 } else { // n > 128
   lu_solve_triangular(LU, pivots, B, trans);
 }
-#endif // ifdef USE_CUSOLVER
+#endif // ifdef USE_LINALG_SOLVER && !USE_ROCM
 #else  // No cublas or cusolver
   // lu_solve_triangular is almost always best
   lu_solve_triangular(LU, pivots, B, trans);
@@ -2596,7 +2610,7 @@ static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
   auto nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
   auto lwork = (m - n + nb) * (nrhs + nb) + nrhs * nb;
   Tensor hwork = at::empty({static_cast<int64_t>(lwork)}, a.scalar_type());
-  auto* hwork_ptr = hwork.data_ptr<scalar_t>();
+  auto* hwork_ptr = hwork.mutable_data_ptr<scalar_t>();
 
   // MAGMA requires infos tensor to live on CPU
   infos = infos.to(at::kCPU);
@@ -2704,7 +2718,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
 }
 
 void gels_looped(const Tensor& a, Tensor& b, Tensor& infos) {
-#if defined(USE_CUSOLVER)
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Magma:
@@ -2713,7 +2727,7 @@ void gels_looped(const Tensor& a, Tensor& b, Tensor& infos) {
     default:
       // linalg_lstsq_gels is a generic function that is implemented using
       // geqrf_stub, ormqr_stub, and triangular_solve_stub
-      // It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
+      // It dispatches to cuSOLVER for CUDA inputs if USE_LINALG_SOLVER is defined
       return linalg_lstsq_gels(a, b, infos);
   }
 #else
@@ -2728,7 +2742,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
   // first handle the underdetermined case (m < n)
   // this case is not supported by MAGMA or cuBLAS
   if (m < n) {
-#if defined(USE_CUSOLVER)
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
     linalg_lstsq_gels(a, b, infos);
 #else
     TORCH_CHECK(

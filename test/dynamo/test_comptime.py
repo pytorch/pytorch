@@ -196,7 +196,23 @@ y = TensorVariable()
                 'guarded_class': None
             }
 -
+            global '' GRAD_MODE
+            {
+                'guard_types': None,
+                'code': None,
+                'obj_weakref': None
+                'guarded_class': None
+            }
+-
             global '' DETERMINISTIC_ALGORITHMS
+            {
+                'guard_types': None,
+                'code': None,
+                'obj_weakref': None
+                'guarded_class': None
+            }
+-
+            global '' DEFAULT_DEVICE
             {
                 'guard_types': None,
                 'code': None,

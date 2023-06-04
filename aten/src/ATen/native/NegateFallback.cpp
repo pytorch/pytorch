@@ -11,7 +11,7 @@ struct NegFallback : MathOpFallback {
   }
 };
 
-void negationFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+static void negationFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   NegFallback object;
   object.fallback_impl(op, dispatch_keys, stack);
 }

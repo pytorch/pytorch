@@ -270,6 +270,28 @@ struct PeepholeOptimizeImpl {
           changed = true;
         }
       } else if (
+          node->matches("aten::device(str type, int index) -> Device") &&
+          shape_peepholes_) {
+        auto string_type = node->inputs().at(0)->type()->expect<StringType>();
+        if (string_type) {
+          WithInsertPoint guard(node);
+          std::string type_str = node->inputs().at(0)->node()->s(attr::value);
+          auto maybe_index = toIValue(node->inputs().at(1));
+          int64_t index = 0;
+          if (maybe_index) {
+            index = maybe_index->toInt();
+          }
+          auto device = c10::Device(type_str + ":" + std::to_string(index));
+          auto output = node->owningGraph()->insertConstant(device);
+          GRAPH_UPDATE(
+              "Replacing ",
+              getHeader(node),
+              " with a device constant ",
+              output->debugName());
+          node->output()->replaceAllUsesWith(output);
+          changed = true;
+        }
+      } else if (
           node->matches("aten::dim(Tensor self) -> int") && shape_peepholes_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (auto dim = ptt->sizes().size()) {
@@ -310,7 +332,7 @@ struct PeepholeOptimizeImpl {
   bool shape_peepholes_;
 };
 
-bool FuseAddMM(Block* block) {
+static bool FuseAddMM(Block* block) {
   bool changed = false;
   for (Node* node : block->nodes()) {
     // XXX: remember that if you want to simplify an expression by combining

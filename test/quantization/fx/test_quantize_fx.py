@@ -92,6 +92,7 @@ from torch.ao.quantization.backend_config.native import (
 
 from torch.ao.quantization.qconfig_mapping import (
     _get_symmetric_qnnpack_qconfig_mapping,
+    _get_symmetric_qnnpack_qat_qconfig_mapping,
     _GLOBAL_DICT_KEY,
     _MODULE_NAME_DICT_KEY,
     _MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY,
@@ -187,7 +188,10 @@ from torch.testing._internal.common_quantized import (
     override_quantized_engine,
 )
 
-from torch.testing._internal.common_utils import TemporaryFileName, IS_ARM64
+from torch.testing._internal.common_utils import (
+    TemporaryFileName,
+    IS_ARM64,
+)
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
@@ -4990,7 +4994,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 continue
             matched_names.add(node.name)
             # Match preceding dequantize
-            self.assertTrue(all([arg.target == "dequantize" for arg in node.args]))
+            self.assertTrue(all(arg.target == "dequantize" for arg in node.args))
             # Match following quantize with the specific qparams and dtypes
             expected_scale, expected_zp, expected_dtype = node_name_to_expected_quantize_args[node.name]
             for user in node.users.keys():
@@ -5978,6 +5982,38 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
             model(*example_inputs)
 
+    def test_symmetric_qnnpack_qat_qconfig_mapping(self):
+        """
+        Test whether `torch.ao.quantization.qconfig_mapping._get_symmetric_qnnpack_qat_qconfig_mapping`
+        works with the QNNPACK BackendConfig.
+        """
+        if "qnnpack" not in supported_qengines:
+            return
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(30, 4).float()
+
+            def forward(self, x):
+                return self.linear(x)
+
+        with override_quantized_engine("qnnpack"):
+            qconfig_mapping = _get_symmetric_qnnpack_qat_qconfig_mapping()
+            example_inputs = (torch.rand((1, 30), dtype=torch.float),)
+            backend_config = get_qnnpack_backend_config()
+            model = MyModel()
+            model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+            model(*example_inputs)
+            model = convert_fx(model, backend_config=backend_config)
+            expected_node_occurrence = {
+                ns.call_module(torch.ao.nn.quantized.Linear) : 1,
+                ns.call_module(torch.nn.Linear) : 0,
+            }
+            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+            model(*example_inputs)
+
+
     def test_get_executorch_backend_config(self):
         from torch.ao.quantization.backend_config import get_executorch_backend_config
         # make sure this runs
@@ -6477,7 +6513,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
             # Match preceding dequantize
             self.assertTrue(len(node.args) == 1 or len(node.args) == 2)
-            self.assertTrue(all([arg.target == "dequantize" for arg in node.args]))
+            self.assertTrue(all(arg.target == "dequantize" for arg in node.args))
 
             # Match following quantize with the specific dtypes
             self.assertEqual(len(node.users), 1)
@@ -8975,6 +9011,43 @@ class TestQuantizeFxOps(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
 
+    def test_pixel_shuffle_module(self) -> None:
+        class MyBias(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(8))
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(8, 8, 1, bias=False)
+                self.ps = nn.PixelShuffle(upscale_factor=2)
+                self.bias = MyBias()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.ps(x)
+                x = x.view(-1, 8, 2, 2)
+                bias = self.bias.bias
+                return x + bias
+
+        backend_config = get_qnnpack_backend_config()
+        qconfig_mapping = get_default_qconfig_mapping("qnnpack")
+        model = MyModel()
+        m = prepare_fx(
+            model,
+            qconfig_mapping=qconfig_mapping,
+            example_inputs=(torch.randn(1, 8, 3, 3),),
+            backend_config=backend_config
+        )
+        m = convert_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 1,
+            ns.call_module(nn.PixelShuffle): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
+
     def test_pixel_unshuffle(self):
         class MyBias(nn.Module):
             def __init__(self):
@@ -9010,6 +9083,46 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_occurrence = {
                 ns.call_function(torch.quantize_per_tensor): 2,
                 ns.call_method("dequantize"): 1,
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
+
+    def test_pixel_unshuffle_module(self) -> None:
+        class MyBias(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(64))
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(8, 8, 1, bias=False)
+                self.unshuffle = nn.PixelUnshuffle(downscale_factor=2)
+                self.bias = MyBias()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.unshuffle(x)
+                bias = self.bias.bias
+                return x + bias
+
+        for backend in ["fbgemm", "qnnpack"]:
+            if backend == "fbgemm":
+                backend_config = get_fbgemm_backend_config()
+            else:
+                backend_config = get_qnnpack_backend_config()
+            qconfig_mapping = get_default_qconfig_mapping(backend)
+            model = MyModel()
+            m = prepare_fx(
+                model,
+                qconfig_mapping=qconfig_mapping,
+                example_inputs=(torch.randn(1, 8, 6, 6),),
+                backend_config=backend_config
+            )
+            m = convert_fx(m)
+            expected_occurrence = {
+                ns.call_function(torch.quantize_per_tensor): 2,
+                ns.call_method("dequantize"): 1,
+                ns.call_module(nn.PixelUnshuffle): 1,
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
 

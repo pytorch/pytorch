@@ -10,6 +10,8 @@ It is lazily initialized, so you can always import it, and use
 
 import contextlib
 import os
+import sys
+import importlib
 import torch
 from torch.types import Device
 import traceback
@@ -83,6 +85,14 @@ if hasattr(torch._C, '_cuda_exchangeDevice'):
     _exchange_device = torch._C._cuda_exchangeDevice
 else:
     def _exchange_device(device: int) -> int:
+        if device < 0:
+            return -1
+        raise RuntimeError("PyTorch was compiled without CUDA support")
+
+if hasattr(torch._C, '_cuda_maybeExchangeDevice'):
+    _maybe_exchange_device = torch._C._cuda_maybeExchangeDevice
+else:
+    def _maybe_exchange_device(device: int) -> int:
         if device < 0:
             return -1
         raise RuntimeError("PyTorch was compiled without CUDA support")
@@ -175,7 +185,7 @@ If you want to use the {} GPU with PyTorch, please check the instructions at htt
     for idx in range(device_count()):
         cap_major, cap_minor = get_device_capability(idx)
         # NVIDIA GPU compute architectures are backward compatible within major version
-        supported = any([sm // 10 == cap_major for sm in supported_sm])
+        supported = any(sm // 10 == cap_major for sm in supported_sm)
         if not supported:
             device_name = get_device_name(idx)
             capability = cap_major * 10 + cap_minor
@@ -305,7 +315,7 @@ class _DeviceGuard:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
 
@@ -325,7 +335,7 @@ class device:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        self.idx = torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._maybe_exchange_device(self.prev_idx)
         return False
 
 
@@ -889,6 +899,64 @@ def clock_rate(device: Optional[Union[Device, int]] = None) -> int:
 
 
 
+def _get_device(device: Union[int, str, torch.device]) -> torch.device:
+    r"""Return the torch.device type object from the passed in device.
+
+    Args:
+        device (torch.device or int): selected device.
+    """
+    if isinstance(device, str):
+        device = torch.device(device)
+    elif isinstance(device, int):
+        device = torch.device('cuda', device)
+    return device
+
+
+def _get_generator(device: torch.device) -> torch._C.Generator:
+    r"""Return the CUDA Generator object for the given device.
+
+    Args:
+        device (torch.device): selected device.
+    """
+
+    idx = device.index
+    if idx is None:
+        idx = current_device()
+    return torch.cuda.default_generators[idx]
+
+
+def _set_rng_state_offset(offset: int, device: Union[int, str, torch.device] = 'cuda') -> None:
+    r"""Sets the random number generator state offset of the specified GPU.
+
+    Args:
+        offset (int): The desired offset
+        device (torch.device or int, optional): The device to set the RNG state.
+            Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
+    """
+    final_device = _get_device(device)
+
+    def cb():
+        default_generator = _get_generator(final_device)
+        default_generator.set_offset(offset)
+
+    _lazy_call(cb)
+
+def _get_rng_state_offset(device: Union[int, str, torch.device] = 'cuda') -> int:
+    r"""Returns the random number generator state offset of the specified GPU.
+
+    Args:
+        device (torch.device or int, optional): The device to return the RNG state offset of.
+            Default: ``'cuda'`` (i.e., ``torch.device('cuda')``, the current CUDA device).
+
+    .. warning::
+        This function eagerly initializes CUDA.
+    """
+    _lazy_init()
+    final_device = _get_device(device)
+    default_generator = _get_generator(final_device)
+    return default_generator.get_offset()
+
+
 from .memory import *  # noqa: F403
 
 
@@ -1070,6 +1138,43 @@ torch._storage_classes.add(BoolStorage)
 torch._storage_classes.add(BFloat16Storage)
 torch._storage_classes.add(ComplexDoubleStorage)
 torch._storage_classes.add(ComplexFloatStorage)
+
+
+class _WrappedTritonKernel(object):
+    """ Just a simple wrapper to store some metadata for testing purposes.
+    """
+
+    def __init__(self, kernel):
+        self.kernel = kernel
+        self.kernel_invoked = False
+
+    def __call__(self, *args, **kwargs):
+        res = self.kernel(*args, **kwargs)
+        self.kernel_invoked = True
+        return res
+
+
+def _register_triton_kernels():
+    if torch._running_with_deploy():
+        return
+
+    @_WrappedTritonKernel
+    def kernel_impl(*args, **kwargs):
+        from torch.sparse._triton_ops import bsr_dense_mm
+        return bsr_dense_mm(*args, skip_checks=True, **kwargs)
+
+    has_triton = importlib.util.find_spec("triton") is not None
+    if has_triton:
+        torch._TritonLibrary.registerOp(
+            "_triton_bsr_dense_mm_out",
+            "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
+            kernel_impl,
+            "SparseCsrCUDA"
+        )
+
+
+_lazy_call(_register_triton_kernels)
+
 
 from . import sparse
 from . import profiler

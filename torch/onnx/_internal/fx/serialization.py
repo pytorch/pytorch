@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 import os
-from typing import Tuple
-
-import onnx
+from typing import Tuple, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal import _beartype
+
+if TYPE_CHECKING:
+    import onnx
 
 
 @_beartype.beartype
 def _create_tensor_proto_with_external_data(
     tensor: torch.Tensor, name: str, location: str, basepath: str
-) -> "onnx.TensorProto":
+) -> onnx.TensorProto:
     """Create a TensorProto with external data from a PyTorch tensor.
     The external data is saved to os.path.join(basepath, location).
 
@@ -32,6 +33,9 @@ def _create_tensor_proto_with_external_data(
         How to set ONNX fields?
         https://github.com/onnx/onnx/blob/5dac81ac0707bdf88f56c35c0a5e8855d3534673/onnx/external_data_helper.py#L88
     """
+    # FIXME: Avoid importing onnx into torch.onnx.
+    import onnx
+
     tensor_proto = onnx.TensorProto()
     tensor_proto.name = name
     tensor_proto.data_type = torch.onnx._type_utils._SCALAR_TYPE_TO_ONNX[  # type: ignore[assignment]
@@ -106,6 +110,9 @@ def save_model_with_external_data(
             If an input name matches a tensor loaded from "torch_load_paths",
             the tensor will be saved as that input's external initializer.
     """
+    # FIXME: Avoid importing onnx into torch.onnx.
+    import onnx
+
     onnx_model_with_initializers = onnx.ModelProto()
     onnx_model_with_initializers.CopyFrom(onnx_model)
     onnx_input_names = [input.name for input in onnx_model.graph.input]

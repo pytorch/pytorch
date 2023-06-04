@@ -5,7 +5,8 @@ import os
 import re
 import sys
 import warnings
-from typing import Any, Dict, List, Set
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.request import Request, urlopen
 
 import yaml
@@ -40,20 +41,39 @@ VALID_TEST_CONFIG_LABELS = {
     }
 }
 
-# Supported modes when running periodically
-SUPPORTED_PERIODICAL_MODES = {
-    "mem_leak_check",
-    "rerun_disabled_tests",
+
+def is_cuda_or_rocm_job(job_name: Optional[str]) -> bool:
+    if not job_name:
+        return False
+
+    return "cuda" in job_name or "rocm" in job_name
+
+
+# Supported modes when running periodically. Only applying the mode when
+# its lambda condition returns true
+SUPPORTED_PERIODICAL_MODES: Dict[str, Callable[[Optional[str]], bool]] = {
+    # Memory leak check is only needed for CUDA and ROCm jobs which utilize GPU memory
+    "mem_leak_check": is_cuda_or_rocm_job,
+    "rerun_disabled_tests": lambda job_name: True,
 }
 
 # The link to the published list of disabled jobs
 DISABLED_JOBS_URL = "https://ossci-metrics.s3.amazonaws.com/disabled-jobs.json"
-# Some constants used to remove disabled jobs
+# and unstable jobs
+UNSTABLE_JOBS_URL = "https://ossci-metrics.s3.amazonaws.com/unstable-jobs.json"
+
+# Some constants used to handle disabled and unstable jobs
 JOB_NAME_SEP = "/"
 BUILD_JOB_NAME = "build"
 TEST_JOB_NAME = "test"
 BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
+EXCLUDED_BRANCHES = ["nightly"]
+
+
+class IssueType(Enum):
+    DISABLED = "disabled"
+    UNSTABLE = "unstable"
 
 
 def parse_args() -> Any:
@@ -81,7 +101,15 @@ def parse_args() -> Any:
         help="name of the event that triggered the job (pull, schedule, etc)",
     )
     parser.add_argument(
-        "--schedule", type=str, help="cron schedule that triggered the job"
+        "--schedule",
+        type=str,
+        help="cron schedule that triggered the job",
+    )
+    parser.add_argument(
+        "--branch",
+        type=str,
+        default="main",
+        help="the branch name",
     )
     return parser.parse_args()
 
@@ -150,7 +178,9 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         return filtered_test_matrix
 
 
-def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+def set_periodic_modes(
+    test_matrix: Dict[str, List[Any]], job_name: Optional[str]
+) -> Dict[str, List[Any]]:
     """
     Apply all periodic modes when running under a schedule
     """
@@ -159,7 +189,10 @@ def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]
     }
 
     for config in test_matrix.get("include", []):
-        for mode in SUPPORTED_PERIODICAL_MODES:
+        for mode, cond in SUPPORTED_PERIODICAL_MODES.items():
+            if not cond(job_name):
+                continue
+
             cfg = config.copy()
             cfg[mode] = mode
             scheduled_test_matrix["include"].append(cfg)
@@ -167,12 +200,86 @@ def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]
     return scheduled_test_matrix
 
 
+def mark_unstable_jobs(
+    workflow: str, job_name: str, test_matrix: Dict[str, List[Any]]
+) -> Dict[str, List[Any]]:
+    """
+    Check the list of unstable jobs and mark them accordingly. Note that if a job
+    is unstable, all its dependents will also be marked accordingly
+    """
+    return process_jobs(
+        workflow=workflow,
+        job_name=job_name,
+        test_matrix=test_matrix,
+        issue_type=IssueType.UNSTABLE,
+        url=UNSTABLE_JOBS_URL,
+    )
+
+
 def remove_disabled_jobs(
     workflow: str, job_name: str, test_matrix: Dict[str, List[Any]]
 ) -> Dict[str, List[Any]]:
     """
     Check the list of disabled jobs, remove the current job and all its dependents
-    if it exists in the list. The list of disabled jobs is as follows:
+    if it exists in the list
+    """
+    return process_jobs(
+        workflow=workflow,
+        job_name=job_name,
+        test_matrix=test_matrix,
+        issue_type=IssueType.DISABLED,
+        url=DISABLED_JOBS_URL,
+    )
+
+
+def _filter_jobs(
+    test_matrix: Dict[str, List[Any]],
+    issue_type: IssueType,
+    target_cfg: Optional[str] = None,
+) -> Dict[str, List[Any]]:
+    """
+    An utility function used to actually apply the job filter
+    """
+    # The result will be stored here
+    filtered_test_matrix: Dict[str, List[Any]] = {"include": []}
+
+    # This is an issue to disable a CI job
+    if issue_type == IssueType.DISABLED:
+        # If there is a target config, disable (remove) only that
+        if target_cfg:
+            # Remove the target config from the test matrix
+            filtered_test_matrix["include"] = [
+                r for r in test_matrix["include"] if r.get("config", "") != target_cfg
+            ]
+
+        return filtered_test_matrix
+
+    if issue_type == IssueType.UNSTABLE:
+        for r in test_matrix["include"]:
+            cpy = r.copy()
+
+            if (target_cfg and r.get("config", "") == target_cfg) or not target_cfg:
+                # If there is a target config, only mark that as unstable, otherwise,
+                # mark everything as unstable
+                cpy[IssueType.UNSTABLE.value] = IssueType.UNSTABLE.value
+
+            filtered_test_matrix["include"].append(cpy)
+
+        return filtered_test_matrix
+
+    # No matching issue, return everything
+    return test_matrix
+
+
+def process_jobs(
+    workflow: str,
+    job_name: str,
+    test_matrix: Dict[str, List[Any]],
+    issue_type: IssueType,
+    url: str,
+) -> Dict[str, List[Any]]:
+    """
+    Both disabled and unstable jobs are in the following format:
 
     {
         "WORKFLOW / PLATFORM / JOB (CONFIG)": [
@@ -201,84 +308,104 @@ def remove_disabled_jobs(
         warnings.warn(f"Invalid job name {job_name}, returning")
         return test_matrix
 
-    # The result will be stored here
-    filtered_test_matrix: Dict[str, List[Any]] = {"include": []}
-
-    for _, record in download_json(url=DISABLED_JOBS_URL, headers={}).items():
+    for _, record in download_json(url=url, headers={}).items():
         (
             author,
             _,
-            disabled_url,
-            disabled_workflow,
-            disabled_platform,
-            disabled_job_cfg,
+            target_url,
+            target_workflow,
+            target_platform,
+            target_job_cfg,
         ) = record
 
-        if disabled_workflow != workflow or disabled_platform != current_platform:
-            # The current workflow or platform is not disabled by this record
+        if target_workflow != workflow:
+            # The current workflow doesn't match this record
+            continue
+
+        cleanup_regex = rf"(-{BUILD_JOB_NAME}|-{TEST_JOB_NAME})$"
+        # There is an exception here for binary build workflows in which the platform
+        # names have the build and test suffix. For example, we have a build job called
+        # manywheel-py3-cuda11_8-build / build and its subsequent test job called
+        # manywheel-py3-cuda11_8-test / test. So they are linked, but their suffixes
+        # are different
+        target_platform_no_suffix = re.sub(cleanup_regex, "", target_platform)
+        current_platform_no_suffix = re.sub(cleanup_regex, "", current_platform)
+
+        if (
+            target_platform != current_platform
+            and target_platform_no_suffix != current_platform_no_suffix
+        ):
+            # The current platform doesn't match this record
             continue
 
         # The logic after this is fairly complicated:
         #
-        # - If the disabled record doesn't have the optional job (config) name,
+        # - If the target record doesn't have the optional job (config) name,
         #   i.e. pull / linux-bionic-py3.8-clang9, all build and test jobs will
-        #   be skipped
+        #   be skipped if it's a disabled record or marked as unstable if it's
+        #   an unstable record
         #
-        # - If the disabled record has the job name and it's a build job, i.e.
+        # - If the target record has the job name and it's a build job, i.e.
         #   pull / linux-bionic-py3.8-clang9 / build, all build and test jobs
-        #   will be skipped, because the latter requires the former
+        #   will be skipped if it's a disabled record or marked as unstable if
+        #   it's an unstable record, because the latter requires the former
         #
-        # - If the disabled record has the job name and it's a test job without
+        # - If the target record has the job name and it's a test job without
         #   the config part, i.e. pull / linux-bionic-py3.8-clang9 / test, all
-        #   test jobs will be skipped. TODO: At the moment, the script uses the
-        #   short-circuiting logic to skip the build job automatically when there
-        #   is no test job assuming that it would be a waste of effort building
-        #   for nothing. This might not be the desirable behavior, and could be
-        #   fixed later if needed
+        #   test jobs will be skipped if it's a disabled record or marked as
+        #   unstable if it's an unstable record
         #
-        # - If the disabled record has the job (config) name, only that test config
-        #   will be skipped, i.e. pull / linux-bionic-py3.8-clang9 / test (dynamo)
-        if not disabled_job_cfg:
+        # - If the target record has the job (config) name, only that test config
+        #   will be skipped or marked as unstable
+        if not target_job_cfg:
             print(
-                f"Issue {disabled_url} created by {author} has disabled all CI jobs for {workflow} / {job_name}"
+                f"Issue {target_url} created by {author} has {issue_type.value} "
+                + f"all CI jobs for {workflow} / {job_name}"
             )
-            return filtered_test_matrix
+            return _filter_jobs(
+                test_matrix=test_matrix,
+                issue_type=issue_type,
+            )
 
-        if disabled_job_cfg == BUILD_JOB_NAME:
+        if target_job_cfg == BUILD_JOB_NAME:
             print(
-                f"Issue {disabled_url} created by {author} has disabled the build job for {workflow} / {job_name}"
+                f"Issue {target_url} created by {author} has {issue_type.value} "
+                + f"the build job for {workflow} / {job_name}"
             )
-            return filtered_test_matrix
+            return _filter_jobs(
+                test_matrix=test_matrix,
+                issue_type=issue_type,
+            )
 
-        if (
-            disabled_job_cfg == TEST_JOB_NAME
-            or disabled_job_cfg == BUILD_AND_TEST_JOB_NAME
-        ):
+        if target_job_cfg in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
             print(
-                f"Issue {disabled_url} created by {author} has disabled all the test jobs for {workflow} / {job_name}"
+                f"Issue {target_url} created by {author} has {issue_type.value} "
+                + f"all the test jobs for {workflow} / {job_name}"
             )
-            return filtered_test_matrix
+            return _filter_jobs(
+                test_matrix=test_matrix,
+                issue_type=issue_type,
+            )
 
-        m = JOB_NAME_CFG_REGEX.match(disabled_job_cfg)
+        m = JOB_NAME_CFG_REGEX.match(target_job_cfg)
         if m:
-            disabled_job = m.group("job")
+            target_job = m.group("job")
             # Make sure that the job name is a valid test job name first before checking the config
-            if disabled_job == TEST_JOB_NAME or disabled_job == BUILD_AND_TEST_JOB_NAME:
-                disabled_cfg = m.group("cfg")
-                # Remove the disabled config from the test matrix
-                filtered_test_matrix["include"] = [
-                    r
-                    for r in test_matrix["include"]
-                    if r.get("config", "") != disabled_cfg
-                ]
-                return filtered_test_matrix
+            if target_job in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
+                target_cfg = m.group("cfg")
+
+                return _filter_jobs(
+                    test_matrix=test_matrix,
+                    issue_type=issue_type,
+                    target_cfg=target_cfg,
+                )
 
         warnings.warn(
-            f"Found a matching disabled issue {disabled_url} for {workflow} / {job_name}, "
-            f"but the name {disabled_job_cfg} is invalid"
+            f"Found a matching {issue_type.value} issue {target_url} for {workflow} / {job_name}, "
+            + f"but the name {target_job_cfg} is invalid"
         )
 
-    # Found no matching disabled issue, return the same input test matrix
+    # Found no matching target, return the same input test matrix
     return test_matrix
 
 
@@ -301,6 +428,33 @@ def set_output(name: str, val: Any) -> None:
             print(f"{name}={val}", file=env)
     else:
         print(f"::set-output name={name}::{val}")
+
+
+def perform_misc_tasks(
+    labels: Set[str], test_matrix: Dict[str, List[Any]], job_name: str
+) -> None:
+    """
+    In addition to apply the filter logic, the script also does the following
+    misc tasks to set keep-going and is-unstable variables
+    """
+    set_output("keep-going", "keep-going" in labels)
+
+    # Obviously, if the job name includes unstable, then this is an unstable job
+    is_unstable = job_name and IssueType.UNSTABLE.value in job_name
+    if not is_unstable and test_matrix:
+        # Even when the job name doesn't mention unstable, we will also mark it as
+        # unstable when the test matrix only includes unstable jobs. Basically, this
+        # logic allows build or build-and-test jobs to be marked as unstable too.
+        #
+        # Basically, when a build job is unstable, all the subsequent test jobs are
+        # also unstable. And when all test jobs are unstable, we will also treat the
+        # build job as unstable. It's simpler this way
+        is_unstable = all(IssueType.UNSTABLE.value in r for r in test_matrix["include"])
+
+    set_output(
+        "is-unstable",
+        is_unstable,
+    )
 
 
 def main() -> None:
@@ -350,14 +504,18 @@ def main() -> None:
         filtered_test_matrix = test_matrix
 
     if args.event_name == "schedule" and args.schedule == "29 8 * * *":
-        # we don't want to run the mem leack check or disabled tests on normal
+        # we don't want to run the mem leak check or disabled tests on normal
         # periodically scheduled jobs, only the ones at this time
-        filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
+        filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
 
-    if args.workflow and args.job_name:
+    if args.workflow and args.job_name and args.branch not in EXCLUDED_BRANCHES:
         # If both workflow and job name are available, we will check if the current job
         # is disabled and remove it and all its dependants from the test matrix
         filtered_test_matrix = remove_disabled_jobs(
+            args.workflow, args.job_name, filtered_test_matrix
+        )
+
+        filtered_test_matrix = mark_unstable_jobs(
             args.workflow, args.job_name, filtered_test_matrix
         )
 
@@ -369,7 +527,11 @@ def main() -> None:
     # quickly check it without the need to parse the JSON string
     set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
 
-    set_output("keep-going", "keep-going" in labels)
+    perform_misc_tasks(
+        labels=labels,
+        test_matrix=filtered_test_matrix,
+        job_name=args.job_name,
+    )
 
 
 if __name__ == "__main__":

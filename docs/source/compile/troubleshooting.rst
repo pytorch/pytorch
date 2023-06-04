@@ -42,12 +42,12 @@ tools and their typical usage. For additional help see
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"``
    * - Dynamo accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
-       between an eager model model and optimized model, when you
+       between an eager mode model and optimized model, when you
        suspect the problem is in AOTAutograd
      - ``TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4``
    * - Inductor accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
-       between an eager model model and optimized model, when you
+       between an eager mode model and optimized model, when you
        suspect the problem is in the backend (e.g., inductor).
        If this doesn't work, try the Dynamo accuracy minifier
        instead.
@@ -198,7 +198,7 @@ following:
 - ``logging.ERROR``: Print errors only.
 
 If a model is sufficiently large, the logs can become overwhelming. If
-an error occurs deep within a model’s Python code, it can be useful to
+an error occurs deep within a model's Python code, it can be useful to
 execute only the frame in which the error occurs to enable easier
 debugging. There are two tools available to enable this:
 
@@ -430,7 +430,7 @@ the following code in ``{torch._dynamo.config.base_dir}/repro.py``.
 
 The minifier successfully reduced the graph to the op that raises the
 error in ``toy_compiler``. The other difference from the procedure in
-`TorhInductor Errors <#torchinductor-errors>`__ is that the minifier is
+`TorchInductor Errors <#torchinductor-errors>`__ is that the minifier is
 automatically run after encountering a backend compiler error. After a
 successful run, the minifier writes ``repro.py`` to
 ``torch._dynamo.config.base_dir``.
@@ -615,8 +615,10 @@ that are encountered. Here is an example usage:
        if b.sum() < 0:
            b = b * -1
        return x * b
-   explanation, out_guards, graphs, ops_per_graph = dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
-   print(explanation)
+   explanation, out_guards, graphs, ops_per_graph, break_reasons, explanation_verbose = (
+       dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
+   )
+   print(explanation_verbose)
    """
    Dynamo produced 3 graphs, with 2 graph breaks and 6 ops.
     Break reasons:
@@ -659,7 +661,7 @@ recompile that function (or part) up to
 hitting the cache limit, you will first need to determine which guard is
 failing and what part of your program is triggering it.
 
-The `compile profiler <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/utils.py>`__ automates the
+The `compile profiler <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/utils.py>`__ automates the
 process of setting TorchDynamo’s cache limit to 1 and running your
 program under an observation-only 'compiler' that records the causes of
 any guard failures. You should be sure to run your program for at least
@@ -685,14 +687,13 @@ acceptable number of recompilations for some dynamic models.
 
    from torch._dynamo.utils import CompileProfiler
 
-   prof = CompileProfiler()
-
    def my_model():
        ...
 
-   profiler_model = torch.compile(my_model, backend=prof)
-   profiler_model()
-   print(prof.report())
+   with CompileProfiler() as prof:
+       profiler_model = torch.compile(my_model, backend=prof)
+       profiler_model()
+       print(prof.report())
 
 Accuracy Debugging
 ~~~~~~~~~~~~~~~~~~

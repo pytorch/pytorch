@@ -51,6 +51,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/native/TensorConversions.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <algorithm>
 #include <numeric>
@@ -1155,7 +1156,7 @@ Tensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
   return sparse._coalesced_(true);
 }
 
-Tensor sparse_compressed_to_flipped(
+static Tensor sparse_compressed_to_flipped(
     const Tensor& self,
     c10::optional<IntArrayRef> blocksize,
     const std::string& name) {

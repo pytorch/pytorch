@@ -209,7 +209,7 @@ def graph_module_from_producer_nodes(
       A graph module constructed from the producer nodes
     '''
     assert len(producer_nodes) > 0, 'list of producer nodes can not be empty'
-    # since we traced back from node to getattrr
+    # since we traced back from node to getattr
     producer_nodes.reverse()
     graph = Graph()
     env: Dict[Any, Any] = {}
@@ -520,7 +520,7 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
     """
     Insert DeQuantStubs after each internal output node of custom module LSTM.
 
-    Custom module LSTM outputs are nested tuples of the sturcture (output, (hidden0, hidden1)),
+    Custom module LSTM outputs are nested tuples of the structure (output, (hidden0, hidden1)),
     Since we cannot dequantize a tuple as a whole, we must first break down the tuple into its
     components through `getitem`. This function transforms the graph as follows:
 

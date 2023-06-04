@@ -304,3 +304,7 @@ Also see :ref:`saved-tensors-hooks-doc`.
 .. autoclass:: torch.autograd.graph.save_on_cpu
 
 .. autoclass:: torch.autograd.graph.disable_saved_tensors_hooks
+
+.. autoclass:: torch.autograd.graph.register_multi_grad_hook
+
+.. autoclass:: torch.autograd.graph.allow_mutation_on_saved_tensors
