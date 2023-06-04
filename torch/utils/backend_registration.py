@@ -4,6 +4,12 @@ from typing import List, Optional, Union
 
 __all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
 
+# TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
+# renamed-backend name for `privateuse1`, but the func will cause a
+# graph break in inductor test, so we use the global variable named
+# `_privateuse1_backend_name`. Once we solve the graph break, we need
+# to remove the variable and use the func named
+# `torch._C._get_privateuse1_backend_name()` instead.
 _privateuse1_backend_name = "privateuseone"
 
 def rename_privateuse1_backend(backend_name: str) -> None:
