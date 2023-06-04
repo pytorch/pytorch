@@ -21,15 +21,6 @@ from torch._prims_common import (
     make_contiguous_strides_for,
     TensorLike,
 )
-from torch._prims_common.linalg import (
-    _linalg_broadcast_batch_dims,
-    _linalg_broadcast_batch_dims_name,
-    checkFloatingOrComplex,
-    checkInputsSolver,
-    checkIsMatrix,
-    linearSolveCheckInputs,
-    squareCheckInputs,
-)
 
 from torch._prims_common.wrappers import (
     _maybe_resize_out,
@@ -308,6 +299,100 @@ def assert_async(val):
 @register_meta(aten._assert_async.msg)
 def assert_async_meta(val, assert_msg):
     return
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def squareCheckInputs(self: Tensor, f_name: str):
+    assert (
+        self.dim() >= 2
+    ), f"{f_name}: The input tensor must have at least 2 dimensions."
+    assert self.size(-1) == self.size(
+        -2
+    ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
+
+
+# Validates input shapes and devices
+# for linear solve methods (solve, cholesky_solve, lu_solve, triangular_solve)
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def linearSolveCheckInputs(
+    self: Tensor,
+    A: Tensor,
+    name: str,
+):
+    torch._check(
+        self.device == A.device,
+        lambda: (
+            f"Expected b and A to be on the same device, but found b on "
+            f"{self.device} and A on {A.device} instead."
+        ),
+    )
+
+    torch._check(
+        self.dtype == A.dtype,
+        lambda: (
+            f"Expected b and A to have the same dtype, but found b of type "
+            f"{self.dtype} and A of type {A.dtype} instead."
+        ),
+    )
+
+    torch._check(
+        A.size(-1) == A.size(-2),
+        lambda: (
+            f"A must be batches of square matrices, "
+            f"but they are {A.size(-2)} by {A.size(-1)} matrices"
+        ),
+    )
+
+    torch._check(
+        A.size(-1) == self.size(-2),
+        lambda: (
+            f"Incompatible matrix sizes for {name}: each A "
+            f"matrix is {A.size(-1)} by {A.size(-1)}"
+            f" but each b matrix is {self.size(-2)} by {self.size(-1)}"
+        ),
+    )
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def checkFloatingOrComplex(
+    t: Tensor, f_name: str, allow_low_precision_dtypes: bool = True
+):
+    dtype = t.dtype
+    torch._check(
+        t.is_floating_point() or t.is_complex(),
+        lambda: f"{f_name}: Expected a floating point or complex tensor as input. Got {dtype}",
+    )
+    if allow_low_precision_dtypes:
+        torch._check(
+            dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
+            lambda: f"{f_name}: Low precision dtypes not supported. Got {dtype}",
+        )
+
+
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def checkIsMatrix(A: Tensor, f_name: str, arg_name: str = "A"):
+    torch._check(
+        A.dim() >= 2,
+        lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
+    )
+
+
+def checkInputsSolver(
+    A: Tensor,
+    B: Tensor,
+    left: bool,
+    f_name: str,
+):
+    squareCheckInputs(A, f_name)
+    checkIsMatrix(B, f_name)
+    torch._check(
+        A.size(-2) == B.size(-2) if left else A.size(-1) == B.size(-1),
+        lambda: (
+            f"{f_name}: Incompatible shapes of A and B for the equation "
+            f"{'AX = B' if left else 'XA = B'}"
+            f" ({A.size(-2)}x{A.size(-1)} and {B.size(-2)}x{B.size(-1)})"
+        ),
+    )
 
 
 def checkSameDevice(
@@ -708,6 +793,108 @@ def _linalg_svd_meta(
     # S is always real, even when A is complex.
     S = A.new_empty(batch_dims + [k], dtype=toRealValueType(A.dtype))
     return U, S, V
+
+
+def _linalg_broadcast_batch_dims(
+    arg1: Tensor, arg2: Tensor
+) -> Tuple[List[int], List[int]]:
+    # broadcast the batch dimensions of arg1 and arg2.
+    arg1_batch_sizes = arg1.shape[:-2]
+    arg2_batch_sizes = arg2.shape[:-2]
+    expand_batch_portion = _broadcast_shapes(arg1_batch_sizes, arg2_batch_sizes)
+
+    arg1_expand_size = list(expand_batch_portion)
+    arg1_expand_size += [arg1.size(-2), arg1.size(-1)]
+
+    arg2_expand_size = list(expand_batch_portion)
+    arg2_expand_size += [arg2.size(-2), arg2.size(-1)]
+    return arg1_expand_size, arg2_expand_size
+
+
+def _linalg_broadcast_batch_dims_name(
+    arg1: Tensor, arg2: Tensor, name: Optional[str]
+) -> Tuple[Tensor, Tensor]:
+    # If there's no name we assume we don't want to check the errors
+    if name:
+        linearSolveCheckInputs(arg1, arg2, name)
+
+    arg1_expand_size, arg2_expand_size = _linalg_broadcast_batch_dims(arg1, arg2)
+
+    arg1_broadcasted = (
+        arg1 if arg1_expand_size == arg1.shape else arg1.expand(arg1_expand_size)
+    )
+    arg2_broadcasted = (
+        arg2 if arg2_expand_size == arg2.shape else arg2.expand(arg2_expand_size)
+    )
+    return arg1_broadcasted, arg2_broadcasted
+
+
+def linalg_solve_is_vector_rhs(input: Tensor, other: Tensor) -> bool:
+    expected_batched_rhs_shape = input.shape[:-1]
+    vector_case = other.ndim == 1 or (
+        input.ndim - 1 == other.ndim and other.shape == expected_batched_rhs_shape
+    )
+    return vector_case
+
+
+@register_meta(aten._linalg_solve_ex)
+def _linalg_solve_ex(
+    A: Tensor,
+    B: Tensor,
+    *,
+    left: bool = True,
+    check_errors: bool = False,
+    result: Tensor = None,
+    LU: Tensor = None,
+    pivots: Tensor = None,
+    info: Tensor = None,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    checkFloatingOrComplex(A, "linalg.solve")
+    torch._check(
+        A.dtype == B.dtype,
+        lambda: (
+            f"linalg.solve: Expected A and B to have the same dtype, but found A of type "
+            f"{A.dtype} and B of type {B.dtype} instead"
+        ),
+    )
+    vector_case = linalg_solve_is_vector_rhs(A, B)
+    B_ = B.unsqueeze(-1) if vector_case else B
+    checkInputsSolver(A, B_, left, "linalg.solve")
+    B_broad_shape, _ = _linalg_broadcast_batch_dims(B_, A)
+    torch._check(
+        left or not vector_case,
+        lambda: (
+            "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. "
+            "In this case linalg.solve is equivalent to B / A.squeeze(-1)"
+        ),
+    )
+    result_shape = B_broad_shape[:-1] if vector_case else B_broad_shape
+    result_ = torch.empty_strided(
+        size=result_shape,
+        stride=make_contiguous_strides_for(result_shape, not left),
+        dtype=B.dtype,
+        device=B.device,
+    )
+    shape = A.shape
+    ndim = A.ndim
+    LU_ = torch.empty_strided(
+        size=shape,
+        stride=make_contiguous_strides_for(shape, False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+    pivots_ = A.new_empty(shape[:-1], dtype=torch.int32)
+    info_ = A.new_empty(shape[:-2], dtype=torch.int32)
+    out = (result, LU, pivots, info)
+    res = (result_, LU_, pivots_, info_)
+    if all(x is not None for x in out):
+        for r, o in zip(res, out):
+            # resize and copy operations are done in-place
+            _maybe_resize_out(o, r.shape)
+            # strides are not copied in out_wrapper
+            o.as_strided_(r.shape, r.stride())
+            _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=False)  # type: ignore[arg-type]
+    return res
 
 
 @register_meta([aten.linalg_solve_triangular.default, aten.linalg_solve_triangular.out])
