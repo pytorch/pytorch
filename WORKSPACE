@@ -94,6 +94,10 @@ local_repository(
     path = "third_party/protobuf",
 )
 
+load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
+
+protobuf_deps()
+
 new_local_repository(
     name = "eigen",
     build_file = "//third_party:eigen.BUILD",
@@ -208,6 +212,9 @@ load("@rules_python//python:repositories.bzl", "python_register_toolchains")
 python_register_toolchains(
     name = "python3_8",
     python_version = "3.8",
+    # In CI, we may run in a container using root as the user. Allow
+    # this to work.
+    ignore_root_user_error = True,
 )
 
 load("@python3_8//:defs.bzl", "interpreter")
@@ -229,10 +236,6 @@ python_configure(
     name = "local_config_python",
     python_interpreter_target = interpreter,
 )
-
-load("@com_google_protobuf//:protobuf_deps.bzl", "protobuf_deps")
-
-protobuf_deps()
 
 new_local_repository(
     name = "cuda",

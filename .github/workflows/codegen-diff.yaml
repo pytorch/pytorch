@@ -1,0 +1,50 @@
+name: codegen-diff
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/codegen-diff.yml
+      - BUILD.bazel
+      - WORKSPACE
+      - build.bzl
+      - aten/**
+      - c10/**
+      - tools/**
+      - torch/**
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/codegen-diff.yml
+      - BUILD.bazel
+      - WORKSPACE
+      - build.bzl
+      - aten/**
+      - c10/**
+      - tools/**
+      - torch/**
+
+jobs:
+  job:
+    uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    with:
+      # Fetch the commit, rather than the merge.
+      ref: ${{ github.event.pull_request.head.sha }}
+      script: |
+        echo ::group::setup Bazelisk
+        python3 >tools/bazel -c \
+            'import urllib.request; print(urllib.request.urlopen("https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py").read().decode())'
+        chmod u+x tools/bazel
+        sha1sum --check <(echo b72d5522b3e7827262809ea413c64a98914b0783 tools/bazel)
+        echo ::endgroup::
+
+        pwd
+        ls third_party/
+        ls third_party/protobuf/
+
+        tools/bazel run //tools/codegen:diff -- \
+            --base-commit=${{ github.event.pull_request.base.sha }} \
+            --debug
+
+      docker-image: python:3.11.0-slim-bullseye
+      runner: linux.large
