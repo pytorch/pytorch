@@ -17,7 +17,7 @@ import textwrap
 import ctypes
 import inspect
 if sys.version_info < (3,):
-    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    raise Exception("Python 2 has reached end-of-life and is no longer supported by the PyTorch Python Library.")
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
