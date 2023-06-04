@@ -142,7 +142,7 @@ A second (optional) input, `lengths`, can be passed, which enforces that only a 
 For example if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1,2]$, then $Y = [mean(1,4), mean(5,1,7), mean(2), mean(9,2)] = [2.5, 4.333, 2, 5.5]$
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_front_back_mean_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduce_front_back_mean_ops.cc
 
 <details>
 
@@ -235,7 +235,7 @@ For example if $X = [[1,5,2,9],[4,1,8,2],[2,7,0,3]]$ and $lengths = [2,3,1]$, th
 
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_front_back_mean_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/reduce_front_back_mean_ops.cc
 
 <details>
 

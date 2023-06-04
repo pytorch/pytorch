@@ -9,7 +9,7 @@ Contribution Process
 
 The PyTorch organization is governed by :doc:`PyTorch
 Governance <governance>` and the technical guide to contributing
-can be found in `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md>`_.
+can be found in `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md>`_.
 
 The PyTorch development process involves a healthy amount of open
 discussions between the core development team and the community.
@@ -61,14 +61,14 @@ here is the basic process.
         open an issue first before implementing a PR.
 
    -  Core changes and refactors can be quite difficult to coordinate
-      since the pace of development on PyTorch master is quite fast.
+      since the pace of development on the PyTorch main branch is quite fast.
       Definitely reach out about fundamental or cross-cutting changes;
       we can often give guidance about how to stage such changes into
       more easily reviewable pieces.
 
 -  **Code it out!**
 
-   -  See the `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md>`_ file for advice for working with PyTorch in a
+   -  See the `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md>`_ file for advice for working with PyTorch in a
       technical form.
 
 -  **Open a pull request.**
@@ -85,7 +85,7 @@ here is the basic process.
       everything, but if you happen to know who the maintainer for a
       given subsystem affected by your patch is, feel free to include
       them directly on the pull request. You can learn more about
-      `Persons of Interest <https://pytorch.org/docs/master/community/persons_of_interest.html>`_
+      `Persons of Interest <https://pytorch.org/docs/main/community/persons_of_interest.html>`_
       that could review your code.
 
 -  **Iterate on the pull request until it's accepted!**
@@ -296,9 +296,9 @@ Frequently Asked Questions
    tasks or pull requests with your environment details is helpful and
    appreciated.
 -  **CI tests failed, what does it mean?** Maybe your PR is based
-   off a broken master? You can try to rebase your change on top
-   of the latest master. You can also see the current status of
-   master's CI at https://hud.pytorch.org/.
+   off a broken main bracnh? You can try to rebase your change on top
+   of the latest main branch. You can also see the current status of
+   main branch's CI at https://hud.pytorch.org/.
 -  **What are the most high risk changes?** Anything that touches build
    configuration is a risky area. Please avoid changing these unless
    you've had a discussion with the team beforehand.
@@ -315,14 +315,14 @@ Python Docs
 
 PyTorch documentation is generated from python source using
 `Sphinx <https://www.sphinx-doc.org/en/master/>`__. Generated HTML is
-copied to the docs folder in the master branch of
+copied to the docs folder in the main branch of
 `pytorch.github.io <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__,
 and is served via GitHub pages.
 
 -  Site: https://pytorch.org/docs
--  GitHub: https://github.com/pytorch/pytorch/tree/master/docs
+-  GitHub: https://github.com/pytorch/pytorch/tree/main/docs
 -  Served from:
-   `https://github.com/pytorch/pytorch.github.io/tree/master/doc <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__
+   `https://github.com/pytorch/pytorch.github.io/tree/master/docs <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__
 
 C++ Docs
 ~~~~~~~~
@@ -333,7 +333,7 @@ https://github.com/pytorch/cppdocs repo, and are served from GitHub
 pages.
 
 -  Site: https://pytorch.org/cppdocs
--  GitHub: https://github.com/pytorch/pytorch/tree/master/docs/cpp
+-  GitHub: https://github.com/pytorch/pytorch/tree/main/docs/cpp
 -  Served from: https://github.com/pytorch/cppdocs
 
 Tutorials

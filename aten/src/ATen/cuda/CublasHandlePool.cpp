@@ -3,7 +3,11 @@
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <map>
+#include <memory>
 #include <regex>
+#include <string>
+#include <tuple>
 
 namespace at { namespace cuda {
 
@@ -81,7 +85,7 @@ at::DataPtr getNewWorkspace() {
 
 cublasHandle_t getCurrentCUDABlasHandle() {
   int device;
-  AT_CUDA_CHECK(cudaGetDevice(&device));
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.

@@ -931,7 +931,9 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = "memory_format"
         elif t.name == BaseTy.Dimname:
             ret = "Union[str, ellipsis, None]"
-        elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Storage, BaseTy.Stream]:
+        elif t.name == BaseTy.Storage:
+            ret = "Union[Storage, UntypedStorage]"
+        elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Stream]:
             # These python schema type names line up with their function schema names
             ret = t.name.name
 
@@ -951,6 +953,9 @@ def argument_type_str_pyi(t: Type) -> str:
             )
         elif str(t.elem) == "float":
             ret = "Sequence[_float]"
+        elif str(t.elem) == "SymInt" and t.size is not None:
+            elem = argument_type_str_pyi(t.elem)
+            ret = f"Union[{elem}, Sequence[{elem}]]"
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f"Sequence[{elem}]"
@@ -1123,7 +1128,7 @@ SUPPORTED_RETURN_TYPES = {
     "::std::tuple<at::Tensor,::std::vector<at::Tensor>>",
     "::std::vector<at::Tensor>",
     # Needed for flash attention forw/backward
-    "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t,int64_t,int64_t,int64_t,at::Tensor>",
+    "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t,int64_t,at::Tensor,at::Tensor,at::Tensor>",
     "at::Scalar",
     "bool",
     "int64_t",
@@ -1133,6 +1138,7 @@ SUPPORTED_RETURN_TYPES = {
     "double",
     "at::IntArrayRef",
     "at::ScalarType",
+    "at::Stream",
 }
 
 
@@ -1252,10 +1258,7 @@ def arg_parser_unpack_method(
         elif t.name == BaseTy.int:
             return "toInt64"
         elif t.name == BaseTy.SymInt:
-            if symint:
-                return "toSymInt"
-            else:
-                return "toInt64"
+            return "toSymInt" if symint else "toInt64"
         elif t.name == BaseTy.bool:
             return "toBoolWithDefault" if has_default_init else "toBool"
         elif t.name == BaseTy.float:
@@ -1288,10 +1291,7 @@ def arg_parser_unpack_method(
     elif isinstance(t, ListType):
         if str(t.elem) == "Tensor":
             # accept and use definite size
-            if t.size is not None:
-                return f"tensorlist_n<{t.size}>"
-            else:
-                return "tensorlist"
+            return f"tensorlist_n<{t.size}>" if t.size is not None else "tensorlist"
         elif str(t.elem) == "Tensor?":
             return "list_of_optional_tensors"
         elif str(t.elem) == "Dimname":
@@ -1300,15 +1300,12 @@ def arg_parser_unpack_method(
         elif str(t.elem) == "int":
             # accept definite size
             return "intlist"
-        elif str(t) == "float[]":
+        elif str(t.elem) == "float":
             return "doublelist"
         elif str(t.elem) == "SymInt":
             # accept definite size
-            if symint:
-                return "symintlist"
-            else:
-                return "intlist"
-        elif str(t) == "Scalar[]":
+            return "symintlist" if symint else "intlist"
+        elif str(t.elem) == "Scalar":
             return "scalarlist"
     raise RuntimeError(f"type '{t}' is not supported by PythonArgParser")
 

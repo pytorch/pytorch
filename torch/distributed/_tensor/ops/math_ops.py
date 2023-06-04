@@ -52,7 +52,7 @@ def sum_rule(op_schema: OpSchema) -> OutputSharding:
     )
 
 
-@register_prop_rule(aten._softmax.default)
+@register_prop_rule([aten._log_softmax.default, aten._softmax.default])
 def softmax_rule(op_schema: OpSchema) -> OutputSharding:
     input_spec, softmax_dim, _ = op_schema.args_schema
     input_spec = cast(DTensorSpec, input_spec)
@@ -63,7 +63,12 @@ def softmax_rule(op_schema: OpSchema) -> OutputSharding:
     return OutputSharding(input_spec)
 
 
-@register_prop_rule(aten._softmax_backward_data.default)
+@register_prop_rule(
+    [
+        aten._log_softmax_backward_data.default,
+        aten._softmax_backward_data.default,
+    ]
+)
 def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     grad_out_spec, out_spec, softmax_dim, _ = op_schema.args_schema
     grad_out_spec = cast(DTensorSpec, grad_out_spec)
@@ -96,7 +101,7 @@ def mean_rule(op_schema: OpSchema) -> OutputSharding:
         for placement in output_sharding.output_spec.placements:
             if placement.is_partial():
                 partial_placement = cast(_Partial, placement)
-                partial_placement.reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
+                partial_placement.reduce_op = c10d.ReduceOp.AVG
 
     return output_sharding
 

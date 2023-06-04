@@ -15,6 +15,7 @@
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
 
 #if AT_CUDNN_ENABLED()
@@ -120,7 +121,7 @@ Device CUDAHooks::getDeviceFromPtr(void* data) const {
   return at::cuda::getDeviceFromPtr(data);
 }
 
-bool CUDAHooks::isPinnedPtr(void* data) const {
+bool CUDAHooks::isPinnedPtr(const void* data) const {
   // First check if driver is broken/missing, in which case PyTorch CPU
   // functionalities should still work, we should report `false` here.
   if (!at::cuda::is_available()) {
@@ -134,17 +135,19 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
   cudaPointerAttributes attr;
-  cudaError_t err = cudaPointerGetAttributes(&attr, data);
+  // We do not believe that CUDA needs mutable access to the data
+  // here.
+  cudaError_t err = cudaPointerGetAttributes(&attr, const_cast<void*>(data));
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear CUDA error
     return false;
   }
   AT_CUDA_CHECK(err);
 #else
   // HIP throws hipErrorUnknown here
   if (err != cudaSuccess) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear HIP error
     return false;
   }
 #endif
@@ -173,6 +176,8 @@ bool CUDAHooks::hasCuDNN() const {
 
 bool CUDAHooks::hasCuSOLVER() const {
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
+  return true;
+#elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50300
   return true;
 #else
   return false;
@@ -223,7 +228,7 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
 
 int64_t current_device() {
   int device;
-  cudaError_t err = cudaGetDevice(&device);
+  cudaError_t err = c10::cuda::GetDevice(&device);
   if (err == cudaSuccess) {
     return device;
   }

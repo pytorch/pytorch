@@ -33,7 +33,7 @@ on:
 
     outputs:
       test-matrix:
-        value: ${{ inputs.test-matrix }}
+        value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
 
 env:
@@ -43,9 +43,14 @@ jobs:
   build:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, windows.4xlarge]
+    runs-on: [self-hosted, windows.4xlarge.nonephemeral]
     timeout-minutes: 240
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
     steps:
+      - name: Clean up leftover processes on non-ephemeral Windows runner
+        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
+
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
@@ -68,7 +73,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
 
@@ -79,7 +84,7 @@ jobs:
 
       - name: Parse ref
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: python3 .github/scripts/parse_ref.py
 
       - name: Get workflow job id
         id: get-job-id

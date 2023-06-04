@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     numpy_to_torch_dtype_dict,
     TEST_SCIPY,
     set_default_dtype,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -1846,12 +1847,13 @@ class TestBinaryUfuncs(TestCase):
                         self.assertEqual(actual_first_tensor, actual_tensor)
                         self.assertEqual(actual_second_tensor, actual_tensor)
 
-            _scalar_helper(operator.truediv, operator.truediv)
-            _scalar_helper(operator.truediv, torch.true_divide)
-            _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
-            _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
+        _scalar_helper(operator.truediv, operator.truediv)
+        _scalar_helper(operator.truediv, torch.true_divide)
+        _scalar_helper(lambda a, b: math.floor(a / b), operator.floordiv)
+        _scalar_helper(lambda a, b: math.floor(a / b), torch.floor_divide)
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_div_and_floordiv_script_vs_python(self, device):
         # Creates jitted functions of two tensors
         def _wrapped_div(a, b):
@@ -1924,6 +1926,7 @@ class TestBinaryUfuncs(TestCase):
                     self.assertEqual(5 // a, scripted_rfloordiv_scalar(a_t))
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_idiv_and_ifloordiv_vs_python(self, device):
         def _wrapped_idiv_tensor(a, b):
             a /= b
@@ -2616,7 +2619,6 @@ class TestBinaryUfuncs(TestCase):
             rtol=0,
         )
 
-    @onlyCUDA
     @dtypes(torch.half)
     def test_divmul_scalar(self, device, dtype):
         x = torch.tensor(100.0, device=device, dtype=dtype)

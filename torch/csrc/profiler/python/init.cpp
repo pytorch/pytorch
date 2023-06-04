@@ -38,7 +38,10 @@ void initPythonBindings(PyObject* module) {
       .value("NVTX", ProfilerState::NVTX)
       .value("ITT", ProfilerState::ITT)
       .value("KINETO", ProfilerState::KINETO)
-      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK);
+      .value("KINETO_GPU_FALLBACK", ProfilerState::KINETO_GPU_FALLBACK)
+      .value(
+          "KINETO_PRIVATEUSE1_FALLBACK",
+          ProfilerState::KINETO_PRIVATEUSE1_FALLBACK);
 
   py::enum_<ActiveProfilerType>(m, "ActiveProfilerType")
       .value("NONE", ActiveProfilerType::NONE)
@@ -50,6 +53,7 @@ void initPythonBindings(PyObject* module) {
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
       .value("XPU", ActivityType::XPU)
+      .value("MTIA", ActivityType::MTIA)
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
@@ -123,7 +127,7 @@ void initPythonBindings(PyObject* module) {
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
       .def(py::init<
            ProfilerState,
-           bool, /* record_input_shapes */
+           bool, /* report_input_shapes */
            bool, /* profile_memory */
            bool, /* with_stack */
            bool, /* with_flops */
@@ -293,6 +297,12 @@ void initPythonBindings(PyObject* module) {
   m.def(
       "_disable_execution_graph_observer",
       &torch::profiler::impl::disableExecutionGraphObserver);
+  m.def(
+      "_set_record_concrete_inputs_enabled_val",
+      &torch::profiler::impl::set_record_concrete_inputs_enabled_val);
+  m.def(
+      "_set_fwd_bwd_enabled_val",
+      &torch::profiler::impl::set_fwd_bwd_enabled_val);
 
   py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
       m, "CapturedTraceback");

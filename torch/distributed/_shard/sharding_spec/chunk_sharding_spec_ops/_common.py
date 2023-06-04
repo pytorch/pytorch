@@ -200,10 +200,8 @@ def _result_distribute_with_col_rearrange(results, input, world_size, weight, pg
 
     # Check if we need to rearrange columns appropriately for output.
     rearrange_columns = any(
-        [
-            idx != placement.rank()
-            for idx, placement in enumerate(weight._sharding_spec.placements)
-        ]
+        idx != placement.rank()
+        for idx, placement in enumerate(weight._sharding_spec.placements)
     )
     if not rearrange_columns:
         return output

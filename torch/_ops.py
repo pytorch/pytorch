@@ -178,6 +178,10 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     cand = DispatchKey.Autograd
     if is_included_in_alias(k, cand) and op.has_kernel_for_dispatch_key(cand):
         return cand
+    # 2.5 Use kernel from DispatchKey::FuncTorchBatchedDecomposition if available
+    cand = DispatchKey.FuncTorchBatchedDecomposition
+    if is_included_in_alias(k, cand) and op.has_kernel_for_dispatch_key(cand):
+        return cand
     # Backend fallback
     if torch._C._dispatch_has_backend_fallback(k):
         # The dispatch key itself will implicitly route to backend fallback.
@@ -772,7 +776,7 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
-        if sys.executable == "torch_deploy":
+        if torch._running_with_deploy():
             return
 
         path = _utils_internal.resolve_library_path(path)

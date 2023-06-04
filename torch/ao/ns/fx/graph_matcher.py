@@ -139,7 +139,7 @@ class _NSGraphMatchableSubgraphsIterator:
 
     def _is_matchable(self, node: Node) -> bool:
         if node.op == 'call_function':
-            return not (node.target in self.non_matchable_functions)
+            return node.target not in self.non_matchable_functions
         elif node.op == 'call_module':
             assert isinstance(node.target, str)
             target_mod = getattr_from_fqn(self.gm, node.target)
@@ -147,7 +147,7 @@ class _NSGraphMatchableSubgraphsIterator:
                 any(isinstance(target_mod, t)  # type: ignore[arg-type]
                     for t in self.non_matchable_modules)
         elif node.op == 'call_method':
-            return not (node.target in self.non_matchable_methods)
+            return node.target not in self.non_matchable_methods
         else:
             return False
 

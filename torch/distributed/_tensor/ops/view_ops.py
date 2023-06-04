@@ -667,6 +667,7 @@ def register_prop_rule_map(
 register_prop_rule_map(aten.squeeze.default, torch.squeeze)
 register_prop_rule_map(aten.squeeze.dim, torch.squeeze)
 register_prop_rule_map(aten.view.default, Tensor.view)
+register_prop_rule_map(aten.reshape.default, torch.reshape)
 register_prop_rule_map(aten._unsafe_view.default, Tensor.view)
 register_prop_rule_map(aten.unsqueeze.default, torch.unsqueeze)
 register_prop_rule_map(aten.expand.default, Tensor.expand)

@@ -283,7 +283,7 @@ def _barrier(worker_names):
         _all_gather(None, set(worker_names))
     except RuntimeError as ex:
         logger.error(
-            f"Failed to complete barrier, got error {ex}"
+            "Failed to complete barrier, got error %s", ex
         )
 
 
@@ -300,7 +300,7 @@ def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
         _all_gather(None, timeout=timeout)
     except RuntimeError as ex:
         logger.error(
-            f"Failed to respond to 'Shutdown Proceed' in time, got error {ex}"
+            "Failed to respond to 'Shutdown Proceed' in time, got error %s", ex
         )
         raise ex
 
@@ -916,7 +916,7 @@ def _get_should_profile():
 
 
 def _enable_rpc_profiler(should_profile, qualified_name, func, rpc_type, dst_worker_info):
-    ctx_manager = contextlib.suppress()
+    ctx_manager = contextlib.nullcontext()
 
     if should_profile:
         # Create appropriate string representation based on type of func

@@ -173,6 +173,7 @@ at::Tensor nansum_backward(
     at::OptionalIntArrayRef dims,
     bool keepdim);
 std::vector<int64_t> reverse_list(const at::IntArrayRef list);
+std::vector<c10::SymInt> reverse_list_symint(const c10::SymIntArrayRef list);
 at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
 at::Tensor prod_safe_zeros_backward(
     const at::Tensor& grad,
@@ -218,6 +219,10 @@ at::Tensor logcumsumexp_backward(
     at::Tensor grad,
     const at::Tensor& self,
     at::Tensor result,
+    int64_t dim);
+at::Tensor logcumsumexp_jvp(
+    const at::Tensor& self_p,
+    const at::Tensor& self_t,
     int64_t dim);
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
 at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
@@ -407,6 +412,7 @@ at::Tensor max_pool_double_backward(
     const at::Tensor& grad,
     const at::Tensor& indices,
     int dim);
+at::Tensor error_for_max_pool2d_double_backward();
 at::Tensor glu_double_backward(
     const at::Tensor& grad,
     const at::Tensor& grad_output,
@@ -1024,6 +1030,32 @@ Tensor to_sparse_backward(
     const Tensor& grad,
     const c10::Layout self_layout,
     const c10::OptionalArrayRef<c10::SymInt>& self_blocksize);
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor>
+mkldnn_rnn_layer_differentiable_backward(
+    const Tensor& input,
+    const Tensor& weight0,
+    const Tensor& weight1,
+    const Tensor& weight2,
+    const Tensor& weight3,
+    const Tensor& hx_,
+    const Tensor& cx_tmp,
+    const Tensor& output,
+    const Tensor& hy_,
+    const Tensor& cy_,
+    const c10::optional<Tensor>& grad_output_r_opt,
+    const c10::optional<Tensor>& grad_hy_r_opt,
+    const c10::optional<Tensor>& grad_cy_r_opt,
+    bool reverse,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t num_layers,
+    bool has_biases,
+    bool train,
+    bool bidirectional,
+    at::IntArrayRef batch_sizes,
+    bool batch_first,
+    const at::Tensor& workspace);
 
 } // namespace details
 } // namespace generated

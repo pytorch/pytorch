@@ -838,10 +838,10 @@ def gen_pyi(
             ],
             "as_subclass": ["def as_subclass(self, cls: Type[S]) -> S: ..."],
             "_make_subclass": [
-                "def _make_subclass({}) -> Tensor: ...".format(
+                "@staticmethod    \ndef _make_subclass({}) -> S: ...".format(
                     ", ".join(
                         [
-                            "cls",
+                            "cls: Type[S]",
                             "data: Tensor",
                             "require_grad: _bool = False",
                             "dispatch_strides: _bool = False",
@@ -888,7 +888,7 @@ def gen_pyi(
             "map2_": [
                 "def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ..."
             ],
-            "storage": ["def untyped_storage(self) -> Storage: ..."],
+            "storage": ["def untyped_storage(self) -> UntypedStorage: ..."],
             "storage_type": ["def storage_type(self) -> Storage: ..."],
             "type": [
                 "def type(self, dtype: None = None, non_blocking: _bool = False) -> str: ...",
@@ -936,8 +936,9 @@ def gen_pyi(
                 "def copy_(self, src: Tensor, non_blocking: _bool = False) -> Tensor: ..."
             ],
             "set_": [
-                "def set_(self, storage: Union[Storage, TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
-                "def set_(self, storage: Union[Storage, TypedStorage]) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage], "
+                "offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage, UntypedStorage]) -> Tensor: ...",
             ],
             "split": [
                 "def split(self, split_size: _int, dim: _int = 0) -> Sequence[Tensor]: ...",
