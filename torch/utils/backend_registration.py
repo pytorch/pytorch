@@ -4,6 +4,8 @@ from typing import List, Optional, Union
 
 __all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
 
+_privateuse1_backend_name = "privateuseone"
+
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     rename_privateuse1_backend(backend_name) -> None
@@ -77,7 +79,9 @@ def rename_privateuse1_backend(backend_name: str) -> None:
         # to implement torch.ones.
         >>> a = torch.ones(2, device="foo")
         """
-    return _rename_privateuse1_backend(backend_name)
+    _rename_privateuse1_backend(backend_name)
+    global _privateuse1_backend_name
+    _privateuse1_backend_name = backend_name
 
 
 def _check_register_once(module, attr):

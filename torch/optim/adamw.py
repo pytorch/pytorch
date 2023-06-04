@@ -4,8 +4,7 @@ from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _di
                         _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
                         _fused_doc, _maximize_doc, _default_to_fused_or_foreach)
 from typing import List, Optional
-from torch.utils._foreach_utils import (_group_tensors_by_device_and_dtype,
-                                        _get_fused_kernels_supported_devices)
+from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ["AdamW", "adamw"]
 
