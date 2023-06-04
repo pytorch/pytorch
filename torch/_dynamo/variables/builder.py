@@ -97,7 +97,9 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
+
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
+from .optimizer import OptimizerVariable
 from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -579,6 +581,12 @@ class VariableBuilder:
             return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, torch.optim.Optimizer):
+            return OptimizerVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
             )
         elif ProcessGroupVariable.is_process_group(value):
             return ProcessGroupVariable(
