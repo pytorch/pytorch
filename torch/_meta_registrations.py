@@ -844,10 +844,10 @@ def _linalg_solve_ex(
     *,
     left: bool = True,
     check_errors: bool = False,
-    result: Tensor = None,
-    LU: Tensor = None,
-    pivots: Tensor = None,
-    info: Tensor = None,
+    result: Optional[Tensor] = None,
+    LU: Optional[Tensor] = None,
+    pivots: Optional[Tensor] = None,
+    info: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     checkFloatingOrComplex(A, "linalg.solve")
     torch._check(
