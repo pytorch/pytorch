@@ -890,9 +890,9 @@ def _linalg_solve_ex(
     if all(x is not None for x in out):
         for r, o in zip(res, out):
             # resize and copy operations are done in-place
-            _maybe_resize_out(o, r.shape)
+            _maybe_resize_out(o, r.shape)  # type: ignore[arg-type]
             # strides are not copied in out_wrapper
-            o.as_strided_(r.shape, r.stride())
+            o.as_strided_(r.shape, r.stride())  # type: ignore[union-attr]
             _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=False)  # type: ignore[arg-type]
     return res
 
