@@ -138,7 +138,7 @@ class TracerBase:
                 node.stack_trace = stack_trace
             # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
             # If other meta fields are needed, they can be added here
-            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten"]
+            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten", "recompute"]
             for field in copy_meta_fields:
                 if field in current_meta:
                     node.meta[field] = current_meta[field]
