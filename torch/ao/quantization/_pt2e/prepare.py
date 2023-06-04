@@ -6,9 +6,6 @@ from torch.ao.quantization.fx.prepare import (
     _get_dtype_and_is_dynamic,
     _insert_obs_or_fq,
     _maybe_insert_output_observer_for_node,
-    _is_observer_in_same_graph,
-    _maybe_make_input_output_share_observers,
-    _remove_output_observer,
     _maybe_insert_observers_before_graph_output,
     _save_state,
     _is_activation_post_process_node,
@@ -60,7 +57,6 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     new_arg = arg
 
     quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
-    reuse_input_obs_or_fq = quantization_annotation._reuse_input_obs_or_fq
     arg_as_input_act_obs_or_fq = _get_arg_as_input_act_obs_or_fq(arg, node, named_modules, obs_or_fq_map, is_qat)
     arg_as_input_target_dtype, arg_as_input_target_is_dynamic = _get_dtype_and_is_dynamic(arg_as_input_act_obs_or_fq)
 
@@ -192,14 +188,6 @@ def _maybe_insert_input_and_output_observers_for_node(
         if user_node is maybe_output_obs_node:
             continue
         user_node.replace_input_with(node, maybe_output_obs_node)
-    _is_observer_in_same_graph_ = _is_observer_in_same_graph(node, named_modules, obs_or_fq_map, is_qat)
-
-    input_output_share_observers = node.meta["quantization_annotation"]._input_output_share_observers
-    reuse_input_obs_or_fq = node.meta["quantization_annotation"]._reuse_input_obs_or_fq
-    if (input_output_share_observers and _is_observer_in_same_graph_) or \
-       reuse_input_obs_or_fq:
-        if not _maybe_make_input_output_share_observers(node, model, named_modules):
-            _remove_output_observer(node, model, named_modules)
 
 def prepare(
     model: GraphModule,
