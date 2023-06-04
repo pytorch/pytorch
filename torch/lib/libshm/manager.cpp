@@ -91,7 +91,7 @@ int main(int argc, char* argv[]) {
           "could not generate a random directory for manager socket");
     }
 
-    std::string tempfile = tempdir->name + "/manager.sock";
+    std::string tempfile = (tempdir->name / "manager.sock").string();
 
     srv_socket = std::make_unique<ManagerServerSocket>(tempfile);
     register_fd(srv_socket->socket_fd);
