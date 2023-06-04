@@ -22,7 +22,7 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
 - [PyTorch Hakkında Daha Fazlası](#Pytorch-Hakkında-Daha-Fazlası)
   - [GPU'ya Hazır Bir Python Kütüphanesi](#a-gpu-ready-tensor-library)
   - [Dinamik Sinir Ağları: Bant Tabanlı Otograd](#Dinamik-Sinir-Ağları-Bant-Tabanlı-Otograd)
-  - [Python First](#python-first)
+  - [Önce Python](#Önce-Python)
   - [Zorunlu Deneyimler](#Zorunlu-Deneyimler)
   - [Hızlı ve Yalın](#Hızlı-ve-Yalın)
   - [Sorunsuz Uzantılar](#Sorunsuz-Uzantılar)
@@ -99,7 +99,7 @@ Bu teknik PyTorch'a özgü olmasa da, bugüne kadarki en hızlı uygulamalardan 
 
 ![Dinamik grafik](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/dynamic_graph.gif)
 
-### Python First
+### Önce Python
 
 PyTorch, monolitik bir C++ çerçevesine bağlanmış bir Python değildir.
 Python'a derinlemesine entegre olacak şekilde tasarlanmıştır.
