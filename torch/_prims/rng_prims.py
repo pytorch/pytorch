@@ -5,13 +5,13 @@ import torch
 import torch.utils._pytree as pytree
 from torch import _prims
 from torch._C import DispatchKey
-from torch._guards import detect_fake_mode
 from torch._ops import HigherOrderOperator
 
 from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
     unwrap_proxy,
@@ -152,6 +152,7 @@ def register_run_and_save_rng_state_op():
     run_and_save_rng_state = HigherOrderOperator("run_and_save_rng_state")
 
     run_and_save_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
+    run_and_save_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
     run_and_save_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
 
     @run_and_save_rng_state.py_impl(DispatchKey.Autograd)
@@ -171,7 +172,8 @@ def register_run_and_save_rng_state_op():
     def impl_backend_select(op, *args, **kwargs):
         # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
         if kwargs.get("device"):
-            device_type = kwargs.get("device").type  # type: ignore[union-attr]
+            device = kwargs.get("device")
+            device_type = device if isinstance(device, str) else device.type  # type: ignore[union-attr]
             if "cuda" in device_type:
                 impl = impl_cuda
             elif "cpu" in device_type:
@@ -195,8 +197,7 @@ def register_run_and_save_rng_state_op():
     @run_and_save_rng_state.py_impl(FakeTensorMode)
     def impl_fake_tensor_mode(op, *args, **kwargs):
         # Check device to call the right impl
-        with detect_fake_mode():
-            return impl_backend_select(op, *args, **kwargs)
+        return impl_backend_select(op, *args, **kwargs)
 
     @run_and_save_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(op, *args, **kwargs):
@@ -204,7 +205,7 @@ def register_run_and_save_rng_state_op():
         assert mode is not None
         with _pop_mode_temporarily() as mode:
             if mode.enable_tracing:
-                out = run_and_save_rng_state(op, *args, **kwargs)
+                out = impl_fake_tensor_mode(op, *args, **kwargs)
                 proxy_args = pytree.tree_map(partial(unwrap_proxy, mode), (op, *args))
                 proxy_kwargs = pytree.tree_map(partial(unwrap_proxy, mode), kwargs)
                 out_proxy = mode.tracer.create_proxy(
@@ -222,6 +223,7 @@ def register_run_with_rng_state_op():
 
     run_with_rng_state.fallthrough(DispatchKey.ADInplaceOrView)
     run_with_rng_state.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
+    run_with_rng_state.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
 
     @run_with_rng_state.py_impl(DispatchKey.Autograd)
     def impl_autograd(rng_state, op, *args, **kwargs):
@@ -250,7 +252,8 @@ def register_run_with_rng_state_op():
         assert mode is not None
         with _pop_mode_temporarily() as mode:
             if mode.enable_tracing:
-                out = run_with_rng_state(op, *args, **kwargs)
+                with disable_proxy_modes_tracing():
+                    out = run_with_rng_state(rng_state, op, *args, **kwargs)
                 proxy_args = pytree.tree_map(
                     partial(unwrap_proxy, mode), (rng_state, op, *args)
                 )
@@ -268,7 +271,8 @@ def register_run_with_rng_state_op():
     def impl_backend_select(rng_state, op, *args, **kwargs):
         # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
         if kwargs.get("device"):
-            device_type = kwargs.get("device").type  # type: ignore[union-attr]
+            device = kwargs.get("device")
+            device_type = device if isinstance(device, str) else device.type  # type: ignore[union-attr]
             if "cuda" in device_type:
                 impl = impl_cuda
             elif "cpu" in device_type:
@@ -293,8 +297,7 @@ def register_run_with_rng_state_op():
     def impl_fake_tensor_mode(rng_state, op, *args, **kwargs):
         # Skip setting the set_rng_state as it does not work well with fake tensors.
         # And it does not matter for the fake tensor mode.
-        with detect_fake_mode():
-            return op(*args, **kwargs)
+        return op(*args, **kwargs)
 
 
 def register_functional_rng_wrappers():
