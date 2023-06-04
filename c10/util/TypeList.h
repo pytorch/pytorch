@@ -338,9 +338,7 @@ struct last<typelist<Head>> final {
 };
 template <class TypeList>
 using last_t = typename last<TypeList>::type;
-static_assert(
-    std::is_same<int, last_t<typelist<double, float, int>>>::value,
-    "");
+static_assert(std::is_same<int, last_t<typelist<double, float, int>>>::value);
 
 /**
  * Take/drop a number of arguments from a typelist.

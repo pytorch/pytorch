@@ -617,7 +617,6 @@ inline typename std::enable_if<std::is_same<PT, opmath_t>::value, void>::type
 CalcDsDb(
     const opmath_t* ds_ptr,
     const opmath_t* db_ptr,
-    bool gamma_null,
     const PT* gamma_ptr,
     const int64_t d,
     const int64_t K,
@@ -626,7 +625,7 @@ CalcDsDb(
     vec::Vectorized<opmath_t> ds_vec(0);
     vec::Vectorized<opmath_t> db_vec(0);
     for (int64_t j = 0; j < d; j += K) {
-      const vec::Vectorized<PT> gamma_vec = gamma_null
+      const vec::Vectorized<PT> gamma_vec = (gamma_ptr == nullptr)
           ? vec::Vectorized<PT>(1)
           : vec::Vectorized<PT>::loadu(gamma_ptr + j);
       ds_vec = ds_vec + vec::Vectorized<PT>::loadu(ds_ptr + j) * gamma_vec;
@@ -641,7 +640,6 @@ inline typename std::enable_if<!std::is_same<PT, opmath_t>::value, void>::type
 CalcDsDb(
     const opmath_t* ds_ptr,
     const opmath_t* db_ptr,
-    bool gamma_null,
     const PT* gamma_ptr,
     const int64_t d,
     const int64_t K,
@@ -652,7 +650,7 @@ CalcDsDb(
   fVec ds_acc(0);
   fVec db_acc(0);
   for (int64_t j = 0; j < d; j += K) {
-    const Vec gamma_vec = gamma_null ? Vec(1) : Vec::loadu(gamma_ptr + j);
+    const Vec gamma_vec = (gamma_ptr == nullptr) ? Vec(1) : Vec::loadu(gamma_ptr + j);
     fVec gamma_vec0, gamma_vec1;
     std::tie(gamma_vec0, gamma_vec1) = convert_to_float<PT>(gamma_vec);
     ds_acc += fVec::loadu(ds_ptr + j) * gamma_vec0;
@@ -693,8 +691,8 @@ void GroupNormInputBackward(
       const int64_t g = i % G;
       const opmath_t* ds_ptr = ds + i * D;
       const opmath_t* db_ptr = db + i * D;
-      const PT* gamma_ptr = gamma + g * D;
-      CalcDsDb(ds_ptr, db_ptr, gamma_null, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
+      const PT* gamma_ptr = gamma_null ? nullptr : (gamma + g * D);
+      CalcDsDb(ds_ptr, db_ptr, gamma_ptr, d, K, ds_arr.data(), db_arr.data());
       opmath_t ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), opmath_t(0));
       opmath_t db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), opmath_t(0));
       for (const auto j : c10::irange(d, D)) {
