@@ -5,7 +5,7 @@
 #ifndef USE_ROCM
 #include <cutlass/cutlass.h>
 #include <cutlass/epilogue/thread/linear_combination.h>
-#include <ATen/native/sparse/cuda/cutlass/custom_gemm_sparse.h>
+#include <ATen/native/sparse/cuda/cutlass/gemm_sparse_row_broadcast.h>
 #endif
 
 #include <type_traits>
@@ -156,7 +156,7 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
     using SmArch = cutlass::arch::Sm80; // Only CC 8.x devices are suported at the moment.
     using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>; // This choice provides good performance across wide range of operand sizes.
     constexpr int NumStages = 3; // This choice provides good performance across wide range of operand sizes.
-    using Gemm = cutlass::gemm::device::CustomSparseGemm<
+    using Gemm = cutlass::gemm::device::SparseGemmRowBroadcast<
         ElementInputA,
         LayoutInputA,
         ElementInputB,
@@ -219,10 +219,10 @@ std::tuple<Tensor, Tensor> two_four_sgemm_cutlass(
 
     // Determine PyTorch datatype for the output matrix.
     auto tensor_d_dtype = at::kChar;
-    if (std::is_same<ElementOutput, int32_t>::value) {
+    if constexpr (std::is_same_v<ElementOutput, int32_t>) {
         tensor_d_dtype = at::kInt;
     }
-    else if (std::is_same<ElementOutput, cutlass::half_t>::value) {
+    else if constexpr (std::is_same_v<ElementOutput, cutlass::half_t>) {
         tensor_d_dtype = at::kHalf;
     }
     else {

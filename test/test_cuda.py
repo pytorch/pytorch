@@ -5230,7 +5230,7 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
-    @unittest.skipIf(not IS_LINUX, 'cpp traces only on linux')
+    @unittest.skipIf(not (IS_LINUX and os.uname().machine == "x86_64"), 'cpp traces only on linux')
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_cpp_memory_snapshot_pickle(self):
         from torch.utils.cpp_extension import load_inline
@@ -5726,6 +5726,18 @@ class TestBlockStateAbsorption(TestCase):
         torch.cuda.empty_cache()
 
         self.assertEqual(len(get_cudagraph_segments(pool)), 0)
+
+
+    def test_no_triton_on_import(self):
+        """ Test that Trition is not imported on first GPU use """
+        script = "import sys; import torch; torch.rand(2, device='cuda'); print('triton' in sys.modules)"
+
+        rc = subprocess.check_output(
+            [sys.executable, '-c', script],
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
+        self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
 
 instantiate_parametrized_tests(TestCuda)

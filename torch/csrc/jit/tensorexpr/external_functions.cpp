@@ -25,7 +25,7 @@
 
 namespace torch::jit::tensorexpr {
 
-c10::MemoryFormat deduce_memory_format(
+static c10::MemoryFormat deduce_memory_format(
     c10::IntArrayRef strides,
     c10::IntArrayRef dims) {
   if (strides.size() == 4 && strides[3] == dims[1] && strides[1] == 1l) {
@@ -34,14 +34,14 @@ c10::MemoryFormat deduce_memory_format(
   return c10::MemoryFormat::Contiguous;
 }
 
-c10::MemoryFormat deduce_memory_format(
+static c10::MemoryFormat deduce_memory_format(
     const std::vector<int64_t>& strides,
     const std::vector<int64_t>& dims) {
   return deduce_memory_format(
       c10::IntArrayRef(strides), c10::IntArrayRef(dims));
 }
 
-at::Tensor from_blob_quantized(
+static at::Tensor from_blob_quantized(
     void* data,
     at::IntArrayRef sizes,
     at::IntArrayRef strides,
@@ -164,7 +164,7 @@ std::vector<at::Tensor> constructTensors(
   return tensors;
 }
 
-std::vector<at::Tensor> constructTensors(
+static std::vector<at::Tensor> constructTensors(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -274,7 +274,7 @@ std::vector<at::Tensor> constructTensors2(
   return tensors;
 }
 
-std::vector<at::Tensor> constructTensors2(
+static std::vector<at::Tensor> constructTensors2(
     int64_t bufs_in_num,
     void** buf_data,
     int64_t* buf_ranks,
@@ -296,7 +296,7 @@ std::vector<at::Tensor> constructTensors2(
 }
 
 #ifndef _WIN32
-at::Tensor quantized_add(
+static at::Tensor quantized_add(
     const at::Tensor& x1,
     const at::Tensor& x2,
     double scale,
@@ -308,7 +308,7 @@ at::Tensor quantized_add(
   return qadd_op.call(x1, x2, scale, zero);
 }
 
-at::Tensor quantized_mul(
+static at::Tensor quantized_mul(
     const at::Tensor& x1,
     const at::Tensor& x2,
     double scale,
@@ -320,7 +320,7 @@ at::Tensor quantized_mul(
   return op.call(x1, x2, scale, zero);
 }
 
-at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
+static at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
   const auto op = c10::Dispatcher::singleton()
                       .findSchemaOrThrow("quantized::mul", "Scalar")
                       .typed<at::Tensor(at::Tensor, c10::Scalar const&)>();
@@ -328,14 +328,7 @@ at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
   return op.call(x, s);
 }
 
-at::Tensor quantized_sigmoid(const at::Tensor& x, double scale, int64_t zero) {
-  const auto op = c10::Dispatcher::singleton()
-                      .findSchemaOrThrow("quantized::sigmoid", "")
-                      .typed<at::Tensor(at::Tensor, double, int64_t)>();
-  return op.call(x, scale, zero);
-}
-
-at::Tensor quantized_cat(
+static at::Tensor quantized_cat(
     const c10::List<at::Tensor>& qxs,
     int64_t dim,
     c10::optional<double> scale,
@@ -355,12 +348,6 @@ at::Tensor quantized_cat(
       zero);
 }
 
-at::Tensor quantized_relu(const at::Tensor& qx) {
-  const auto op = c10::Dispatcher::singleton()
-                      .findSchemaOrThrow("quantized::relu", "")
-                      .typed<at::Tensor(at::Tensor)>();
-  return op.call(qx);
-}
 #endif // _WIN32
 
 #ifdef C10_MOBILE
