@@ -27,7 +27,7 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
   - [Hızlı ve Yalın](#Hızlı-ve-Yalın)
   - [Sorunsuz Uzantılar](#Sorunsuz-Uzantılar)
 - [Kurulum](#Kurulum)
-  - [Binaries](#binaries)
+  - [İkili Değerler (Binaries)](#İkili-Değerler-Binaries)
     - [NVIDIA Jetson Platformları](#nvidia-jetson-platformları)
   - [Kaynak Kodundan](#Kaynak-Kodundan)
     - [Ön Koşullar](#Ön-Koşullar)
@@ -43,7 +43,7 @@ Bağlantı yolu iyileştirmelerini (Sürekli Entegrasyon işaretleri) hud.pytorc
 - [Buradan Başlayın](#Buradan-Başlayın)
 - [Kaynaklar](#Kaynaklar)
 - [İletişim](#İletişim)
-- [Releases and Contributing](#releases-and-contributing)
+- [Yayımlama ve Katkıta Bulunma](#Yayımlama-ve-Katkıda-Bulunma)
 - [Takım](#Takım)
 - [Lisans](#lisans)
 
@@ -139,7 +139,7 @@ Sarmalayıcı kod yazılmasına gerek yoktur.Burada [bir öğretici](https://pyt
 
 ## Kurulum
 
-### Binaries
+### İkili Değerler (Binaries)
 Conda veya pip wheels aracılığıyla ikili dosyaları yüklemek için komutlar web sitemizde bulunmaktadır. [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
 
@@ -423,7 +423,7 @@ Başlamanız için üç ipucu:
 * Facebook Sayfası: PyTorch hakkında önemli duyurular için https://www.facebook.com/pytorch
 * Marka yönergeleri için lütfen web sitemizi ziyaret edin [pytorch.org](https://pytorch.org/)
 
-## Releases and Contributing
+## Yayımlama ve Katkıda Bulunma
 
 Genellikle, PyTorch yılda üç büyük sürüm çıkarır. Eğer bir hata ile karşılaşırsanız lütfen [sorun bildirerek](https://github.com/pytorch/pytorch/issues).
 
