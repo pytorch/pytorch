@@ -526,7 +526,14 @@ class SchedulerNode(BaseSchedulerNode):
                 )
             ]
         choices = [LoopOrder(self, self._body, self._sizes)]
-        if config.loop_ordering_search_limit <= 1:
+        if (
+            config.loop_ordering_search_limit <= 1
+            or
+            # reordering CPU reductions leads to some subtle bugs in vectorization
+            # in tests like test_transpose_sum_outer
+            # self.get_device().type == "cpu" and
+            self.is_reduction()
+        ):
             return choices
         permute = functools.partial(LoopOrder.permute, self, self._body, self._sizes)
         iter_sizes, reduce_sizes = self._sizes
