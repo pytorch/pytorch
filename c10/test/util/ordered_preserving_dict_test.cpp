@@ -445,10 +445,7 @@ TEST(OrderedPreservingDictTest, test_swap_empty) {
   using std::swap;
   swap(map, map2);
 
-  TORCH_INTERNAL_ASSERT(
-      map ==
-      (ska_ordered::
-           order_preserving_flat_hash_map<std::int64_t, std::int64_t>{}));
+  TORCH_INTERNAL_ASSERT(map.empty());
   TORCH_INTERNAL_ASSERT(
       map2 ==
       (ska_ordered::order_preserving_flat_hash_map<std::int64_t, std::int64_t>{

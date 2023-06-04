@@ -11,7 +11,7 @@ TEST(TempFileTest, MatchesExpectedPattern) {
 #endif // !defined(_WIN32)
 
 static bool directory_exists(const char* path) {
-  struct stat st;
+  struct stat st {};
   return (stat(path, &st) == 0 && (st.st_mode & S_IFDIR));
 }
 
