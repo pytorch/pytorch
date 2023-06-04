@@ -226,7 +226,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
-    'c10/core/**/*.cpp',
+    'c10/**/*.cpp',
     'torch/csrc/fx/**/*.cpp',
     'torch/csrc/generic/**/*.cpp',
     'torch/csrc/onnx/**/*.cpp',
@@ -239,6 +239,7 @@ exclude_patterns = [
     # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
     # in a follow up PR.
     # that are not easily converted to accepted c++
+    'c10/cuda/**/*.cpp',
     'c10/test/**/*.cpp',
     'torch/csrc/jit/passes/onnx/helper.cpp',
     'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
