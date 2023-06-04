@@ -716,7 +716,7 @@ def lu_unpack_meta(
     )
     if unpack_pivots:
         torch._check(
-            pivots.dtype == torch.int,
+            pivots.dtype == torch.int32,
             lambda: (
                 "torch.lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype.\n"
                 "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor"
