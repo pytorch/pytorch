@@ -1124,6 +1124,31 @@ class TestPrims(TestCase):
             for a, b in zip(references, results):
                 self.assertEqual(a, b)
 
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_functional_rng_wrappers(self, device, dtype):
+        size = (10, 10)
+
+        torch.cuda.manual_seed(123)
+        ref1 = torch.rand(10, device=device, dtype=dtype)
+        ref2 = torch.rand(10, device=device, dtype=dtype)
+
+
+        torch.cuda.manual_seed(123)
+        rng_state1, res1 = torch.ops.run_and_save_rng_state(torch.rand, 10, device=device, dtype=dtype)
+        rng_state2, res2 = torch.ops.run_and_save_rng_state(torch.rand, 10, device=device, dtype=dtype)
+
+        torch.cuda.manual_seed(123)
+        res3 = torch.ops.run_with_rng_state(rng_state1, torch.rand, 10, device=device, dtype=dtype)
+        res4 = torch.ops.run_with_rng_state(rng_state2, torch.rand, 10, device=device, dtype=dtype)
+        torch.rand(10, device=device, dtype=dtype)
+
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
+        self.assertEqual(ref1, res3)
+        self.assertEqual(ref2, res4)
+
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
         r = make_tensor((2,), device='cpu', dtype=torch.float)
