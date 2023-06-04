@@ -938,15 +938,17 @@ class FakeTensor(torch.Tensor):
         # on
         if not fake_mode.allow_meta:
             assert device.type != "meta"
-        # normalize cuda device.
+        # normalize device.
         if device.type == "cuda":
             init_cuda_context()
-            if device.index is None:
-                device = torch.device(f"cuda:{torch.cuda.current_device()}")
 
-        # normalize hpu device.
-        if device.type == "hpu" and device.index is None:
-            device = torch.device(f"hpu:{torch.hpu.current_device()}")
+        if (
+            device.type in ["cuda", "hpu", torch._C._get_privateuse1_backend_name()]
+            and device.index is None
+        ):
+            device = torch.device(
+                f"{device.type}:{getattr(torch, device.type).current_device()}"
+            )
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
