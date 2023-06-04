@@ -3210,6 +3210,8 @@ class FallbackKernel(ExternKernelAlloc):
                 if V.graph.cpp_wrapper
                 else f"aten.{kernel.__name__}"
             )
+        elif getattr(torch.ops, kernel.__name__, None) is kernel:
+            self.kernel = f"torch.ops.{kernel.__name__}"
         else:
             if V.graph.cpp_wrapper:
                 from torch._inductor.codegen.wrapper import (
@@ -3268,6 +3270,23 @@ class FallbackKernel(ExternKernelAlloc):
         self.kwargs.update(kwargs)
         return args
 
+    @staticmethod
+    def find_device(tensor_args, example_output):
+        if tensor_args:
+            return tensor_args[0].get_device()
+        if isinstance(example_output, torch.Tensor):
+            return example_output.device
+        if isinstance(example_output, (list, tuple)):
+            devices = {FallbackKernel.find_device(None, x) for x in example_output}
+            # Remove None
+            devices = [device for device in devices if device]
+            if len(devices) == 1:
+                return devices[0]
+            for device in devices:
+                if "cuda" in device.type:
+                    return device
+        return None
+
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
             args = [*self.codegen_args(), *self.codegen_kwargs()]
@@ -3305,13 +3324,10 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        assert tensor_args or isinstance(
-            example_output, torch.Tensor
-        ), "Not sure where to find device info"
+        device = FallbackKernel.find_device(tensor_args, example_output)
+        assert device, "Not sure where to find device info"
         packed = FallbackKernel(
-            MultiOutputLayout(
-                tensor_args[0].get_device() if tensor_args else example_output.device
-            ),
+            MultiOutputLayout(device),
             kernel,
             tensor_args,
             non_tensor_args,
