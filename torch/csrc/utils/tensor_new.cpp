@@ -217,7 +217,23 @@ void recursive_store(
     if (is_symint) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymInt>();
-      *(int64_t*)data = val.guard_int(__FILE__, __LINE__);
+      const auto int_val = val.guard_int(__FILE__, __LINE__);
+      switch (elementSize) {
+        case 8:
+          *reinterpret_cast<int64_t*>(data) = int_val;
+          break;
+        case 4:
+          *reinterpret_cast<int32_t*>(data) = static_cast<int32_t>(int_val);
+          break;
+        case 2:
+          *reinterpret_cast<int16_t*>(data) = static_cast<int16_t>(int_val);
+          break;
+        case 1:
+          *reinterpret_cast<int8_t*>(data) = static_cast<int8_t>(int_val);
+          break;
+        default:
+          TORCH_CHECK(false, "Unexpected elementSize ", elementSize);
+      }
       return;
     }
     torch::utils::store_scalar(data, scalarType, obj);
@@ -820,7 +836,7 @@ class CheckSparseTensorInvariantsContext {
   bool state;
 };
 
-Tensor sparse_compressed_tensor_ctor_worker(
+static Tensor sparse_compressed_tensor_ctor_worker(
     std::string name,
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
@@ -1635,7 +1651,10 @@ Tensor asarray(
       THPObjectPtr ptr;
       auto arr = obj;
 
-      if (is_numpy_scalar) {
+      // PyArray_CheckScalar is true for both scalars and 0-dim arrays, per
+      // https://numpy.org/devdocs/reference/c-api/array.html#c.PyArray_CheckScalar
+      // But for 0-dim arrays no `PyArray_FromScalar` call is needed
+      if (is_numpy_scalar && !is_numpy_array) {
         TORCH_CHECK(
             !force_alias,
             "can't alias NumPy scalars. ",

@@ -5,24 +5,6 @@
 
 #pragma once
 
-// Caffe2 version. The plan is to increment the minor version every other week
-// as a track point for bugs, until we find a proper versioning cycle.
-
-#define CAFFE2_VERSION_MAJOR @CAFFE2_VERSION_MAJOR@
-#define CAFFE2_VERSION_MINOR @CAFFE2_VERSION_MINOR@
-#define CAFFE2_VERSION_PATCH @CAFFE2_VERSION_PATCH@
-
-static_assert(
-    CAFFE2_VERSION_MINOR < 100,
-    "Programming error: you set a minor version that is too big.");
-static_assert(
-    CAFFE2_VERSION_PATCH < 100,
-    "Programming error: you set a patch version that is too big.");
-
-#define CAFFE2_VERSION                                         \
-  (CAFFE2_VERSION_MAJOR * 10000 + CAFFE2_VERSION_MINOR * 100 + \
-   CAFFE2_VERSION_PATCH)
-
 #cmakedefine CAFFE2_BUILD_SHARED_LIBS
 #cmakedefine CAFFE2_FORCE_FALLBACK_CUDA_MPI
 #cmakedefine CAFFE2_HAS_MKL_DNN

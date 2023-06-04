@@ -229,6 +229,7 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "default_stream",
       "current_device",
       "_exchange_device",
+      "_maybe_exchange_device",
       "set_device",
       "device_index",
       "device_count",
@@ -372,7 +373,8 @@ SugaredValuePtr ModuleValue::getitem(
     throw ErrorReport(loc)
         << "Unable to extract string literal index. "
         << "ModuleDict indexing is only supported with string literals. "
-        << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): ...'";
+        << "For example, 'i = \"a\"; self.layers[i](x)' will fail because i is not a literal. "
+        << "Enumeration of ModuleDict is supported, e.g. 'for k, v in self.items(): out = v(inp)'";
   }
   throw ErrorReport(loc)
       << "Only ModuleList, Sequential, ModuleDict, "
@@ -1006,13 +1008,19 @@ bool isNamedTupleClass(const py::object& obj) {
   return is_tuple_class == 1 && py::hasattr(obj, "_fields");
 }
 
-TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
+TypePtr registerNamedTuple(
+    const py::object& obj,
+    const SourceRange& loc,
+    const ResolutionCallback& rcb) {
   TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
   auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
       py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
 
-  py::object props = py::module::import("torch._jit_internal")
-                         .attr("_get_named_tuple_properties")(obj, loc);
+  // Note: we need to pass rcb to resolve ForwardRef annotations. See
+  // [Note: ForwardRef annotations in NamedTuple attributes]
+  py::object props =
+      py::module::import("torch._jit_internal")
+          .attr("_get_named_tuple_properties")(obj, loc, py::cpp_function(rcb));
 
   std::string unqualName;
   std::vector<std::string> field_names;
@@ -1290,7 +1298,14 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (isNamedTupleClass(obj)) {
-    auto tuple_type = registerNamedTuple(obj, loc)->expect<TupleType>();
+    // The use of fakeRcb here prevents us from correctly resolving ForwardRef
+    // annotations on NamedTuple attributes for instances whose types are
+    // inferred. See #95858 for more details, as well as
+    // [Note: ForwardRef annotations in NamedTuple attributes]
+    auto fakeRcb =
+        py::module::import("torch.jit.annotations").attr("_fake_rcb");
+    auto tuple_type =
+        registerNamedTuple(obj, loc, fakeRcb)->expect<TupleType>();
     return std::make_shared<NamedTupleConstructor>(tuple_type);
   }
 

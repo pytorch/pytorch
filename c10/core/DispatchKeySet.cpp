@@ -1,6 +1,5 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
 namespace c10 {
 
@@ -259,7 +258,7 @@ std::array<FunctionalityOffsetAndMask, num_functionality_keys>
 initializeFunctionalityOffsetsAndMasks() {
   std::array<FunctionalityOffsetAndMask, num_functionality_keys>
       offsets_and_masks;
-  // manualy set the first entry, which corresponds to Undefined.
+  // manually set the first entry, which corresponds to Undefined.
   offsets_and_masks[0] = FunctionalityOffsetAndMask(0, 0);
   // loop through every functionality key (aside from Undefined).
   for (const auto functionality_idx : c10::irange(1, num_functionality_keys)) {

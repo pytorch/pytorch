@@ -59,11 +59,11 @@ def foo_add():
     return torch.add(torch.ones(1), torch.ones(1))
 
 def udf_with_torch_ops(device=-1, use_record_function=False):
-    device_ctx = contextlib.suppress() if device == -1 else torch.cuda.device(device)
+    device_ctx = contextlib.nullcontext() if device == -1 else torch.cuda.device(device)
     record_function_ctx = (
         torch.autograd.profiler.record_function("##forward##")
         if use_record_function
-        else contextlib.suppress()
+        else contextlib.nullcontext()
     )
     with device_ctx, record_function_ctx:
         t1, t2 = torch.ones(1), torch.ones(1)
@@ -1587,10 +1587,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         og_func = rpc.api._wait_all_workers
 
         def wait_all_workers_sleep(timeout):
-            try:
-                rpc.api._all_gather(SlowPickleClass(0.5), timeout=timeout)
-            except RuntimeError as ex:
-                raise ex
+            rpc.api._all_gather(SlowPickleClass(0.5), timeout=timeout)
 
         rpc.api._wait_all_workers = wait_all_workers_sleep
 
@@ -1839,7 +1836,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 trace = json.load(f)
                 event_names = [event['name'] for event in trace]
                 for expected_event_name in EXPECTED_REMOTE_EVENTS + [RPCExecMode.ASYNC.value]:
-                    event_exists = any([expected_event_name in event_name for event_name in event_names])
+                    event_exists = any(expected_event_name in event_name for event_name in event_names)
                     self.assertTrue(event_exists)
 
     @dist_init
@@ -1849,7 +1846,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             return
 
         # Spawn multiple threads that send RPCs to ensure keys are correctly
-        # prefixied when there are multiple RPCs being created/in flight at the
+        # prefixed when there are multiple RPCs being created/in flight at the
         # same time.
         dst_ranks = [rank for rank in range(0, self.world_size) if rank != self.rank]
 
@@ -2164,7 +2161,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         if self.rank == 1:
             with p() as prof:
                 record_function_ctx_mgr = (
-                    contextlib.suppress()
+                    contextlib.nullcontext()
                     if not use_record_function
                     else torch.autograd.profiler.record_function(
                         "foo"
@@ -2903,7 +2900,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         def launched_rpc(events):
             expected_name = f"rpc_{RPCExecMode.ASYNC.value}#_rref_typeof_on_owner"
-            return any([e.name.startswith(expected_name) for e in events])
+            return any(e.name.startswith(expected_name) for e in events)
 
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))
@@ -3074,7 +3071,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init(setup_rpc=True)
     def test_call_method_on_rref(self):
         """
-        Tests that it is possible to call an instance method on a remote objet
+        Tests that it is possible to call an instance method on a remote object
         by using rref.owner() as destination of the call.
         """
         vals = [10, 2, 5, 7]
@@ -6116,7 +6113,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             options.set_device_map(input_src, {remote_device: local_device})
         elif self.rank == 2:
             # worker2 will get the out RRef and call to_here() and hence, needs
-            # to configure devcie map.
+            # to configure device map.
             options.set_device_map(model_dst, {local_device: remote_device})
 
         rpc.init_rpc(

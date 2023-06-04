@@ -40,7 +40,7 @@ jobs:
       keep-going: ${{ steps.filter.outputs.keep-going }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           fetch-depth: 1
           submodules: false
@@ -68,7 +68,7 @@ jobs:
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -163,7 +163,7 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
 
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
 
           # sanitize the input commit message and PR body here:
           #
@@ -210,7 +210,7 @@ jobs:
 
       - name: Print remaining test logs
         shell: bash
-        if: always()
+        if: always() && steps.test.conclusion
         run: |
           cat test/**/*.log || true
 

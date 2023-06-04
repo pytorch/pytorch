@@ -89,7 +89,7 @@ struct GuardElimination {
     // uses on *all* parameters are moved to the same anchor node
     // and they may come in different order after the anchor node
     // e.g. (anchor, guard_x, guard_y, guard_x, guard_y)
-    // this pass recognizes contigious streches of guards and
+    // this pass recognizes contiguous stretches of guards and
     // keeps track of the guards it's seen for each def. the next time
     // the guard on the same def, it simply removes it.
     std::unordered_map<Value*, Node*> inputs_to_guards;

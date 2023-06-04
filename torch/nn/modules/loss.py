@@ -426,7 +426,6 @@ class KLDivLoss(_Loss):
     .. warning::
         :attr:`reduction`\ `= "mean"` doesn't return the true KL divergence value, please use
         :attr:`reduction`\ `= "batchmean"` which aligns with the mathematical definition.
-        In a future release, `"mean"` will be changed to be the same as `"batchmean"`.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -605,8 +604,8 @@ class BCELoss(_WeightedLoss):
 
         >>> m = nn.Sigmoid()
         >>> loss = nn.BCELoss()
-        >>> input = torch.randn(3, requires_grad=True)
-        >>> target = torch.empty(3).random_(2)
+        >>> input = torch.randn(3, 2, requires_grad=True)
+        >>> target = torch.rand(3, 2, requires_grad=False)
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
@@ -691,8 +690,14 @@ class BCEWithLogitsLoss(_Loss):
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        pos_weight (Tensor, optional): a weight of positive examples.
-                Must be a vector with length equal to the number of classes.
+        pos_weight (Tensor, optional): a weight of positive examples to be broadcasted with target.
+            Must be a tensor with equal size along the class dimension to the number of classes.
+            Pay close attention to PyTorch's broadcasting semantics in order to achieve the desired
+            operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
+            size [B, C, H, W] will apply different pos_weights to each element of the batch or
+            [C, H, W] the same pos_weights across the batch. To apply the same positive weight
+            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            Default: ``None``
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -735,7 +740,7 @@ class HingeEmbeddingLoss(_Loss):
     .. math::
         l_n = \begin{cases}
             x_n, & \text{if}\; y_n = 1,\\
-            \max \{0, \Delta - x_n\}, & \text{if}\; y_n = -1,
+            \max \{0, margin - x_n\}, & \text{if}\; y_n = -1,
         \end{cases}
 
     and the total loss functions is
@@ -1070,8 +1075,8 @@ class CrossEntropyLoss(_WeightedLoss):
                 \text{if reduction} = \text{`sum'.}
             \end{cases}
 
-      Note that this case is equivalent to the combination of :class:`~torch.nn.LogSoftmax` and
-      :class:`~torch.nn.NLLLoss`.
+      Note that this case is equivalent to applying :class:`~torch.nn.LogSoftmax`
+      on an input, followed by :class:`~torch.nn.NLLLoss`.
 
     - Probabilities for each class; useful when labels beyond a single class per minibatch item
       are required, such as for blended labels, label smoothing, etc. The unreduced (i.e. with
@@ -1711,7 +1716,7 @@ class CTCLoss(_Loss):
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,C)
         >>> # xdoctest: +SKIP("FIXME: error in doctest")
-        >>> input = torch.randn(T, C).log_softmax(2).detach().requires_grad_()
+        >>> input = torch.randn(T, C).log_softmax(1).detach().requires_grad_()
         >>> input_lengths = torch.tensor(T, dtype=torch.long)
         >>>
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)

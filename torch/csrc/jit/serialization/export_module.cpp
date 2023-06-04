@@ -54,7 +54,7 @@ CompilationOptions getOptionsFromGlobal() {
   return compilation_options;
 }
 
-IValue to_tuple(std::initializer_list<IValue> ivalues) {
+static IValue to_tuple(std::initializer_list<IValue> ivalues) {
   return c10::ivalue::Tuple::create(ivalues);
 }
 
@@ -176,7 +176,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   // operators
   std::vector<IValue> operators;
   operators.reserve(mobile_code.op_names_.size());
-  for (int i = 0; i < mobile_code.op_names_.size(); ++i) {
+  for (const auto i : c10::irange(mobile_code.op_names_.size())) {
     const auto& opname = mobile_code.op_names_[i];
     const int size = mobile_code.operator_input_sizes_[i];
     if (BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()) {

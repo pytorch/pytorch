@@ -22,7 +22,7 @@ jobs:
       keep-going: ${{ steps.filter.outputs.keep-going }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           fetch-depth: 1
           submodules: false
@@ -43,7 +43,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Set up JDK 8
         uses: actions/setup-java@v3
@@ -73,7 +73,7 @@ jobs:
           timeout_minutes: 10
           max_attempts: 5
           command: |
-            sh scripts/buck_setup.sh
+            bash scripts/buck_setup.sh
 
       - name: Build tools
         run: |
@@ -122,3 +122,7 @@ jobs:
       - name: Build everything
         run: |
           buck build //... --keep-going
+
+      - name: Build aten_cpu@shared
+        run: |
+          buck build :aten_cpu#linux-x86_64,shared

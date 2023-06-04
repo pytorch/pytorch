@@ -650,15 +650,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(model, (x, y, z), input_names=("x", "y", "z"))
         self.run_test(model, (x,), {"y": y, "z": z}, input_names=("x", "y", "z"))
-
-        # Requires input_names to be set so that we can feed the inputs properly into ORT.
-        # TODO: Export default values as ONNX initializers, then this should not raise.
-        # https://msdata.visualstudio.com/Vienna/_workitems/edit/969268
-        # Default values are accessible via FunctionSchema.
-        with self.assertRaisesRegex(
-            ValueError, "Model requires 3 inputs. Input Feed contains 2"
-        ):
-            self.run_test(model, (x,), {"y": y}, input_names=("x", "y"))
+        self.run_test(model, (x,), {"y": y}, input_names=("x", "y"))
 
         for example_inputs, example_kwargs in (
             ((x, y, None), {}),
@@ -742,16 +734,28 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(2, 3)
         model = torch.jit.script(Model())
 
-        # TODO: Export default values as ONNX initializers, then this should not raise.
-        # https://msdata.visualstudio.com/Vienna/_workitems/edit/969268
-        # Default values are accessible via FunctionSchema.
-        with self.assertRaisesRegex(
-            ValueError, "Model requires 2 inputs. Input Feed contains 1"
-        ):
-            self.run_test(model, (x,))
-            self.run_test(model, (), {"y": y})
+        # Optional supports None inputs
+        self.run_test(model, (x,))
+        # NOTE: default value is not supported on ONNX, so torch and ONNX has
+        # different behavior
+        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close!"):
+            self.run_test(model, (), {"y": y}, input_names=["y"])
+
         self.run_test(model, (x, y))
         self.run_test(model, (), {"x": x, "y": y}, input_names=("x", "y"))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logit(self):
+        class Logit(torch.nn.Module):
+            def __init__(self, eps):
+                super(Logit, self).__init__()
+                self.eps = eps
+
+            def forward(self, x):
+                return x.logit(self.eps)
+
+        model = Logit(eps=1e-6)
+        self.run_test(model, torch.randn(1, 3, 640, 640))
 
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
@@ -1152,6 +1156,27 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
                 self.conv3 = torch.nn.Conv3d(
                     16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0)
+                )
+
+            def forward(self, input1, input2, input3):
+                return self.conv1(input1), self.conv2(input2), self.conv3(input3)
+
+        x1 = torch.randn(20, 16, 50)
+        x2 = torch.randn(20, 16, 50, 50)
+        x3 = torch.randn(20, 16, 10, 50, 50)
+
+        self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
+
+    def test_conv_str_padding(self):
+        class TraceModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv1d(16, 33, 3, padding="valid")
+                self.conv2 = torch.nn.Conv2d(
+                    16, 33, (3, 5), stride=1, padding="valid", dilation=(3, 1)
+                )
+                self.conv3 = torch.nn.Conv3d(
+                    16, 33, (3, 5, 2), stride=1, padding="same"
                 )
 
             def forward(self, input1, input2, input3):
@@ -3984,6 +4009,49 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"indices": {0: "a", 1: "b"}, "src": {0: "c", 1: "d"}},
         )
 
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_scatter_reduce(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x, index, input):
+                y_max = input.scatter_reduce(0, index, x, reduce="amax")
+                y_sum = input.scatter_reduce(0, index, x, reduce="sum")
+                y_min = input.scatter_reduce(0, index, x, reduce="amin")
+                y_mul = input.scatter_reduce(0, index, x, reduce="prod")
+                return y_max, y_sum, y_min, y_mul
+
+        model = Model()
+        model.eval()
+
+        src = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        index = torch.tensor([0, 1, 0, 1, 2, 1])
+        input = torch.tensor([1.0, 2.0, 3.0, 8.0])
+
+        self.run_test(model, (src, index, input))
+
+    @skipIfUnsupportedMinOpsetVersion(16)
+    def test_scatter_reduce_self_rank_zero(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(self, x, index, input):
+                y_max = input.scatter_reduce(0, index, x, reduce="amax")
+                y_sum = input.scatter_reduce(0, index, x, reduce="sum")
+                y_min = input.scatter_reduce(0, index, x, reduce="amin")
+                y_mul = input.scatter_reduce(0, index, x, reduce="prod")
+                return y_max, y_sum, y_min, y_mul
+
+        model = Model()
+        model.eval()
+
+        empty_tensor = torch.tensor([])
+        empty_idx = torch.tensor([], dtype=torch.int64)
+
+        self.run_test(model, (empty_tensor, empty_idx, empty_tensor))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_bucketize(self):
         class BucketModel(torch.nn.Module):
@@ -5210,6 +5278,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x, another_repeats)],
             input_names=["input_1", "repeats_1"],
             dynamic_axes={"repeats_1": {0: "r"}},
+        )
+
+        class DynamicFlattenModel(torch.nn.Module):
+            def forward(self, x):
+                return x.repeat_interleave(2)
+
+        x = torch.tensor([1, 2, 3])
+        self.run_test(
+            DynamicFlattenModel(),
+            x,
+            input_names=["input_1"],
+            dynamic_axes={"input_1": {0: "w"}},
         )
 
     @skipIfUnsupportedMinOpsetVersion(13)
@@ -6606,7 +6686,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, x):
-                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.bool)
                 return x.masked_fill(mask, 2)
 
         x = torch.zeros(4, 2, 3, requires_grad=True)
@@ -6624,7 +6704,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class MaskedFillModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.bool)
                 x.masked_fill_(mask, 2)
                 return x
 
@@ -8600,7 +8680,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
-
         x = torch.rand(5).log()
         y = torch.rand(5)
         self._kldiv_loss(x, y)
@@ -9712,26 +9791,34 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
+            input_names = ["input"]
 
             directions = 2 if bidirectional else 1
 
             if initial_state:
                 h0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
                 inputs.append(h0)
+                input_names.append("h0")
             if packed_sequence != 0:
                 inputs.append(torch.IntTensor(seq_lengths))
+                input_names.append("seq_lengths")
             if len(inputs) == 1:
                 input = inputs[0]
             else:
                 input = tuple(inputs)
-            return input
+            return input, input_names
 
-        input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input)
+        input, input_names = make_input(RNN_BATCH_SIZE)
+        dynamic_axes = {"input": [0, 1], "seq_lengths": [0]}
+        if initial_state:
+            dynamic_axes.update({"h0": [1]})
+        export_options = {"input_names": input_names, "dynamic_axes": dynamic_axes}
 
         # test that the model still runs with a different batch size
-        other_input = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, other_input)
+        other_input, _ = make_input(RNN_BATCH_SIZE + 1)
+        self.run_test(
+            model, input, additional_test_inputs=[other_input], **export_options
+        )
 
     def _lstm_test(
         self,
@@ -9779,27 +9866,35 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
-
+            input_names = ["input"]
             directions = 2 if bidirectional else 1
 
             if initial_state:
                 h0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
                 c0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
                 inputs.append((h0, c0))
+                input_names.append("h0")
+                input_names.append("c0")
             if packed_sequence != 0:
                 inputs.append(torch.IntTensor(seq_lengths))
+                input_names.append("seq_lengths")
             if len(inputs) == 1:
                 input = inputs[0]
             else:
                 input = tuple(inputs)
-            return input
+            return input, input_names
 
-        input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input)
+        input, input_names = make_input(RNN_BATCH_SIZE)
+        dynamic_axes = {"input": [0, 1], "seq_lengths": [0]}
+        if initial_state:
+            dynamic_axes.update({"h0": [1], "c0": [1]})
+        export_options = {"input_names": input_names, "dynamic_axes": dynamic_axes}
 
         # test that the model still runs with a different batch size
-        other_input = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, other_input)
+        other_input, _ = make_input(RNN_BATCH_SIZE + 1)
+        self.run_test(
+            model, input, additional_test_inputs=[other_input], **export_options
+        )
 
     def _gru_test(
         self,
@@ -9922,26 +10017,34 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
+            input_names = ["input"]
 
             directions = 2 if bidirectional else 1
 
             if initial_state:
                 h0 = torch.randn(directions * layers, batch_size, RNN_HIDDEN_SIZE)
                 inputs.append(h0)
+                input_names.append("h0")
             if packed_sequence != 0:
                 inputs.append(torch.IntTensor(seq_lengths))
+                input_names.append("seq_lengths")
             if len(inputs) == 1:
                 input = inputs[0]
             else:
                 input = tuple(inputs)
-            return input
+            return input, input_names
 
-        input = make_input(RNN_BATCH_SIZE)
-        self.run_test(model, input)
+        input, input_names = make_input(RNN_BATCH_SIZE)
+        dynamic_axes = {"input": [0, 1], "seq_lengths": [0]}
+        if initial_state:
+            dynamic_axes.update({"h0": [1]})
+        export_options = {"input_names": input_names, "dynamic_axes": dynamic_axes}
 
         # test that the model still runs with a different batch size
-        other_input = make_input(RNN_BATCH_SIZE + 1)
-        self.run_test(model, other_input)
+        other_input, _ = make_input(RNN_BATCH_SIZE + 1)
+        self.run_test(
+            model, input, additional_test_inputs=[other_input], **export_options
+        )
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fake_quantize_per_tensor(self):
@@ -12808,7 +12911,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         name_fn=lambda align_corners: str(align_corners),
     )
     def test_grid_sample(self, mode, padding_mode, align_corners):
-
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
 
         class GridSampleModule(torch.nn.Module):

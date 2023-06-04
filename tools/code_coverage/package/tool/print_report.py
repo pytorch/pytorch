@@ -38,7 +38,6 @@ def is_this_type_of_tests(target_name: str, test_set_by_type: Set[str]) -> bool:
 def print_test_by_type(
     tests: TestList, test_set_by_type: Set[str], type_name: str, summary_file: IO[str]
 ) -> None:
-
     print("Tests " + type_name + " to collect coverage:", file=summary_file)
     for test in tests:
         if is_this_type_of_tests(test.name, test_set_by_type):

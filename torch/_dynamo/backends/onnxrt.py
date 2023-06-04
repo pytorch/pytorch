@@ -60,6 +60,9 @@ def onnxrt(gm, example_inputs, *, filename=None, provider=None):
 
     device_type = device_from_inputs(example_inputs).type
     example_outputs = gm(*example_inputs)
+    if len(example_outputs) == 0:
+        log.warning("Explicitly fall back to eager due to zero output")
+        return gm.forward
     output_spec = [
         (o.shape, o.dtype, o.layout, o.device, o.requires_grad) for o in example_outputs
     ]
@@ -87,7 +90,7 @@ def onnxrt(gm, example_inputs, *, filename=None, provider=None):
         for name, value in zip(input_names, args):
             if name not in active_inputs:
                 log.warning(
-                    f"input {name} skipped as not found in onnx inference session"
+                    "input %s skipped as not found in onnx inference session", name
                 )
                 continue
             dev = value.device

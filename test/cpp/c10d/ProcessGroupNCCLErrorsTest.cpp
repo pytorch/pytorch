@@ -224,7 +224,7 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   // Now run all reduce with errors.
   pg.set_timedout_error();
   work = pg.allreduce(tensors_);
-  EXPECT_THROW(work->wait(), c10::Error);
+  EXPECT_THROW(work->wait(), std::runtime_error);
 
   // Communicators might be aborted here, further operations would fail.
 }

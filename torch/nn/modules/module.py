@@ -433,11 +433,15 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
     call_super_init: bool = False
+    _compiled_call_impl : Optional[Callable] = None
+
+
 
     def __init__(self, *args, **kwargs) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
+
         torch._C._log_api_usage_once("python.nn_module")
 
         # Backward compatibility: no args used to be allowed when call_super_init=False
@@ -1335,7 +1339,7 @@ class Module:
                           "is deprecated and will be removed in future versions. This hook will be missing "
                           "some grad_output. Please use register_full_backward_hook to get the documented behavior.")
         else:
-            # At this point the grad_ouput part of the hook will most likely be correct
+            # At this point the grad_output part of the hook will most likely be correct
             inputs_grad_fn = {i.grad_fn for i in inputs if i.grad_fn is not None}
 
             next_functions = {n[0] for n in grad_fn.next_functions}
@@ -1491,6 +1495,12 @@ class Module:
                 tracing_state.pop_scope()
         return result
 
+    def _wrapped_call_impl(self, *args, **kwargs):
+        if self._compiled_call_impl is not None:
+            return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+        else:
+            return self._call_impl(*args, **kwargs)
+
     def _call_impl(self, *args, **kwargs):
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
@@ -1572,10 +1582,16 @@ class Module:
 
         return result
 
-    __call__ : Callable[..., Any] = _call_impl
+    __call__ : Callable[..., Any] = _wrapped_call_impl
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_compiled_call_impl", None)
+        return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+
         # Support loading old checkpoints that don't have the following attrs:
         if '_forward_pre_hooks' not in self.__dict__:
             self._forward_pre_hooks = OrderedDict()
@@ -1718,9 +1734,6 @@ class Module:
             prefix (str): the prefix for parameters and buffers used in this
                 module
         """
-        for hook in self._state_dict_pre_hooks.values():
-            hook(self, prefix, keep_vars)
-
         for name, param in self._parameters.items():
             if param is not None:
                 destination[prefix + name] = param if keep_vars else param.detach()
@@ -1743,7 +1756,7 @@ class Module:
     def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Any]:
         ...
 
-    # TODO: Change `*args` to `*` and remove the copprespinding warning in docs when BC allows.
+    # TODO: Change `*args` to `*` and remove the corresponding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing references to the whole state of the module.
@@ -1812,6 +1825,8 @@ class Module:
         if hasattr(destination, "_metadata"):
             destination._metadata[prefix[:-1]] = local_metadata
 
+        for hook in self._state_dict_pre_hooks.values():
+            hook(self, prefix, keep_vars)
         self._save_to_state_dict(destination, prefix, keep_vars)
         for name, module in self._modules.items():
             if module is not None:
@@ -2263,8 +2278,7 @@ class Module:
                 if module is None:
                     continue
                 submodule_prefix = prefix + ('.' if prefix else '') + name
-                for m in module.named_modules(memo, submodule_prefix, remove_duplicate):
-                    yield m
+                yield from module.named_modules(memo, submodule_prefix, remove_duplicate)
 
     def train(self: T, mode: bool = True) -> T:
         r"""Sets the module in training mode.
@@ -2422,3 +2436,14 @@ class Module:
         replica._is_replica = True  # type: ignore[assignment]
 
         return replica
+
+    def compile(self, *args, **kwargs):
+        """
+        Compile this Module's forward using :func:`torch.compile`.
+
+        This Module's `__call__` method is compiled and all arguments are passed as-is
+        to :func:`torch.compile`.
+
+        See :func:`torch.compile` for details on the arguments for this function.
+        """
+        self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)

@@ -382,7 +382,7 @@ Tensor empty_like(
 
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
-      result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
+      result = at::empty_strided_symint(self.sym_sizes(), self.sym_strides(), options.memory_format(c10::nullopt));
     } else if (self.unsafeGetTensorImpl()->support_as_strided() && self.layout() == kStrided) {
       // If input tensor is not dense and non-overlapping but strided, we will infer an output strides
       // which keeps the layout permutation of the input tensor.
@@ -391,11 +391,11 @@ Tensor empty_like(
       result = at::empty_strided(self.sizes(), strides, options.memory_format(c10::nullopt));
     } else {
       // See Note [Explicit nullopt MemoryFormat argument]
-      result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
+      result = at::empty_symint(self.sym_sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
     }
   } else {
     // See Note [Explicit nullopt MemoryFormat argument]
-    result = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
+    result = at::empty_symint(self.sym_sizes(), options.memory_format(memory_format), c10::nullopt);
   }
 
   if (self.opt_names()) {
@@ -1241,7 +1241,9 @@ Tensor zeros_like(
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  auto other_options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  // Prefer values passed in explicitly, but default to value from self.
+  auto options = self.options().merge_in(other_options);
 
   if (options.layout() == kSparse) {
     TORCH_CHECK(

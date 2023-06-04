@@ -33,7 +33,7 @@ Tensor cat_batch(const Tensor& tensor, const ITensorListRef& tensors, MetalTenso
                           X, "copy_offset", "copy_offset_nonarray")];
     id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
         newBufferWithLength:1 * sizeof(ushort)
-                    options:MTLResourceOptionCPUCacheModeWriteCombined];
+                    options:MTLResourceCPUCacheModeWriteCombined];
     ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
     offsetBufferPtr[0] = cat_dim4_pointer;
 
@@ -91,7 +91,7 @@ Tensor cat_feature(const Tensor& tensor, const ITensorListRef& tensors, MetalTen
                          ]];
       id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
           newBufferWithLength:6 * sizeof(ushort)
-                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+                      options:MTLResourceCPUCacheModeWriteCombined];
       ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
       offsetBufferPtr[0] = (X.featureChannels + tex_offset + 3) / 4;
       offsetBufferPtr[1] = (Y.featureChannels + 3) / 4;
@@ -141,7 +141,7 @@ Tensor cat_feature(const Tensor& tensor, const ITensorListRef& tensors, MetalTen
                          ]];
       id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
           newBufferWithLength:2 * sizeof(ushort)
-                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+                      options:MTLResourceCPUCacheModeWriteCombined];
       ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
       offsetBufferPtr[0] = channel_offset / 4;
       offsetBufferPtr[1] = (Y.featureChannels + 3) / 4;

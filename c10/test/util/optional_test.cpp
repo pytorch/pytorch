@@ -63,7 +63,7 @@ static_assert(
     sizeof(c10::optional<c10::IntArrayRef>) == sizeof(c10::IntArrayRef),
     "c10::optional<IntArrayRef> should be size-optimized");
 
-TYPED_TEST_CASE(OptionalTest, OptionalTypes);
+TYPED_TEST_SUITE(OptionalTest, OptionalTypes);
 
 TYPED_TEST(OptionalTest, Empty) {
   typename TestFixture::optional empty;
@@ -111,11 +111,11 @@ TEST_P(SelfCompareTest, SelfCompare) {
   EXPECT_THAT(x, Not(Gt(x)));
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     nullopt,
     SelfCompareTest,
     testing::Values(c10::nullopt));
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     int,
     SelfCompareTest,
     testing::Values(c10::make_optional(2)));
@@ -158,7 +158,7 @@ using CmpTestTypes = testing::Types<
     std::pair<long, c10::optional<int>>>;
 template <typename T>
 class CmpTest : public testing::Test {};
-TYPED_TEST_CASE(CmpTest, CmpTestTypes);
+TYPED_TEST_SUITE(CmpTest, CmpTestTypes);
 
 TYPED_TEST(CmpTest, Cmp) {
   TypeParam pair = {2, 3};

@@ -64,13 +64,9 @@ def _compare_mts(mt1, mt2, rtol=1e-05, atol=1e-08):
     if not _tensors_match(a, b, exact=False, rtol=rtol, atol=atol):
         raise ValueError("The data in MaskedTensor mt1 and MaskedTensor mt2 do not match")
 
-def _make_tensor_mask(shape, device):
-    return make_tensor(
-        shape, device=device, dtype=torch.bool, low=0, high=1, requires_grad=False
-    )
 
 def _create_random_mask(shape, device):
-    return torch.randint(0, 2, shape, device=device).bool()
+    return make_tensor(shape, device=device, dtype=torch.bool)
 
 def _generate_sample_data(
     device="cpu", dtype=torch.float, requires_grad=True, layout=torch.strided
@@ -89,7 +85,7 @@ def _generate_sample_data(
     inputs = []
     for s in shapes:
         data = make_tensor(s, device=device, dtype=dtype, requires_grad=requires_grad)  # type: ignore[arg-type]
-        mask = _make_tensor_mask(s, device)
+        mask = _create_random_mask(s, device)
         if layout == torch.sparse_coo:
             mask = mask.to_sparse_coo().coalesce()
             data = data.sparse_mask(mask).requires_grad_(requires_grad)
@@ -508,7 +504,7 @@ class TestReductions(TestCase):
         d = torch.tensor([[0, 1, 2], [3, 4, 5.0]])
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = masked_tensor(d, m)
-        with self.assertRaisesRegex(TypeError, "no implementation found for 'torch._ops.aten.max.default'"):
+        with self.assertRaisesRegex(TypeError, "torch._ops.aten.max.default"):
             mt.max()
 
     def test_sum(self):
@@ -803,7 +799,7 @@ class TestOperators(TestCase):
             input = sample.input
             sample_args, sample_kwargs = sample.args, sample.kwargs
             mask = (
-                _make_tensor_mask(input.shape, device)
+                _create_random_mask(input.shape, device)
                 if "mask" not in sample_kwargs
                 else sample_kwargs.pop("mask")
             )
@@ -849,7 +845,7 @@ class TestOperators(TestCase):
             if input.dim() == 0 or input.numel() == 0:
                 continue
 
-            mask = _make_tensor_mask(input.shape, device)
+            mask = _create_random_mask(input.shape, device)
 
             if torch.count_nonzero(mask) == 0:
                 continue

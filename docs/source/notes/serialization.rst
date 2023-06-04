@@ -55,7 +55,7 @@ Saving tensors preserves their view relationships:
     tensor([ 1,  4,  3,  8,  5, 12,  7, 16,  9])
 
 Behind the scenes, these tensors share the same "storage." See
-`Tensor Views <https://pytorch.org/docs/master/tensor_view.html>`_ for more
+`Tensor Views <https://pytorch.org/docs/main/tensor_view.html>`_ for more
 on views and storage.
 
 When PyTorch saves tensors it saves their storage objects and tensor

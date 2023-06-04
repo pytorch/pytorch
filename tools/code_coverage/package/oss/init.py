@@ -143,7 +143,7 @@ def get_python_run_only(args_run_only: Optional[List[str]]) -> List[str]:
     if detect_compiler_type() == CompilerType.GCC:
         return ["run_test.py"]
     else:
-        # for clang, some tests will result in too large intermidiate files that can't be merged by llvm, we need to skip them
+        # for clang, some tests will result in too large intermediate files that can't be merged by llvm, we need to skip them
         run_only: List[str] = []
         binary_folder = get_oss_binary_folder(TestType.PY)
         g = os.walk(binary_folder)

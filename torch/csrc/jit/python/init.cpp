@@ -85,6 +85,7 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/python_tree_views.h>
 #include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/jit/python/utf8_decoding_ignore.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/decomposition_registry.h>
@@ -993,7 +994,7 @@ void initJITBindings(PyObject* module) {
 #ifdef TORCH_ENABLE_LLVM
             return true;
 #else
-        return false;
+            return false;
 #endif
           })
       .def(
@@ -1124,27 +1125,30 @@ void initJITBindings(PyObject* module) {
             return retval;
           })
       .def("_jit_pass_batch_mm", BatchMM)
-      .def("_jit_decay_packed_param_input_types", [](Graph& g) {
-        for (Value* i : g.inputs()) {
-          if (i->type() ==
-                  getCustomClass(
-                      "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
-              i->type() ==
-                  getCustomClass(
-                      "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
-              i->type() ==
-                  getCustomClass(
-                      "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
-            // Dummy CompleteTensorType to appease ONNX validator.
-            i->setType(TensorType::create(
-                at::kQInt8,
-                c10::kCPU,
-                std::vector<int64_t>{1},
-                std::vector<int64_t>{1},
-                c10::nullopt));
-          }
-        }
-      });
+      .def(
+          "_jit_decay_packed_param_input_types",
+          [](Graph& g) {
+            for (Value* i : g.inputs()) {
+              if (i->type() ==
+                      getCustomClass(
+                          "__torch__.torch.classes.quantized.Conv2dPackedParamsBase") ||
+                  i->type() ==
+                      getCustomClass(
+                          "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
+                  i->type() ==
+                      getCustomClass(
+                          "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
+                // Dummy CompleteTensorType to appease ONNX validator.
+                i->setType(TensorType::create(
+                    at::kQInt8,
+                    c10::kCPU,
+                    std::vector<int64_t>{1},
+                    std::vector<int64_t>{1},
+                    c10::nullopt));
+              }
+            }
+          })
+      .def("_jit_set_utf8_decoding_ignore", &setUTF8DecodingIgnore);
 
   // NB: This isn't actually used for regular PyTorch symbolic tracing;
   // XLA is what needs this
@@ -1345,6 +1349,7 @@ void initJITBindings(PyObject* module) {
                 name, reinterpret_cast<const char*>(data), size);
           })
       .def("archive_name", &PyTorchStreamWriter::archiveName)
+      .def("serialization_id", &PyTorchStreamWriter::serializationId)
       .def(
           "get_all_written_records",
           &PyTorchStreamWriter::getAllWrittenRecords);
@@ -1469,6 +1474,7 @@ void initJITBindings(PyObject* module) {
                     at::CPU(scalar_type).typeMeta());
             return at::Tensor(std::move(ptr));
           })
+      .def("serialization_id", &PyTorchStreamReader::serializationId)
       .def("get_all_records", [](PyTorchStreamReader& self) {
         return self.getAllRecords();
       });

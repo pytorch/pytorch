@@ -314,7 +314,7 @@ struct TypeError : public PyTorchError {
 // Translates to Python ValueError
 struct ValueError : public PyTorchError {
   using PyTorchError::PyTorchError;
-  ValueError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  TORCH_PYTHON_API ValueError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_ValueError;
   }
@@ -322,6 +322,7 @@ struct ValueError : public PyTorchError {
 
 // Translates to Python NotImplementedError
 struct NotImplementedError : public PyTorchError {
+  NotImplementedError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   NotImplementedError() = default;
   PyObject* python_type() override {
     return PyExc_NotImplementedError;

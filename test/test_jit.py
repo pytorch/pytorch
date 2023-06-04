@@ -367,7 +367,6 @@ class TestJitProfiler(JitTestCase):
             self.graph_executor_optimize_opt
         )
 
-    @unittest.skipIf(IS_WINDOWS, 'TODO: fix occasional windows failure')
     def test_profiler(self):
         torch._C._set_graph_executor_optimize(False)
 
@@ -450,7 +449,7 @@ class TestJit(JitTestCase):
         buf.seek(0)
 
         files = zipfile.ZipFile(buf).filelist
-        self.assertTrue(any(['archive/constants.pkl' == f.filename for f in files]))
+        self.assertTrue(any('archive/constants.pkl' == f.filename for f in files))
 
     def test_script_fn_pkl(self):
         with self.assertRaisesRegex(pickle.PickleError, "ScriptFunction cannot be pickled"):
@@ -4131,7 +4130,11 @@ def foo(x):
                 return torch.relu(x)
 
         f = torch.jit.script(Foo())
-        self.assertEqual('ScriptObject', str(f._c))
+
+        str_f = str(f._c)
+        self.assertTrue(str_f.startswith('ScriptObject'))
+        self.assertTrue('__torch__.' in str_f)
+        self.assertTrue('.Foo' in str_f)
 
     def test_jitter_bug(self):
         @torch.jit.script
@@ -6126,7 +6129,7 @@ a")
 
         @torch.jit.script
         def test_bool_arith_not(lhs):
-            if not (lhs is None):
+            if lhs is not None:
                 return 1
             else:
                 return 2
@@ -11522,6 +11525,16 @@ dedent """
         g = {'Tuple' : typing.Tuple}
         python_type = eval(empty_tuple_type.annotation_str, g)
         assert python_type is typing.Tuple[()]
+
+    def test_tuple_str(self):
+        tuple1_type = torch._C.TupleType([torch._C.StringType.get()])
+        self.assertEqual(tuple1_type.annotation_str, "Tuple[str]")
+        tuple2_type = torch._C.TupleType([torch._C.StringType.get(), torch._C.StringType.get()])
+        self.assertEqual(tuple2_type.annotation_str, "Tuple[str, str]")
+
+    def test_dict_str(self):
+        dict_type = torch._C.DictType(torch._C.StringType.get(), torch._C.StringType.get())
+        self.assertEqual(dict_type.annotation_str, "Dict[str, str]")
 
     def test_none_type_str(self):
         none_type = torch._C.NoneType.get()

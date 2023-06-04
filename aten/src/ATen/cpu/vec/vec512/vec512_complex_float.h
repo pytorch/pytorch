@@ -680,7 +680,9 @@ public:
     return ret;
   }
   __m512 abs_() const {
-    return _mm512_sqrt_ps(abs_2_());                // abs     abs
+    auto real = _mm512_moveldup_ps(values);    // real real
+    auto imag = _mm512_movehdup_ps(values);    // imag imag
+    return Sleef_hypotf16_u05(real, imag);     // abs  abs
   }
   Vectorized<c10::complex<float>> abs() const {
     const __m512 real_mask = _mm512_castsi512_ps(_mm512_setr_epi32(0xFFFFFFFF, 0x00000000, 0xFFFFFFFF, 0x00000000,
@@ -706,10 +708,7 @@ public:
     auto abs = abs_();
     auto zero = _mm512_setzero_ps();
     auto mask = _mm512_cmp_ps_mask(abs, zero, _CMP_EQ_OQ);
-    auto abs_val = Vectorized(abs);
-
-    auto div = values / abs_val.values;       // x / abs(x)
-
+    auto div = values / abs;
     return _mm512_mask_blend_ps(mask, div, zero);
   }
   __m512 real_() const {
@@ -806,7 +805,7 @@ public:
     return scaled_values.exp();
   }
   Vectorized<c10::complex<float>> expm1() const {
-    AT_ERROR("not supported for complex numbers");
+    return map(std::expm1);
   }
   Vectorized<c10::complex<float>> sin() const {
     return map(std::sin);
@@ -879,7 +878,7 @@ public:
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF));
   }
   Vectorized<c10::complex<float>> operator!=(const Vectorized<c10::complex<float>>& other) const {
-    auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_NEQ_OQ);
+    auto mask = _mm512_cmp_ps_mask(values, other.values, _CMP_NEQ_UQ);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vector, mask, 0xFFFFFFFF));
   }
   Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& other) const {
@@ -1032,12 +1031,16 @@ Vectorized<c10::complex<float>> inline operator^(const Vectorized<c10::complex<f
 
 inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::eq(
     const Vectorized<c10::complex<float>>& other) const {
-  return (*this == other) & Vectorized<c10::complex<float>>(_mm512_set1_ps(1.0f));
+  auto eq = (*this == other);  // compares real and imag individually
+  // If both real numbers and imag numbers are equal, then the complex numbers are equal
+  return (eq.real() & eq.imag()) & Vectorized<c10::complex<float>>(_mm512_set1_ps(1.0f));
 }
 
 inline Vectorized<c10::complex<float>> Vectorized<c10::complex<float>>::ne(
     const Vectorized<c10::complex<float>>& other) const {
-  return (*this != other) & Vectorized<c10::complex<float>>(_mm512_set1_ps(1.0f));
+  auto ne = (*this != other);  // compares real and imag individually
+  // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
+  return (ne.real() | ne.imag()) & Vectorized<c10::complex<float>>(_mm512_set1_ps(1.0f));
 }
 
 #endif

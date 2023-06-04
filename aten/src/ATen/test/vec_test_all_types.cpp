@@ -19,6 +19,8 @@ namespace {
     template <typename T>
     class SignManipulation : public ::testing::Test {};
     template <typename T>
+    class SignManipulationHalfPrecision : public ::testing::Test {};
+    template <typename T>
     class Rounding : public ::testing::Test {};
     template <typename T>
     class SqrtAndReciprocal : public ::testing::Test {};
@@ -61,7 +63,7 @@ namespace {
     template <typename T>
     class FunctionalTests : public ::testing::Test {};
     template <typename T>
-    class FunctionalBF16Tests : public ::testing::Test {};
+    class FunctionalTestsReducedFloat : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -69,36 +71,37 @@ namespace {
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
-    using BFloatTestedTypes = ::testing::Types<vBFloat16>;
-    TYPED_TEST_CASE(Memory, ALLTestedTypes);
-    TYPED_TEST_CASE(Arithmetics, FloatIntTestedTypes);
-    TYPED_TEST_CASE(Comparison, RealFloatIntTestedTypes);
-    TYPED_TEST_CASE(Bitwise, FloatIntTestedTypes);
-    TYPED_TEST_CASE(MinMax, RealFloatIntTestedTypes);
-    TYPED_TEST_CASE(Nan, RealFloatTestedTypes);
-    TYPED_TEST_CASE(Interleave, RealFloatIntTestedTypes);
-    TYPED_TEST_CASE(SignManipulation, FloatIntTestedTypes);
-    TYPED_TEST_CASE(Rounding, RealFloatTestedTypes);
-    TYPED_TEST_CASE(SqrtAndReciprocal, FloatTestedTypes);
-    TYPED_TEST_CASE(SqrtAndReciprocalReal, RealFloatTestedTypes);
-    TYPED_TEST_CASE(FractionAndRemainderReal, RealFloatTestedTypes);
-    TYPED_TEST_CASE(Trigonometric, RealFloatTestedTypes);
-    TYPED_TEST_CASE(ErrorFunctions, RealFloatTestedTypes);
-    TYPED_TEST_CASE(Exponents, RealFloatTestedTypes);
-    TYPED_TEST_CASE(Hyperbolic, RealFloatTestedTypes);
-    TYPED_TEST_CASE(InverseTrigonometricReal, RealFloatTestedTypes);
-    TYPED_TEST_CASE(InverseTrigonometric, FloatTestedTypes);
-    TYPED_TEST_CASE(LGamma, RealFloatTestedTypes);
-    TYPED_TEST_CASE(Logarithm, FloatTestedTypes);
-    TYPED_TEST_CASE(LogarithmReals, RealFloatTestedTypes);
-    TYPED_TEST_CASE(Pow, RealFloatTestedTypes);
-    TYPED_TEST_CASE(RealTests, RealFloatTestedTypes);
-    TYPED_TEST_CASE(RangeFactories, FloatIntTestedTypes);
-    TYPED_TEST_CASE(BitwiseFloatsAdditional, RealFloatTestedTypes);
-    TYPED_TEST_CASE(BitwiseFloatsAdditional2, FloatTestedTypes);
-    TYPED_TEST_CASE(QuantizationTests, QuantTestedTypes);
-    TYPED_TEST_CASE(FunctionalTests, RealFloatIntTestedTypes);
-    TYPED_TEST_CASE(FunctionalBF16Tests, BFloatTestedTypes);
+    using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
+    TYPED_TEST_SUITE(Memory, ALLTestedTypes);
+    TYPED_TEST_SUITE(Arithmetics, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(Comparison, RealFloatIntTestedTypes);
+    TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(MinMax, RealFloatIntTestedTypes);
+    TYPED_TEST_SUITE(Nan, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(Interleave, RealFloatIntTestedTypes);
+    TYPED_TEST_SUITE(SignManipulation, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(SignManipulationHalfPrecision, ReducedFloatTestedTypes);
+    TYPED_TEST_SUITE(Rounding, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(SqrtAndReciprocal, FloatTestedTypes);
+    TYPED_TEST_SUITE(SqrtAndReciprocalReal, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(FractionAndRemainderReal, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(Trigonometric, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(ErrorFunctions, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(Exponents, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(Hyperbolic, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(InverseTrigonometricReal, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(InverseTrigonometric, FloatTestedTypes);
+    TYPED_TEST_SUITE(LGamma, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(Logarithm, FloatTestedTypes);
+    TYPED_TEST_SUITE(LogarithmReals, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(Pow, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(RealTests, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(RangeFactories, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
+    TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+    TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
+    TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -164,6 +167,60 @@ namespace {
             [](vec v) { return v.neg(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_int_minimum));
+    }
+    TYPED_TEST(SignManipulationHalfPrecision, AbsNegate) {
+      typedef enum  {
+        ABS,
+        NEGATE
+      } SignOpType;
+      using vec = TypeParam;
+      using VT = UholdType<TypeParam>;
+      using RT = float; // reference
+      float atol = 0.01f;
+      float rtol = 0.01f;
+
+      auto cmp = [&](RT ref, VT val) {
+        return std::abs(ref - RT(val)) <= atol + rtol * std::abs(val);
+      };
+
+#define APPLY_FN_AND_STORE(VEC_TYPE)                            \
+      [&](SignOpType op_type, VEC_TYPE& x_fp_vec, void *x_fp) { \
+        if (op_type == SignOpType::NEGATE) {                    \
+          x_fp_vec.neg().store(x_fp);                           \
+        } else {                                                \
+          x_fp_vec.abs().store(x_fp);                           \
+        }                                                       \
+      }
+
+      auto apply_fn_and_store_ref = APPLY_FN_AND_STORE(vfloat);
+      auto apply_fn_and_store_half = APPLY_FN_AND_STORE(vec);
+
+      auto half_precision_ut = [&](SignOpType op_type) {
+        constexpr auto N = vec::size();
+        CACHE_ALIGN RT x_fp[N];
+        CACHE_ALIGN VT x_hp[N];
+        auto seed = TestSeed();
+        ValueGen<RT> generator(RT(-1), RT(1), seed);
+        for (const auto i : c10::irange(N)) {
+            x_fp[i] = generator.get();
+            x_hp[i] = VT(x_fp[i]);
+        }
+        auto x_fp_vec = vfloat::loadu(x_fp);
+        apply_fn_and_store_ref(op_type, x_fp_vec, x_fp);
+        x_fp_vec = vfloat::loadu(x_fp + vfloat::size());
+        apply_fn_and_store_ref(op_type, x_fp_vec, x_fp + vfloat::size());
+
+        auto x_hp_vec = vec::loadu(x_hp);
+        apply_fn_and_store_half(op_type, x_hp_vec, x_hp);
+
+        for (int64_t len = 0; len < N; len++) {
+            ASSERT_TRUE(cmp(x_fp[len], x_hp[len])) << "Failure Details:\nTest Seed to reproduce: " << seed
+                << "\nabs/negate, Length: " << len << "; fp32: " << x_fp[len] << "; bf16/fp16: " << RT(x_hp[len]);
+        }
+      };
+
+      half_precision_ut(SignOpType::ABS);
+      half_precision_ut(SignOpType::NEGATE);
     }
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;
@@ -855,7 +912,7 @@ namespace {
         // generate expected_val
         for (int64_t i = 0; i < vec::size(); i++) {
             bit_rep hex_mask = 0;
-            hex_mask=bit_cast<bit_rep>(mask[i]);
+            hex_mask=c10::bit_cast<bit_rep>(mask[i]);
             expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
         }
         // test with blendv
@@ -1183,7 +1240,7 @@ namespace {
             for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();
                 qint_b[j] = generator.get();
-                if (std::is_same<underlying, int>::value) {
+                if constexpr (std::is_same_v<underlying, int>) {
                     //filter overflow cases
                     filter_sub_overflow(qint_vals[j], qint_b[j]);
                 }
@@ -1284,11 +1341,11 @@ namespace {
         for (const auto i : c10::irange(N)) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
         cmp(y, ref_y);
     }
-      TYPED_TEST(FunctionalBF16Tests, Reduce) {
+      TYPED_TEST(FunctionalTestsReducedFloat, Reduce) {
       using vec = TypeParam;
       // Can't use ValueType<TypeParam> here:
       // Vectorized<BFloat16>::value_type returns uint16_t on AVX2/AVX512
-      using VT = c10::BFloat16;
+      using VT = UholdType<TypeParam>;
       using RT = float; // reference
       constexpr auto R = 2LL; // residual
       constexpr auto N = vec::size() * 2 + R;
@@ -1350,9 +1407,9 @@ namespace {
             << "\nmap3_reduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
       }
     }
-    TYPED_TEST(FunctionalBF16Tests, Map) {
+    TYPED_TEST(FunctionalTestsReducedFloat, Map) {
       using vec = TypeParam;
-      using VT = c10::BFloat16;
+      using VT = UholdType<TypeParam>;
       using RT = float; // reference
       constexpr auto R = 2LL; // residual
       constexpr auto N = vec::size() * 2 + R;

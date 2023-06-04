@@ -50,7 +50,7 @@ class StorageWriter(abc.ABC):
         Initialize this instance.
 
         Args:
-            is_coordinator (bool): Whether this instance is reponsible for coordinating
+            is_coordinator (bool): Whether this instance is responsible for coordinating
               the checkpoint.
         """
         pass
@@ -60,7 +60,7 @@ class StorageWriter(abc.ABC):
         """
         Perform storage-specific local planning.
 
-        While this method can produce a completely different plan, the recomended
+        While this method can produce a completely different plan, the recommended
         way is to store storage specific data in SavePlan::storage_data.
 
         Args:
@@ -78,7 +78,7 @@ class StorageWriter(abc.ABC):
 
         This method is only called on the coordinator instance.
 
-        While this method can produce a completely different plan, the prefered
+        While this method can produce a completely different plan, the preferred
         way is to store storage specific data in SavePlan::storage_data.
 
         Args:
@@ -100,7 +100,7 @@ class StorageWriter(abc.ABC):
         from the plan to get access to the underlying object to write.
 
         Subclasses should lazily call `resolve_data` as it can allocate memory.
-        In case of tensors, make following assuptions:
+        In case of tensors, make following assumptions:
 
         - They might be on any device, including not matching the one on ``WriteItem::tensor_data``
         - They might be views or not contiguous. Only the projection needs to be saved.
@@ -119,10 +119,10 @@ class StorageWriter(abc.ABC):
         self, metadata: Metadata, results: List[List[WriteResult]]
     ) -> None:
         """
-        Writes the metadata and marks the current checkpoint as sucessful.
+        Writes the metadata and marks the current checkpoint as successful.
 
         The actual format/schema used for serializing `metadata` is an
-        implemetation detail. The only requirement is that it's recoverable
+        implementation detail. The only requirement is that it's recoverable
         in to the same object graph.
 
         Args:
@@ -158,7 +158,7 @@ class StorageReader(abc.ABC):
         Reads the checkpoint metadata.
 
         Returns:
-            The metatada object associated with the checkpoint being loaded.
+            The metadata object associated with the checkpoint being loaded.
 
         """
         pass
@@ -170,7 +170,7 @@ class StorageReader(abc.ABC):
 
         Args:
             metadata (Metadata): The metadata schema to use.
-            is_coordinator (bool): Whether this instance is reponsible for coordinating
+            is_coordinator (bool): Whether this instance is responsible for coordinating
               the checkpoint.
         """
         pass
@@ -180,7 +180,7 @@ class StorageReader(abc.ABC):
         """
         Perform storage-specific local planning.
 
-        While this method can produce a completely different plan, the recomended
+        While this method can produce a completely different plan, the recommended
         way is to store storage specific data in LoadPlan::storage_data.
 
         Args:
@@ -198,7 +198,7 @@ class StorageReader(abc.ABC):
 
         This method is only called on the coordinator instance.
 
-        While this method can produce a completely different plan, the prefered
+        While this method can produce a completely different plan, the preferred
         way is to store storage specific data in LoadPlan::storage_data.
 
         Args:

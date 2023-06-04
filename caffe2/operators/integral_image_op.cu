@@ -120,7 +120,7 @@ template <>
 bool IntegralImageOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
 
-  CAFFE_ENFORCE(X.dim() == 4, "Only supports 4D tensors for the momement");
+  CAFFE_ENFORCE(X.dim() == 4, "Only supports 4D tensors for the moment");
 
   // Input is (N, C, H, W)
   // Output is (N, C, H + 1, W + 1)

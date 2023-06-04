@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
+import sympy
 import weakref
 import torch
 from torch import sym_float, sym_int, sym_max
@@ -153,6 +155,16 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             )
             raise RuntimeError(msg)
 
+    if a.is_conj() != b.is_conj():
+        raise RuntimeError(
+            f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
+        )
+
+    if a.is_neg() != b.is_neg():
+        raise RuntimeError(
+            f"Neg mismatch! is_neg is set to {a.is_neg()} and {b.is_neg()}"
+        )
+
 
 def _check_strides_helper(
     a: TensorLikeType, b: TensorLikeType, *, only_cuda=True, significant_only=True
@@ -256,7 +268,7 @@ _memory_formats = {
 
 
 def validate_memory_format(memory_format: torch.memory_format):
-    check(
+    torch._check(
         memory_format in _memory_formats,
         lambda: f"Received unknown memory format {memory_format}!",
     )
@@ -274,7 +286,7 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     if memory_format == torch.channels_last_3d:
         return is_channels_last_contiguous_3d(a)
 
-    check(
+    torch._check(
         False,
         lambda: f"is_contiguous received unsupported memory format {memory_format}",
     )
@@ -502,7 +514,7 @@ def validate_shape(shape: ShapeType):
     Validates that a sequence represents a valid shape.
     """
 
-    assert isinstance(shape, Sequence)
+    assert isinstance(shape, Sequence), type(shape)
     for l in shape:
         validate_dim_length(l)
 
@@ -783,13 +795,13 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
     newsize = 1
     for i, d in enumerate(shape):
         if d == -1:
-            check(dim is None, lambda: "only one dimension can be inferred")
+            torch._check(dim is None, lambda: "only one dimension can be inferred")
             dim = i
         elif d >= 0:
             newsize *= d
         else:
-            check(False, lambda: f"invalid shape dimension {d}")
-    check(
+            torch._check(False, lambda: f"invalid shape dimension {d}")
+    torch._check(
         numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
     )
@@ -797,7 +809,7 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         # Convert to list to produce a compatible error message with core
         # PyTorch, which prints sequences in square brackets.
         shape = list(shape)
-        check(
+        torch._check(
             newsize != 0,
             lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
                      f"unspecified dimension size -1 can be any value and is ambiguous"),
@@ -942,18 +954,18 @@ def check_fp_or_complex(
     Checks whether the input is floating point or complex.
     If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and complex32
     """
-    check(
+    torch._check(
         is_float_dtype(dtype) or is_complex_dtype(dtype),
         lambda: f"{fn_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
-    check(
+    torch._check(
         allow_low_precision_dtypes or not is_low_precision_dtype(dtype),
         lambda: f"{fn_name}: Half precision dtypes not supported. Got {dtype}",
     )
 
 
 def check_is_matrix(A: TensorLikeType, f_name: str, arg_name: str = "A"):
-    check(
+    torch._check(
         len(A.shape) >= 2,
         lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
     )
@@ -1048,11 +1060,11 @@ def get_higher_dtype(
 
 
 def check_pin_memory(pin_memory: bool):
-    check(not pin_memory, lambda: "PrimTorch does not support pinned memory", NotImplementedError)
+    torch._check_not_implemented(not pin_memory, lambda: "PrimTorch does not support pinned memory")
 
 
 def check_layout(layout: torch.layout):
-    check(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}", NotImplementedError)
+    torch._check_not_implemented(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}")
 
 
 # TODO: maybe unify with can_cast_to?
@@ -1221,6 +1233,14 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
+def symbol_type(x: sympy.Symbol) -> Type:
+    if x.is_integer:  # type: ignore[attr-defined]
+        return int
+    else:
+        # NB: Not strictly correct, but we don't support SymPy complex or bool.
+        return float
+
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1316,7 +1336,7 @@ def elementwise_dtypes(
 
     highest_type: type = bool
     for x in args:
-        if not isinstance(x, (Number, TensorLike)):
+        if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = (
                 "Unexpected type {0} when computing elementwise type promotion!".format(
                     str(type(x))
@@ -1326,6 +1346,8 @@ def elementwise_dtypes(
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
+        elif isinstance(x, sympy.Symbol):
+            highest_type = get_higher_type(highest_type, symbol_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1462,9 +1484,26 @@ def make_contiguous_strides_for(
         return result[:-2] + (1, max(shape[-2], 1))
 
 
+def make_channels_last_1d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    torch._check(
+        len(shape) == 3,
+        lambda: "Only tensors of rank 3 can use the channels_last_1d memory format",
+    )
+
+    multiplier = 1
+    strides = [0] * 3
+    for idx in (1, -1, 0):
+        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # This is consistent with eager
+        strides[idx] = multiplier
+        multiplier *= shape[idx]
+
+    return tuple(strides)
+
+
 def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
-    check(
+    torch._check(
         len(shape) == 4,
         lambda: "Only tensors of rank 4 can use the channels_last memory format",
     )
@@ -1481,7 +1520,7 @@ def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
 
 
 def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
-    check(
+    torch._check(
         len(shape) == 5,
         lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
     )
@@ -1499,7 +1538,9 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
 
 def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     ndim = len(shape) if isinstance(shape, Sequence) else 1
-    if ndim == 4:
+    if ndim == 3:
+        return make_channels_last_1d_strides_for(shape)
+    elif ndim == 4:
         return make_channels_last_2d_strides_for(shape)
     elif ndim == 5:
         return make_channels_last_3d_strides_for(shape)
@@ -1611,19 +1652,6 @@ def check_in_bounds_for_storage(
             )
         )
         raise ValueError(msg)
-
-
-def check(
-    b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
-) -> None:
-    """
-    Helper function for raising an error_type (default: RuntimeError) if a boolean condition fails.
-    Error message is a callable producing a string (to avoid wasting time
-    string formatting in non-error case, and also to make it easier for torchdynamo
-    to trace.)
-    """
-    if not b:
-        raise exc_type(s())
 
 
 # This combines is_channels_last_strides_2d and is_channels_last_strides_3d in
@@ -1751,3 +1779,26 @@ def clone_preserve_strides(x):
         return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     finally:
         torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, old)
+
+class CUDARngStateHelper:
+    @staticmethod
+    def get_torch_state_as_tuple(fake_mode=nullcontext()):
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA not available")
+
+        with fake_mode:
+            seed = torch.tensor(torch.cuda.initial_seed())
+            offset = torch.tensor(torch.cuda._get_rng_state_offset())
+            return seed, offset
+
+    @staticmethod
+    def set_torch_state_tensor(seed, offset):
+        # Rng state is [64-bit seed, 64-bit offset]
+        seed_portion = seed.reshape([1]).view(torch.uint8)
+        offset_portion = offset.reshape([1]).view(torch.uint8)
+        new_state = torch.cat([seed_portion, offset_portion])
+        torch.cuda.set_rng_state(new_state)
+
+    @staticmethod
+    def set_new_offset(relative_offset):
+        torch.cuda._set_rng_state_offset(relative_offset.item())

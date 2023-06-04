@@ -5,11 +5,12 @@ and torch operators given the same inputs.
 
 Usage:
 
-    pytest test/onnx/test_op_consistancy.py
+    pytest test/onnx/test_op_consistency.py
 
     To run tests on a specific operator (e.g. torch.ceil):
 
-    pytest test/onnx/test_op_consistancy.py -k ceil
+    pytest test/onnx/test_op_consistency.py -k ceil
+    pytest test/onnx/test_op_consistency.py -k nn_functional_scaled_dot_product_attention
 
     Read more on Running and writing tests:
         https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
@@ -24,273 +25,22 @@ Note:
 from __future__ import annotations
 
 import copy
-import dataclasses
-import unittest
-import warnings
-from typing import Any, Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
+from typing import Optional, Tuple
 
 import onnx_test_common
 import parameterized
 
 import torch
-from torch.onnx import _constants
+
+# For readability, these two are allowed to be imported as function
+from onnx_test_common import skip, xfail
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
     common_utils,
 )
-from torch.testing._internal.opinfo import core as opinfo_core
 
-# The min onnx opset version to test for
-MIN_ONNX_OPSET_VERSION = 9
-# The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
-
-TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
-
-BOOL_TYPES = (torch.bool,)
-
-INT_TYPES = (
-    torch.int8,
-    torch.int16,
-    torch.int32,
-    torch.int64,
-    torch.uint8,
-)
-
-QINT_TYPES = (
-    torch.qint8,
-    torch.quint8,
-)
-
-FLOAT_TYPES = (
-    torch.float16,
-    torch.float32,
-    torch.float64,
-)
-
-COMPLEX_TYPES = (
-    torch.complex32,
-    torch.complex64,
-    torch.complex128,
-)
-
-TESTED_DTYPES = (
-    # Boolean
-    torch.bool,
-    # Integers
-    *INT_TYPES,
-    # Floating types
-    *FLOAT_TYPES,
-)
-
-
-@dataclasses.dataclass
-class DecorateMeta:
-    """Information about a test case to skip or xfail.
-
-    Adapted from functorch: functorch/test/common_utils.py
-
-    Attributes:
-        op_name: The name of the operator.
-        variant_name: The name of the OpInfo variant.
-        decorator: The decorator to apply to the test case.
-        opsets: The opsets to apply the decorator to.
-        dtypes: The dtypes to apply the decorator to.
-        reason: The reason for skipping.
-    """
-
-    op_name: str
-    variant_name: str
-    decorator: Callable
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]]
-    dtypes: Optional[Collection[torch.dtype]]
-    reason: str
-    matcher: Optional[Callable[[Any], Any]] = None
-
-    def contains_opset(self, opset: int) -> bool:
-        if self.opsets is None:
-            return True
-        return any(
-            opset == opset_spec if isinstance(opset_spec, int) else opset_spec(opset)
-            for opset_spec in self.opsets
-        )
-
-
-def xfail(
-    op_name: str,
-    variant_name: str = "",
-    *,
-    reason: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-):
-    """Expects a OpInfo test to fail.
-
-    Args:
-        op_name: The name of the operator.
-        variant_name: The name of the variant.
-        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
-        dtypes: The dtypes to expect the failure.
-        reason: The reason for the failure.
-    """
-    return DecorateMeta(
-        op_name=op_name,
-        variant_name=variant_name,
-        decorator=unittest.expectedFailure,
-        opsets=opsets,
-        dtypes=dtypes,
-        reason=reason,
-    )
-
-
-def dont_care(
-    op_name: str,
-    variant_name: str = "",
-    *,
-    reason: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-    matcher: Optional[Callable[[Any], Any]] = None,
-):
-    """Skips a test case in OpInfo that we don't care about.
-
-    Likely because ONNX does not support the use case or it is by design.
-
-    Args:
-        op_name: The name of the operator.
-        variant_name: The name of the variant.
-        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
-        dtypes: The dtypes to expect the failure.
-        reason: The reason for the failure.
-        matcher: A function that matches the test sample input. It is used only when
-            dont_care is in the SKIP_SUBTESTS list.
-    """
-    return DecorateMeta(
-        op_name=op_name,
-        variant_name=variant_name,
-        decorator=unittest.skip(f"Don't care: {reason}"),
-        opsets=opsets,
-        dtypes=dtypes,
-        reason=reason,
-        matcher=matcher,
-    )
-
-
-def fixme(
-    op_name: str,
-    variant_name: str = "",
-    *,
-    reason: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
-    dtypes: Optional[Collection[torch.dtype]] = None,
-    matcher: Optional[Callable[[Any], Any]] = None,
-):
-    """Skips a test case in OpInfo. It should be eventually fixed.
-
-    Args:
-        op_name: The name of the operator.
-        variant_name: The name of the variant.
-        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
-        dtypes: The dtypes to expect the failure.
-        reason: The reason for the failure.
-        matcher: A function that matches the test sample input. It is used only when
-            fixme is in the SKIP_SUBTESTS list.
-    """
-    return DecorateMeta(
-        op_name=op_name,
-        variant_name=variant_name,
-        decorator=unittest.skip(f"To fix: {reason}"),
-        opsets=opsets,
-        dtypes=dtypes,
-        reason=reason,
-        matcher=matcher,
-    )
-
-
-def add_decorate_info(
-    all_opinfos: Sequence[opinfo_core.OpInfo],
-    test_class_name: str,
-    base_test_name: str,
-    opset: int,
-    skip_or_xfails: Iterable[DecorateMeta],
-):
-    """Decorates OpInfo tests with decorators based on the skip_or_xfails list.
-
-    Args:
-        all_opinfos: All OpInfos.
-        test_class_name: The name of the test class.
-        base_test_name: The name of the test method.
-        opset: The opset to decorate for.
-        skip_or_xfails: DecorateMeta's.
-    """
-    ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
-    for decorate_meta in skip_or_xfails:
-        if not decorate_meta.contains_opset(opset):
-            # Skip does not apply to this opset
-            continue
-        opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
-        assert (
-            opinfo is not None
-        ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
-        decorators = list(opinfo.decorators)
-        new_decorator = opinfo_core.DecorateInfo(
-            decorate_meta.decorator,
-            test_class_name,
-            base_test_name,
-            dtypes=decorate_meta.dtypes,
-        )
-        decorators.append(new_decorator)
-        opinfo.decorators = tuple(decorators)
-
-    # This decorator doesn't modify fn in any way
-    def wrapped(fn):
-        return fn
-
-    return wrapped
-
-
-def opsets_before(opset: int) -> Callable[[int], bool]:
-    """Returns a comparison function that decides if the given opset is before the specified."""
-
-    def compare(other_opset: int):
-        return other_opset < opset
-
-    return compare
-
-
-def opsets_after(opset: int) -> Callable[[int], bool]:
-    """Returns a comparison function that decides if the given opset is after the specified."""
-
-    def compare(other_opset: int):
-        return other_opset > opset
-
-    return compare
-
-
-def reason_onnx_runtime_does_not_support(
-    operator: str, dtypes: Optional[Sequence[str]] = None
-) -> str:
-    """Formats the reason: ONNX Runtime doesn't support the given dtypes."""
-    return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX Runtime"
-
-
-def reason_onnx_does_not_support(
-    operator: str, dtypes: Optional[Sequence[str]] = None
-) -> str:
-    """Formats the reason: ONNX doesn't support the given dtypes."""
-    return f"{operator} on {dtypes or 'certain dtypes'} not supported by the ONNX Spec"
-
-
-def reason_jit_tracer_error(info: str) -> str:
-    """Formats the reason: JIT tracer errors."""
-    return f"JIT tracer error on {info}"
-
-
-def reason_flaky() -> str:
-    """Formats the reason: test is flaky."""
-    return "flaky test"
-
+OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 
 # Modify this section ##########################################################
 # NOTE: Modify this section as more ops are supported. The list should be sorted
@@ -304,11 +54,23 @@ def reason_flaky() -> str:
 # Ops to be tested for numerical consistency between onnx and pytorch
 TESTED_OPS: frozenset[str] = frozenset(
     [
+        "atan",
+        "atan2",
+        "broadcast_to",
         "ceil",
+        "expand",
+        "flatten",
         "logical_not",
+        # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
+        "nn.functional.scaled_dot_product_attention",
+        "repeat",
+        # "scatter_add",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
+        # "scatter_reduce",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "sqrt",
         "stft",
         "t",
+        "tile",
+        "unflatten",
     ]
 )
 
@@ -317,35 +79,120 @@ TESTED_OPS: frozenset[str] = frozenset(
 
 # Expected failures for onnx export.
 # The list should be sorted alphabetically by op name.
-# Q: When should I use fixme vs vs dont_care vs xfail?
-# A: Use fixme when we want to fix the test eventually but it doesn't fail consistently,
-#        e.g. the test is flaky or some tests pass. Otherwise, use xfail.
-#    Use dont_care if we don't care about the test passing, e.g. ONNX doesn't support the usage.
-#    Use xfail if a test fails now and we want to eventually fix the test.
-EXPECTED_SKIPS_OR_FAILS: Tuple[DecorateMeta, ...] = (
-    dont_care(
-        "ceil", dtypes=BOOL_TYPES + INT_TYPES,
-        reason=reason_onnx_does_not_support("Ceil")
+# Q: When should I use fixme vs vs skip vs xfail?
+# A: Prefer xfail over skip when possible.
+#     2a. If a test is now failing because of xpass, because some previous errors
+#     are now fixed, removed the corresponding xfail.
+#     2b. If a test is not failing consistently, use skip.
+EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
+    skip(
+        "atan", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Atan")
     ),
-    fixme("ceil", dtypes=[torch.float64], reason=reason_onnx_runtime_does_not_support("Ceil", ["f64"])),
-    dont_care("sqrt", dtypes=BOOL_TYPES, reason=reason_onnx_does_not_support("Sqrt")),
-    dont_care("stft", opsets=[opsets_before(17)], reason=reason_onnx_does_not_support("STFT")),
+    xfail("atan", dtypes=[torch.float64], reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64"])),
+    skip(
+        "atan2", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Atan")
+    ),
+    xfail("atan2", dtypes=[torch.float64], reason=onnx_test_common.reason_onnx_runtime_does_not_support("Atan", ["f64"])),
+    xfail(
+        "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Ceil")
+    ),
+    xfail(
+        "logit",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Log", "bool, int"),
+    ),
+    skip("nn.functional.scaled_dot_product_attention", opsets=[onnx_test_common.opsets_before(14)], reason="Need Trilu."),
+    skip("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
+    skip("scatter_reduce", variant_name="amin", opsets=[onnx_test_common.opsets_before(16)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
+    skip("scatter_reduce", variant_name="amax", opsets=[onnx_test_common.opsets_before(16)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
+    skip("scatter_reduce", variant_name="prod", opsets=[onnx_test_common.opsets_before(16)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
+    xfail("scatter_reduce", variant_name="mean",
+          reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction=mean")),
+    skip("scatter_reduce", variant_name="sum", opsets=[onnx_test_common.opsets_before(16)],
+         reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
+    xfail(
+        "scatter_reduce",
+        variant_name="sum",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=sum", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="prod",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=prod", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="amin",
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=amin", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="amax",
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=amax", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="mean",
+        reason="ONNX doesn't support reduce='mean' option",
+    ),
+    skip("sqrt", dtypes=onnx_test_common.BOOL_TYPES, reason=onnx_test_common.reason_onnx_does_not_support("Sqrt")),
+    skip("stft", opsets=[onnx_test_common.opsets_before(17)], reason=onnx_test_common.reason_onnx_does_not_support("STFT")),
+    xfail("stft",
+          reason=onnx_test_common.reason_onnx_runtime_does_not_support("STFT", "Regression on ORT=1.15 4 percent difference")),
+    skip("tile", opsets=[onnx_test_common.opsets_before(13)], reason=onnx_test_common.reason_onnx_does_not_support("Tile")),
+    xfail("unflatten", opsets=[onnx_test_common.opsets_before(13)], reason="Helper function is needed to support legacy ops."),
 )
 # fmt: on
 
-SKIP_SUBTESTS: tuple[DecorateMeta, ...] = (
-    dont_care(
+SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
+    skip(
+        "nn.functional.scaled_dot_product_attention",
+        matcher=lambda sample: sample.kwargs.get("dropout_p") != 0.0,
+        reason="dropout is random so the results do not match",
+    ),
+    skip(
+        "repeat",
+        reason="Empty repeats value leads to an invalid graph",
+        matcher=lambda sample: not sample.args[0],
+    ),
+    skip(
+        "scatter_reduce",
+        # ONNX has not include_self parameter and default is include_self=True mode
+        matcher=lambda sample: sample.kwargs.get("include_self") is False,
+        reason="ONNX does't support include_self=False option",
+    ),
+    skip(
         "stft",
         reason="ONNX STFT does not support complex results",
         matcher=lambda sample: sample.kwargs.get("return_complex") is True,
     ),
+    skip(
+        "tile",
+        matcher=lambda sample: any(dim == 0 for dim in sample.input.shape)
+        or not sample.input.shape,
+        reason="Logic not implemented for size 0 inputs in op.Reshape",
+    ),
+    skip(
+        "unflatten",
+        reason="Logic not implemented for size 0 inputs in op.Reshape",
+        matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
+    ),
 )
+
 
 # END OF SECTION TO MODIFY #####################################################
 
-
-OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
-OP_WITH_SKIPPED_SUBTESTS = frozenset(meta.op_name for meta in SKIP_SUBTESTS)
+OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_SUBTESTS)
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
 assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
@@ -363,17 +210,19 @@ class SingleOpModel(torch.nn.Module):
         return self.operator(*args, **self.kwargs)
 
 
-def _should_skip_test_sample(op_name: str, sample) -> Optional[str]:
+def _should_skip_xfail_test_sample(
+    op_name: str, sample
+) -> Tuple[Optional[str], Optional[str]]:
     """Returns a reason if a test sample should be skipped."""
-    if op_name not in OP_WITH_SKIPPED_SUBTESTS:
-        return None
-    for decorator_meta in SKIP_SUBTESTS:
-        # Linear search on SKIP_SUBTESTS. That's fine because the list is small.
+    if op_name not in OP_WITH_SKIPPED_XFAIL_SUBTESTS:
+        return None, None
+    for decorator_meta in SKIP_XFAIL_SUBTESTS:
+        # Linear search on ops_test_data.SKIP_XFAIL_SUBTESTS. That's fine because the list is small.
         if decorator_meta.op_name == op_name:
             assert decorator_meta.matcher is not None, "Matcher must be defined"
             if decorator_meta.matcher(sample):
-                return decorator_meta.reason
-    return None
+                return decorator_meta.test_behavior, decorator_meta.reason
+    return None, None
 
 
 def _get_test_class_name(cls, num, params_dict) -> str:
@@ -388,7 +237,7 @@ def _get_test_class_name(cls, num, params_dict) -> str:
             "name": f"TestOnnxModelOutputConsistency_opset{opset}",
             "opset_version": opset,
         }
-        for opset in TESTED_OPSETS
+        for opset in onnx_test_common.TESTED_OPSETS
     ],
     class_name_func=_get_test_class_name,
 )
@@ -402,7 +251,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],
-        allowed_dtypes=TESTED_DTYPES,
+        allowed_dtypes=onnx_test_common.TESTED_DTYPES,
     )
     def test_output_match(self, device: str, dtype: torch.dtype, op):
         """Test the ONNX exporter."""
@@ -418,42 +267,41 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         for i, cpu_sample in enumerate(samples):
             inputs = (cpu_sample.input, *cpu_sample.args)
             # Provide the repr to subtest because tensors are not serializable in parallel test runs
-
             with self.subTest(
                 opset=self.opset_version,
                 sample_num=i,
                 inputs=repr(inputs),
                 kwargs=repr(cpu_sample.kwargs),
             ):
-                skip_reason = _should_skip_test_sample(op.name, cpu_sample)
-                if skip_reason is not None:
-                    # Cannot use self.skip because pytest would skip the entire test
-                    warnings.warn(f"skipped sample {i}. Reason: {skip_reason}")
-                    continue
+                test_behavior, reason = _should_skip_xfail_test_sample(
+                    op.name, cpu_sample
+                )
+                with onnx_test_common.normal_xfail_skip_test_behaviors(
+                    test_behavior, reason
+                ):
+                    model = SingleOpModel(op, cpu_sample.kwargs)
+                    model.eval()
 
-                model = SingleOpModel(op, cpu_sample.kwargs)
-                model.eval()
-
-                if dtype == torch.float32:
-                    # Relax atol and rtol for float32 based on empirical results
-                    # The current most relaxed values are for aten::stft
-                    rtol = 1e-5
-                    atol = 2e-5
-                elif dtype == torch.float64:
-                    # The current most relaxed values are for aten::stft
-                    rtol = 1e-5
-                    atol = 2e-5
-                else:
-                    rtol = None
-                    atol = None
-                # Run the test
-                self.run_test(model, inputs, rtol=rtol, atol=atol)
+                    if dtype == torch.float32:
+                        # Relax atol and rtol for float32 based on empirical results
+                        # The current most relaxed values are for aten::stft
+                        rtol = 1e-5
+                        atol = 2e-5
+                    elif dtype == torch.float64:
+                        # The current most relaxed values are for aten::stft
+                        rtol = 1e-5
+                        atol = 2e-5
+                    else:
+                        rtol = None
+                        atol = None
+                    # Run the test
+                    self.run_test(model, inputs, rtol=rtol, atol=atol)
 
 
-for opset in TESTED_OPSETS:
+for opset in onnx_test_common.TESTED_OPSETS:
     # The name needs to match the parameterized_class name.
     test_class_name = f"TestOnnxModelOutputConsistency_opset{opset}"
-    add_decorate_info(
+    onnx_test_common.add_decorate_info(
         OPS_DB,
         test_class_name,
         "test_output_match",

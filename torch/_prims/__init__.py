@@ -1,6 +1,5 @@
 import contextlib
 import itertools
-import math
 import operator
 import weakref
 from enum import Enum
@@ -13,9 +12,10 @@ import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
+from torch._prims.debug_prims import register_debug_prims
 from torch._prims.nvfuser_prims import register_nvprims
+from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
-    check,
     Dim,
     DimsSequenceType,
     DimsType,
@@ -188,6 +188,7 @@ __all__ = [
     "amin",
     "prod",
     "sum",
+    "xor_sum",
     "var",
     #
     # Tensor Creation Prims
@@ -417,7 +418,7 @@ def _elementwise_meta(
 
 
 def _complex_only_elementwise_meta(*args, **kwargs):
-    utils.check(
+    torch._check(
         utils.is_complex_dtype(args[0].dtype), lambda: "Only complex dtype is supported"
     )
     return _elementwise_meta(*args, **kwargs)
@@ -576,7 +577,7 @@ bitwise_not = _make_elementwise_unary_prim(
 
 
 def _cbrt_aten(a: torch.Tensor) -> Tensor:
-    utils.check(
+    torch._check(
         not a.is_complex(),
         lambda: "cbrt: Complex inputs not supported. Consider calling torch.pow(a, 1.0/3.0)",
     )
@@ -940,6 +941,7 @@ bitwise_xor = _make_elementwise_binary_prim(
 #   doc="",
 # )
 
+
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
@@ -1047,7 +1049,7 @@ lt = _make_elementwise_binary_prim(
 )
 
 
-# Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs
+# Note: the following impls are because torch.maximum and torch.minimum do not support scalar inputs
 def _maximum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
@@ -1150,6 +1152,7 @@ zeta = _make_elementwise_binary_prim(
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
 
 #
 # View operations
@@ -1286,10 +1289,9 @@ def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
 
     # Verifies end is strictly greater than start
     # (Collapse requires a non-empty interval)
-    utils.check(
+    torch._check_value(
         end >= start,
         lambda: f"Attempting to collapse but end, {end}, is less than start, {start}!",
-        ValueError,
     )
 
 
@@ -1401,7 +1403,9 @@ collapse_view = _make_prim(
 def _conj_meta(a: TensorLikeType) -> TensorLikeType:
     if not a.dtype.is_complex:
         raise RuntimeError("Expected complex dtype in prims.conj")
-    return a.as_strided(a.shape, a.stride(), a.storage_offset())
+    out = a.as_strided(a.shape, a.stride(), a.storage_offset())
+    torch._C._set_conj(out, not a.is_conj())
+    return out
 
 
 _conj_doc = """
@@ -1521,7 +1525,7 @@ def _slice_meta(
 
     new_shape = []
     for x, y, z in zip(start_indices, limit_indices, _strides):
-        new_shape.append(math.floor((y - x) / z))
+        new_shape.append(1 + (y - x - 1) // z)
 
     new_strides = []
     for x, y in zip(a.stride(), _strides):
@@ -1701,6 +1705,7 @@ split_dim = _make_prim(
     doc=_split_dim_doc,
 )
 
+
 # Note: allows dimensions to be specified redundantly
 def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
     assert isinstance(a, TensorLike)
@@ -1813,7 +1818,7 @@ def _as_strided_scatter_meta(
     utils.validate_strides(stride)
 
     required_size = utils.compute_required_storage_length(size, stride, storage_offset)
-    utils.check(
+    torch._check(
         input.numel() >= required_size,
         lambda: (
             f"as_strided_scatter: sizes {size}, strides {stride}, storage offset {storage_offset} "
@@ -1822,7 +1827,7 @@ def _as_strided_scatter_meta(
             f"for storage of size {input.numel() * input.element_size()}"
         ),
     )
-    utils.check(
+    torch._check(
         utils.is_same_shape(src.shape, size),
         lambda: f"expected src to have a size equal to the slice of self. src size = {src.shape}, slice size = {size}",
     )
@@ -1980,7 +1985,6 @@ rev = _make_prim(
 def _where_meta(
     pred: TensorLikeType, a: TensorLikeType, b: TensorLikeType
 ) -> TensorLikeType:
-
     return _elementwise_meta(
         a,
         b,
@@ -2004,6 +2008,7 @@ where = _make_prim(
     doc=_where_doc,
 )
 
+
 #
 # Type conversions
 #
@@ -2022,7 +2027,6 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
 
 
 def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
-
     # Propagates requires grad when possible
     if not utils.is_grad_dtype(dtype):
         requires_grad = False
@@ -2078,6 +2082,7 @@ device_put = _make_prim(
     doc=_device_put_doc,
 )
 
+
 # NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
 def _item_meta(a: TensorLikeType) -> FakeTensor:
@@ -2099,6 +2104,7 @@ item = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_item_doc,
 )
+
 
 # NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
@@ -2149,14 +2155,14 @@ def _minimum_value_aten(dtype: torch.dtype):
 
 
 _minimum_value_doc = """
-    Return the mimimum finite value for a dtype.
+    Return the minimum finite value for a dtype.
 """
 
 # TODO: create a new return type for scalars?
 # FIXME: currently returns integers for boolean tensors
 # https://github.com/pytorch/pytorch/issues/78071
 minimum_value = _make_prim(
-    schema="minium_value(ScalarType dtype) -> Scalar",
+    schema="minimum_value(ScalarType dtype) -> Scalar",
     meta=_minimum_value_meta,
     impl_aten=_minimum_value_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2299,6 +2305,10 @@ _sum_doc = """
     Computes the sum of elements in the input tensor over the list of dimensions
     specified in the dim argument
     """
+_xor_sum_doc = """
+    Computes the xor sum of elements in the input tensor over the list of dimensions
+    specified in the dim argument
+    """
 _prod_doc = """
     Computes the product of elements in the input tensor over the list of dimensions
     specified in the dim argument
@@ -2342,6 +2352,22 @@ sum = _make_reduction_prim(
     name="sum",
     impl_aten=torch.sum,
     doc=_sum_doc,
+)
+
+
+def _xor_sum_aten(
+    inp: TensorLikeType,
+    dims: Optional[DimsSequenceType],
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    raise NotImplementedError("xor_sum only implemented with inductor")
+
+
+xor_sum = _make_reduction_prim(
+    name="xor_sum",
+    impl_aten=_xor_sum_aten,
+    doc=_xor_sum_doc,
 )
 
 
@@ -2401,11 +2427,11 @@ def _iota_meta(
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    utils.check(
+    torch._check(
         utils.is_integer_dtype(dtype),
         lambda: "prims.iota only supports integer dtypes",
     )
-    utils.check(step != 0, lambda: "step must be nonzero")
+    torch._check(step != 0, lambda: "step must be nonzero")
     return torch.empty(
         length,
         dtype=dtype,
@@ -2501,7 +2527,7 @@ def _empty_permuted_meta(
 ) -> TensorLikeType:
     p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
     dim = len(shape)
-    utils.check(
+    torch._check(
         len(physical_layout) == dim,
         lambda: (
             "Number of dimensions in the tensor input does not match the "
@@ -2512,7 +2538,7 @@ def _empty_permuted_meta(
     strides = [0] * len(shape)
     seen_dims = set()
     for p, l in enumerate(physical_layout):
-        utils.check(
+        torch._check(
             0 <= l < dim,
             lambda: (
                 f"Dimension out of range (expected to be between 0 and {dim - 1}, but got "
@@ -2520,7 +2546,7 @@ def _empty_permuted_meta(
                 "not currently supported; file an issue if you want it."
             ),
         )
-        utils.check(l not in seen_dims, lambda: "Duplicate dim not allowed")
+        torch._check(l not in seen_dims, lambda: "Duplicate dim not allowed")
         strides[l] = p_strides[p]
         seen_dims.add(l)
     return TensorMeta(
@@ -2704,6 +2730,10 @@ def _svd_meta(
     is_cuda = A.device.type == "cuda"
     strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
+    # Also makes sure this is CUDA or HIP:
+    # https://pytorch.org/docs/stable/notes/hip.html#checking-for-hip
+    if A.numel() != 0 and Vh.is_complex() and torch.cuda.is_available():
+        Vh = Vh.conj()
     return U, S, Vh
 
 
@@ -2732,6 +2762,7 @@ svd = _make_prim(
 # Randomness Prims
 #
 
+
 # TODO: add generator support
 # NOTE: there is currently no way of acquiring the "default" torch generator
 def _normal_meta(
@@ -2743,12 +2774,12 @@ def _normal_meta(
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    utils.check(
+    torch._check(
         std >= 0.0,
         lambda: f"expected non-negative standard deviation, but got std={std}",
     )
 
-    utils.check(
+    torch._check(
         utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
         lambda: f"expected a floating-point or complex dtype, but got dtype={dtype}",
     )
@@ -2782,7 +2813,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device,  bool requires_grad) -> Tensor"
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,
@@ -2959,3 +2990,5 @@ fft_c2r = _make_prim(
 )
 
 register_nvprims()
+register_rng_prims()
+register_debug_prims()

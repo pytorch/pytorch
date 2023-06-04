@@ -6,9 +6,9 @@ import types
 from typing import List
 
 import torch.nn
+from . import utils
 
 from .bytecode_transformation import (
-    cell_and_freevars_offset,
     create_call_function,
     create_dup_top,
     create_instruction,
@@ -17,11 +17,12 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .exc import unimplemented
-from .source import AttrSource, Source
-from .utils import is_safe_constant, istype, rot_n_helper
+from .source import AttrSource, GeneratorStateSource, Source
+from .utils import is_safe_constant, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
@@ -63,9 +64,6 @@ class PyCodegen:
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
 
-    def cell_and_freevars_offset(self, i):
-        return cell_and_freevars_offset(self.code_options, i)
-
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
 
@@ -96,7 +94,11 @@ class PyCodegen:
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache:
+        if (
+            value.source is not None
+            and allow_cache
+            and not isinstance(value.source, GeneratorStateSource)
+        ):
             output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
@@ -109,6 +111,7 @@ class PyCodegen:
                 SymNodeVariable,
                 TensorWithTFOverrideVariable,
                 UnspecializedPythonVariable,
+                NumpyNdarrayVariable,
             ),
         ):
             if isinstance(value, TensorWithTFOverrideVariable):
@@ -121,14 +124,16 @@ class PyCodegen:
                 )
             else:
                 graph_outputs[graph_outputs_key].merge(value)
-
+            if isinstance(value, NumpyNdarrayVariable):
+                self.load_import_from(utils.__name__, "to_numpy_helper")
             output.append(self.create_load(self.graph_output_var))
             output.append(
                 self._create_load_const(graph_outputs[graph_outputs_key].index)
             )
             output.append(create_instruction("BINARY_SUBSCR"))
-
-            if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
+            if isinstance(value, NumpyNdarrayVariable):
+                output.extend(create_call_function(1, False))
+            elif isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)
                 )
@@ -193,75 +198,39 @@ class PyCodegen:
 
     def create_load(self, name):
         if name in self.cell_and_freevars():
-            return create_instruction(
-                "LOAD_DEREF",
-                self.cell_and_freevars_offset(self.cell_and_freevars().index(name)),
-                name,
-            )
+            return create_instruction("LOAD_DEREF", argval=name)
         assert name in self.code_options["co_varnames"], f"{name} missing"
-        return create_instruction(
-            "LOAD_FAST", self.code_options["co_varnames"].index(name), name
-        )
+        return create_instruction("LOAD_FAST", argval=name)
 
     def create_load_closure(self, name):
         assert name in self.cell_and_freevars()
-        return create_instruction(
-            "LOAD_CLOSURE",
-            self.cell_and_freevars_offset(self.cell_and_freevars().index(name)),
-            name,
-        )
+        return create_instruction("LOAD_CLOSURE", argval=name)
 
     def create_store(self, name):
         if name in self.cell_and_freevars():
-            return create_instruction(
-                "STORE_DEREF",
-                self.cell_and_freevars_offset(self.cell_and_freevars().index(name)),
-                name,
-            )
+            return create_instruction("STORE_DEREF", argval=name)
         assert name in self.code_options["co_varnames"]
-        return create_instruction(
-            "STORE_FAST", self.code_options["co_varnames"].index(name), name
-        )
+        return create_instruction("STORE_FAST", argval=name)
 
     def create_load_global(self, name, push_null, add=False):
         if add:
             self.tx.output.update_co_names(name)
         assert name in self.code_options["co_names"], f"{name} not in co_names"
-        return create_load_global(
-            name, self.code_options["co_names"].index(name), push_null
-        )
+        return create_load_global(name, push_null)
 
     def create_load_const(self, value):
         assert is_safe_constant(value), f"unsafe constant {value}"
         return self._create_load_const(value)
 
-    @staticmethod
-    def get_const_index(code_options, value):
-        co_consts = code_options["co_consts"]
-        assert istype(co_consts, tuple)
-        index = None
-        for i, v in enumerate(co_consts):
-            if type(v) is type(value) and v == value:
-                index = i
-                break
-        if index is None:
-            index = len(co_consts)
-            co_consts = co_consts + (value,)
-            code_options["co_consts"] = co_consts
-        return index
-
     def _create_load_const(self, value):
-        index = self.get_const_index(self.code_options, value)
-        return create_instruction("LOAD_CONST", index, value)
+        return create_instruction("LOAD_CONST", argval=value)
 
     create_load_output = _create_load_const
 
     def create_load_attr(self, name):
         if name not in self.code_options["co_names"]:
-            self.code_options["co_names"] = self.code_options["co_names"] + (name,)
-        return create_instruction(
-            "LOAD_ATTR", self.code_options["co_names"].index(name), name
-        )
+            self.code_options["co_names"] += (name,)
+        return create_instruction("LOAD_ATTR", argval=name)
 
     def create_load_attrs(self, names):
         return [self.create_load_attr(name) for name in names.split(".")]
@@ -271,11 +240,13 @@ class PyCodegen:
         output = []
         if push_null and sys.version_info >= (3, 11):
             output.extend(
-                [create_instruction("PUSH_NULL")] + self.rot_n(num_on_stack + 1)
+                [create_instruction("PUSH_NULL"), *self.rot_n(num_on_stack + 1)]
             )
         output.extend(
-            [self.create_load_global(fn_name, False, add=True)]
-            + self.rot_n(num_on_stack + 1)
+            [
+                self.create_load_global(fn_name, False, add=True),
+                *self.rot_n(num_on_stack + 1),
+            ]
         )
         return output
 
@@ -284,48 +255,41 @@ class PyCodegen:
             return create_rot_n(n)
         except AttributeError:
             # desired rotate bytecode doesn't exist, generate equivalent bytecode
-            return (
-                [
-                    create_instruction("BUILD_TUPLE", n),
-                    self._create_load_const(rot_n_helper(n)),
-                ]
-                + create_rot_n(2)
-                + [
-                    create_instruction("CALL_FUNCTION_EX", 0),
-                    create_instruction("UNPACK_SEQUENCE", n),
-                ]
-            )
+            return [
+                create_instruction("BUILD_TUPLE", arg=n),
+                self._create_load_const(rot_n_helper(n)),
+                *create_rot_n(2),
+                create_instruction("CALL_FUNCTION_EX", arg=0),
+                create_instruction("UNPACK_SEQUENCE", arg=n),
+            ]
 
     def pop_null(self):
         # POP_TOP doesn't work for null, so we pop nulls by pushing in a
         # nop function, calling it (which consumes the null), and popping the result.
         assert sys.version_info >= (3, 11)
-        return (
-            [self._create_load_const(lambda: None)]
-            + create_call_function(0, False)
-            + [create_instruction("POP_TOP")]
-        )
+        return [
+            self._create_load_const(lambda: None),
+            *create_call_function(0, False),
+            create_instruction("POP_TOP"),
+        ]
 
     def make_function_with_closure(
-        self, fn_name: str, code: types.CodeType, num_on_stack=0
+        self, fn_name: str, code: types.CodeType, push_null: bool, num_on_stack=0
     ):
         freevars = code.co_freevars
         assert freevars
         output = self._output
+        if sys.version_info >= (3, 11) and push_null:
+            output.append(create_instruction("PUSH_NULL"))
+            output.extend(self.rot_n(num_on_stack + 1))
         for var in freevars:
             assert var in self.cell_and_freevars()
-            output.append(
-                create_instruction(
-                    "LOAD_CLOSURE",
-                    self.cell_and_freevars_offset(self.cell_and_freevars().index(var)),
-                    var,
-                )
-            )
-        output.append(create_instruction("BUILD_TUPLE", len(freevars)))
+            output.append(create_instruction("LOAD_CLOSURE", argval=var))
+        output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
         output.append(self.create_load_const(code))
         if sys.version_info < (3, 11):
             output.append(self.create_load_const(fn_name))
-        output.append(create_instruction("MAKE_FUNCTION", 0x08))
+        output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
         output.extend(self.rot_n(num_on_stack + 1))
         self.clear_tos()
 
@@ -352,7 +316,7 @@ class PyCodegen:
                 self.extend_output(
                     [
                         self.create_load_python_module(torch, True),
-                        self.create_load_attr("tensor"),
+                        self.create_load_attr("as_tensor"),
                     ]
                 )
                 self.extend_output(arg.load(self))
@@ -373,12 +337,10 @@ class PyCodegen:
         if sys.version_info >= (3, 11):
             output = create_call_function(nargs, push_null)
             assert output[-2].opname == "PRECALL"
-            kw_names_inst = create_instruction(
-                "KW_NAMES", self.get_const_index(self.code_options, kw_names)
-            )
+            kw_names_inst = create_instruction("KW_NAMES", argval=kw_names)
             output.insert(-2, kw_names_inst)
             return output
         return [
             self.create_load_const(kw_names),
-            create_instruction("CALL_FUNCTION_KW", nargs),
+            create_instruction("CALL_FUNCTION_KW", arg=nargs),
         ]

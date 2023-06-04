@@ -14,8 +14,8 @@ from itertools import groupby
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_available() or not c10d.is_gloo_available():
+    print("c10d GLOO not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
@@ -2355,16 +2355,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("gloo")
 
-    @requires_gloo()
-    def test_gloo_barrier_device_ids(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
-            c10d.barrier(device_ids=[self.rank])
-
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_gloo_warn_not_in_group(self):
@@ -2486,6 +2476,34 @@ class CompilerTest(test_c10d_common.CompilerTest):
         self._test_consecutive_comm_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
+
+class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    def setUp(self):
+        super(LargeCommTest, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(LargeCommTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def device(self):
+        return torch.device("cpu")
+
+    @requires_gloo()
+    def test_new_group_local_sync(self):
+        self._test_new_group_local_sync(backend="gloo")
+
+    @requires_gloo()
+    def test_new_group_local_sync_sanity_check(self):
+        self._test_new_group_local_sync_sanity_check(backend="gloo")
+
+    @requires_gloo()
+    def test_new_group_local_sync_duplicate_pg(self):
+        self._test_new_group_local_sync_duplicate_pg(backend="gloo")
 
 if __name__ == "__main__":
     assert (

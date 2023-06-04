@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/BFloat16.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/bits.h>
@@ -261,6 +262,10 @@ static inline bool isFloatingType(ScalarType t) {
   return (
       t == ScalarType::Double || t == ScalarType::Float ||
       t == ScalarType::Half || t == ScalarType::BFloat16);
+}
+
+static inline bool isReducedFloatingType(ScalarType t) {
+  return (t == ScalarType::Half || t == ScalarType::BFloat16);
 }
 
 static inline bool isComplexType(ScalarType t) {

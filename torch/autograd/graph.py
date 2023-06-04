@@ -14,6 +14,7 @@ __all__ = [
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
     "Node",
+    "increment_version",
 ]
 
 class Node(abc.ABC):
@@ -57,7 +58,7 @@ class Node(abc.ABC):
 
 
         The hook should not modify its argument, but it can optionally return
-        a new gradient which will be used in place of :attr:`grad_outputs`.
+        a new gradient which will be used in place of :attr:`grad_inputs`.
 
         This function returns a handle with a method ``handle.remove()``
         that removes the hook from the module.
@@ -127,6 +128,21 @@ class Node(abc.ABC):
                     or issubclass(C, torch.autograd.function.BackwardCFunction)):
                 return True
         return NotImplemented
+
+def increment_version(tensor):
+    """This function can be used to let autograd know that a given Tensor was modified
+    inplace to enable more accurate error checking within the autograd engine.
+
+    This is already done automatically by PyTorch functions and within custom Function
+    when mark_dirty() is called appropriately so you only need to call this explicitly
+    if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
+    know about. For example a custom kernel that reads the Tensor data_ptr and modifies
+    the memory inplace based on this pointer.
+
+    Note that incrementing the version counter multiple times for a single inplace operation
+    is not problematic.
+    """
+    torch._C._increment_version(tensor)
 
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
@@ -350,6 +366,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
             return t.grad_fn
 
     grad_fns = list(map(get_grad_fn, tensors))
+    len_tensors = len(tensors)
 
     def get_inner_hook(idx):
         def inner_hook(grad: torch.Tensor):
@@ -357,7 +374,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
             id = torch._C._current_graph_task_id()
             assert id != -1, "expected this hook to be called inside a backward call"
             count[id] = count.get(id, 0)
-            buffer[id] = buffer.get(id, [None] * len(tensors))
+            buffer[id] = buffer.get(id, [None] * len_tensors)
 
             if count[id] == 0:
                 # On the first call, compute the actual nb_calls and buffer

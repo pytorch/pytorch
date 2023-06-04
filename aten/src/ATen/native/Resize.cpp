@@ -11,6 +11,7 @@
 #include <ATen/ops/resize_as_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
+#include <ATen/ops/_resize_output.h>
 #endif
 
 namespace at { namespace native {
@@ -97,7 +98,7 @@ void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
   storage->set_nbytes(size_bytes);
   const auto copy_capacity = std::min(size_bytes, old_capacity);
   if (old_data != nullptr && copy_capacity > 0) {
-    memcpy(storage->data(), old_data.get(), copy_capacity);
+    memcpy(storage->mutable_data(), old_data.get(), copy_capacity);
   }
 }
 

@@ -104,12 +104,17 @@ GenericList pack_outputs(const std::vector<TensorSpec>& output_specs, id<MLFeatu
     for (int i = 0; i < val.multiArrayValue.shape.count; ++i) {
       output_shape.emplace_back(val.multiArrayValue.shape[i].integerValue);
     }
-    auto tensor = at::empty(IntArrayRef(output_shape), spec.dtype);
+    TORCH_CHECK(val.multiArrayValue.dataType == MLMultiArrayDataTypeFloat32, "Core ML backend unexpected output data type");
     int64_t count = val.multiArrayValue.count;
-    memcpy(
-      tensor.data_ptr<float>(),
-      (float*)val.multiArrayValue.dataPointer,
-      count * sizeof(float));
+    float* temp = static_cast<float*>(std::malloc(count * sizeof(float)));
+    if (@available(iOS 15.4, *)) {
+      [val.multiArrayValue getBytesWithHandler:^(const void * _Nonnull bytes, NSInteger size) {
+        memcpy(temp, (float *)bytes, count * sizeof(float));
+      }];
+    } else {
+      memcpy(temp, (float *)val.multiArrayValue.dataPointer, count * sizeof(float));
+    }
+    auto tensor = at::from_blob(temp, output_shape, [&](void* ptr) { std::free(ptr); }, TensorOptions().dtype(at::kFloat));
     outputs.push_back(std::move(tensor));
   }
   if(output_specs.size() > 1){
@@ -127,7 +132,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     const c10::Dict<IValue, IValue> model_dict = processed.toGenericDict();
     const std::string& extra = model_dict.at("extra").toStringRef();
     const std::string& model = model_dict.at("model").toStringRef();
-    const std::string& modelID = model_dict.at("hash").toStringRef();
+    const std::string modelID = std::string(model_dict.at("hash").toStringRef());
 
     CoreMLConfig config;
     std::vector<TensorSpec> input_specs;

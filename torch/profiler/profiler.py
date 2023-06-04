@@ -135,6 +135,19 @@ class _KinetoProfile:
             if dist_info:
                 self.add_metadata_json("distributedInfo", json.dumps(dist_info))
 
+            # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
+            is_cuda11_or_lower = (
+                (torch.version.cuda is not None)
+                and ([int(x) for x in torch.version.cuda.split(".")] < [12, 0])
+            )
+            if (
+                is_cuda11_or_lower
+                and hasattr(torch, '_inductor')
+                and torch._inductor.config.triton.cudagraphs
+            ):
+                os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
+
     def stop_trace(self):
         assert self.profiler is not None
         self.profiler.__exit__(None, None, None)
@@ -245,7 +258,10 @@ class _KinetoProfile:
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
 
         # Depending on the file suffix, save the data as json.gz or json.
-        if path.endswith('.gz'):
+        # For html, we can embed the image into an HTML file.
+        if path.endswith('.html'):
+            self.mem_tl.export_memory_timeline_html(path, device)
+        elif path.endswith('.gz'):
             fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
             fp.close()
             self.mem_tl.export_memory_timeline(fp.name, device)
@@ -306,6 +322,7 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
+
 def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -325,8 +342,9 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
             except Exception as e:
                 raise RuntimeError("Can't create directory: " + dir_name) from e
         if not worker_name:
-            worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
-        file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
+            worker_name = f"{socket.gethostname()}_{os.getpid()}"
+        # Use nanosecond here to avoid naming clash when exporting the trace
+        file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
         if use_gzip:
             file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
@@ -532,11 +550,13 @@ class profile(_KinetoProfile):
         prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
+        prof._enable_dynamo_cache_lookup_profiler(True)
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
+        prof._enable_dynamo_cache_lookup_profiler(False)
         prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):

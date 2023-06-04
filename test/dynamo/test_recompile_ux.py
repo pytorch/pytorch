@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import unittest
 import weakref
+from unittest.mock import patch
 
 import torch
 
@@ -134,6 +135,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             msg=f'Expected to find "{contains_str}" in log "{logs.records[0].getMessage()}"',
         )
 
+    @patch.object(torch._dynamo.config, "report_guard_failures", True)
     def test_verbose_tensor_check(self):
         def func(a):
             # Warning: choose a function here whose meta implementation lives
@@ -156,26 +158,33 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 
         a = torch.rand(3, 4, 5)
         cache_fail_test(
-            a, a[0:2, :, :], "tensor 'a' size mismatch at index 0. expected 3, actual 2"
+            a,
+            a[0:2, :, :],
+            "tensor 'L['a']' size mismatch at index 0. expected 3, actual 2",
         )
         cache_fail_test(
             a,
             a.clone().as_strided((3, 4, 5), stride=(1, 3, 12)),
-            "tensor 'a' strides mismatch at index 0. expected 20, actual 1",
+            "tensor 'L['a']' stride mismatch at index 0. expected 20, actual 1",
         )
-        cache_fail_test(a, a[0, :, :], "tensor 'a' rank mismatch. expected 3, actual 2")
-        cache_fail_test(a, a.to("meta"), "tensor 'a' dispatch key set mismatch.")
+        cache_fail_test(
+            a, a[0, :, :], "tensor 'L['a']' rank mismatch. expected 3, actual 2"
+        )
+        cache_fail_test(a, a.to("meta"), "tensor 'L['a']' dispatch key set mismatch.")
         cache_fail_test(
             a,
             a.to(torch.float16),
-            "tensor 'a' dtype mismatch. expected Float, actual Half",
+            "tensor 'L['a']' dtype mismatch. expected Float, actual Half",
         )
         a_grad = a.clone()
         a_grad.requires_grad = True
         cache_fail_test(
-            a, a_grad, "tensor 'a' requires_grad mismatch. expected requires_grad=0"
+            a,
+            a_grad,
+            "tensor 'L['a']' requires_grad mismatch. expected requires_grad=0",
         )
 
+    @patch.object(torch._dynamo.config, "report_guard_failures", True)
     def test_mismatched_type(self):
         a = torch.rand(3, 4, 5)
         b = torch.rand(3, 4, 5)
@@ -191,7 +200,8 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_func = torch._dynamo.optimize("eager")(func)
             opt_func(a, 1)
         self.assert_single_log_contains(
-            logs, "expected type of 'b' to be a tensor type, ' but found <class 'int'>"
+            logs,
+            "expected type of 'L['b']' to be a tensor type, ' but found <class 'int'>",
         )
 
 

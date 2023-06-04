@@ -5,7 +5,6 @@ from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 import torch.distributed.distributed_c10d as c10d
-from torch.distributed._spmd.comm_tensor import CommTensor
 
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -40,45 +39,77 @@ class Shard(Placement):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
-    ) -> Tuple[List[torch.Tensor], int]:
-        # NOTE: For with_padding option, we pad the tensor on each rank before calling
-        # the collectives (i.e. scatter/all_gather, etc.). This is because for gloo
-        # backend, it does not support uneven collectives, nccl supports some, but
-        # it might be slow compared to even size collective, we need to pad tensor
-        # before really calling the collective, and unpad/narrow it afterwards
-        # TODO: consider if we should remove this logic once ProcessGroupGloo
-        # support uneven list, and collective perfomance on par
+    ) -> Tuple[List[torch.Tensor], List[int]]:
+        """
+        This function uses torch.chunk to split a tensor into num_chunks shards along
+        the Shard placement dimension, and return a list of shards with their pad sizes.
+
+        Keyword args:
+            with_padding (bool, optional): when True, we pad the tensor on the last
+            few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
+            This is because collectives usually require equal size tensor inputs
+        """
         assert (
             self.dim <= tensor.ndim
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         assert (
-            tensor.size(self.dim) >= num_chunks
-        ), f"Tensors to be sharded on dim {self.dim} must be at least as large as "
-        f"the number of devices in that dimension {num_chunks}"
-        # split tensor over dimension `dim` into n slices with padding if necessary
-        tensor_list = list(tensor.tensor_split(num_chunks, self.dim))
-        idx_start_to_pad = tensor.size(self.dim) % num_chunks
+            tensor.size(self.dim) > 0
+        ), f"Tensor size along dim{self.dim} is 0. There is nothing to be sharded."
+
+        # chunk tensor over dimension `dim` into n slices with padding if necessary
+        tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
+        # compute the chunk size inline with ``torch.chunk``
+        full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
+
+        # Compute chunk size for each chunk for ``self.dim``
+        chunk_sizes = [
+            tensor_list[idx].size(self.dim) if idx < len(tensor_list) else 0
+            for idx in range(num_chunks)
+        ]
+        # Compute pad size on each chunk
+        pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
+
+        # Reuse tensor to fill empty chunk with empty tensor
+        num_empty_tensors = num_chunks - len(tensor_list)
+        tensor_size = list(tensor_list[0].size())
+        tensor_size = [
+            size if idx != self.dim else 0 for idx, size in enumerate(tensor_size)
+        ]
+        tensor = tensor.new_zeros(tensor_size)
+        for _ in range(num_empty_tensors):
+            tensor_list.append(tensor)
+
         if with_padding or contiguous:
             shard_list = []
-            for i, shard in enumerate(tensor_list):
-                if with_padding and idx_start_to_pad != 0 and i >= idx_start_to_pad:
-                    shard = self._pad_tensor(shard)
-                # input tensors are expected to be congtiguous by the collective backend
+            for shard, pad_size in zip(tensor_list, pad_sizes):
+                # Fill the empty tensor with zeroes with padding.
+                if with_padding and pad_size > 0:
+                    shard = self._pad_tensor(shard, pad_size)
                 shard = shard.contiguous() if contiguous else shard
                 shard_list.append(shard)
-            return shard_list, idx_start_to_pad
+            return shard_list, pad_sizes
         else:
-            return tensor_list, idx_start_to_pad
+            return tensor_list, pad_sizes
 
-    def _pad_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
-        # pad tensor by 1 on the shard dim
+    def _pad_tensor(
+        self,
+        tensor: torch.Tensor,
+        pad_size: int,
+    ) -> torch.Tensor:
         pad = [0, 0] * (tensor.ndim - self.dim)
-        pad[-1] = 1
+        pad[-1] = pad_size
         return torch.nn.functional.pad(tensor, pad)
 
-    def _unpad_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
-        # unpad tensor by 1 on the shard dim
-        return tensor.narrow(self.dim, start=0, length=tensor.size(self.dim) - 1)
+    def _unpad_tensor(
+        self,
+        tensor: torch.Tensor,
+        pad_size: int,
+    ) -> torch.Tensor:
+        return tensor.narrow(
+            self.dim,
+            start=0,
+            length=tensor.size(self.dim) - pad_size,
+        )
 
     def _local_shard_size_on_dim(
         self,
@@ -93,15 +124,26 @@ class Shard(Placement):
         assert (
             size_on_dim >= num_chunks
         ), f"Size to be sharded on dim {self.dim} must be at least as large as the number of devices in that dimension {num_chunks}"
-        split_size, pad_idx = divmod(size_on_dim, num_chunks)
-        local_shard_size = (
-            split_size + 1 if pad_idx != 0 and rank < pad_idx else split_size
-        )
+
+        # Compute the chunk size inline with ``torch.chunk``
+        full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
+
+        # Compute chunk size for each chunk on the dimension.
+        chunk_sizes = [
+            max(
+                min(size_on_dim, full_chunk_size * (idx + 1)) - full_chunk_size * idx,
+                0,
+            )
+            for idx in range(num_chunks)
+        ]
+        local_shard_size = chunk_sizes[rank]
+
         local_offset_on_dim = -1
         if return_offset:
-            local_offset_on_dim = (
-                rank * split_size + pad_idx if rank >= pad_idx else rank
-            )
+            # Return global tensor dim size of current dimension if for empty shard
+            # to represent the end of the corresponding tensor dim.
+            local_offset_on_dim = sum(chunk_sizes[:rank])
+
         return (local_shard_size, local_offset_on_dim)
 
     def _shard_tensor(
@@ -113,25 +155,29 @@ class Shard(Placement):
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
+
         if my_coordinate is None:
             # if rank is not part of mesh, we simply return an empty tensor
             return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
-        scatter_list, pad_idx = self._split_tensor(
+        scatter_list, pad_sizes = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
         )
+
         output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
         mesh.scatter(output, scatter_list, mesh_dim=mesh_dim)
 
-        if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
-            output = self._unpad_tensor(output)
+        # Only unpad if the local_tensor was padded on the dimension.
+        pad_size = pad_sizes[my_coordinate[mesh_dim]]
+        if pad_size > 0:
+            output = self._unpad_tensor(output, pad_size)
         return output
 
     def _reduce_shard_tensor(
         self,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
-        reduce_op: c10d.ReduceOp,
+        reduce_op: c10d.ReduceOp.RedOpType,
         mesh_dim: int,
     ) -> torch.Tensor:
         """
@@ -139,25 +185,25 @@ class Shard(Placement):
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
-        scattered_list, pad_idx = self._split_tensor(
-            tensor, num_chunks, with_padding=True, contiguous=True
+
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return tensor
+
+        is_padded = tensor.size(self.dim) % num_chunks != 0
+        if is_padded:
+            scattered_list, pad_sizes = self._split_tensor(
+                tensor, num_chunks, with_padding=True, contiguous=True
+            )
+            tensor = torch.cat(scattered_list, dim=self.dim)
+
+        output = mesh.reduce_scatter(
+            tensor, op=reduce_op, mesh_dim=mesh_dim, scatter_dim=self.dim
         )
-        # wrap with comm tensor
-        scattered_list = [CommTensor(t) for t in scattered_list]
-        output = torch.empty_like(scattered_list[my_coordinate[mesh_dim]])
-        mesh.reduce_scatter(
-            CommTensor(output),
-            scattered_list,  # pyre-ignore[6]
-            op=reduce_op,
-            mesh_dim=mesh_dim,
-        )
-        if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
-            output = self._unpad_tensor(output)
+
+        if is_padded:
+            output = self._unpad_tensor(output, pad_sizes[my_coordinate[mesh_dim]])
         return output
 
     def _to_replicate_tensor(
@@ -173,40 +219,48 @@ class Shard(Placement):
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(dim=mesh_dim)
-        # TODO: what should happen if rank is not in the mesh?
-        # see issue https://github.com/pytorch/tau/pull/492
-        assert (
-            my_coordinate is not None
-        ), "Rank if not part of mesh"  # TODO: figure out behavior here
+
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return local_tensor,
+            # which should be an empty tensor
+            return local_tensor
+
         # check if it needs to pad input tensor before all_gather
-        pad_idx = size[self.dim] % num_chunks
-        if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
-            local_tensor = self._pad_tensor(local_tensor).contiguous()
-
-        gathered_list = []
-        # N.B. CommTensor does not change eager mode behavior. During tracing, it
-        # makes sure communication result is properly waited before subsequent
-        # read operations.
-        for _ in range(num_chunks):
-            gathered_list.append(
-                CommTensor(
-                    torch.empty_like(
-                        local_tensor,
-                        memory_format=torch.contiguous_format,
-                    )
-                )
+        full_chunk_size = (size[self.dim] + num_chunks - 1) // num_chunks
+        chunk_sizes = [
+            max(
+                min(size[self.dim], full_chunk_size * (idx + 1))
+                - full_chunk_size * idx,
+                0,
             )
+            for idx in range(num_chunks)
+        ]
+        pad_sizes = [full_chunk_size - chunk_size for chunk_size in chunk_sizes]
+        is_padded = size[self.dim] % num_chunks != 0
 
-        mesh.all_gather(gathered_list, CommTensor(local_tensor.contiguous()), mesh_dim=mesh_dim)  # type: ignore[arg-type]
-        # unpad the tensor if the input tensor was padded
-        if pad_idx != 0:
+        pad_size = pad_sizes[my_coordinate[mesh_dim]]
+        if pad_size > 0:
+            local_tensor = self._pad_tensor(local_tensor, pad_size)
+        local_tensor = local_tensor.contiguous()
+
+        result = mesh.all_gather(
+            tensor=local_tensor,
+            mesh_dim=mesh_dim,
+            gather_dim=self.dim,
+        )
+
+        # Unpad the tensor if the input tensor was padded
+        if is_padded:
+            gathered_list = torch.chunk(result, num_chunks, dim=self.dim)
             gathered_list = [
-                self._unpad_tensor(gathered_tensor)  # type: ignore[misc]
-                if i >= pad_idx
+                self._unpad_tensor(gathered_tensor, pad_size)  # type: ignore[misc]
+                if pad_size > 0
                 else gathered_tensor
-                for i, gathered_tensor in enumerate(gathered_list)
+                for gathered_tensor, pad_size in zip(gathered_list, pad_sizes)
             ]
-        return torch.cat(gathered_list, dim=self.dim)  # type: ignore[arg-type]
+
+            result = torch.cat(gathered_list, dim=self.dim)
+        return result
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Shard):
@@ -217,7 +271,14 @@ class Shard(Placement):
         return hash(self.dim)
 
     def __repr__(self) -> str:
+        """
+        machine readable representation of the Shard placement
+        """
         return f"Shard(dim={self.dim})"
+
+    def __str__(self) -> str:
+        """human readable representation of the Shard placement"""
+        return f"S({self.dim})"
 
 
 class Replicate(Placement):
@@ -232,13 +293,19 @@ class Replicate(Placement):
         return -1
 
     def __repr__(self) -> str:
+        """
+        machine readable representation of the Replicate placement
+        """
         return "Replicate()"
 
+    def __str__(self) -> str:
+        """
+        human readable representation of the Replicate placement
+        """
+        return "R"
+
     def _replicate_tensor(
-        self,
-        tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         """
         Replicate (broadcast) a torch.Tensor on a mesh dimension (use
@@ -263,15 +330,13 @@ class _Partial(Placement):
     # We can implement custom reductions as needed by subclassing this
     # class and override those contracts.
 
-    def __init__(self, reduce_op: c10d.ReduceOp = c10d.ReduceOp.SUM):  # type: ignore[assignment]
-        self.reduce_op: c10d.ReduceOp = reduce_op
+    def __init__(self, reduce_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM):
+        self.reduce_op: c10d.ReduceOp.RedOpType = reduce_op
 
     def _to_replicate(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        return mesh.all_reduce(
-            tensor, self.reduce_op, mesh_dim=mesh_dim  # type: ignore[call-arg]
-        )
+        return mesh.all_reduce(tensor, self.reduce_op, mesh_dim=mesh_dim)
 
     def _to_shard(
         self,
@@ -282,9 +347,7 @@ class _Partial(Placement):
     ) -> torch.Tensor:
         # by default call reduce_shard_tensor of the shard_spec.
         shard_spec = cast(Shard, shard_spec)
-        return shard_spec._reduce_shard_tensor(
-            tensor, mesh, self.reduce_op, mesh_dim  # type: ignore[call-arg]
-        )
+        return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _Partial):
@@ -295,7 +358,16 @@ class _Partial(Placement):
         return hash(self.reduce_op)
 
     def __repr__(self) -> str:
+        """
+        machine readable representation of the Partial placement
+        """
         return f"_Partial(reduce_op={self.reduce_op})"
+
+    def __str__(self) -> str:
+        """
+        human readable representation of the Partial placement
+        """
+        return "P"
 
 
 # used internally to propagate the placements
@@ -336,6 +408,14 @@ class DTensorSpec:
         if self.tensor_meta is None:
             raise ValueError("tensor_meta is not set")
         return len(self.tensor_meta.shape)
+
+    @property
+    def num_shards(self) -> int:
+        num_shards = 1
+        for i, placement in enumerate(self.placements):
+            if placement.is_shard():
+                num_shards *= self.mesh.size(i)
+        return num_shards
 
     @property
     def dim_map(self) -> List[int]:

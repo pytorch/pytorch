@@ -12,8 +12,7 @@ class DataChunkDF(DataChunk):
 
     def __iter__(self):
         for df in self.items:
-            for record in df_wrapper.iterate(df):
-                yield record
+            yield from df_wrapper.iterate(df)
 
     def __len__(self):
         total_len = 0

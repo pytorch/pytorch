@@ -42,7 +42,11 @@ class LoadingNvfuserLibrary {
     library_name += "libnvfuser_codegen.so";
 #endif
     try {
-      nvfuserLib_ = std::make_shared<at::DynamicLibrary>(library_name.c_str());
+      // NOTE: we need to refactor this to a lazy load instead. We could end up
+      // with double de-allocation with our python API loading the library.
+      // Leaking the handle should solve the problem for now
+      nvfuserLib_ = std::make_shared<at::DynamicLibrary>(
+          library_name.c_str(), nullptr, true);
     } catch (const c10::DynamicLibraryError& e) {
 #if defined(BUILD_NVFUSER) || !defined(NDEBUG)
       TORCH_WARN("Loading nvfuser library failed with: ", e.msg());

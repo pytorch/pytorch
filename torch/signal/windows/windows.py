@@ -71,7 +71,7 @@ def _window_function_checks(function_name: str, M: int, dtype: torch.dtype, layo
         raise ValueError(f'{function_name} requires non-negative window length, got M={M}')
     if layout is not torch.strided:
         raise ValueError(f'{function_name} is implemented for strided tensors only, got: {layout}')
-    if not (dtype in [torch.float32, torch.float64]):
+    if dtype not in [torch.float32, torch.float64]:
         raise ValueError(f'{function_name} expects float32 or float64 dtypes, got: {dtype}')
 
 

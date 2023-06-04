@@ -6,6 +6,8 @@
 
 #include <ATen/TensorUtils.h>
 #include <ATen/Dispatch.h>
+#include <c10/core/GradMode.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -288,15 +290,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   auto w1_ = get_mkldnn_tensor(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
   auto w2_ = get_mkldnn_tensor(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
 
-  auto pd = ideep::lstm_forward_training::prepare(
-      x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
-  auto workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
-  ideep::tensor mkldnn_workspace;
-  mkldnn_workspace.init(
-      pd.workspace_desc(), workspace.data_ptr<uint8_t>());
-  ideep::lstm_forward_training::compute(
-      pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
-  return std::make_tuple(output, hy_, cy_, workspace);
+  if (at::GradMode::is_enabled()) {
+    Tensor workspace = Tensor();
+    auto pd = ideep::lstm_forward_training::prepare(
+        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
+    workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
+    ideep::tensor mkldnn_workspace;
+    mkldnn_workspace.init(
+        pd.workspace_desc(), workspace.template data_ptr<uint8_t>());
+    ideep::lstm_forward_training::compute(
+        pd, x, hx, cx, w1_, w2_, b, mkldnn_workspace, y, hy, cy, reverse, ideep::prop_kind::forward_training);
+    return std::make_tuple(output, hy_, cy_, workspace);
+  } else {
+    ideep::lstm_forward_inference::compute(
+        x, hx, cx, w1_, w2_, b, y, hy, cy, reverse, ideep::prop_kind::forward_inference);
+    return std::make_tuple(output, hy_, cy_, Tensor());
+  }
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(

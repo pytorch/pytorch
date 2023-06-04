@@ -250,9 +250,16 @@ def create_default_local_load_plan(
     It handles resharding by issuing multiple read requests against storage in order to match
     load requirements.
     """
+
     for fqn, obj in state_dict.items():
         md = metadata.state_dict_metadata[fqn]
-        requests += _create_read_items(fqn, md, obj)
+        # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
+        # gets called only when the current rank is part of the mesh for the corresponding DTensor.
+        if isinstance(obj, DTensor):
+            if obj.device_mesh.get_coordinate() is not None:
+                requests += _create_read_items(fqn, md, obj)
+        else:
+            requests += _create_read_items(fqn, md, obj)
 
     return LoadPlan(requests)
 
@@ -282,8 +289,14 @@ def create_default_local_save_plan(
     """
     requests = []
     for fqn, obj in state_dict.items():
-        if isinstance(obj, (ShardedTensor, DTensor)) or is_coordinator:
+        # Since DTensor supports submesh, adding extra check to ensure _create_write_items()
+        # gets called only when the current rank is part of the mesh for the corresponding DTensor.
+        if isinstance(obj, DTensor):
+            if obj.device_mesh.get_coordinate() is not None:
+                requests += _create_write_items(fqn, obj)
+        elif isinstance(obj, (ShardedTensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
+
     return SavePlan(requests)
 
 
@@ -396,10 +409,10 @@ def _validate_global_plan(
             # Compute the volume
             if not _check_box_bounds(value.size, chunk0):
                 logger.warning(
-                    f"""
-                        key:{key} has out of bounds chunk:
-                        tensor-size:{value.size} chunk: {chunk0}
                     """
+                        key:%s has out of bounds chunk:
+                        tensor-size:%s chunk: %s
+                    """, key, value.size, chunk0
                 )
                 all_good = False
             chunks_volume += reduce(operator.mul, chunk0.sizes, 1)
@@ -408,7 +421,7 @@ def _validate_global_plan(
             for chunk1 in value.chunks[chunk_idx + 1 :]:
                 if _check_box_overlap(chunk0, chunk1):
                     logger.warning(
-                        f"key:{key} has overlapping chunks: {chunk0} {chunk1}"
+                        "key:%s has overlapping chunks: %s %s", key, chunk0, chunk1
                     )
                     all_good = False
 
@@ -416,10 +429,10 @@ def _validate_global_plan(
         tensor_volume = reduce(operator.mul, value.size, 1)
         if chunks_volume != tensor_volume:
             logger.warning(
-                f"""
-                    key:{key} invalid fill tensor-volume:
-                    {tensor_volume} chunks-volume: {chunks_volume}
                 """
+                    key:%s invalid fill tensor-volume:
+                    %s chunks-volume: %s
+                """, key, tensor_volume, chunks_volume
             )
             all_good = False
 

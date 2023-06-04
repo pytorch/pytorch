@@ -155,6 +155,7 @@ endif()
 
 # ---[ BLAS
 
+set(AT_MKLDNN_ACL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -1069,6 +1070,11 @@ if(BUILD_PYTHON)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
+  if(NOT PYTHONLIBS_VERSION_STRING)
+    message(FATAL_ERROR
+      "Python development libraries could not be found.")
+  endif()
+
   if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -1170,6 +1176,9 @@ if(USE_OPENMP AND NOT TARGET caffe2::openmp)
   include(${CMAKE_CURRENT_LIST_DIR}/Modules/FindOpenMP.cmake)
   if(OPENMP_FOUND)
     message(STATUS "Adding OpenMP CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
+    if(APPLE AND USE_MPS)
+      string(APPEND CMAKE_OBJCXX_FLAGS " ${OpenMP_CXX_FLAGS}")
+    endif()
     if(OpenMP_CXX_LIBRARIES)
       message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
     endif()
@@ -1257,14 +1266,9 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
     list(APPEND HIP_CXX_FLAGS -DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
-    list(APPEND HIP_CXX_FLAGS -Wno-macro-redefined)
-    list(APPEND HIP_CXX_FLAGS -Wno-inconsistent-missing-override)
-    list(APPEND HIP_CXX_FLAGS -Wno-exceptions)
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-negative)
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
-    list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
-    list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
@@ -1283,7 +1287,7 @@ if(USE_ROCM)
     # host linker to link.
     list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
     foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
-      list(APPEND HIP_CLANG_FLAGS --amdgpu-target=${pytorch_rocm_arch})
+      list(APPEND HIP_CLANG_FLAGS --offload-arch=${pytorch_rocm_arch})
     endforeach()
 
     set(Caffe2_HIP_INCLUDE
@@ -1300,7 +1304,7 @@ if(USE_ROCM)
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse)
+        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
     else()
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
@@ -1724,6 +1728,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   set(AT_MKLDNN_ENABLED 0)
+  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1731,6 +1736,9 @@ if(NOT INTERN_BUILD_MOBILE)
         "Not compiling with MKLDNN. "
         "Turn this warning off by USE_MKLDNN=OFF.")
       set(USE_MKLDNN OFF)
+    endif()
+    if(USE_MKLDNN_ACL)
+      set(AT_MKLDNN_ACL_ENABLED 1)
     endif()
   endif()
   if(USE_MKLDNN)
@@ -1795,6 +1803,8 @@ if(NOT INTERN_BUILD_MOBILE)
   else(NOT C_HAS_THREAD)
     add_compile_options(-DTH_HAVE_THREAD)
   endif(NOT C_HAS_THREAD)
+
+  find_package(ZVECTOR) # s390x simd support
 endif()
 
 #

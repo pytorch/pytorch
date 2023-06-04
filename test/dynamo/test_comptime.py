@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import re
+import sys
 from io import StringIO
 
 import torch._dynamo.test_case
@@ -40,8 +41,9 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-def forward(self, x : torch.Tensor):
-    mul = x * 2;  x = None""",
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    mul = l_x_ * 2;  l_x_ = None""",
         )
 
     def test_print_disas(self):
@@ -76,7 +78,10 @@ def forward(self, x : torch.Tensor):
         self.assertIn("-->", out)
         # Check that the bytecode resembles what we expect
         self.assertIn("STORE_FAST", out)
-        self.assertIn("BINARY_MULTIPLY", out)
+        if sys.version_info < (3, 11):
+            self.assertIn("BINARY_MULTIPLY", out)
+        else:
+            self.assertIn("BINARY_OP", out)
 
     def test_print_value_stack(self):
         global FILE
@@ -180,10 +185,34 @@ y = TensorVariable()
         f(torch.randn(2))
         self.assertEqual(cnt.frame_count, 1)
         self.assertExpectedInline(
-            FILE.getvalue().rstrip(),
+            re.sub(r"\s+$", "", FILE.getvalue().rstrip(), flags=re.MULTILINE),
             """\
 -
-            local 'x' TENSOR_MATCH
+            local "L['x']" TENSOR_MATCH
+            {
+                'guard_types': None,
+                'code': None,
+                'obj_weakref': None
+                'guarded_class': None
+            }
+-
+            global '' GRAD_MODE
+            {
+                'guard_types': None,
+                'code': None,
+                'obj_weakref': None
+                'guarded_class': None
+            }
+-
+            global '' DETERMINISTIC_ALGORITHMS
+            {
+                'guard_types': None,
+                'code': None,
+                'obj_weakref': None
+                'guarded_class': None
+            }
+-
+            global '' DEFAULT_DEVICE
             {
                 'guard_types': None,
                 'code': None,
@@ -259,8 +288,9 @@ y = TensorVariable()
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-def forward(self, x : torch.Tensor):
-    mul = x * 2;  x = None
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    mul = l_x_ * 2;  l_x_ = None
     add = mul + 4;  mul = None""",
         )
 

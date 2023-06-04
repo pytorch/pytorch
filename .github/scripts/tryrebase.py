@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 
+import contextlib
 import os
+import re
 import subprocess
 import sys
-import re
-from typing import Any
-from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
+from typing import Any, Generator
+
 from github_utils import gh_post_pr_comment as gh_post_comment
+from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import GitHubPR
 
 SAME_SHA_ERROR = (
-    "\n```\nAborting rebase because rebasing the branch resulted in the same sha as the target branch.\n" +
-    "This usually happens because the PR has already been merged.  Please rebase locally and push.\n```"
+    "\n```\nAborting rebase because rebasing the branch resulted in the same sha as the target branch.\n"
+    + "This usually happens because the PR has already been merged.  Please rebase locally and push.\n```"
 )
+
 
 def parse_args() -> Any:
     from argparse import ArgumentParser
+
     parser = ArgumentParser("Rebase PR into branch")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--branch", type=str)
@@ -23,9 +27,32 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
-def rebase_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False) -> None:
+def post_already_uptodate(
+    pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool
+) -> None:
+    msg = f"Tried to rebase and push PR #{pr.pr_num}, but it was already up to date."
+    def_branch = pr.default_branch()
+    def_branch_fcn = f"refs/remotes/{repo.remote}/{def_branch}"
+    if onto_branch != def_branch_fcn and repo.rev_parse(
+        def_branch_fcn
+    ) != repo.rev_parse(onto_branch):
+        def_branch_url = f"https://github.com/{pr.org}/{pr.project}/tree/{def_branch}"
+        msg += f" Try rebasing against [{def_branch}]({def_branch_url}) by issuing:"
+        msg += f"\n`@pytorchbot rebase -b {def_branch}`"
+
+    gh_post_comment(
+        pr.org,
+        pr.project,
+        pr.pr_num,
+        msg,
+        dry_run=dry_run,
+    )
+
+
+def rebase_onto(
+    pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
+) -> None:
     branch = f"pull/{pr.pr_num}/head"
-    onto_branch = f"refs/remotes/origin/{onto_branch}"
     remote_url = f"https://github.com/{pr.info['headRepository']['nameWithOwner']}.git"
     refspec = f"{branch}:{pr.head_ref()}"
 
@@ -40,20 +67,30 @@ def rebase_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = F
     else:
         push_result = repo._run_git("push", "-f", remote_url, refspec)
     if "Everything up-to-date" in push_result:
-        gh_post_comment(pr.org, pr.project, pr.pr_num,
-                        f"Tried to rebase and push PR #{pr.pr_num}, but it was already up to date", dry_run=dry_run)
+        post_already_uptodate(pr, repo, onto_branch, dry_run)
     else:
-        gh_post_comment(pr.org, pr.project, pr.pr_num,
-                        f"Successfully rebased `{pr.head_ref()}` onto `{onto_branch}`, please pull locally " +
-                        f"before adding more changes (for example, via `git checkout {pr.head_ref()} && " +
-                        "git pull --rebase`)", dry_run=dry_run)
+        gh_post_comment(
+            pr.org,
+            pr.project,
+            pr.pr_num,
+            f"Successfully rebased `{pr.head_ref()}` onto `{onto_branch}`, please pull locally "
+            + f"before adding more changes (for example, via `git checkout {pr.head_ref()} && "
+            + "git pull --rebase`)",
+            dry_run=dry_run,
+        )
 
 
-def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False) -> None:
-    if subprocess.run([sys.executable, "-m", "ghstack", "--help"], capture_output=True).returncode != 0:
+def rebase_ghstack_onto(
+    pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
+) -> None:
+    if (
+        subprocess.run(
+            [sys.executable, "-m", "ghstack", "--help"], capture_output=True
+        ).returncode
+        != 0
+    ):
         subprocess.run([sys.executable, "-m", "pip", "install", "ghstack"])
     orig_ref = f"{re.sub(r'/head$', '/orig', pr.head_ref())}"
-    onto_branch = f"refs/remotes/origin/{onto_branch}"
 
     repo.fetch(orig_ref, orig_ref)
     repo._run_git("rebase", onto_branch, orig_ref)
@@ -68,11 +105,13 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: 
     repo._run_git("config", "--global", "user.name", name)
 
     os.environ["OAUTH_TOKEN"] = os.environ["GITHUB_TOKEN"]
-    with open('.ghstackrc', 'w+') as f:
-        f.write('[ghstack]\n' +
-                "github_url=github.com\n" +
-                "github_username=pytorchmergebot\n" +
-                "remote_name=origin")
+    with open(".ghstackrc", "w+") as f:
+        f.write(
+            "[ghstack]\n"
+            + "github_url=github.com\n"
+            + "github_username=pytorchmergebot\n"
+            + "remote_name=origin"
+        )
 
     if dry_run:
         print("Don't know how to dry-run ghstack")
@@ -102,19 +141,45 @@ def rebase_ghstack_onto(pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: 
             if "Updated" in line:
                 pr_num = int(line.split("/")[-1])
                 if pr_num != pr.pr_num:
-                    gh_post_comment(pr.org, pr.project, pr_num,
-                                    f"Rebased `{orig_ref}` onto `{onto_branch}` because #{pr.pr_num} was rebased, "
-                                    "please pull locally before adding more changes (for example, via `ghstack " +
-                                    f"checkout https://github.com/{org}/{project}/pull/{pr_num}`)", dry_run=dry_run)
+                    gh_post_comment(
+                        pr.org,
+                        pr.project,
+                        pr_num,
+                        f"Rebased `{orig_ref}` onto `{onto_branch}` because #{pr.pr_num} was rebased, "
+                        "please pull locally before adding more changes (for example, via `ghstack "
+                        + f"checkout https://github.com/{org}/{project}/pull/{pr_num}`)",
+                        dry_run=dry_run,
+                    )
                 else:
-                    gh_post_comment(pr.org, pr.project, pr_num,
-                                    f"Successfully rebased `{orig_ref}` onto `{onto_branch}`, please pull locally " +
-                                    "before adding more changes (for example, via `ghstack " +
-                                    f"checkout https://github.com/{org}/{project}/pull/{pr.pr_num}`)", dry_run=dry_run)
+                    gh_post_comment(
+                        pr.org,
+                        pr.project,
+                        pr_num,
+                        f"Successfully rebased `{orig_ref}` onto `{onto_branch}`, please pull locally "
+                        + "before adding more changes (for example, via `ghstack "
+                        + f"checkout https://github.com/{org}/{project}/pull/{pr.pr_num}`)",
+                        dry_run=dry_run,
+                    )
 
-        if f"Skipped https://github.com/{org}/{project}/pull/{pr.pr_num}" in push_result:
-            gh_post_comment(pr.org, pr.project, pr.pr_num,
-                            f"Tried to rebase and push PR #{pr.pr_num}, but it was already up to date", dry_run=dry_run)
+        if (
+            f"Skipped https://github.com/{org}/{project}/pull/{pr.pr_num}"
+            in push_result
+        ):
+            post_already_uptodate(pr, repo, onto_branch, dry_run)
+
+
+@contextlib.contextmanager
+def git_config_guard(repo: GitRepo) -> Generator[None, None, None]:
+    """Restores user.name and user.email global properties after context is finished"""
+    user_email = repo._run_git("config", "user.email")
+    user_name = repo._run_git("config", "user.name")
+    try:
+        yield
+    finally:
+        if user_email:
+            repo._run_git("config", "--global", "user.email", user_email)
+        if user_name:
+            repo._run_git("config", "--global", "user.name", user_name)
 
 
 def main() -> None:
@@ -124,25 +189,29 @@ def main() -> None:
 
     pr = GitHubPR(org, project, args.pr_num)
     onto_branch = args.branch if args.branch else pr.default_branch()
+    onto_branch = f"refs/remotes/{repo.remote}/{onto_branch}"
+    onto_branch_url = (
+        f"https://github.com/{org}/{project}/commit/{repo.rev_parse(onto_branch)}"
+    )
 
-    msg = "@pytorchbot successfully started a rebase job."
+    msg = f"@pytorchbot started a rebase job onto [{onto_branch}]({onto_branch_url})."
     msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
     gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
     if pr.is_closed():
-        gh_post_comment(org, project, args.pr_num, f"PR #{args.pr_num} is closed, won't rebase", dry_run=args.dry_run)
+        gh_post_comment(
+            org,
+            project,
+            args.pr_num,
+            f"PR #{args.pr_num} is closed, won't rebase",
+            dry_run=args.dry_run,
+        )
         return
 
     try:
-        email = name = ""
-
         if pr.is_ghstack_pr():
-            # Check the configured name and email. If they are available, store them so that
-            # we can put them back after rebasing here
-            email = repo._run_git("config", "user.email")
-            name = repo._run_git("config", "user.name")
-
-            rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+            with git_config_guard(repo):
+                rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
         else:
             rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
 
@@ -152,13 +221,6 @@ def main() -> None:
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
         gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
-
-    finally:
-        if email:
-            repo._run_git("config", "--global", "user.email", email)
-
-        if name:
-            repo._run_git("config", "--global", "user.name", name)
 
 
 if __name__ == "__main__":

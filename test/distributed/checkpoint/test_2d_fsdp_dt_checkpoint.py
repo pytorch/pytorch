@@ -182,7 +182,7 @@ class Test2dFsdpDtCheckpoint(DTensorTestBase):
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             )
             flattened_osd = FSDP.optim_state_dict_to_load(
-                optim_state["optim"], model_2, optim_2
+                model_2, optim_2, optim_state["optim"]
             )
             optim_2.load_state_dict(flattened_osd)
 

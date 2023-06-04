@@ -10,16 +10,17 @@ architectures:
     * Latest ROCM
 """
 
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
 
 
-CUDA_ARCHES = ["11.7", "11.8"]
+CUDA_ARCHES = ["11.7", "11.8", "12.1"]
 
 
 ROCM_ARCHES = ["5.3", "5.4.2"]
 
 
-CPU_CXX11_ABI_ARCH = ['cpu-cxx11-abi']
+CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
+
 
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
@@ -121,9 +122,12 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     return ret
 
 
-def generate_libtorch_matrix(os: str, abi_version: str,
-                             arches: Optional[List[str]] = None,
-                             libtorch_variants: Optional[List[str]] = None) -> List[Dict[str, str]]:
+def generate_libtorch_matrix(
+    os: str,
+    abi_version: str,
+    arches: Optional[List[str]] = None,
+    libtorch_variants: Optional[List[str]] = None,
+) -> List[Dict[str, str]]:
     if arches is None:
         arches = ["cpu"]
         if os == "linux":
@@ -163,7 +167,9 @@ def generate_libtorch_matrix(os: str, abi_version: str,
                     "devtoolset": abi_version if os != "windows" else "",
                     "container_image": LIBTORCH_CONTAINER_IMAGES[
                         (arch_version, abi_version)
-                    ] if os != "windows" else "",
+                    ]
+                    if os != "windows"
+                    else "",
                     "package_type": "libtorch",
                     "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
                         ".", "_"
@@ -173,9 +179,12 @@ def generate_libtorch_matrix(os: str, abi_version: str,
     return ret
 
 
-def generate_wheels_matrix(os: str,
-                           arches: Optional[List[str]] = None,
-                           python_versions: Optional[List[str]] = None) -> List[Dict[str, str]]:
+def generate_wheels_matrix(
+    os: str,
+    arches: Optional[List[str]] = None,
+    python_versions: Optional[List[str]] = None,
+    gen_special_an_non_special_wheel: bool = True,
+) -> List[Dict[str, str]]:
     package_type = "wheel"
     if os == "linux":
         # NOTE: We only build manywheel packages for linux
@@ -196,10 +205,11 @@ def generate_wheels_matrix(os: str,
     for python_version in python_versions:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
-            gpu_arch_version = "" if arch_version == "cpu" or arch_version == "cpu-cxx11-abi" else arch_version
-            # Skip rocm 3.11 binaries for now as the docker image are not correct
-            if python_version == "3.11" and gpu_arch_type == "rocm":
-                continue
+            gpu_arch_version = (
+                ""
+                if arch_version == "cpu" or arch_version == "cpu-cxx11-abi"
+                else arch_version
+            )
 
             # special 11.7 wheels package without dependencies
             # dependency downloaded via pip install
@@ -215,8 +225,7 @@ def generate_wheels_matrix(os: str,
                         "devtoolset": "",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
-                        "pytorch_extra_install_requirements":
-                        "nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "pytorch_extra_install_requirements": "nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
                         "nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
                         "nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' and platform_machine == 'x86_64' | "
                         "nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -227,13 +236,13 @@ def generate_wheels_matrix(os: str,
                         "nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' and platform_machine == 'x86_64' | "
                         "nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
                         "nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux' and platform_machine == 'x86_64'",
-                        "build_name":
-                        f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-with-pypi-cudnn"
-                        .replace(
+                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-with-pypi-cudnn".replace(  # noqa: B950
                             ".", "_"
                         ),
                     }
                 )
+                if not gen_special_an_non_special_wheel:
+                    continue
 
             ret.append(
                 {
@@ -243,7 +252,9 @@ def generate_wheels_matrix(os: str,
                     "desired_cuda": translate_desired_cuda(
                         gpu_arch_type, gpu_arch_version
                     ),
-                    "devtoolset": "cxx11-abi" if arch_version == "cpu-cxx11-abi" else "",
+                    "devtoolset": "cxx11-abi"
+                    if arch_version == "cpu-cxx11-abi"
+                    else "",
                     "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                     "package_type": package_type,
                     "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(

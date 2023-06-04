@@ -4,11 +4,11 @@ import copy
 import math
 import os
 import random
+import re
 import signal
 import sys
 import tempfile
 import threading
-import time
 from contextlib import contextmanager
 from datetime import timedelta
 from itertools import product
@@ -17,8 +17,8 @@ from unittest import mock
 import torch
 import torch.distributed as c10d
 
-if not c10d.is_available():
-    print("c10d not available, skipping tests", file=sys.stderr)
+if not c10d.is_available() or not c10d.is_nccl_available():
+    print("c10d NCCL not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 import test_c10d_common
@@ -382,6 +382,34 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                     RuntimeError, "Cannot use " + err + " with NCCL"
             ):
                 allreduce(tensors, op)
+
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_alltoall_ops_with_cudafree_race(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        opts = c10d.AllToAllOptions()
+        local_device = f"cuda:{self.rank_to_GPU[self.rank][0]}"
+        torch.cuda.set_device(local_device)
+        input = torch.rand(1000, 1000, device=local_device)
+        output = torch.rand(1000, 1000, device=local_device)
+        race_tensors = []
+        # create some tensors to race with alltoall collective
+        for _ in range(10):
+            tmp = []
+            for i in range(5):
+                tmp.append(torch.rand(10 ** (3 + i), device=local_device))
+            race_tensors.append(tmp)
+
+        for i in range(10):
+            race_tensors.pop()
+            work = pg.alltoall_base(output, input, [], [], opts)
+            # this triggers cudaFree
+            torch.cuda.empty_cache()
+            work.wait()
+        torch.cuda.synchronize(local_device)
+
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -1119,8 +1147,7 @@ class DistributedDataParallelTest(
             try:
                 pg.allreduce([torch.ones(2).cuda(self.rank)]).wait()
             except RuntimeError as e:
-                self.assertTrue("timed out in call to wait()" in str(e))
-                self.assertTrue("TensorShape=[1]" in str(e))
+                self.assertTrue("aborted" in str(e))
             else:
                 self.fail("Expected error to be raised!")
 
@@ -2420,7 +2447,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @property
     def blocking_wait_error_msg(self):
-        return "Caught collective operation timeout"
+        return "timeout"
 
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))
@@ -2481,12 +2508,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # Clean up structures (ex: files for FileStore before going down)
             del process_group
             func()
-        else:
-            # Wait for timeout
-            time.sleep(2 * self.op_timeout_sec)
-
-            # Now verify communicators on this rank have been aborted by the watchdog thread.
-            self._wait_for_comm_abort(process_group)
 
     @with_nccl_blocking_wait
     @requires_nccl()
@@ -2563,33 +2584,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env("2147483647")
         self._run_invalid_nccl_blocking_wait_env("4294967295")
 
-    def _check_valid_comm_exception(self, e):
-        exception_str = str(e)
-        valid_exceptions = [
-            "NCCL communicator was aborted",
-            "NCCL communicator encountered error",
-            "Caught collective operation timeout"
-        ]
-        return any(exc in exception_str for exc in valid_exceptions)
-
-    def _wait_for_comm_abort(self, process_group, timeout=None):
-        """
-        Waits for the watchdog thread to abort communicators for the process group.
-        """
-        while True:
-            try:
-                if not timeout:
-                    process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
-                else:
-                    assert isinstance(timeout, timedelta)
-                    process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timeout)
-            except Exception as e:
-                if self._check_valid_comm_exception(e):
-                    return
-                else:
-                    raise e
-            time.sleep(1)
-
     @with_nccl_blocking_wait
     @requires_nccl()
     @requires_gloo()
@@ -2620,9 +2614,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 pg_gloo.barrier().wait()
             except Exception as e:
                 raise ValueError(f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}") from e
-            # Now verify communicators on this rank have
-            # been aborted by watchdog.
-            self._wait_for_comm_abort(process_group, failed_collective_timeout)
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
@@ -2723,12 +2714,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
         self._test_sequence_num_set_new_group(backend="nccl")
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_pass_nccl_options_high_priority_stream(self):
-        pg_opts = c10d.ProcessGroupNCCL.Options()
-        pg_opts.is_high_priority_stream = True
-
+    def _test_pass_nccl_options(self, pg_opts):
         store = c10d.FileStore(self.file_name, self.world_size)
         # Test init_process_group accepts options
         dist.init_process_group(
@@ -2746,6 +2732,37 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg.allreduce(t).wait()
         expected_tensor = torch.tensor([3] * 10).cuda(self.rank)
         self.assertEqual(expected_tensor, t)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_high_priority_stream(self):
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        pg_opts.is_high_priority_stream = True
+        self._test_pass_nccl_options(pg_opts)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 17), "Need NCCL 2.17+ for configuring NCCL communicators")
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config(self):
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        pg_opts.config.max_ctas = 4
+        pg_opts.config.min_ctas = 2
+        pg_opts.config.cga_cluster_size = 2
+        nccl_debug_file = tempfile.NamedTemporaryFile()
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+
+        # Tests functionality when passing nccl config
+        self._test_pass_nccl_options(pg_opts)
+
+        # Tests if comms were configured
+        nccl_debug_file_content = nccl_debug_file.read()
+        max_ctas = re.search(rb'Max CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
+        min_ctas = re.search(rb'Min CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
+        cga_cluster_size = re.search(rb'CGA cluster.*(\d+)|$', nccl_debug_file_content).group(1)
+        self.assertEqual(pg_opts.config.max_ctas, int(max_ctas))
+        self.assertEqual(pg_opts.config.min_ctas, int(min_ctas))
+        self.assertEqual(pg_opts.config.cga_cluster_size, int(cga_cluster_size))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -2918,7 +2935,7 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
     @skip_if_lt_x_gpu(2)
     def test_allreduce_work_wait_gpu(self):
-        self._test_allgather_work_wait(
+        self._test_allreduce_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank,
         )
 
@@ -3023,6 +3040,42 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.reduce_scatter_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
+
+class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
+    def setUp(self):
+        super(LargeCommTest, self).setUp()
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(LargeCommTest, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def device(self):
+        return self.rank
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_local_sync(self):
+        self._test_new_group_local_sync(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_local_sync_sanity_check(self):
+        self._test_new_group_local_sync_sanity_check(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_local_sync_duplicated_pg(self):
+        self._test_new_group_local_sync_duplicate_pg(backend="nccl")
+
+
 
 if __name__ == "__main__":
     assert (

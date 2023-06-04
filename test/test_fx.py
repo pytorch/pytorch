@@ -36,8 +36,8 @@ from copy import deepcopy
 from collections import namedtuple
 
 from torch.fx.proxy import TraceError
-from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMATIBLITY
-
+from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBILITY
+from torch.fx._symbolic_trace import PHBase, PHWithMeta
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
@@ -46,7 +46,7 @@ from fx.test_pass_infra import TestPassManager  # noqa: F401
 from fx.test_common_passes import TestCommonPass  # noqa: F401
 from fx.test_cse_pass import TestCSEPass  # noqa: F401
 from fx.test_matcher_utils import TestMatcher  # noqa: F401
-from fx.test_verifier import VerifierTest  # noqa: F401
+from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 
 from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
@@ -152,6 +152,11 @@ class Foo:  # noqa: B209
     def __init__(self, a, b):
         self.a = a
         self.b = b
+
+@torch.fx.has_side_effect
+@torch.fx.wrap
+def side_effect_func(x: torch.Tensor):
+    print(x)
 
 class TestFX(JitTestCase):
     def setUp(self):
@@ -322,7 +327,7 @@ class TestFX(JitTestCase):
         def f(x, y):
             x = control_flow.cond(x[0] == 0, true, false, [x, y])
 
-        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace PyOperators"):
+        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace HigherOrderOperators"):
             _ = symbolic_trace(f)
 
     def test_disallow_override(self):
@@ -2317,6 +2322,88 @@ class TestFX(JitTestCase):
         x, y = torch.randn(3, 4), torch.randn(3, 4)
         self.checkGraphModule(foo, (x, y))
 
+
+    def test_trace_return_dataclass(self):
+        """
+        Test case for Module that return dataclass
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class MyOutput:
+            foo: torch.Tensor
+            bar: torch.Tensor
+
+        class ModuleReturnDataclass(torch.nn.Module):
+            def forward(self, d : torch.Tensor):
+                return MyOutput(foo=d + d, bar=d * 3)
+
+        module = ModuleReturnDataclass()
+        traced_graph = symbolic_trace(module).graph
+        print(traced_graph)
+
+        gm = GraphModule(module, traced_graph)
+        x = torch.rand(1)
+
+        self.assertEqual(module(x), gm(x))
+
+    def test_trace_return_dataclass_nested(self):
+        """
+        Test case for Module that return dataclass
+        """
+        from dataclasses import dataclass
+
+        @dataclass
+        class MyOutput:
+            foo: torch.Tensor
+            bar: torch.Tensor
+
+        class ModuleReturnDataclass(torch.nn.Module):
+            def forward(self, d : torch.Tensor):
+                return MyOutput(foo=d + d, bar=d * 3)
+
+        class CallsModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m = ModuleReturnDataclass()
+
+            def forward(self, x):
+                tmp = self.m(x)
+                return MyOutput(foo=tmp.foo, bar=tmp.bar)
+
+        module = CallsModule()
+        traced_graph = symbolic_trace(module).graph
+        print(traced_graph)
+
+        gm = GraphModule(module, traced_graph)
+        x = torch.rand(1)
+
+        self.assertEqual(module(x), gm(x))
+
+
+    def test_trace_return_namedtuple(self):
+        """
+        Test case for Module that return namedtuple
+        """
+        class MyOutput(NamedTuple):
+            foo: torch.Tensor
+            bar: torch.Tensor
+
+        class ModuleReturnNamedTuple(torch.nn.Module):
+            def forward(self, d : torch.Tensor):
+                return MyOutput(foo=d, bar=d)
+
+
+        module = ModuleReturnNamedTuple()
+
+        traced_graph = symbolic_trace(module).graph
+        print(traced_graph)
+
+        gm = GraphModule(module, traced_graph)
+        x = torch.rand(1)
+
+        self.assertEqual(module(x), gm(x))
+
     def test_trace_dict_int_keys(self):
         class ModWithDictArg(torch.nn.Module):
             def forward(self, d : Dict[int, torch.Tensor]):
@@ -2669,7 +2756,7 @@ class TestFX(JitTestCase):
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
         self.assertEqual(mod_true(3, True), 6)
         print(mod_true.code)
-        assert(any([i.target == torch._assert for i in mod_true.graph.nodes]))
+        assert(any(i.target == torch._assert for i in mod_true.graph.nodes))
         with self.assertRaises(AssertionError):
             mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
@@ -3382,6 +3469,10 @@ class TestFX(JitTestCase):
             traced(0)
 
     def test_pytree(self):
+        # Used to test that you can use your own placeholder class
+        class PHTest(PHBase):
+            pass
+
         def f_sum(x):
             return sum(x)
 
@@ -3422,6 +3513,7 @@ class TestFX(JitTestCase):
         tests = [
             (f_sum, [PH, PH, PH]),
             (f_sum, []),
+            (f_sum, [PHTest(), PHTest(), PHTest()]),
             (f_sum_dict, {'a': PH, 'b': PH, 'c': PH}),
             (f_dict_list_map, {'a': (PH, PH), 'b': [PH], 'c': []}),
             (f_dict_list_map, {5: (PH, PH, PH)}),
@@ -3435,7 +3527,7 @@ class TestFX(JitTestCase):
         ]
 
         def verify_pytree(f, inp):
-            val = pytree.tree_map(lambda x: torch.randn(3) if x == PH else x, inp)
+            val = pytree.tree_map(lambda x: torch.randn(3) if isinstance(x, PHBase) else x, inp)
             num_flat_args = len([i == PH for i in pytree.tree_flatten(inp)[0]])
             orig_out = f(val)
             nf = symbolic_trace(f, concrete_args={'x': inp})
@@ -3480,6 +3572,61 @@ class TestFX(JitTestCase):
 
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
+
+    def test_metadata_on_ph(self):
+        def f_sum(a: int, b: int) -> int:
+            return a + b
+
+        # Due to unflattening of dict, the batch argument
+        # will be split into two separate nodes with the names
+        # "batch_1" and "batch_2", referring to the keys
+        # "f1" and "f2" respectively in the dict.
+        def f_dict(a: Dict[str, str]) -> bool:
+            return a["f1"] == a["f2"]
+
+        def verify_metadata(gm: GraphModule, arg_names: List[str], metadata: List[str]):
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    self.assertTrue(node.name in arg_names)
+                    self.assertTrue(node.ph_key in metadata)
+
+        verify_metadata(
+            gm=symbolic_trace(
+                f_sum,
+                concrete_args={"a": PHWithMeta(ph_key="a"), "b": PHWithMeta(ph_key="b")}
+            ),
+            arg_names=["a_1", "b_1"],
+            metadata=["a", "b"]
+        )
+        verify_metadata(
+            gm=symbolic_trace(
+                f_dict,
+                concrete_args={"a": {"f1": PHWithMeta(ph_key="f1"), "f2": PHWithMeta(ph_key="f2")}}
+            ),
+            arg_names=["a_1", "a_2"],
+            metadata=["f1", "f2"]
+        )
+
+        # Ensures that tags on nodes are NOT overwritten by PH attributes with same attr name (tag)
+        class TaggingTracer(Tracer):
+            def create_node(self, kind : str, target : Union[str, Callable],
+                            args : Tuple[Argument, ...], kwargs : Dict[str, Any], name : Optional[str] = None,
+                            type_expr : Optional[Any] = None) -> Node:
+                n = super().create_node(kind, target, args, kwargs, name)
+                n.tag = "foo"
+                return n
+
+        class PHWithTag(PHBase):
+            def __init__(self, tag: str):
+                super().__init__()
+
+                self.tag = tag
+
+        g = TaggingTracer().trace(f_sum, concrete_args={"a": PHWithTag(tag="bar"), "b": PHWithTag(tag="bar")})
+        for n in g.nodes:
+            self.assertTrue(hasattr(n, "tag"))
+            # Ensure that tag is still "foo" and not "bar" (from PHWithTag)
+            self.assertEqual(n.tag, "foo")
 
     def test_custom_codegen(self):
         class ListCodeGen(CodeGen):
@@ -3883,7 +4030,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                 if isinstance(v, types.ModuleType):
                     check_symbols_have_bc_designation(v, prefix + [k])
                 elif isinstance(v, (type, types.FunctionType)):
-                    if v not in _MARKED_WITH_COMATIBLITY:
+                    if v not in _MARKED_WITH_COMPATIBILITY:
                         non_back_compat_objects.setdefault(v)
 
         check_symbols_have_bc_designation(torch.fx, ['torch', 'fx'])
@@ -3903,6 +4050,24 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                                  f"backwards-compatibility classification! Please decorate these "
                                  f"API(s) with `@torch.fx._compatibility.compatibility` to specify "
                                  f"BC guarantees.")
+
+    def test_adding_side_effect_function(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                side_effect_func(x)
+                return x
+
+        gm = torch.fx.symbolic_trace(TestModule())
+        self.assertEqual(len(gm.graph.nodes), 3)
+        gm.graph.eliminate_dead_code()
+        gm.recompile()
+        self.assertEqual(len(gm.graph.nodes), 3)
+        found = False
+        for node in gm.graph.nodes:
+            if node.op == 'call_function' and node.target == side_effect_func:
+                found = True
+        self.assertTrue(found)
+
 
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):

@@ -6,7 +6,6 @@ from operator_inp_utils import OperatorInputsLoader
 
 from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
-from torch._inductor import config as inductor_config
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.decomposition import decompositions
 from torch._inductor.lowering import fallbacks, lowerings
@@ -40,10 +39,9 @@ def compute_speedups(
 
                 # do_bench() clears L2 cache to hide the latency of CPU launch time
                 # along with cuda synchronization
-                median_ms, _, _ = triton.testing.do_bench(
+                timings[rep, m] = triton.testing.do_bench(
                     lambda: model(*example_inputs)
                 )
-                timings[rep, m] = median_ms
             else:
                 from torch._inductor.utils import timed
 
@@ -132,7 +130,7 @@ def skip_operator(operator):
         print(f"Skipping {operator}, no inductor impl")
         return True
 
-    if inductor_config.triton.convolution == "aten" and "convolution" in str(operator):
+    if "convolution" in str(operator):
         return True
 
     return False

@@ -19,16 +19,50 @@ class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
 
     Every Sampler subclass has to provide an :meth:`__iter__` method, providing a
-    way to iterate over indices of dataset elements, and a :meth:`__len__` method
+    way to iterate over indices or lists of indices (batches) of dataset elements, and a :meth:`__len__` method
     that returns the length of the returned iterators.
+
+    Args:
+        data_source (Dataset): This argument is not used and will be removed in 2.2.0.
+            You may still have custom implementation that utilizes it.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> class AccedingSequenceLengthSampler(Sampler[int]):
+        >>>     def __init__(self, data: List[str]) -> None:
+        >>>         self.data = data
+        >>>
+        >>>     def __len__(self) -> int:
+        >>>         return len(self.data)
+        >>>
+        >>>     def __iter__(self) -> Iterator[int]:
+        >>>         sizes = torch.tensor([len(x) for x in self.data])
+        >>>         yield from torch.argsort(sizes).tolist()
+        >>>
+        >>> class AccedingSequenceLengthBatchSampler(Sampler[List[int]]):
+        >>>     def __init__(self, data: List[str], batch_size: int) -> None:
+        >>>         self.data = data
+        >>>         self.batch_size = batch_size
+        >>>
+        >>>     def __len__(self) -> int:
+        >>>         return (len(self.data) + self.batch_size - 1) // self.batch_size
+        >>>
+        >>>     def __iter__(self) -> Iterator[List[int]]:
+        >>>         sizes = torch.tensor([len(x) for x in self.data])
+        >>>         for batch in torch.chunk(torch.argsort(sizes), len(self)):
+        >>>             yield batch.tolist()
 
     .. note:: The :meth:`__len__` method isn't strictly required by
               :class:`~torch.utils.data.DataLoader`, but is expected in any
               calculation involving the length of a :class:`~torch.utils.data.DataLoader`.
     """
 
-    def __init__(self, data_source: Optional[Sized]) -> None:
-        pass
+    def __init__(self, data_source: Optional[Sized] = None) -> None:
+        if data_source is not None:
+            import warnings
+
+            warnings.warn("`data_source` argument is not used and will be removed in 2.2.0."
+                          "You may still have custom implementation that utilizes it.")
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError

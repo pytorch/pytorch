@@ -192,15 +192,16 @@ class TimerServer(abc.ABC):
         reaped_worker_ids = set()
         for worker_id, expired_timers in self.get_expired_timers(now).items():
             log.info(
-                f"Reaping worker_id=[{worker_id}]."
-                f" Expired timers: {self._get_scopes(expired_timers)}"
+                "Reaping worker_id=[%s]."
+                " Expired timers: %s",
+                worker_id, self._get_scopes(expired_timers)
             )
             if self._reap_worker_no_throw(worker_id):
-                log.info(f"Successfully reaped worker=[{worker_id}]")
+                log.info("Successfully reaped worker=[%s]", worker_id)
                 reaped_worker_ids.add(worker_id)
             else:
                 log.error(
-                    f"Error reaping worker=[{worker_id}]. Will retry on next watchdog."
+                    "Error reaping worker=[%s]. Will retry on next watchdog.", worker_id
                 )
         self.clear_timers(reaped_worker_ids)
 
@@ -209,9 +210,10 @@ class TimerServer(abc.ABC):
 
     def start(self) -> None:
         log.info(
-            f"Starting {type(self).__name__}..."
-            f" max_interval={self._max_interval},"
-            f" daemon={self._daemon}"
+            "Starting %s..."
+            " max_interval=%s,"
+            " daemon=%s",
+            type(self).__name__, self._max_interval, self._daemon
         )
         self._watchdog_thread = threading.Thread(
             target=self._watchdog_loop, daemon=self._daemon
@@ -220,7 +222,7 @@ class TimerServer(abc.ABC):
         self._watchdog_thread.start()
 
     def stop(self) -> None:
-        log.info(f"Stopping {type(self).__name__}")
+        log.info("Stopping %s", type(self).__name__)
         self._stop_signaled = True
         if self._watchdog_thread:
             log.info("Stopping watchdog thread...")
@@ -239,7 +241,7 @@ def configure(timer_client: TimerClient):
     """
     global _timer_client
     _timer_client = timer_client
-    log.info(f"Timer client configured to: {type(_timer_client).__name__}")
+    log.info("Timer client configured to: %s", type(_timer_client).__name__)
 
 
 @contextmanager
@@ -265,7 +267,7 @@ def expires(
     """
     if client is None:
         if _timer_client is None:
-            raise RuntimeError("Configure timer client before using coundown timers.")
+            raise RuntimeError("Configure timer client before using countdown timers.")
         client = _timer_client
     if scope is None:
         # grab the caller file + lineno

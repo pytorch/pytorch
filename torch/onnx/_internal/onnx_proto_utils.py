@@ -292,7 +292,6 @@ def _find_onnxscript_op(
 
 
 def _convert_tensor_to_numpy(input: Any) -> Any:
-
     try:
         import numpy as np
     except ImportError:
@@ -315,5 +314,4 @@ def _convert_tensor_to_numpy(input: Any) -> Any:
             return np.array(input, dtype=np.int64)
         if isinstance(input[0], float):
             return np.array(input)
-
     return input

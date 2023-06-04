@@ -132,8 +132,9 @@ class TailLog:
                 f.result()
             except Exception as e:
                 log.error(
-                    f"error in log tailor for {self._name}{local_rank}."
-                    f" {e.__class__.__qualname__}: {e}",
+                    "error in log tailor for %s%s. %s: %s",
+                    self._name, local_rank,
+                    e.__class__.__qualname__, e,
                 )
 
         if self._threadpool:

@@ -179,7 +179,6 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
 @_onnx_symbolic("aten::relu6")
 @_beartype.beartype
 def relu6(g: jit_utils.GraphContext, input):
-    relu_ = opset9._op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     scalar_type = _type_utils.JitScalarType.from_value(
         input, _type_utils.JitScalarType.FLOAT
     )
@@ -191,7 +190,7 @@ def relu6(g: jit_utils.GraphContext, input):
         "Constant",
         value_t=torch.tensor(6, dtype=scalar_type.dtype()),
     )
-    return clamp(g, relu_, min_val, max_val)
+    return clamp(g, input, min_val, max_val)
 
 
 @_onnx_symbolic("aten::select")
@@ -885,7 +884,7 @@ def arange(g: jit_utils.GraphContext, *args):
         dtype = symbolic_helper._maybe_get_const(dtype, "i")
         return dtype
 
-    if len(args) == 2 and all(map(lambda val: isinstance(val, int), args)):
+    if len(args) == 2 and all((isinstance(val, int) for val in args)):
         # aten::arange(Scalar start, Scalar end)
         dtype = torch.int64
         # Start index.
@@ -1463,14 +1462,14 @@ def embedding_bag(
 def embedding_renorm(g: jit_utils.GraphContext, weight, indices, max_norm, norm_type):
     unique_indices = g.op("Unique", indices)
     partial_weight = g.op("Gather", weight, unique_indices)
-    norm_type = int(norm_type)
-    if norm_type == 1:
+    norm_i = int(norm_type)
+    if norm_i == 1:
         norm_type = "ReduceL1"
-    elif norm_type == 2:
+    elif norm_i == 2:
         norm_type = "ReduceL2"
     else:
         raise errors.SymbolicValueError(
-            f"Unsupported: ONNX export of embedding_renorm with norm: {norm_type}. "
+            f"Unsupported: ONNX export of embedding_renorm with norm: {norm_i}. "
             "Only 1. and 2. are supported.",
             weight,
         )

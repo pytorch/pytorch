@@ -30,7 +30,7 @@ const char* AccessToString(AccessType a) {
   return "Unknown";
 }
 
-void getDependencyChain(
+static void getDependencyChain(
     const std::shared_ptr<AccessInfo>& info,
     DependencySet& dependencies) {
   if (!dependencies.insert(info).second) {
@@ -42,7 +42,7 @@ void getDependencyChain(
   }
 }
 
-void getDependentsChain(
+static void getDependentsChain(
     const std::shared_ptr<AccessInfo>& info,
     DependencySet& dependents) {
   if (!dependents.insert(info).second) {
@@ -582,7 +582,7 @@ void MemDependencyChecker::visit(LoadPtr v) {
 // dependence. This function does not consider overlap in bound range, but
 // rather the stride of the bound relative to the loop variable. This is the
 // section of the code which considers iteration order, if allowed.
-bool executionSafetyCheck(
+static bool executionSafetyCheck(
     const std::shared_ptr<AccessInfo>& info,
     const std::shared_ptr<AccessInfo>& other,
     const std::vector<ExprPtr>& aStrides,
@@ -686,7 +686,7 @@ void MemDependencyChecker::visit(ForPtr v) {
   // They exist in the enclosing scope, but accesses within the loop body may
   // depend on them via usage of the loop variable.
   // The way we handle this is to create a new scope so we have an easily
-  // accessible list of the acceses within the extents.
+  // accessible list of the accesses within the extents.
   auto extentsScope =
       std::make_shared<Scope>(currentScope_->block, currentScope_);
   currentScope_ = extentsScope;
@@ -940,7 +940,7 @@ void MemDependencyChecker::visit(CondPtr v) {
   // present in both the true and false branches then we can close overlapping
   // accesses in the enclosing scope. Without that analysis future accesses
   // may be dependent on a write of a common range in all three of the
-  // enclosing, true and false scope. This is a false positve so not too bad
+  // enclosing, true and false scope. This is a false positive so not too bad
   // in the short term, I think.
 
   // Merge both true and false branches into the parent, but don't close any
@@ -1212,7 +1212,7 @@ void MemDependencyChecker::updateWriteHistory(
       it = writeHistory.erase(it);
     } else {
       // The new write partially overlaps a previous write. We want to keep
-      // both, but only track the unconvered part of the earlier write.
+      // both, but only track the uncovered part of the earlier write.
 
       // Determine the slices of the earlier bound not covered by info.
       auto newBounds =

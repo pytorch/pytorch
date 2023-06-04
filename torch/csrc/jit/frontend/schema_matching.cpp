@@ -340,6 +340,9 @@ bool isBlockListedSchema(const FunctionSchema& schema) {
   if (schema.name() == "aten::max" && schema.overload_name() == "unary_out") {
     return true;
   }
+  if (schema.name() == "aten::min" && schema.overload_name() == "unary_out") {
+    return true;
+  }
   return false;
 }
 
@@ -543,17 +546,6 @@ MatchedSchema matchSchema(
     return *result;
   }
   throw ErrorReport(loc) << failure_messages.str();
-}
-
-MatchedSchema matchSchema(
-    const ::c10::FunctionSchema& schema,
-    const SourceRange& loc,
-    Graph& graph,
-    at::ArrayRef<Value*> args,
-    at::ArrayRef<NamedValue> kwargs) {
-  std::vector<NamedValue> named_args =
-      fmap(args, [](Value* v) { return NamedValue(v); });
-  return matchSchema(schema, loc, graph, named_args, kwargs);
 }
 
 static std::string prefixLine(

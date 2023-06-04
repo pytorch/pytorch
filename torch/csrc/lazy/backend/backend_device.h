@@ -80,7 +80,7 @@ TORCH_API c10::optional<BackendDevice> GetBackendDevice(
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(
     const at::Tensor& tensor);
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(
-    const c10::optional<c10::Device> device);
+    const c10::optional<c10::Device>& device);
 
 // For variadic template.
 TORCH_API c10::optional<BackendDevice> GetBackendDevice();

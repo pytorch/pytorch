@@ -132,12 +132,32 @@ def upload_to_s3(
         json.dump(doc, body)
         body.write("\n")
 
-    S3_RESOURCE.Object(f"{bucket_name}", f"{key}",).put(
+    S3_RESOURCE.Object(
+        f"{bucket_name}",
+        f"{key}",
+    ).put(
         Body=gzip.compress(body.getvalue().encode()),
         ContentEncoding="gzip",
         ContentType="application/json",
     )
     print("Done!")
+
+
+def read_from_s3(
+    bucket_name: str,
+    key: str,
+) -> List[Dict[str, Any]]:
+    print(f"Reading from s3://{bucket_name}/{key}")
+    body = (
+        S3_RESOURCE.Object(
+            f"{bucket_name}",
+            f"{key}",
+        )
+        .get()["Body"]
+        .read()
+    )
+    results = gzip.decompress(body).decode().split("\n")
+    return [json.loads(result) for result in results if result]
 
 
 def upload_workflow_stats_to_s3(

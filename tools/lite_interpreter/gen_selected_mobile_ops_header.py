@@ -47,7 +47,7 @@ selected_mobile_ops_preamble = """#pragma once
 
 def extract_root_operators(selective_builder: SelectiveBuilder) -> Set[str]:
     ops = []
-    for (op_name, op) in selective_builder.operators.items():
+    for op_name, op in selective_builder.operators.items():
         if op.is_root_operator:
             ops.append(op_name)
     return set(ops)
@@ -67,9 +67,7 @@ def get_selected_kernel_dtypes_code(
     ):
         body_parts = []
         for kernel_tag, dtypes in selective_builder.kernel_metadata.items():
-            conditions = list(
-                map(lambda x: "scalar_type == at::ScalarType::" + x, dtypes)
-            )
+            conditions = ["scalar_type == at::ScalarType::" + x for x in dtypes]
             body_parts.append(
                 if_condition_template.substitute(
                     kernel_tag_name=kernel_tag,

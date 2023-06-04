@@ -31,7 +31,7 @@ if __name__ == "__main__":
         work = process_group.allreduce(torch.rand(10).cuda(rank))
         logging.info('Waiting for allreduce to complete...')
         work.wait()
-        logging.info('Second allreduce successful: {}'.format(work.is_success()))
+        logging.info('Second allreduce successful: %s', work.is_success())
     else:
         logging.info('Aborting all other ranks.')
         os.abort()

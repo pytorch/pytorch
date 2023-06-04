@@ -73,13 +73,24 @@ TABLE = {
         "nvprims_nvfuser": "--training --backend=nvprims_nvfuser ",
         "inductor": "--training --inductor ",
         "inductor_no_cudagraphs": "--training --inductor --disable-cudagraphs ",
+        "inductor_max_autotune": "--training --inductor --inductor-compile-mode max-autotune ",
+        "inductor_max_autotune_no_cudagraphs": (
+            "--training --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
+        ),
     },
     "inference": {
-        "ts_nnc": "--speedup-ts",
-        "ts_nvfuser": "-n100 --speedup-ts --nvfuser",
-        "trt": "-n100 --speedup-trt",
-        "ts_nvfuser_cudagraphs": "--backend=cudagraphs_ts",
-        "inductor": "-n50 --inductor",
+        "aot_eager": "--inference --backend=aot_eager ",
+        "eager": "--inference --backend=eager ",
+        "ts_nnc": "--inference --speedup-ts ",
+        "ts_nvfuser": "--inference -n100 --speedup-ts --nvfuser ",
+        "trt": "--inference -n100 --speedup-trt ",
+        "ts_nvfuser_cudagraphs": "--inference --backend=cudagraphs_ts ",
+        "inductor": "--inference -n50 --inductor ",
+        "inductor_no_cudagraphs": "--inference -n50 --inductor --disable-cudagraphs ",
+        "inductor_max_autotune": "--inference -n50 --inductor --inductor-compile-mode max-autotune ",
+        "inductor_max_autotune_no_cudagraphs": (
+            "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
+        ),
     },
 }
 
@@ -93,10 +104,15 @@ DEFAULTS = {
         "inductor",
         "inductor_no_cudagraphs",
     ],
-    "inference": ["ts_nvfuser_cudagraphs", "inductor"],
+    "inference": [
+        "eager",
+        "aot_eager",
+        "inductor",
+        "inductor_no_cudagraphs",
+    ],
     "flag_compilers": {
         "training": ["inductor", "inductor_no_cudagraphs"],
-        "inference": ["inductor"],
+        "inference": ["inductor", "inductor_no_cudagraphs"],
     },
     "dtypes": [
         "float32",
@@ -261,6 +277,12 @@ def parse_args():
         help="Do not write a comment to github",
     )
     parser.add_argument(
+        "--no-detect-regressions",
+        action="store_true",
+        default=False,
+        help="Do not compare to previous runs for regressions or metric graphs.",
+    )
+    parser.add_argument(
         "--update-dashboard-test",
         action="store_true",
         default=False,
@@ -316,6 +338,17 @@ def parse_args():
         help="Provide the args of torch.backends.xeon.run_cpu. "
         "To look up what optional arguments this launcher offers: python -m torch.backends.xeon.run_cpu --help",
     )
+    parser.add_argument(
+        "--no-cold-start-latency",
+        action="store_true",
+        default=False,
+        help="Do not include --cold-start-latency on inductor benchmarks",
+    )
+    parser.add_argument(
+        "--inductor-compile-mode",
+        default=None,
+        help="torch.compile mode argument for inductor runs.",
+    )
     args = parser.parse_args()
     return args
 
@@ -340,7 +373,7 @@ def get_skip_tests(suite):
     if hasattr(module, "SKIP_TRAIN"):
         skip_tests.update(module.SKIP_TRAIN)
 
-    skip_tests = map(lambda name: f"-x {name}", skip_tests)
+    skip_tests = (f"-x {name}" for name in skip_tests)
     skip_str = " ".join(skip_tests)
     return skip_str
 
@@ -396,9 +429,13 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
 
-                    if compiler in (
-                        "inductor",
-                        "inductor_no_cudagraphs",
+                    if (
+                        compiler
+                        in (
+                            "inductor",
+                            "inductor_no_cudagraphs",
+                        )
+                        and not args.no_cold_start_latency
                     ):
                         cmd = f"{cmd} --cold-start-latency"
 
@@ -413,6 +450,9 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
 
                     if args.partition_id is not None:
                         cmd = f"{cmd} --partition-id {args.partition_id}"
+
+                    if args.inductor_compile_mode is not None:
+                        cmd = f"{cmd} --inductor-compile-mode {args.inductor_compile_mode}"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
@@ -674,6 +714,12 @@ class ParsePerformanceLogs(Parser):
                 df = pd.merge(frames[0], frames[1], on=["dev", "name", "batch_size"])
                 for idx in range(2, len(frames)):
                     df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
+
+            if testing == "performance":
+                for compiler in self.compilers:
+                    df[compiler] = pd.to_numeric(df[compiler], errors="coerce").fillna(
+                        0
+                    )
 
             df_copy = df.copy()
             df_copy = df_copy.sort_values(
@@ -964,7 +1010,7 @@ def find_last_2_with_filenames(lookup_file, dashboard_archive_path, dtype, filen
         fullpaths = [
             os.path.join(dashboard_archive_path, path, name) for name in filenames
         ]
-        if all([os.path.exists(fullpath) for fullpath in fullpaths]):
+        if all(os.path.exists(fullpath) for fullpath in fullpaths):
             last2.append(output_dir)
         if len(last2) >= 2:
             return last2
@@ -1312,7 +1358,7 @@ class DashboardUpdater:
             "gh_warnings.txt",
             "gh_regression.txt",
             "gh_metric_regression.txt",
-            "gh_training.txt",
+            "gh_training.txt" if self.args.training else "gh_inference.txt",
             "gh_graphs.txt",
             "gh_build_summary.txt",
         ]
@@ -1354,14 +1400,15 @@ class DashboardUpdater:
 
     def update(self):
         self.upload_graphs()
-        SummaryStatDiffer(self.args).generate_comment()
-        RegressionDetector(self.args).generate_comment()
-        try:
-            RegressionTracker(self.args).diff()
-        except Exception as e:
-            logging.exception(e)
-            with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
-                gh_fh.write("")
+        if not self.args.no_detect_regressions:
+            SummaryStatDiffer(self.args).generate_comment()
+            RegressionDetector(self.args).generate_comment()
+            try:
+                RegressionTracker(self.args).diff()
+            except Exception as e:
+                logging.exception(e)
+                with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
+                    gh_fh.write("")
 
         comment = self.gen_comment()
         print(comment)

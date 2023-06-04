@@ -36,6 +36,7 @@ from torch.testing._internal.opinfo.utils import (
 if TEST_SCIPY:
     import scipy.special
 
+
 # TODO: Consolidate `i0e` with sample_inputs_unary when `make_tensor`,
 #       supports `exclude` argument.
 #       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
@@ -104,8 +105,7 @@ op_db: List[OpInfo] = [
         aten_name="special_i0e",
         ref=scipy.special.i0e if TEST_SCIPY else None,
         decorators=(precisionOverride({torch.bfloat16: 3e-1, torch.float16: 3e-1}),),
-        dtypes=all_types_and(torch.bool, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
         backward_dtypes=floating_types(),
         sample_inputs_func=sample_inputs_i0_i1,
         supports_forward_ad=True,
@@ -156,8 +156,7 @@ op_db: List[OpInfo] = [
         aten_name="special_ndtr",
         decorators=(precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-4}),),
         ref=scipy.special.ndtr if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.bool, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
@@ -177,7 +176,7 @@ op_db: List[OpInfo] = [
         op=lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),
         variant_test_name="special_polygamma_n_0",
         ref=reference_polygamma if TEST_SCIPY else None,
-        dtypes=all_types_and(torch.bool, torch.bfloat16),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bool, torch.half),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -249,8 +248,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         decorators=(precisionOverride({torch.float16: 1e-1, torch.bfloat16: 1e-1}),),
-        dtypes=all_types_and(torch.bool, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
+        dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),

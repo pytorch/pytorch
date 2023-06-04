@@ -219,7 +219,7 @@ class PythonCode:
     """
     # Python source code for the forward function definition.
     src: str
-    # Values in global scope during exection of `src_def`.
+    # Values in global scope during execution of `src_def`.
     globals: Dict[str, Any]
 
 
@@ -394,6 +394,10 @@ class CodeGen:
                     qualified_name = _get_qualified_name(type(arg))
                     global_name = add_global(qualified_name, type(arg))
                     return f"{global_name}{repr(tuple(arg))}"
+                elif isinstance(arg, torch._ops.OpOverload):
+                    qualified_name = _get_qualified_name(arg)
+                    global_name = add_global(qualified_name, arg)
+                    return f"{global_name}"
                 return repr(arg)
             args_s = ', '.join(_get_repr(a) for a in args)
             kwargs_s = ', '.join(f'{k} = {_get_repr(v)}' for k, v in kwargs.items())
@@ -867,6 +871,9 @@ class Graph:
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
+        if to_erase._erased:
+            warnings.warn(f"erase_node({to_erase}) on an already erased node")
+            return
 
         to_erase._remove_from_list()
         to_erase._erased = True  # iterators may retain handles to erased nodes

@@ -4,7 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
@@ -20,7 +20,7 @@
 #include <ATen/ops/empty_like_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::sparse;
 
@@ -275,5 +275,4 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
 }
 
 
-} // namespace native
-} // namespace at
+} // namespace at::native

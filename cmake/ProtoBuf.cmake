@@ -5,11 +5,6 @@ macro(custom_protobuf_find)
   option(protobuf_BUILD_TESTS "" OFF)
   option(protobuf_BUILD_EXAMPLES "" OFF)
   option(protobuf_WITH_ZLIB "" OFF)
-  if(APPLE)
-    # Protobuf generated files triggers a deprecated atomic operation warning
-    # so we turn it off here.
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
-  endif()
   if(${CAFFE2_LINK_LOCAL_PROTOBUF})
     # If we are going to link protobuf locally, we will need to turn off
     # shared libs build for protobuf.

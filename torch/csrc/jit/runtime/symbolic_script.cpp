@@ -403,7 +403,7 @@ const std::vector<std::string> functions = {
 
         # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
         # instead of doing [b, m, p] and then reduce to [m, p]
-        # whice potentially uses large intermediate of size b*m*p,
+        # which potentially uses large intermediate of size b*m*p,
         # we do [m, bn] * [bn, p] to avoid having the large
         # intermediate, thus reduces max memory usage.
         def AD_matmul_bw_special_fold(mat1, mat2):
@@ -1497,7 +1497,8 @@ std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 CompilationUnit compilation_unit;
 } // anonymous namespace
 
-std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
+static std::pair<std::shared_ptr<Graph>, Value*> extractClosure(
+    Value* closure) {
   TORCH_CHECK(
       closure->node()->kind() == prim::TupleConstruct,
       "closure must be a literal tuple construct");
@@ -1510,7 +1511,7 @@ std::pair<std::shared_ptr<Graph>, Value*> extractClosure(Value* closure) {
   return std::make_pair(fn->node()->g(attr::Subgraph), context);
 }
 
-Argument originalReturnType(const TupleTypePtr& tup) {
+static Argument originalReturnType(const TupleTypePtr& tup) {
   TORCH_CHECK(tup->elements().size() > 1);
   if (tup->elements().size() == 2)
     return Argument("", tup->elements().at(0));
@@ -1523,7 +1524,7 @@ Argument originalReturnType(const TupleTypePtr& tup) {
 // overloaded functions of `func`.
 // Remove the suffix before adding the schema string to map
 // schema_to_graphs.
-std::string overloadedSchemaString(const FunctionSchema& schema) {
+static std::string overloadedSchemaString(const FunctionSchema& schema) {
   const auto& schema_name = schema.name();
   auto pos = schema_name.find_last_of('_');
   auto schema_name_suffix = schema_name.substr(pos + 1);
@@ -1539,12 +1540,12 @@ std::string overloadedSchemaString(const FunctionSchema& schema) {
   return schema_string;
 }
 
-bool isHelperFunction(const std::string& method_name) {
+static bool isHelperFunction(const std::string& method_name) {
   std::string helper_prefix = "AD_";
   return method_name.compare(0, helper_prefix.length(), helper_prefix) == 0;
 }
 
-void loadModule(const CompilationUnit& module) {
+static void loadModule(const CompilationUnit& module) {
   for (const auto& method : module.get_functions()) {
     if (isHelperFunction(method->name()))
       continue;
@@ -1607,7 +1608,7 @@ void loadModule(const CompilationUnit& module) {
   }
 }
 
-void loadFunctions() {
+static void loadFunctions() {
   for (const std::string& str : functions) {
     compilation_unit.define(c10::nullopt, str, nativeResolver(), nullptr);
   }

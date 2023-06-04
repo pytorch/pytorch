@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/csrc/utils/byte_order.h>
 #include <string>
 
 namespace torch::jit {
@@ -87,11 +88,16 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         // no op, there is nothing to tag
         break;
       case c10::SymIntType::Kind:
-        TORCH_CHECK(!w.value.toSymInt().is_symbolic());
+        // TODO: Can this really show up though? :think:
+        TORCH_CHECK(!w.value.toSymInt().is_heap_allocated());
         // no op, there is nothing to tag
         break;
       case c10::SymFloatType::Kind:
         TORCH_CHECK(!w.value.toSymFloat().is_symbolic());
+        // no op, there is nothing to tag
+        break;
+      case c10::SymBoolType::Kind:
+        TORCH_CHECK(!w.value.toSymBool().is_symbolic());
         // no op, there is nothing to tag
         break;
       case DynamicType::Kind:
@@ -182,7 +188,9 @@ bool is(const Type& type) {
 }
 } // namespace
 
-void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
+static void restoreContainerTypeTags(
+    const IValue& ivalue,
+    const TypePtr& type) {
   if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(type->containedType(0));
@@ -210,6 +218,7 @@ IValue Unpickler::parse_ivalue() {
 double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
   double big_endian = read<double>();
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double little_endian;
 
@@ -221,6 +230,9 @@ double Unpickler::readFloat() {
       reinterpret_cast<char*>(&little_endian));
 
   return little_endian;
+#else /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
+  return big_endian;
+#endif /* __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ */
 }
 
 void Unpickler::run() {
@@ -323,21 +335,25 @@ PickleOpCode Unpickler::readInstruction() {
       stack_.emplace_back(int64_t(value));
     } break;
     case PickleOpCode::BININT2: {
-      uint16_t value = read<uint16_t>();
+      uint16_t value = from_le16(read<uint16_t>());
       stack_.emplace_back(int64_t(value));
     } break;
     case PickleOpCode::BININT: {
-      int32_t value = read<int32_t>();
+      int32_t value = from_le32(read<int32_t>());
       stack_.emplace_back(int64_t(value));
     } break;
     case PickleOpCode::LONG1: {
       // Only read LONG1s with 8 as the length
       uint8_t length = read<uint8_t>();
       TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
-      stack_.emplace_back(int64_t(read<int64_t>()));
+      stack_.emplace_back(int64_t(from_le64(read<int64_t>())));
     } break;
     case PickleOpCode::BINUNICODE: {
-      uint32_t length = read<uint32_t>();
+      uint32_t length = from_le32(read<uint32_t>());
+      stack_.emplace_back(readBytes(length));
+    } break;
+    case PickleOpCode::BINUNICODE8: {
+      int64_t length = from_le64(read<int64_t>());
       stack_.emplace_back(readBytes(length));
     } break;
     case PickleOpCode::BINFLOAT:
@@ -348,6 +364,12 @@ PickleOpCode Unpickler::readInstruction() {
       size_t start = marks_.back();
       marks_.pop_back();
       std::vector<IValue> elements;
+      TORCH_CHECK(
+          stack_.size() >= start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       const auto tupleSize = stack_.size() - start;
       switch (tupleSize) {
         case 3: {
@@ -420,7 +442,10 @@ PickleOpCode Unpickler::readInstruction() {
       size_t start = marks_.back();
       TORCH_CHECK(
           start > 0 && start <= stack_.size(),
-          "Parsing error: wrong start index for stack_");
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       auto list_ivalue = stack_.at(start - 1);
       readList(list_ivalue);
     } break;
@@ -433,6 +458,12 @@ PickleOpCode Unpickler::readInstruction() {
       TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
+      TORCH_CHECK(
+          stack_.size() > start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ which of size ",
+          stack_.size());
       auto dict = c10::impl::GenericDict(AnyType::get(), AnyType::get());
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
@@ -518,7 +549,8 @@ PickleOpCode Unpickler::readInstruction() {
       const std::string& key = args.at(2).toStringRef();
 
       at::Device device(args.at(3).toStringRef());
-      if (device_) {
+      // remap device location if it's not meta
+      if (device_ && !device.is_meta()) {
         device = *device_;
       }
 
@@ -565,11 +597,13 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
-          device.is_hpu()) {
+          device.is_hpu() || device.is_mps() || device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
-            "supported devices include CPU, CUDA and HPU, however got ",
+            "supported devices include CPU, CUDA, HPU and ",
+            c10::get_privateuse1_backend(),
+            " however got ",
             DeviceTypeName(device.type(), false));
       }
       stack_.emplace_back(std::move(tensor));
@@ -581,10 +615,20 @@ PickleOpCode Unpickler::readInstruction() {
       // | Dict         | -> (stack_size - 3)
       // | Key          | -> (stack_size - 2)
       // | Value        | -> (stack_size - 1)
+      TORCH_CHECK(
+          stack_.size() >= 3,
+          "Parsing error: stack doesn't have enough elements");
+
       auto stack_size = stack_.size();
       auto dict_pos = stack_size - 3;
       auto key_pos = stack_size - 2;
       auto val_pos = stack_size - 1;
+
+      TORCH_CHECK(
+          (dict_pos < stack_size) && (key_pos < stack_size) &&
+              (val_pos < stack_size),
+          "Parsing error: attempted out-of-bounds access while processing SETITEM opcode");
+
       auto dict = stack_.at(dict_pos).toGenericDict();
       dict.insert_or_assign(stack_.at(key_pos), stack_.at(val_pos));
       stack_.erase(stack_.begin() + (key_pos), stack_.end());
@@ -1030,6 +1074,11 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
 std::string Unpickler::readBytes(size_t length) {
   std::string data;
   static const size_t kSmallString = 64;
+  TORCH_CHECK(
+      length <= data.max_size(),
+      "Parsing error: can't read ",
+      length,
+      " bytes to a string");
   if (length <= buffer_remaining_) {
     // Fast-path: entirely in buffer.
     data.assign(buffer_.data() + buffer_pos_, length);
