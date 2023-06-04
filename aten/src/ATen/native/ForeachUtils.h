@@ -13,14 +13,14 @@
 namespace at::native {
 namespace {
 // Check if tensor list has either a boolean tensor or a integer tensor
-bool has_integral_tensor(TensorList tensors, const bool includeBool) {
+TORCH_API bool has_integral_tensor(TensorList tensors, const bool includeBool) {
   return std::any_of(
       tensors.begin(), tensors.end(), [&includeBool](const auto& t) {
         return at::isIntegralType(t.scalar_type(), includeBool);
       });
 }
 // check if tensor list has bool tensors
-bool has_bool_tensor(TensorList tensors) {
+TORCH_API bool has_bool_tensor(TensorList tensors) {
   return std::any_of(tensors.begin(), tensors.end(), [](const auto& t) -> bool {
     return t.scalar_type() == ScalarType::Bool;
   });
@@ -30,31 +30,24 @@ bool has_bool_tensor(TensorList tensors) {
 // - Tensor lists must be non-empty.
 // - All TensorLists and ScalarLists must have the same number of elements.
 // - Corresponding tensors must have the same size.
-void check_foreach_api_restrictions(TensorList tensors) {
+TORCH_API void check_foreach_api_restrictions(TensorList tensors) {
   TORCH_CHECK(!tensors.empty(), "Tensor list must have at least one tensor.");
 }
 
-void check_foreach_api_restrictions(
+TORCH_API void check_foreach_api_restrictions(
     TensorList tensors,
     ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors);
   TORCH_CHECK(
       tensors.size() == scalars.size(),
       "Tensor list must have same number of elements as scalar list.");
-}
 
-void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
+TORCH_API void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(!tensors1.empty(), "Tensor list must have at least one tensor.");
-  TORCH_CHECK(!tensors2.empty(), "Tensor list must have at least one tensor.");
-  TORCH_CHECK(
-      tensors1.size() == tensors2.size(),
       "Tensor lists must have the same number of tensors, got ",
-      tensors1.size(),
-      " and ",
-      tensors2.size());
 }
 
-void check_foreach_api_restrictions(
+TORCH_API void check_foreach_api_restrictions(
     TensorList tensors1,
     TensorList tensors2,
     TensorList tensors3) {
@@ -75,15 +68,11 @@ void check_foreach_api_restrictions(
       tensors3.size());
 }
 
-void check_foreach_api_restrictions(
+TORCH_API void check_foreach_api_restrictions(
     TensorList tensors1,
     TensorList tensors2,
-    TensorList tensors3,
     ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
-  TORCH_CHECK(
-      tensors1.size() == scalars.size(),
-      "Tensor list must have same number of elements as scalar list, got ",
       tensors1.size(),
       " and ",
       scalars.size());
@@ -98,7 +87,7 @@ void check_foreach_api_restrictions(
 
 // Please, make sure to call check_foreach_api_restrictions before calling this
 // method. There is a set of preconditions that have to be satisfied.
-bool check_fast_path_restrictions(
+TORCH_API bool check_fast_path_restrictions(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
     bool does_op_promote_integer_inputs_to_float = false) {
@@ -159,7 +148,7 @@ bool check_fast_path_restrictions(
   return true;
 }
 
-std::vector<c10::Scalar> convert_tensor_to_scalar_list(
+TORCH_API std::vector<c10::Scalar> convert_tensor_to_scalar_list(
     const Tensor& scalarList_,
     int64_t expect_length) {
   std::vector<c10::Scalar> scalarList;
