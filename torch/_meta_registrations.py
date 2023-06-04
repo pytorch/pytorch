@@ -755,6 +755,24 @@ def linalg_qr_meta(
     return Q, R
 
 
+@register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
+@out_wrapper("sign", "logabsdet", "LU", "pivots")
+def _linalg_slogdet(A: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    squareCheckInputs(A, "linalg.slogdet")
+    checkFloatingOrComplex(A, "linalg.slogdet", False)
+    shape = A.shape
+    sign = A.new_empty(shape[:-2])
+    logabsdet = A.new_empty(shape[:-2], dtype=toRealValueType(A.dtype))
+    LU = torch.empty_strided(
+        size=shape,
+        stride=make_contiguous_strides_for(shape, False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+    pivots = A.new_empty(shape[:-1], dtype=torch.int32)
+    return sign, logabsdet, LU, pivots
+
+
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 # NOTE: matching defaults in aten/src/ATen/native/native_functions.yaml
 @register_meta(aten._linalg_svd.default)
