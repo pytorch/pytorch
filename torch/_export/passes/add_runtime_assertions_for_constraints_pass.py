@@ -80,13 +80,15 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 continue
 
             fake_tensor_shape = node.meta["val"].shape
+            prev_node = node
             for dim, shape in enumerate(fake_tensor_shape):
-                with graph.inserting_after(node):
+                with graph.inserting_after(prev_node):
                     dim_node = graph.call_function(
                         torch.ops.aten.sym_size.int, (node, dim)
                     )
                 input_dim = InputDim(node.name, dim)
                 inputdim_to_node[input_dim] = dim_node
+                prev_node = dim_node
 
                 if isinstance(shape, SymInt):
                     # If the shape is dynamic, add range assertions
@@ -109,7 +111,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             list(inputdim_to_node.values())[-1]
         ):
             self._insert_equality_assert_inplace(graph, inputdim_to_node)
-
+        
         # Add runtime asserts for inline constraints
         val = super().call(graph_module)
 
@@ -139,7 +141,6 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         each placeholder's dynamic dimension.
         """
 
-        dim_node = graph.call_function(torch.ops.aten.sym_size.int, (node, dim))
         min_val, max_val = _convert_range_to_int(range)
         assert_msg = (
             f"Input {input_dim.input_name}.shape[{input_dim.dim}] is "
@@ -168,20 +169,18 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     ):
         for input_dim, other_input_dim in self.equality_constraints:
             dim_node = inputdim_to_node[input_dim]
-            with graph.inserting_after(dim_node):
-                assert_msg = (
-                    f"Input {input_dim.input_name}.shape[{input_dim.dim}] is "
-                    f"not equal to input {other_input_dim.input_name}.shape[{other_input_dim.dim}]"
-                )
+            assert_msg = (
+                f"Input {input_dim.input_name}.shape[{input_dim.dim}] is "
+                f"not equal to input {other_input_dim.input_name}.shape[{other_input_dim.dim}]"
+            )
 
-                other_dim_node = inputdim_to_node[other_input_dim]
-                with graph.inserting_after(other_dim_node):
-                    self._insert_assert_async_inplace(
-                        graph,
-                        operator.eq,
-                        (dim_node, other_dim_node),
-                        assert_msg
-                    )
+            other_dim_node = inputdim_to_node[other_input_dim]
+            self._insert_assert_async_inplace(
+                graph,
+                operator.eq,
+                (dim_node, other_dim_node),
+                assert_msg
+            )
 
     def _create_dummy_node_metadata(self):
         return NodeMetadata({
@@ -225,7 +224,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             messages = []
             if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 symbol = val.node._expr
-                if symbol.name.startswith("i"):
+                if isinstance(symbol, sympy.Symbol) and symbol.name.startswith("i"):
                     # We only care about unbacked symints for these inline
                     # constraints, which are prefixed with 'i'
                     constraint = self.range_constraints[symbol]

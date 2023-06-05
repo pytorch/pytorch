@@ -95,7 +95,7 @@ class ExportTracer(PythonKeyTracer):
                     )
                     fake_tensor = None
                 return fake_tensor
-            elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool, int)):
                 return x
             else:
                 return None
