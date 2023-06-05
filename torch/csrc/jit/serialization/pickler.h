@@ -301,18 +301,52 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 using BackendMetaPtr =
     void (*)(const at::Tensor&, std::unordered_map<std::string, bool>&);
 
-// Register function pointer of Tensor BackendMetadata for serialization.
-TORCH_API void TensorBackendMetaRegistry(
-    c10::DeviceType t,
-    BackendMetaPtr get_fptr,
-    BackendMetaPtr set_fptr);
+// A allowlist of device type, currently available is PrivateUse1
+static std::unordered_set<c10::DeviceType> DeviceTypeAllowlist{
+    c10::DeviceType::PrivateUse1};
 
 // Dynamically obtain serialization function pairs
 // that require the corresponding backend.
-TORCH_API std::array<
+inline std::array<
+    c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
+    at::COMPILE_TIME_MAX_DEVICE_TYPES>&
+GetBackendMetaSerialization() {
+// The array to save function pointer for BackendMeta serialization.
+// key is the DeviceType, value is std::pair obj.
+// value.first represent get function and value.seconde represent set function
+static std::array<
     c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
     at::COMPILE_TIME_MAX_DEVICE_TYPES>
-GetBackendMetaSerialization();
+    BackendMetaSerialization;
+  return BackendMetaSerialization;
+}
+
+// Register function pointer of Tensor BackendMetadata for serialization.
+TORCH_API inline void TensorBackendMetaRegistry(
+    c10::DeviceType t,
+    BackendMetaPtr get_fptr,
+    BackendMetaPtr set_fptr) {
+  // allowlist verification
+  // Only if the devicetype is in the allowlist,
+  // we allow the serialization extension to be registered for backendmeta data.
+  TORCH_CHECK(
+      DeviceTypeAllowlist.find(t) != DeviceTypeAllowlist.end(),
+      "It is not allowed to register the serialization method ",
+      "of backendMeta data for PrivateUse1. ",
+      "If you have related serialization requirements, ",
+      "please expand the allowlist");
+  // Register function pointer
+  int device_type = static_cast<int>(t);
+  auto BackendMetaSerialization = GetBackendMetaSerialization();
+  TORCH_CHECK(
+      !BackendMetaSerialization[device_type].has_value(),
+      "The tensor BackendMeta serialization function pointer for ",
+      t,
+      "has been registered.");
+  BackendMetaSerialization[device_type] =
+      c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>(
+          std::make_pair(get_fptr, set_fptr));
+}
 
 // Return a map of Tensor Metadata which including BackendMetaData for
 // serialization. For now, it only takes care of `conj` and `neg` bit.
