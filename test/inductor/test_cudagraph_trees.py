@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -43,6 +44,9 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
 )
+
+if not TEST_CUDA_GRAPH:
+    raise unittest.SkipTest("cuda graph test is skipped")
 
 
 def cdata(t):
