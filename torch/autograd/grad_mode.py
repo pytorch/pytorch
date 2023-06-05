@@ -216,16 +216,16 @@ class inference_mode(_DecoratorContextManager):
     def __init__(self, mode: bool = True) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
-        # Holds a context manager that can enable or disable inference mode
-        self._inference_mode_raii_context: Optional[torch._C._InferenceMode] = None
+        # Holds a python binding to a RAII guard that can enable or disable
+        # inference mode
+        self._inference_mode_raii_guard: Optional[torch._C._InferenceMode] = None
         self.mode = mode
 
     def __enter__(self) -> None:
-        self._inference_mode_context = torch._C._InferenceMode(self.mode)
-        self._inference_mode_context.__enter__()
+        self._inference_mode_raii_guard = torch._C._InferenceMode(self.mode)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
+        del self._inference_mode_raii_guard
 
     def clone(self) -> "inference_mode":
         return self.__class__(self.mode)
@@ -287,13 +287,13 @@ class _force_original_view_tracking(_DecoratorContextManager):
 
     def __init__(self, mode: bool) -> None:
         self.mode = mode
+        self._force_original_view_tracking_guard = torch._C._ViewReplayEnabled(mode)
 
     def __enter__(self) -> None:
-        self._force_original_view_tracking_context = torch._C._ViewReplayEnabled(self.mode)
-        self._force_original_view_tracking_context.__enter__()
+        pass
 
     def __exit__(self, *args) -> None:
-        self._force_original_view_tracking_context.__exit__(*args)
+        del self._force_original_view_tracking_guard
 
     def clone(self):
         return self.__class__(self.mode)

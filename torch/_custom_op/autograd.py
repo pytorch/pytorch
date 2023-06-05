@@ -64,8 +64,11 @@ def construct_autograd_kernel(
         def forward(ctx, *flat_args):
             ctx.set_materialize_grads(True)
             args = pytree.tree_unflatten(list(flat_args), spec)
-            with torch._C._AutoDispatchBelowAutograd():
+            guard = torch._C._AutoDispatchBelowAutograd()
+            try:
                 output = forward_op(*args)
+            finally:
+                del guard
 
             # We use the info about args to give better error messages in backward
             args_info = namedtuple_args(

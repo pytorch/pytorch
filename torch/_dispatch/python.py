@@ -9,8 +9,21 @@ import torch._ops
 
 __all__ = ['enable_python_dispatcher', 'no_python_dispatcher']
 
-no_python_dispatcher = torch._C._DisablePythonDispatcher
-enable_python_dispatcher = torch._C._EnablePythonDispatcher
+@contextmanager
+def no_python_dispatcher():
+    g = torch._C._DisablePythonDispatcher()
+    try:
+        yield
+    finally:
+        del g
+
+@contextmanager
+def enable_python_dispatcher():
+    g = torch._C._EnablePythonDispatcher()
+    try:
+        yield
+    finally:
+        del g
 
 CROSSREF_FUNCTIONALIZE = False
 
