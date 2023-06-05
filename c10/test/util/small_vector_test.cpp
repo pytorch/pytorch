@@ -147,7 +147,6 @@ struct NonCopyable {
     return *this;
   }
 
- private:
   NonCopyable(const NonCopyable&) = delete;
   NonCopyable& operator=(const NonCopyable&) = delete;
 };
@@ -971,7 +970,6 @@ struct Emplaceable {
     return *this;
   }
 
- private:
   Emplaceable(const Emplaceable&) = delete;
   Emplaceable& operator=(const Emplaceable&) = delete;
 };
