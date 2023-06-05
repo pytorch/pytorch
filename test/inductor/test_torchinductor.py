@@ -4799,6 +4799,44 @@ class CommonTemplate:
         self.assertTrue((d >= 0).all())
         self.assertTrue((d < 1).all())
 
+    def test_functionalize_rng_wrappers(self):
+        # Ideally, we would like to use torch.compile for these operators. But
+        # currently the plan is to introduce these operators at the partitioner
+        # level, obviating the need to support them fully through the
+        # torch.compile stack. To ensure that we have good enough debugging with
+        # minifiers, we have ensure that they work with make_fx. This test uses
+        # make_fx to do the testing. In future, we can move on torch.compile.
+        def fn():
+            rng_state1, a1 = torch.ops.run_and_save_rng_state(
+                torch.ops.aten.rand.default, [4, 4], dtype=torch.float32, device="cuda"
+            )
+            rng_state2, a2 = torch.ops.run_and_save_rng_state(
+                torch.ops.aten.rand.default, [4, 4], dtype=torch.float32, device="cuda"
+            )
+
+            b1 = torch.ops.run_with_rng_state(
+                rng_state1,
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device="cuda",
+            )
+            b2 = torch.ops.run_with_rng_state(
+                rng_state2,
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device="cuda",
+            )
+
+            return (a1, a2, b1, b2)
+
+        mod = make_fx(fn)()
+        compiled_f = compile_fx_inner(mod, ())
+        a1, a2, b1, b2 = compiled_f(())
+        self.assertEqual(a1, b1)
+        self.assertEqual(a2, b2)
+
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     def test_philox_rand(self):
         if self.device == "cpu":

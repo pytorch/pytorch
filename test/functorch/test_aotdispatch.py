@@ -2568,10 +2568,12 @@ class TestPartitioning(AOTTestCase):
 
 
     def test_functional_rng_wrappers(self):
-        # Currently, the plan to introduce these operators is at the partitioner
-        # level, so they don't need to be supported via Dynamo, AOT AUtograd
-        # stack. But, there is just enough implementation to survive make_fx in
-        # order to work with minifier.
+        # Ideally, we would like to use torch.compile for these operators. But
+        # currently the plan is to introduce these operators at the partitioner
+        # level, obviating the need to support them fully through the
+        # torch.compile stack. To ensure that we have good enough debugging with
+        # minifiers, we have ensure that they work with make_fx. This test uses
+        # make_fx to do the testing. In future, we can move on torch.compile.
         def fn():
             rng_state1, a1 = torch.ops.run_and_save_rng_state(
                 torch.ops.aten.rand.default, [4, 4], dtype=torch.float32, device="cuda"
