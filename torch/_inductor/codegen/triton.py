@@ -724,6 +724,7 @@ class TritonKernel(Kernel):
         self.index_dtype = index_dtype
         self.indirect_max_sizes_expr = {}  # Upper bounds for indirect_indexing
         self.indirect_max_sizes_printed = {}  # Upper bounds, printed as a string
+        self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
         is_rocm = torch.version.hip is not None and torch.cuda.is_available()
@@ -766,6 +767,15 @@ class TritonKernel(Kernel):
         # will need to recompile if we cross a larger power of 2 boundary
         V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))
         return True
+
+    def set_last_usage(self, nodes):
+        if not self.inside_reduction or self.persistent_reduction:
+            return
+        self.last_usage = set(
+            itertools.chain.from_iterable(
+                n.last_usage for n in nodes if n is not EnableReduction
+            )
+        )
 
     def initialize_range_tree(self, pid_cache):
         names = ["xindex", "yindex", "zindex"][: len(self.numels) - 1] + ["rindex"]
@@ -920,6 +930,12 @@ class TritonKernel(Kernel):
     def is_indirect_indexing(self, index: sympy.Expr):
         # tmpX  means indirect indexing
         return free_symbol_startswith(index, "tmp")
+
+    def is_broadcasted(self, index: sympy.Expr):
+        # Note. This may not be correct when there is indirect indexing
+        if self.is_indirect_indexing(index):
+            return False
+        return not set.issubset(set(self.range_tree_nodes.keys()), index.free_symbols)
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
@@ -1164,14 +1180,24 @@ class TritonKernel(Kernel):
         original_index = index
         index, mask_vars, mask, expand_str = self.indexing(index)
 
-        if "rmask" in mask and not self.persistent_reduction:
-            # This eviction policy heuristic is untested.
-            # ptillet suggested we should try only doing this for
-            # the first N-1 loops and not for the final loop.
+        # Keep the variable in cache if were going to reuse it. Equiv., if any of the following hold
+        #  1) We are doing broadcasting
+        #  2) It will be used later and it won't be CSE'd. Equiv., if all the following hold
+        #   2.1) We are in a reduction loop
+        #   2.2) Its not its last use
+        #   2.3) This load will not be lifted to the body
+        if self.is_broadcasted(original_index):
             ep = ", eviction_policy='evict_last'"
+        elif self.inside_reduction and not self.persistent_reduction:
+            if name in self.args.inplace_buffers:
+                names = set(self.args.inplace_buffers[name].other_names)
+            else:
+                names = {name}
+            last_use = len(names & self.last_usage) > 0
+            evict_last = not last_use and ("rmask" in mask or indirect_indexing)
+            ep = ", eviction_policy='evict_last'" if evict_last else ""
         else:
             ep = ""
-
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
         # for bool, even though it's likely subject to the same bug, setting `other` leads
         # to LLVM errors so we are skipping it for now
@@ -1232,9 +1258,7 @@ class TritonKernel(Kernel):
         # program. The workaround is to add a barrier before storing, which
         # enforces that all warps have already read the data.
         is_inplace = name in self.args.inplace_buffers
-        is_broadcasted = not set.issubset(
-            set(self.range_tree_nodes.keys()), original_index.free_symbols
-        )
+        is_broadcasted = self.is_broadcasted(original_index)
         if is_inplace and is_broadcasted:
             self.stores.writeline(DeferredLine(name, "tl.debug_barrier()"))
 
@@ -2110,16 +2134,21 @@ class TritonScheduling:
         self.scheduler.free_buffers()
 
     def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
+        def current_reduction_nodes(nodes):
+            return itertools.takewhile(lambda n: n is not DisableReduction, nodes)
+
         with kernel:
             stack = contextlib.ExitStack()
+            kernel.set_last_usage(current_reduction_nodes(node_schedule))
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
                     node.mark_run()
-            for node in node_schedule:
+            for i, node in enumerate(node_schedule):
                 if node is DisableReduction:
                     stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
                     stack.close()
+                    kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
                     # TODO - mostly works but needs a couple fixes
                     if not dynamo_config.dynamic_shapes:
