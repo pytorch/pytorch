@@ -425,6 +425,16 @@ class MyPythonStore(dist.Store):
         self.set(key, bytes(str(new).encode("utf-8")))
         return new
 
+    def compare_set(self, key, expected, newValue):
+        if type(expected) is not bytes:
+            raise AssertionError("compare_set::expected not bytes")
+        if type(newValue) is not bytes:
+            raise AssertionError("compare_set::newValue not bytes")
+
+        val = self.store.get(key, None)
+        if expected == val or val is None:
+            val = self.store[key] = newValue
+        return val
 
 class PythonStoreTest(TestCase):
     def test_set_get(self):
@@ -633,6 +643,18 @@ class TestPythonStore(TestCase):
         self.assertEqual(1, len(store.multi_sets))
         self.assertEqual(["p/foo", "p/bar"], store.multi_sets[0][0])
         self.assertEqual([b'x', b'y'], store.multi_sets[0][1])
+
+    def test_extended_methods_fallbacks(self):
+        test_store = MyPythonStore()
+        store = dist.PrefixStore("p", test_store)
+        self.assertFalse(store.has_extended_api())
+        store.append("foo", b"po")
+        store.append("foo", b"tato")
+        self.assertEqual(store.get("foo"), b"potato")
+
+        store.multi_set(["a", "b"], [b"c", b"d"])
+        self.assertEqual(store.multi_get(["a", "b", "foo"]), [b"c", b"d", b"potato"])
+
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
     # TODO: Use less hacky means of instantiating stores.
