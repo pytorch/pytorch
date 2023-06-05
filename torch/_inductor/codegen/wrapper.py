@@ -668,7 +668,7 @@ class WrapperCodeGen(CodeGen):
                 f"{self.declare}{expr} = {self.expr_printer(tree.numel)}{self.ending}"
             )
         else:
-            self.writeline(f"{expr} = {self.expr_printer(self.numel)}{self.ending}")
+            self.writeline(f"{expr} = {self.expr_printer(tree.numel)}{self.ending}")
         # We can get symbolic expressions here, like s0*64
         # It is fine to have them here, but we need to handle them correctly as their own type
         # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
