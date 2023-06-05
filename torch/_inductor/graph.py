@@ -674,16 +674,21 @@ class GraphLowering(torch.fx.Interpreter):
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
                 if dense and len(strides):
-                    stride_order = ir.get_stride_order(strides)
-
-                    if (
+                    if n.name in self.user_visible_outputs:
+                        stride_order = ir.get_stride_order(strides)
+                        result = ir.ExternKernel.require_stride_order(
+                            result, stride_order
+                        )
+                    elif (
                         len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
-                        and n.name not in self.user_visible_outputs
                     ):
-                        stride_order = ir.NHWC_STRIDE_ORDER
-
-                    result = ir.ExternKernel.require_stride_order(result, stride_order)
+                        result = ir.ExternKernel.require_stride_order(
+                            result, ir.NHWC_STRIDE_ORDER
+                        )
+                    else:
+                        # don't enforce stride order for other tensors.
+                        pass
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
