@@ -22,11 +22,8 @@ def autograd_kernel_indirection(custom_op):
             lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)
         ):
             raise RuntimeError("Autograd has not been implemented for operator")
-        guard = torch._C._AutoDispatchBelowAutograd()
-        try:
+        with torch._C._AutoDispatchBelowAutograd():
             return custom_op(*args, **kwargs)
-        finally:
-            del guard
 
     def inner(*args, **kwargs):
         if custom_op._has_impl('autograd'):

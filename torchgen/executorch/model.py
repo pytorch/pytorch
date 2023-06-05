@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Tuple, Union
 from enum import IntEnum
 import itertools
+import re
 
 from torchgen.model import (
     BackendIndex,
@@ -51,6 +52,8 @@ class ETKernelKey:
 
     # Indicator for this kernel being used as a catch all
     default: bool = False
+
+    version: int = KERNEL_KEY_VERSION
 
     @staticmethod
     def gen_from_yaml(args: Dict[str, Tuple[str, str]],
@@ -175,3 +178,14 @@ class ETKernelIndex:
             external=False,
             index=index,
         )
+
+    # Note duplicate ETKernelKey from index_b will clobber the metadata from index_a
+    @staticmethod
+    def merge_indices(index_a : "ETKernelIndex", index_b : "ETKernelIndex") -> "ETKernelIndex":
+        combined = defaultdict(dict, index_a.index.copy())
+
+        for op, entry in index_b.index.items():
+            for key, metadata in entry.items():
+                combined[op][key] = metadata
+
+        return ETKernelIndex(combined)

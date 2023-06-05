@@ -1,6 +1,7 @@
 from collections import defaultdict, namedtuple
 from dataclasses import dataclass
 from typing import (
+    Any,
     Dict,
     List,
     Optional,
@@ -13,13 +14,16 @@ import yaml
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey
 
 from torchgen.gen import parse_native_yaml, LineLoader
-from torchgen.model import BackendMetadata, DispatchKey, FunctionSchema
+from torchgen.model import BackendMetadata, DispatchKey, FunctionSchema, OperatorName, NativeFunction
 from torchgen.utils import (
     NamespaceHelper,
 )
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and ET Backend Indices.
 ETParsedYaml = namedtuple("ETParsedYaml", ["native_functions", "et_kernel_indices"])
+
+# Fields in native_functions.yaml used to determine which kernels should be used
+ET_FIELDS = ["kernels", "type_alias", "dim_order_alias"]
 
 def parse_from_yaml(ei: Dict[str, object]) -> Dict[ETKernelKey, BackendMetadata]:
     """ Given a loaded yaml representing kernel assignment information, extract the
@@ -86,22 +90,43 @@ def parse_et_yaml_struct(es: object) -> ETKernelIndex:
 
     return ETKernelIndex(indices)
 
+def extract_kernel_fields(es: object) -> Dict[OperatorName, Dict[str, Any]]:
+    """ Given a loaded yaml representing a list of operators, extract the
+    kernel key related fields indexed by the operator name.
+    """
+    fields: Dict[OperatorName, Dict[str, Any]] = defaultdict(dict)
+    for ei in es:
+        funcs = ei.get("func")
+        assert isinstance(funcs, str), f"not a str: {funcs}"
+        namespace_helper = NamespaceHelper.from_namespaced_entity(
+            namespaced_entity=funcs, max_level=1
+        )
+        opname = FunctionSchema.parse(namespace_helper.entity_name).name
+
+        for field in ET_FIELDS:
+            if (value := ei.get(field)) is not None:
+                fields[opname][field] = value
+
+    return fields
+
 def parse_et_yaml(
     path: str,
     tags_yaml_path: str,
     ignore_keys: Optional[Set[DispatchKey]] = None,
     skip_native_fns_gen: bool = False,
-) -> ETParsedYaml:
+) -> Tuple[List[NativeFunction], Dict[OperatorName, Dict[str, Any]]]:
+    """ Parse native_functions.yaml into NativeFunctions and an Operator Indexed Dict
+    of fields to persist from native_functions.yaml to functions.yaml
+    """
     with open(path, "r") as f:
         es = yaml.load(f, Loader=LineLoader)
 
-    et_kernel = parse_et_yaml_struct(es)
+    et_kernel = extract_kernel_fields(es)
 
     # Remove ET specific fields from entries for BC compatibility
-    et_fields = ("type_alias", "dim_order_alias", "kernels")
     for entry in es:
-        for field in et_fields:
+        for field in ET_FIELDS:
             entry.pop(field, None)
 
     native_yaml = parse_native_yaml(path, tags_yaml_path, ignore_keys, skip_native_fns_gen=skip_native_fns_gen, loaded_yaml=es)
-    return ETParsedYaml(native_yaml.native_functions, et_kernel)
+    return native_yaml.native_functions, et_kernel

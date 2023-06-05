@@ -1430,13 +1430,13 @@ class DistributedDataParallel(Module, Joinable):
             self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
         if self.device_ids:
-            inputs, kwargs = _to_kwargs(
+            moved_inputs, moved_kwargs = _to_kwargs(
                 inputs,
                 kwargs,
                 torch.device(self.device_type, self.device_ids[0]),
                 self.use_side_stream_for_tensor_copies,
             )
-            args, kwargs = inputs[0], kwargs[0]  # type: ignore[index]
+            args, kwargs = moved_inputs[0], moved_kwargs[0]
             # Cast inputs to reduced precision if needed.
             if self.mixed_precision is not None:
                 args, kwargs = _cast_forward_inputs(
@@ -2235,4 +2235,18 @@ class DistributedDataParallel(Module, Joinable):
             )
 
     def _remove_autograd_hooks(self):
+        """
+        Removes autograd hooks registered by the reducer on the model parameters.
+        """
         self.reducer._remove_autograd_hooks()
+
+    def _check_reducer_finalized(self):
+        """
+        Checks if the reducer has processed all buckets and finalized the backward
+        appropriately.
+
+        It is useful to call this method after calling .backward() in your training loop
+        in order to avoid subsequent hard to debug errors down the road due to the
+        reducer not finalizing backward.
+        """
+        self.reducer._check_reducer_finalized()

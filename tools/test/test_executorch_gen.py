@@ -8,7 +8,7 @@ import yaml
 from torchgen.executorch.model import ETKernelIndex
 from torchgen.gen import LineLoader
 
-from torchgen.gen_executorch import gen_functions_declarations, translate_native_yaml
+from torchgen.gen_executorch import gen_functions_declarations, translate_native_yaml, parse_yaml_files
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
@@ -34,25 +34,6 @@ TEST_YAML = """
     SparseCsrCUDA: add_out_sparse_csr_cuda
     MkldnnCPU: mkldnn_add_out
     MPS: add_out_mps
-  type_alias:
-    T0: [Float, Double]
-    T1: [Double, Int]
-  dim_order_alias:
-    D0: [0, 1, 2, 3]
-    D1: [0, 3, 2, 1]
-  kernels:
-    - arg_meta: null
-      kernel_name: default_impl
-    - arg_meta:
-        self: [T0, D0]
-        other: [T1, D0]
-        out: [T0, D0]
-      kernel_name: test_impl
-    - arg_meta:
-        self: [T1, D0]
-        other: [T1, D1]
-        out: [T0, D1]
-      kernel_name: test_impl_2
 
 - func: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -88,6 +69,67 @@ TEST_YAML = """
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Tensor
+  tags: core
+
+"""
+
+
+TEST_KERNEL_YAML = """
+- func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  ufunc_inner_loop:
+    Generic: add (AllAndComplex, BFloat16, Half, ComplexHalf)
+    ScalarOnly: add (Bool)
+  type_alias:
+    T0: [Float, Double]
+    T1: [Double, Int]
+  dim_order_alias:
+    D0: [0, 1, 2, 3]
+    D1: [0, 3, 2, 1]
+  kernels:
+    - arg_meta: null
+      kernel_name: default_impl
+    - arg_meta:
+        self: [T0, D0]
+        other: [T1, D0]
+        out: [T0, D0]
+      kernel_name: test_impl
+    - arg_meta:
+        self: [T1, D0]
+        other: [T1, D1]
+        out: [T0, D1]
+      kernel_name: test_impl_2
+
+- func: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: add.out
+  variants: function, method
+  tags: core
+
+- func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  type_alias:
+    T0: [Float]
+    T1: [Double]
+  dim_order_alias:
+    D0: [0, 1, 2, 3]
+  kernels:
+    - arg_meta: null
+      kernel_name: default_impl
+    - arg_meta:
+        self: [T0, D0]
+        other: [T1, D0]
+        out: [T0, D0]
+      kernel_name: test_impl
+
+- func: mul.Tensor(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: mul.out
+  variants: function, method
   tags: core
 
 """
@@ -139,29 +181,33 @@ class TestParseNativeYaml(unittest.TestCase):
         self.assertTrue(all("func" in e for e in es))
         self.assertTrue(all(e.get("variants") == "function" for e in es))
 
-        # Check validity of kernels in yaml
-        kernel_func = "add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)"
-        kernel_func_present = False
+        # Check that kernel fields aren't introduced in yaml
         for e in es:
-            if e['func'] == kernel_func:
-                kernel_func_present = True
-                self.assertTrue("kernels" in e)
-                expected_kernels = {
-                    'default': 'default_impl',
-                    'v1/6;0,1,2,3|3;0,1,2,3|6;0,1,2,3': 'test_impl',
-                    'v1/6;0,1,2,3|7;0,1,2,3|6;0,1,2,3': 'test_impl',
-                    'v1/7;0,1,2,3|3;0,1,2,3|7;0,1,2,3': 'test_impl',
-                    'v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3': 'test_impl',
-                    'v1/3;0,1,2,3|3;0,3,2,1|6;0,3,2,1': 'test_impl_2',
-                    'v1/3;0,1,2,3|3;0,3,2,1|7;0,3,2,1': 'test_impl_2',
-                    'v1/7;0,1,2,3|7;0,3,2,1|6;0,3,2,1': 'test_impl_2',
-                    'v1/7;0,1,2,3|7;0,3,2,1|7;0,3,2,1': 'test_impl_2',
-                }
-                self.assertTrue(expected_kernels.items() <= e["kernels"].items())
-            else:
-                self.assertFalse("kernels" in e)
+            self.assertFalse({"kernels", "type_alias", "dim_order_alias"} < e.keys())
 
-        self.assertTrue(kernel_func_present)
+    def test_parse_yaml_files(self) -> None:
+        custom_ops_yaml_path = None
+        selector = SelectiveBuilder.get_nop_selector()
+        use_aten_lib = False
+
+        parsed_yaml, custom_ops_parsed_yaml = parse_yaml_files(
+            aten_yaml_path=self.aten_yaml_path,
+            tags_yaml_path=self.tags_yaml_path,
+            native_yaml_path=self.ops_yaml_path,
+            custom_ops_yaml_path=custom_ops_yaml_path,
+            selector=selector,
+            use_aten_lib=use_aten_lib
+        )
+
+        # Just the default kernel entry
+        expected_kernel_entry = {"add.out": 1, "mul.out": 1}
+        self.assertTrue(len(parsed_yaml.native_functions) == len(expected_kernel_entry))
+
+        op_entries = parsed_yaml.kernel_index.index
+        for op_name, kernel_mapping in op_entries.items():
+            self.assertTrue(len(kernel_mapping) == expected_kernel_entry.pop(str(op_name)))
+
+        self.assertTrue(len(expected_kernel_entry) == 0)
 
     def tearDown(self) -> None:
         import shutil
@@ -171,6 +217,87 @@ class TestParseNativeYaml(unittest.TestCase):
         except OSError:
             pass
 
+
+class TestParseKernelYamlFiles(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.mkdtemp()
+
+        self.aten_kernel_yaml_path = os.path.join(self.temp_dir, "test_kernel_native_functions.yaml")
+        with open(self.aten_kernel_yaml_path, "w") as f:
+            f.write(TEST_KERNEL_YAML)
+        self.ops_yaml_path = os.path.join(self.temp_dir, "test.yaml")
+        self.tags_yaml_path = os.path.join(self.temp_dir, "tags.yaml")
+        with open(self.tags_yaml_path, "w") as f:
+            f.write(
+                """
+- tag: core
+  desc: test
+            """
+            )
+        with open(self.ops_yaml_path, "w") as f:
+            f.write(
+                """
+- op: add.out
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CPU: torch::executor::add_out_kernel
+
+- op: mul.out
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CPU: torch::executor::mul_out_kernel
+                """
+            )
+
+    def test_translate_kernel_native_yaml_writes_correct_data(self) -> None:
+        out_yaml_path = os.path.join(self.temp_dir, "out2.yaml")
+        with open(out_yaml_path, "w") as out_file:
+            translate_native_yaml(
+                tags_yaml_path=self.tags_yaml_path,
+                aten_yaml_path=self.aten_kernel_yaml_path,
+                native_yaml_path=self.ops_yaml_path,
+                use_aten_lib=False,
+                out_file=out_file,
+            )
+        with open(out_yaml_path, "r") as out_file:
+            es = yaml.load(out_file, Loader=LineLoader)
+        self.assertTrue(all("func" in e for e in es))
+        self.assertTrue(all(e.get("variants") == "function" for e in es))
+
+        # Check persistence of kernel fields in yaml
+        for e in es:
+            self.assertTrue({"kernels", "type_alias", "dim_order_alias"} < e.keys())
+
+    def test_parse_yaml_files(self) -> None:
+        custom_ops_yaml_path = None
+        selector = SelectiveBuilder.get_nop_selector()
+        use_aten_lib = False
+
+        parsed_yaml, custom_ops_parsed_yaml = parse_yaml_files(
+            aten_yaml_path=self.aten_kernel_yaml_path,
+            tags_yaml_path=self.tags_yaml_path,
+            native_yaml_path=self.ops_yaml_path,
+            custom_ops_yaml_path=custom_ops_yaml_path,
+            selector=selector,
+            use_aten_lib=use_aten_lib
+        )
+
+        expected_kernel_entry = {"add.out": 9, "mul.out": 2}
+        self.assertTrue(len(parsed_yaml.native_functions) == len(expected_kernel_entry))
+
+        op_entries = parsed_yaml.kernel_index.index
+        for op_name, kernel_mapping in op_entries.items():
+            self.assertTrue(len(kernel_mapping) == expected_kernel_entry.pop(str(op_name)))
+
+        self.assertTrue(len(expected_kernel_entry) == 0)
+
+    def tearDown(self) -> None:
+        import shutil
+
+        try:
+            shutil.rmtree(self.temp_dir)
+        except OSError:
+            pass
 
 class TestGenFunctionsDeclarations(unittest.TestCase):
     def setUp(self) -> None:
