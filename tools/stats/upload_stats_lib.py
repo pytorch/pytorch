@@ -1,9 +1,11 @@
+import datetime
 import decimal
 import gzip
 import inspect
 import io
 import json
 import os
+import time
 import uuid
 import xml.etree.ElementTree as ET
 import zipfile
@@ -311,20 +313,15 @@ def emit_metric(
             "calling_file": calling_file,
             "calling_module": calling_module,
             "calling_function": calling_function,
+            "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f"),
             **{m.name: m.value() for m in env_var_metrics},
         }
     except ValueError as e:
         warn(f"Not emitting metrics. {e}")
         return
 
-    reserved_metrics["dynamo_key"] = "_".join(
-        [
-            reserved_metrics[
-                "metric_name"
-            ],  # to derisk chance of a uuid1 name collision
-            uuid.uuid1().hex,
-        ]
-    )
+    # Prefix key with metric name and timestamp to derisk chance of a uuid1 name collision
+    reserved_metrics["dynamo_key"] = f"{metric_name}_{int(time.time())}_{uuid.uuid1().hex}"
 
     # Ensure the metrics dict doesn't contain any reserved keys
     for key in reserved_metrics.keys():
