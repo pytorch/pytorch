@@ -303,6 +303,12 @@ at::Tensor renorm_backward(
     const at::Scalar& p,
     int64_t dim,
     const at::Scalar& maxnorm);
+at::Tensor renorm_jvp(
+    const at::Tensor& self_p,
+    const at::Tensor& self_t,
+    const at::Scalar& p,
+    int64_t dim,
+    const at::Scalar& maxnorm);
 at::Tensor repeat_backward(
     at::Tensor grad,
     at::SymIntArrayRef repeats,
