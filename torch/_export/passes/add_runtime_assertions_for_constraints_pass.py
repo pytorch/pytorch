@@ -111,7 +111,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             list(inputdim_to_node.values())[-1]
         ):
             self._insert_equality_assert_inplace(graph, inputdim_to_node)
-        
+
         # Add runtime asserts for inline constraints
         val = super().call(graph_module)
 
