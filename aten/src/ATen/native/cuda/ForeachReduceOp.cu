@@ -57,7 +57,7 @@ struct LpNormFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(r_x, x, 0, i_start);
+        load_store(r_x, x, static_cast<decltype(i_start)>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           opmath_t next = static_cast<opmath_t>(r_x[ii]);
@@ -69,7 +69,7 @@ struct LpNormFunctor {
            i_start += blockDim.x * kILP) {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
-          int i = i_start + threadIdx.x + ii * blockDim.x;
+          const auto i = i_start + threadIdx.x + ii * blockDim.x;
           if (i < n && i < chunk_size) {
             opmath_t next = static_cast<opmath_t>(x[i]);
             vals[ii] += NormType == 1 ? ::abs(next) : next * next;

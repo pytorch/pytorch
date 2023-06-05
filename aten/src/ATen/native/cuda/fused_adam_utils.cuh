@@ -122,9 +122,9 @@ struct FusedAdamMathFunctor {
             const float* found_inf_ptr,
             const ADAM_MODE adam_mode
   ) {
-        int tensor_loc = tl.block_to_tensor[blockIdx.x];
-        int chunk_idx = tl.block_to_chunk[blockIdx.x];
-        int n = tl.numel_for_tensor[tensor_loc];
+        const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+        const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+        auto n = tl.numel_for_tensor[tensor_loc];
 
         if (found_inf_ptr && *found_inf_ptr == 1) {
             return;
@@ -140,14 +140,14 @@ struct FusedAdamMathFunctor {
             for (int64_t i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
 #pragma unroll
                 for (int i = 0; i < depth; i++) {
-                    load_store(r_args[i], args[i], 0, i_start);
+                    load_store(r_args[i], args[i], static_cast<decltype(i_start)>(0), i_start);
                 }
                 adam_math<scalar_type, opmath_t, depth>(
                     r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, grad_scale_ptr, found_inf_ptr, adam_mode);
 #pragma unroll
                 for (int i = 0; i < depth; i++) {
                   if (i != kGradIdx || grad_scale_ptr) {
-                    load_store(args[i], r_args[i], i_start, 0);
+                    load_store(args[i], r_args[i], i_start, static_cast<decltype(i_start)>(0));
                   }
                 }
             }

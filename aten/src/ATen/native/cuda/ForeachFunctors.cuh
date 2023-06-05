@@ -18,13 +18,13 @@ inline void increment_version(TensorList tensors) {
 }
 
 // Initializes args and checks if all args are aligned
-template <int depth, typename T>
+template <int depth, typename T, typename index_t>
 __device__ bool init_args(
     T** args,
     TensorListMetadata<depth>& tl,
-    const int64_t chunk_idx,
-    const int64_t chunk_size,
-    const int64_t tensor_loc) {
+    const index_t chunk_idx,
+    const int chunk_size,
+    const int tensor_loc) {
   bool all_aligned = true;
   for (int i = 0; i < depth; i++) {
     args[i] = (T*)tl.addresses[i][tensor_loc];
@@ -38,13 +38,13 @@ __device__ bool init_args(
 }
 
 // Initializes args and checks if all args are aligned
-template <int depth, typename T, typename T2>
+template <int depth, typename T, typename T2, typename index_t>
 __device__ bool init_args(
     T** args,
     TensorListScalarListMetadata<T2, depth>& tl,
-    const int64_t chunk_idx,
-    const int64_t chunk_size,
-    const int64_t tensor_loc) {
+    const index_t chunk_idx,
+    const int chunk_size,
+    const int tensor_loc) {
   bool all_aligned = true;
   for (int i = 0; i < depth; i++) {
     args[i] = (T*)tl.addresses[i][tensor_loc];
@@ -57,13 +57,13 @@ __device__ bool init_args(
   return all_aligned;
 }
 
-template <int depth, typename T>
+template <int depth, typename T, typename index_t>
 __device__ bool init_args(
     T** args,
     FusedOptimizerTensorListMetadata<depth>& tl,
-    const int64_t chunk_idx,
-    const int64_t chunk_size,
-    const int64_t tensor_loc) {
+    const index_t chunk_idx,
+    const int chunk_size,
+    const int tensor_loc) {
   bool all_aligned = true;
   for (int i = 0; i < depth; i++) {
     args[i] = (T*)tl.addresses[i][tensor_loc];
@@ -76,13 +76,13 @@ __device__ bool init_args(
   return all_aligned;
 }
 
-template <int depth, typename T>
+template <int depth, typename T, typename index_t>
 __device__ void load_args(
     T r_args[][kILP],
     T** args,
-    const int64_t i_start,
-    const int64_t chunk_size,
-    const int64_t n) {
+    const index_t i_start,
+    const int chunk_size,
+    const index_t n) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
     const auto i = i_start + threadIdx.x + ii * blockDim.x;
@@ -95,16 +95,16 @@ __device__ void load_args(
   }
 }
 
-template <typename T>
+template <typename T, typename index_t>
 __device__ void store_args(
     T* dst,
     T* src,
-    const int64_t i_start,
-    const int64_t chunk_size,
-    const int64_t n) {
+    const index_t i_start,
+    const int chunk_size,
+    const index_t n) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
-    const int64_t i = i_start + threadIdx.x + ii * blockDim.x;
+    const auto i = i_start + threadIdx.x + ii * blockDim.x;
     if (i < n && i < chunk_size)
       dst[i] = src[ii];
   }
@@ -125,7 +125,8 @@ __device__ __forceinline__ void binary_op_scalar(
          i_start * kILP < n && i_start * kILP < chunk_size;
          i_start += blockDim.x) {
       // load
-      load_store(r_args[0], args[0], 0, i_start);
+      load_store(
+          r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
 #pragma unroll
       for (int ii = 0; ii < kILP; ii++) {
         r_args[0][ii] = static_cast<T>(
@@ -133,7 +134,11 @@ __device__ __forceinline__ void binary_op_scalar(
                static_cast<opmath_t>(scalar)));
       }
       // store
-      load_store(args[res_arg_index], r_args[0], i_start, 0);
+      load_store(
+          args[res_arg_index],
+          r_args[0],
+          i_start,
+          static_cast<decltype(i_start)>(0));
     }
   } else {
     for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -167,9 +172,12 @@ __device__ __forceinline__ void pointwise_op_scalar(
          i_start * kILP < n && i_start * kILP < chunk_size;
          i_start += blockDim.x) {
       // load
-      load_store(r_args[0], args[0], 0, i_start);
-      load_store(r_args[1], args[1], 0, i_start);
-      load_store(r_args[2], args[2], 0, i_start);
+      load_store(
+          r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
+      load_store(
+          r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
+      load_store(
+          r_args[2], args[2], static_cast<decltype(i_start)>(0), i_start);
 #pragma unroll
       for (int ii = 0; ii < kILP; ii++) {
         r_args[0][ii] = static_cast<T>(
@@ -179,7 +187,11 @@ __device__ __forceinline__ void pointwise_op_scalar(
                    static_cast<opmath_t>(r_args[2][ii])));
       }
       // store
-      load_store(args[res_arg_index], r_args[0], i_start, 0);
+      load_store(
+          args[res_arg_index],
+          r_args[0],
+          i_start,
+          static_cast<decltype(i_start)>(0));
     }
   } else {
     for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -276,8 +288,10 @@ struct BinaryOpListAlphaFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(r_args[0], args[0], 0, i_start);
-        load_store(r_args[1], args[1], 0, i_start);
+        load_store(
+            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
+        load_store(
+            r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] = static_cast<T>(
@@ -285,7 +299,11 @@ struct BinaryOpListAlphaFunctor {
                  alpha * static_cast<opmath_t>(r_args[1][ii])));
         }
         // store
-        load_store(args[res_arg_index], r_args[0], i_start, 0);
+        load_store(
+            args[res_arg_index],
+            r_args[0],
+            i_start,
+            static_cast<decltype(i_start)>(0));
       }
     } else {
       for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -332,7 +350,8 @@ struct ZeroFunctor {
           r_args[0][ii] = 0;
         }
         // store
-        load_store(args[0], r_args[0], i_start, 0);
+        load_store(
+            args[0], r_args[0], i_start, static_cast<decltype(i_start)>(0));
       }
     } else {
       for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -371,14 +390,19 @@ struct UnaryOpFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(r_args[0], args[0], 0, i_start);
+        load_store(
+            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] =
               static_cast<T>(op(static_cast<opmath_t>(r_args[0][ii])));
         }
         // store
-        load_store(args[res_arg_index], r_args[0], i_start, 0);
+        load_store(
+            args[res_arg_index],
+            r_args[0],
+            i_start,
+            static_cast<decltype(i_start)>(0));
       }
     } else {
       for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -471,8 +495,10 @@ struct PointwiseOpListFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(r_args[0], args[0], 0, i_start);
-        load_store(r_args[1], args[1], 0, i_start);
+        load_store(
+            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
+        load_store(
+            r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] = static_cast<T>(
@@ -523,9 +549,12 @@ struct TernaryOpListFunctor {
       for (int64_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
-        load_store(r_args[0], args[0], 0, i_start);
-        load_store(r_args[1], args[1], 0, i_start);
-        load_store(r_args[2], args[2], 0, i_start);
+        load_store(
+            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
+        load_store(
+            r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
+        load_store(
+            r_args[2], args[2], static_cast<decltype(i_start)>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] =
@@ -533,7 +562,11 @@ struct TernaryOpListFunctor {
                  static_cast<opmath_t>(r_args[1][ii]),
                  static_cast<opmath_t>(r_args[2][ii]));
         }
-        load_store(args[res_arg_index], r_args[0], i_start, 0);
+        load_store(
+            args[res_arg_index],
+            r_args[0],
+            i_start,
+            static_cast<decltype(i_start)>(0));
       }
     } else {
       for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -580,8 +613,10 @@ struct TernaryOpScalarFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(r_args[0], args[0], 0, i_start);
-        load_store(r_args[1], args[1], 0, i_start);
+        load_store(
+            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
+        load_store(
+            r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] =
@@ -590,7 +625,11 @@ struct TernaryOpScalarFunctor {
                  alpha);
         }
         // store
-        load_store(args[res_arg_index], r_args[0], i_start, 0);
+        load_store(
+            args[res_arg_index],
+            r_args[0],
+            i_start,
+            static_cast<decltype(i_start)>(0));
       }
     } else {
       for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
