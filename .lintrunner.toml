@@ -148,7 +148,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.23.1',
+    'numpy==1.24.3',
     'expecttest==0.1.3',
     'mypy==0.960',
     'types-requests==2.27.25',
@@ -226,7 +226,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
-    'c10/core/**/*.cpp',
+    'c10/**/*.cpp',
     'torch/csrc/fx/**/*.cpp',
     'torch/csrc/generic/**/*.cpp',
     'torch/csrc/onnx/**/*.cpp',
@@ -239,6 +239,7 @@ exclude_patterns = [
     # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
     # in a follow up PR.
     # that are not easily converted to accepted c++
+    'c10/cuda/**/*.cpp',
     'c10/test/**/*.cpp',
     'torch/csrc/jit/passes/onnx/helper.cpp',
     'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
