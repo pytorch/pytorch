@@ -83,6 +83,37 @@ def normalize_split_base(match: Match, _get_split_args: Callable):
     counters["inductor"]["split_cat_norm"] += 1
 
 
+def normalize_cat_base(match: Match):
+    cat_node = match.nodes[0]
+    graph = match.graph
+    tensors = get_arg_value(cat_node, 0)
+    cat_dim = get_arg_value(cat_node, 1, "dim") or 0
+    out = get_arg_value(cat_node, 2, "out")
+    if tensors is None or cat_dim is None:
+        log.info("couldn't find cat args")
+        return
+    if "example_value" not in cat_node.meta:
+        log.warning("example value absent for node: %s", cat_node)
+        return
+
+    ndim = tensors[0].meta["example_value"].dim()
+    assert all(ndim == x.meta["example_value"].dim() for x in tensors)
+
+    if cat_dim < 0:  # Normalize cat dim
+        cat_dim += ndim
+
+    with graph.inserting_after(cat_node):
+        new_cat_node = graph.call_function(
+            torch.cat,
+            args=(tensors,),
+            kwargs={"dim": cat_dim, "out": out},
+        )
+    cat_node.replace_all_uses_with(new_cat_node)
+    new_cat_node.meta.update(cat_node.meta)
+    graph.erase_node(cat_node)
+    counters["inductor"]["split_cat_norm"] += 1
+
+
 @register_graph_pattern(
     CallFunctionVarArgs(torch.split, users=MULTIPLE),
     pass_dict=normalize_split_pass,
@@ -95,6 +126,20 @@ def normalize_split_base(match: Match, _get_split_args: Callable):
 )
 def normalize_split_default(match: Match, *args, **kwargs):
     return normalize_split_base(match, _get_split_args_default)
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.cat, users=MULTIPLE),
+    pass_dict=normalize_split_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+@register_graph_pattern(
+    CallMethodVarArgs("cat", users=MULTIPLE),
+    pass_dict=normalize_split_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def normalize_cat_default(match: Match, *args, **kwargs):
+    return normalize_cat_base(match)
 
 
 def find_next_users(split_node):
