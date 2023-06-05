@@ -2566,6 +2566,53 @@ class TestPartitioning(AOTTestCase):
             res = aot_mod(x)
         res.sum().backward()
 
+
+    def test_functional_rng_wrappers(self):
+        # Currently, the plan to introduce these operators is at the partitioner
+        # level, so they don't need to be supported via Dynamo, AOT AUtograd
+        # stack. But, there is just enough implementation to survive make_fx in
+        # order to work with minifier.
+        def fn():
+            rng_state1, a1 = torch.ops.run_and_save_rng_state(
+                torch.ops.aten.rand.default, [4, 4], dtype=torch.float32, device="cuda"
+            )
+            rng_state2, a2 = torch.ops.run_and_save_rng_state(
+                torch.ops.aten.rand.default, [4, 4], dtype=torch.float32, device="cuda"
+            )
+
+            b1 = torch.ops.run_with_rng_state(
+                rng_state1,
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device="cuda",
+            )
+            b2 = torch.ops.run_with_rng_state(
+                rng_state2,
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device="cuda",
+            )
+
+            return (a1, a2, b1, b2)
+
+        mod = make_fx(fn)()
+        a1, a2, b1, b2 = mod()
+        # Ensure that the wrapper ops are present in the generated graph module.
+        self.assertEqual(
+            [node.target for node in mod.graph.nodes].count(
+                torch.ops.run_and_save_rng_state
+            ),
+            2,
+        )
+        self.assertEqual(
+            [node.target for node in mod.graph.nodes].count(torch.ops.run_with_rng_state), 2
+        )
+        self.assertEqual(a1, b1)
+        self.assertEqual(a2, b2)
+
+
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
