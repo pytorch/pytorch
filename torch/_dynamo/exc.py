@@ -105,6 +105,7 @@ class UserErrorType(Enum):
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
     CONSTRAIN_VIOLATION = auto()
+    INVALID_INPUT = auto()
 
 
 class UserError(Unsupported):

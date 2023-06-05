@@ -214,6 +214,20 @@ class TestExport(TestCase):
         ):
             export(f, example_inputs, constraints)
 
+    def test_not_correct_dim(self):
+        def f(x):
+            return x.cos()
+
+        def g(x):
+            return x + 4
+
+        inp_for_f = torch.tensor(5)
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "The index 0 to make dynamic is out of bounds"):
+            constraints = [dynamic_dim(inp_for_f, 0)]
+
+        inp_for_g = 4
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"):
+            constraints = [dynamic_dim(inp_for_g, 0)]
 
 if __name__ == '__main__':
     run_tests()

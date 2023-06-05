@@ -67,6 +67,19 @@ from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 #     ]
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
+    if not isinstance(t, torch.Tensor):
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"Expected tensor as input to dynamic_dim but got {type(t)}"
+        )
+
+    if index >= t.dim():
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            f"The index {index} to make dynamic is out of bounds"
+            f" for the tensor which has {t.dim()} dimensions.",
+        )
+
     return Constraint(
         weakref.ref(t),
         id(t),
