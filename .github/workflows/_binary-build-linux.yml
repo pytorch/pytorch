@@ -165,7 +165,7 @@ jobs:
       - name: Checkout ROCmSoftwarePlatform/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: test_PR_1412_1413_1414
           submodules: recursive
           repository: ROCmSoftwarePlatform/builder
           path: builder
