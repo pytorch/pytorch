@@ -8,62 +8,51 @@ using namespace c10::guts;
 namespace {
 
 namespace test_function_traits {
-static_assert(
-    std::is_same<
-        void,
-        typename function_traits<void(int, float)>::return_type>::value,
-    "");
-static_assert(
-    std::is_same<int, typename function_traits<int(int, float)>::return_type>::
-        value,
-    "");
+static_assert(std::is_same<
+              void,
+              typename function_traits<void(int, float)>::return_type>::value);
+static_assert(std::is_same<
+              int,
+              typename function_traits<int(int, float)>::return_type>::value);
 static_assert(
     std::is_same<
         typelist::typelist<int, float>,
-        typename function_traits<void(int, float)>::parameter_types>::value,
-    "");
+        typename function_traits<void(int, float)>::parameter_types>::value);
 static_assert(
     std::is_same<
         typelist::typelist<int, float>,
-        typename function_traits<int(int, float)>::parameter_types>::value,
-    "");
+        typename function_traits<int(int, float)>::parameter_types>::value);
 
 static_assert(
     std::is_same<
         bool,
         typename make_function_traits_t<bool, typelist::typelist<int, float>>::
-            return_type>::value,
-    "");
+            return_type>::value);
 static_assert(
     std::is_same<
         void,
         typename make_function_traits_t<void, typelist::typelist<int, float>>::
-            return_type>::value,
-    "");
+            return_type>::value);
 static_assert(
     std::is_same<
         typelist::typelist<int, float>,
         typename make_function_traits_t<bool, typelist::typelist<int, float>>::
-            parameter_types>::value,
-    "");
+            parameter_types>::value);
 static_assert(
     std::is_same<
         typelist::typelist<int, float>,
         typename make_function_traits_t<void, typelist::typelist<int, float>>::
-            parameter_types>::value,
-    "");
+            parameter_types>::value);
 static_assert(
     std::is_same<
         bool(int, float),
         typename make_function_traits_t<bool, typelist::typelist<int, float>>::
-            func_type>::value,
-    "");
+            func_type>::value);
 static_assert(
     std::is_same<
         void(int, float),
         typename make_function_traits_t<void, typelist::typelist<int, float>>::
-            func_type>::value,
-    "");
+            func_type>::value);
 } // namespace test_function_traits
 
 struct MovableOnly {
@@ -177,8 +166,7 @@ TEST(MetaprogrammingTest, TupleMap_simple) {
       [](int32_t a) -> int16_t { return a + 1; });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
-          value,
-      "");
+          value);
   EXPECT_EQ(4, std::get<0>(result));
   EXPECT_EQ(5, std::get<1>(result));
   EXPECT_EQ(6, std::get<2>(result));
@@ -190,8 +178,7 @@ TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
       [](int64_t a) -> int16_t { return a + 1; });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
-          value,
-      "");
+          value);
   EXPECT_EQ(4, std::get<0>(result));
   EXPECT_EQ(5, std::get<1>(result));
   EXPECT_EQ(6, std::get<2>(result));
@@ -203,8 +190,7 @@ TEST(MetaprogrammingTest, TupleMap_mapperTakesConstRef) {
       [](const int32_t& a) -> int16_t { return a + 1; });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
-          value,
-      "");
+          value);
   EXPECT_EQ(4, std::get<0>(result));
   EXPECT_EQ(5, std::get<1>(result));
   EXPECT_EQ(6, std::get<2>(result));
@@ -221,8 +207,7 @@ TEST(MetaprogrammingTest, TupleMap_mapsToDifferentTypes) {
   };
   auto result = tuple_map(std::tuple<int32_t, std::string>(3, "4"), Mapper());
   static_assert(
-      std::is_same<std::tuple<std::string, int32_t>, decltype(result)>::value,
-      "");
+      std::is_same<std::tuple<std::string, int32_t>, decltype(result)>::value);
   EXPECT_EQ("3", std::get<0>(result));
   EXPECT_EQ(4, std::get<1>(result));
 }
@@ -242,8 +227,7 @@ TEST(MetaprogrammingTest, TupleMap_differentiatesLRValueReferences) {
       Mapper());
   static_assert(
       std::is_same<std::tuple<std::string, std::string>, decltype(result)>::
-          value,
-      "");
+          value);
   EXPECT_EQ("copied", std::get<0>(result));
   EXPECT_EQ("moved", std::get<1>(result));
 }
@@ -251,8 +235,7 @@ TEST(MetaprogrammingTest, TupleMap_differentiatesLRValueReferences) {
 TEST(MetaprogrammingTest, TupleMap_canWorkWithMovableOnlyType) {
   auto result = tuple_map(
       std::tuple<MovableOnly>(MovableOnly(7)), [](MovableOnly a) { return a; });
-  static_assert(
-      std::is_same<std::tuple<MovableOnly>, decltype(result)>::value, "");
+  static_assert(std::is_same<std::tuple<MovableOnly>, decltype(result)>::value);
   EXPECT_EQ(MovableOnly(7), std::get<0>(result));
 }
 
@@ -261,7 +244,7 @@ TEST(MetaprogrammingTest, TupleMap_doesntUnecessarilyCopyValues) {
       std::tuple<CopyCounting>(CopyCounting()),
       [](CopyCounting a) { return a; });
   static_assert(
-      std::is_same<std::tuple<CopyCounting>, decltype(result)>::value, "");
+      std::is_same<std::tuple<CopyCounting>, decltype(result)>::value);
   EXPECT_EQ(4, std::get<0>(result).move_count);
   EXPECT_EQ(0, std::get<0>(result).copy_count);
 }
@@ -272,7 +255,7 @@ TEST(MetaprogrammingTest, TupleMap_doesntUnecessarilyMoveValues) {
       std::tuple<CopyCounting&&>(std::move(a)),
       [](CopyCounting&& a) -> CopyCounting&& { return std::move(a); });
   static_assert(
-      std::is_same<std::tuple<CopyCounting&&>, decltype(result)>::value, "");
+      std::is_same<std::tuple<CopyCounting&&>, decltype(result)>::value);
   EXPECT_EQ(&a, &std::get<0>(result));
   EXPECT_EQ(0, std::get<0>(result).move_count);
   EXPECT_EQ(0, std::get<0>(result).copy_count);
@@ -292,8 +275,7 @@ TEST(MetaprogrammingTest, TupleMap_canBeUsedWithAutoLambdas) {
   auto result =
       tuple_map(std::make_tuple(A(), B()), [](auto a) { return a.func(); });
   static_assert(
-      std::is_same<std::tuple<int32_t, std::string>, decltype(result)>::value,
-      "");
+      std::is_same<std::tuple<int32_t, std::string>, decltype(result)>::value);
   EXPECT_EQ(5, std::get<0>(result));
   EXPECT_EQ("5", std::get<1>(result));
 }
