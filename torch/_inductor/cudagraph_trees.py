@@ -19,7 +19,7 @@ with a lot of caveats.  CUDA graph trees remove these restrictions:
 * Previously, if you executed graph A, some non-CUDA graph code, and then
   graph B, after executing graph B, it was not safe to retain any references
   to intermediates produced by A.  With CUDA graph trees, we track if any
-  outputs of graph A are still live by the time graph B is run, and make
+outputs of graph A are still live by the time graph B is run, and make
   sure graph B doesn't clobber there memory when reusing the CUDA graphs
   pool.  You'll get a separate recording of B depending on what tensors
   stay live or dead.
@@ -72,7 +72,6 @@ from torch._inductor.compile_fx import (
     remove_unaligned_input_idxs,
     static_input,
 )
-from torch._prims_common import check
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.utils import _pytree as pytree
@@ -581,6 +580,7 @@ class CUDAWarmupNode:
                 o is not None
                 and o.is_cuda
                 and o.untyped_storage().data_ptr() not in non_cudagraph_inps
+                and o.untyped_storage().data_ptr() != 0
             )
 
         self.outputs_weakrefs.extend(
@@ -1008,6 +1008,7 @@ class CUDAGraphNode:
                 StorageWeakRefWrapper(elem)
                 for i, elem in enumerate(inputs)
                 if i not in self.wrapped_function.static_input_idxs
+                and elem.data_ptr() != 0
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
@@ -1055,7 +1056,7 @@ class CUDAGraphNode:
                 self.output_storage_alias.append(UnaliasedStorage)
                 continue
 
-            check(
+            torch._check(
                 o.is_cuda,
                 lambda: f"Expected all cuda outputs in cuda graph recording. Non cuda output from {self.stack_traces[i]}",
             ),
@@ -1063,7 +1064,10 @@ class CUDAGraphNode:
             ref = static_input_persistent_storage_ptrs.get(
                 o.untyped_storage().data_ptr(), None
             )
-            if ref and ref() is not None:
+            # also treat empty storages as static outputs because we do not need to manage their lifetime
+            # and they should not participate in checkpointing
+            is_empty_storage = o.data_ptr() == 0
+            if ref and ref() is not None or is_empty_storage:
                 self.output_storage_alias.append(None)
                 self.static_output_tensors[i] = o
                 continue
@@ -1425,7 +1429,7 @@ class CUDAGraphNode:
         for idx in self.cudagraph_managed_idxs:
             inputs[idx] = None
 
-        check(
+        torch._check(
             self._check_liveness(
                 self.expected_dead_indices_after_graph, self.path_weakrefs
             ),
@@ -1502,7 +1506,7 @@ def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWr
 
             addr += block["size"]
 
-    check(
+    torch._check(
         len(unique_storages) == 0,
         lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
     )

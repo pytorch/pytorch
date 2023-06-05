@@ -3,7 +3,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, required, _use_grad_for_differentiable, _default_to_fused_or_foreach,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['SGD', 'sgd']
 
@@ -280,7 +279,7 @@ def _multi_tensor_sgd(params: List[Tensor],
     if len(params) == 0:
         return
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, momentum_buffer_list], with_indices=True)
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, momentum_buffer_list], with_indices=True)
     for device_params, device_grads, device_momentum_buffer_list, indices in grouped_tensors.values():
         device_has_sparse_grad = any(grad.is_sparse for grad in device_grads)
 

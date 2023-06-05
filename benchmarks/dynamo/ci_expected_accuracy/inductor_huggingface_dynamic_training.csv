@@ -1,6 +1,5 @@
 name,accuracy,graph_breaks
 AlbertForMaskedLM,pass,6
-AlbertForQuestionAnswering,pass,6
 AllenaiLongformerBase,pass,10
 BartForCausalLM,pass,6
 BertForMaskedLM,pass,6
@@ -8,8 +7,8 @@ BertForQuestionAnswering,pass,6
 BlenderbotSmallForCausalLM,pass,6
 BlenderbotSmallForConditionalGeneration,pass,6
 CamemBert,pass,6
-DebertaForMaskedLM,pass,51
-DebertaForQuestionAnswering,pass,51
+DebertaForMaskedLM,pass,6
+DebertaForQuestionAnswering,pass,6
 DebertaV2ForMaskedLM,pass_due_to_skip,0
 DistilBertForMaskedLM,pass,6
 DistilBertForQuestionAnswering,pass,6
