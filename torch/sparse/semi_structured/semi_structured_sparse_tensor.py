@@ -37,7 +37,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         kwargs["layout"] = compressed_tensor.layout
         kwargs["requires_grad"] = False
 
-        return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)
+        return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)  # type: ignore[attr-defined]
 
     def __init__(
         self,
@@ -96,25 +96,31 @@ class SemiStructuredSparseTensor(torch.Tensor):
 
             # Currently, we only support the first matrix being sparse for addmm/mm in cuSPARSELT and CUTLASS.
             # CUTLASS only supports the first input to be sparse for a given matmul.
-            # cuSPARSELt does not have this limitation, although it appears that it uses CUTLASS under the hood, since it will be slower to have the second matrix be sparse.
+            # cuSPARSELt does not have this limitation, although it appears that it uses CUTLASS under the hood,
+            # since it will be slower to have the second matrix be sparse.
             # It may be using the same transpose trick we are using below
-            # input_A cannot be transposed.
             if (
                 isinstance(input_A, SemiStructuredSparseTensor)
                 and not input_A.transposed
             ):
                 return input_A.cslt.addmm(
                     input_B, bias, not input_B.is_contiguous(), False
-                )
+                )  # type: ignore[attr-defined]
 
-            # Although we only support the first matrix being sparse, we can suppor the second matrix being sparse using some transpose properties.
-            # F.linear(x) = addmm(bias, input, weight.t()) = b + xW' = (b + xW')'' = (W''x' + b')' = (Wx' + b')' = W.cslt.addmm(input, ).T
+            # Although we only support the first matrix being sparse, we can support the second matrix being sparse.
+            # We do this by taking advantage of some transpose properties:
+            # F.linear(x) = addmm(bias, input, weight.t()) = b + xW' = (b + xW')''
+            #        = (W''x' + b')' = (Wx' + b')' = W.cslt.addmm(input, ).T
             elif isinstance(input_B, SemiStructuredSparseTensor) and input_B.transposed:
-                res = input_B.t().cslt.addmm(input_A.T, bias, True, cls.fuse_transpose)
+                res = input_B.t().cslt.addmm(input_A.T, bias, True, cls.fuse_transpose)  # type: ignore[attr-defined]
                 return res if cls.fuse_transpose else res.T
 
             raise NotImplementedError(
-                f"func: {func} is currently not supported for \n opA: {input_A.transposed} A: {input_A} \n opB: {input_B.transposed} B {input_B}"
+                (
+                    f"func: {func} is currently not supported for ",
+                    f"opA: {input_A.transposed} A: {input_A}",
+                    f"opB: {input_B.transposed} B {input_B}",
+                )
             )
 
         if func is torch.ops.aten.mm.default:
@@ -124,14 +130,18 @@ class SemiStructuredSparseTensor(torch.Tensor):
                 isinstance(input_A, SemiStructuredSparseTensor)
                 and not input_A.transposed
             ):
-                return input_A.cslt.mm(input_B, not input_B.is_contiguous(), False)
+                return input_A.cslt.mm(input_B, not input_B.is_contiguous(), False)  # type: ignore[attr-defined]
 
             elif isinstance(input_B, SemiStructuredSparseTensor) and input_B.transposed:
-                res = input_B.t().cslt.mm(input_A.T, True, cls.fuse_transpose)
+                res = input_B.t().cslt.mm(input_A.T, True, cls.fuse_transpose)  # type: ignore[attr-defined]
                 return res if cls.fuse_transpose else res.T
 
             raise NotImplementedError(
-                f"func: {func} is currently not supported for \n opA: {input_A.transposed} A: {input_A} \n opB: {input_B.transposed} B {input_B}"
+                (
+                    f"func: {func} is currently not supported for ",
+                    f"opA: {input_A.transposed} A: {input_A}",
+                    f"opB: {input_B.transposed} B {input_B}",
+                )
             )
 
         # When torch is run with inference mode, it looks like pytorch does some merging in order to make linear faster.
@@ -140,7 +150,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         if func is torch.ops.aten.linear.default:
             input, weight, bias = args
             if isinstance(weight, SemiStructuredSparseTensor):
-                res = weight.t().cslt.addmm(input.T, bias, True, cls.fuse_transpose)
+                res = weight.t().cslt.addmm(input.T, bias, True, cls.fuse_transpose)  # type: ignore[attr-defined]
                 return res if cls.fuse_transpose else res.T
 
         raise NotImplementedError(f"{func} on {args} is not implemented!")

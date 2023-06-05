@@ -60,7 +60,10 @@ struct CusparseLt : public torch::CustomClassHolder {
   cusparseComputeType compute_type = CUSPARSE_COMPUTE_16F;
 
   // struct functions / constructor
-  at::Tensor cusparselt_mm(const at::Tensor& input, bool transpose_dense, bool transpose_result);
+  at::Tensor cusparselt_mm(
+      const at::Tensor& input,
+      bool transpose_dense,
+      bool transpose_result);
   at::Tensor cusparselt_addmm(
       const at::Tensor& input,
       const at::Tensor& bias,
@@ -75,8 +78,8 @@ struct CusparseLt : public torch::CustomClassHolder {
   void compress(const at::Tensor& sparse_input, bool transpose_sparse);
   CusparseLt(const at::Tensor& sparse_compressed)
       : sparse_compressed{sparse_compressed} {
-
-    // Check CUDA compatibility, currently only supported on 8.0, 8.6, 8.9, and 9.0
+    // Check CUDA compatibility, currently only supported on 8.0, 8.6, 8.9,
+    // and 9.0
     int major_cc, minor_cc;
     CHECK_CUDA(
         cudaDeviceGetAttribute(&major_cc, cudaDevAttrComputeCapabilityMajor, 0))
@@ -165,7 +168,8 @@ at::Tensor CusparseLt::cusparselt_mm(
     const at::Tensor& input,
     bool transpose_dense,
     bool transpose_result) {
-  return CusparseLt::cusparselt_helper(input, nullptr, 0, transpose_dense, transpose_result);
+  return CusparseLt::cusparselt_helper(
+      input, nullptr, 0, transpose_dense, transpose_result);
 }
 
 at::Tensor CusparseLt::cusparselt_addmm(
@@ -190,14 +194,16 @@ at::Tensor CusparseLt::cusparselt_helper(
 
   // create tensor
   auto res = (transpose_result) ? input.new_empty({n, num_A_rows})
-                               : input.new_empty({num_A_rows, n});
+                                : input.new_empty({num_A_rows, n});
 
   cusparseOrder_t result_order =
       (transpose_result) ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
-  cusparseOperation_t opB = (transpose_dense)? CUSPARSE_OPERATION_TRANSPOSE : CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cusparseOperation_t opB = (transpose_dense)
+      ? CUSPARSE_OPERATION_TRANSPOSE
+      : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  int64_t num_B_rows = (transpose_dense)? n : k;
-  int64_t num_B_cols = (transpose_dense)? k : n;
+  int64_t num_B_rows = (transpose_dense) ? n : k;
+  int64_t num_B_cols = (transpose_dense) ? k : n;
   int64_t num_C_rows = num_A_rows;
   int64_t num_C_cols = n;
 

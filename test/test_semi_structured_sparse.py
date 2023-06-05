@@ -12,27 +12,13 @@ from torch.sparse.semi_structured import (
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
-    load_tests,
-    coalescedonoff,
     parametrize,
     subtest,
-    skipIfTorchDynamo,
-    skipIfRocm,
-    IS_FBCODE,
-    IS_REMOTE_GPU,
 )
 
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
-)
-from torch.testing._internal.common_dtype import (
-    floating_types,
-    all_types_and_complex_and,
-    floating_and_complex_types,
-    floating_types_and,
-    all_types_and_complex,
-    floating_and_complex_types_and,
 )
 
 CUSPARSELT_SUPPORTED_DTYPES = [torch.int8, torch.float16, torch.bfloat16, torch.float32]
