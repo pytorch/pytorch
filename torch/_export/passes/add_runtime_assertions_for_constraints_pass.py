@@ -13,6 +13,7 @@ import torch
 import torch.fx
 from torch.fx.experimental.symbolic_shapes import SymInt
 from torch._export.pass_base import ExportPassBase, ProxyValue, PassResult
+from torch._export.constraints import constrain_as_size
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._subclasses.fake_tensor import FakeTensor
 
@@ -213,7 +214,12 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         if "val" not in meta:
             return ret
 
+        # TODO Hack to re-record the constraints
         val = meta["val"]
+        if isinstance(val, torch.SymInt):
+            min_v, max_v = _convert_range_to_int(self.range_constraints[val.node._expr])
+            constrain_as_size(ret.node.meta["val"], min_v, max_v)
+
 
         # In general, we may have to deal the case such as: ret[1].shape[0].
         # We need first find out what symbols require assertion, then we need to follow the path

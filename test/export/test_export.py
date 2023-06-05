@@ -68,7 +68,6 @@ class TestExperimentalExport(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
-    @unittest.expectedFailure
     def test_export_inline_constraints(self):
 
         def f(x):
