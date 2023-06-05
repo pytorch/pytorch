@@ -21,6 +21,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/record_function_ops.h>
 #include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -373,6 +374,30 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       });
   m.def("_pop_saved_tensors_default_hooks", []() {
     torch::autograd::PyDefaultSavedVariableHooks::pop_hooks();
+  });
+
+  m.def("_autograd_meta_is_differentiable_view", [](const at::Tensor& t) {
+    return torch::autograd::impl::get_view_autograd_meta(t) != nullptr;
+  });
+
+  m.def("_autograd_meta_creation_meta", [](const at::Tensor& t) {
+    using torch::autograd::CreationMeta;
+    auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+    TORCH_CHECK(meta != nullptr);
+    switch (meta->get_creation_meta()) {
+      case CreationMeta::DEFAULT:
+        return "DEFAULT";
+      case CreationMeta::IN_CUSTOM_FUNCTION:
+        return "IN_CUSTOM_FUNCTION";
+      case CreationMeta::MULTI_OUTPUT_NODE:
+        return "MULTI_OUTPUT_NODE";
+      case CreationMeta::NO_GRAD_MODE:
+        return "NO_GRAD_MODE";
+      case CreationMeta::INFERENCE_MODE:
+        return "INFERENCE_MODE";
+      default:
+        return "UNKNOWN";
+    }
   });
 
   _C_m.def(
