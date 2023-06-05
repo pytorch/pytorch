@@ -42,7 +42,7 @@ if os.path.exists("/opt/rocm") and not IS_MEM_LEAK_CHECK:
     except subprocess.CalledProcessError as e:
         # The safe default for ROCm GHA runners is to run tests serially.
         NUM_PROCS = 1
-    NUM_PROCS_FOR_SHARDING_CALC = 1
+    NUM_PROCS_FOR_SHARDING_CALC = 2
 
 
 class ShardedTest(NamedTuple):
