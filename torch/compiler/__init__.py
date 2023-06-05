@@ -1,7 +1,6 @@
 import torch
 import torch._dynamo
-import torch._inductor
-from typing import Callable, Union, List, Set, Tuple, Any, Dict
+from typing import List
 
 __all__ = [
     "compile",
