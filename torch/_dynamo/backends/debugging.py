@@ -129,6 +129,6 @@ def non_leaf_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs
     else:
         return gm
     for t in example_inputs:
-        if t.grad_fn is not None:
+        if not t.is_leaf:
             raise TestingOnlyCompileError()
     return gm
