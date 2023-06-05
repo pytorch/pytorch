@@ -34,7 +34,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     mask = gen_two_four_sparse_mask(
         m, k, dtype=dtype
     )
-    sparse_weight = torch.rand(m, k).to(dtype).cuda()  * mask
+    sparse_weight = torch.rand(m, k).to(dtype).cuda() * mask
     input_tensor = torch.zeros(n, k).to(dtype).cuda()
     model = Model(m, k).to(dtype).cuda().eval()
 

@@ -3,7 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
 #include <cusparse.h>
-#include <cusparseLt.h>
+#include <torch/csrc/sparse/cusparseLt.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
@@ -32,7 +32,7 @@ namespace torch {
 namespace ao {
 namespace pruning {
 
-// create a container that holds relevant data for cusparselt matmul 
+// create a container that holds relevant data for cusparselt matmul
 struct CusparseLt : public torch::CustomClassHolder {
   constexpr static auto order{CUSPARSE_ORDER_ROW};
   // this tensor is magic, will segfault when removed?
@@ -163,7 +163,7 @@ void CusparseLt::compress(
 
 at::Tensor CusparseLt::cusparselt_mm(
     const at::Tensor& input,
-    bool transpose_dense, 
+    bool transpose_dense,
     bool transpose_result) {
   return CusparseLt::cusparselt_helper(input, nullptr, 0, transpose_dense, transpose_result);
 }
@@ -171,7 +171,7 @@ at::Tensor CusparseLt::cusparselt_mm(
 at::Tensor CusparseLt::cusparselt_addmm(
     const at::Tensor& input,
     const at::Tensor& bias,
-    bool transpose_dense, 
+    bool transpose_dense,
     bool transpose_result) {
   return CusparseLt::cusparselt_helper(
       input, bias.data_ptr(), 0, transpose_dense, transpose_result);
@@ -181,7 +181,7 @@ at::Tensor CusparseLt::cusparselt_helper(
     const at::Tensor& input,
     void* dBias,
     int64_t biasStride,
-    bool transpose_dense, 
+    bool transpose_dense,
     bool transpose_result) {
   cusparseLtMatmulDescriptor_t matmul;
 

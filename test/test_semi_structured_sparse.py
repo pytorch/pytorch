@@ -2,10 +2,6 @@
 
 import torch
 from torch import nn
-import random
-import itertools
-import unittest
-import functools
 
 from torch.sparse import SemiStructuredSparseTensor
 from torch.sparse.semi_structured import (
