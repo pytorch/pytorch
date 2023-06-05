@@ -763,7 +763,7 @@ IValueComparator getGreaterThanComparator(const IValue& v) {
   };
 }
 
-static std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
   out << v.qualifiedClassName() << "." << v.name();
   return out;
 }
