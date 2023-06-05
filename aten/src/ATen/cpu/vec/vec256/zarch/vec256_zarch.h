@@ -1168,14 +1168,16 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return blendv(tmp, other, other.isnan());
   }
 
-  /* Does not propagate NaN */
+  /* Keeps NaN if actual value is NaN */
   Vectorized<T> clamp_min(const Vectorized<T>& min) const {
-    return Vectorized<T> {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
+    Vectorized<T> tmp = {vec_max(_vec0, min._vec0), vec_max(_vec1, min._vec1)};
+    return blendv(tmp, *this, isnan());
   }
 
-  /* Does not propagate NaN */
+  /* Keeps NaN if actual value is NaN */
   Vectorized<T> clamp_max(const Vectorized<T>& max) const {
-    return Vectorized<T> {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
+    Vectorized<T> tmp = {vec_min(_vec0, max._vec0), vec_min(_vec1, max._vec1)};
+    return blendv(tmp, *this, isnan());
   }
 
   template <
