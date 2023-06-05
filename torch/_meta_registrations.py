@@ -104,7 +104,7 @@ def linalg_cross(self, other, *, dim=-1):
     return self.new_empty(out_shape)
 
 
-@register_meta([aten.linalg_matrix_exp.default, aten.linalg_matrix_exp.out])
+@register_meta(aten.linalg_matrix_exp)
 @out_wrapper()
 def linalg_matrix_exp(self):
     squareCheckInputs(self, "linalg.matrix_exp")
