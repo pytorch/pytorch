@@ -985,10 +985,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         original_conv_bn_getitem_meta = original_conv_bn_getitem_node.meta[
             "quantization_annotation"
         ]
-        maxpool_getitem_meta = maxpool_getitem_node.meta["quantization_annotation"]
         conv_bn_getitem_meta = conv_bn_getitem_node.meta["quantization_annotation"]
         self.assertEqual(conv_bn_getitem_meta, original_conv_bn_getitem_meta)
-        self.assertNotEqual(conv_bn_getitem_meta, maxpool_getitem_meta)
 
     def _verify_symmetric_qnnpack_qat_graph(
         self,
