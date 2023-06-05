@@ -5,10 +5,14 @@ TRITON_HAS_REDUCE = hasattr(tl, "reduce")
 
 
 @triton.jit
+def promote_to_tensor(x):
+    # Addition promotes to tensor for us
+    return x + tl.zeros((1,), tl.int1)
+
+
+@triton.jit
 def is_floating(x):
-    # Addition to promote scalars to tensor
-    x += tl.zeros((1,), tl.int1)
-    return x.dtype.is_floating()
+    return promote_to_tensor(x).dtype.is_floating()
 
 
 @triton.jit
