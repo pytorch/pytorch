@@ -231,17 +231,17 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def exit(self, tx, *args):
         self.mode = (
-            exit_functional_autocast(self.mode[0]),
+            torch.amp._exit_autocast(self.mode[0]),
             tx.output.create_node(
-                "call_function", exit_functional_autocast, (self.mode[1],), {}
+                "call_function", torch.amp._exit_autocast, (self.mode[1],), {}
             ),
         )
 
     def enter(self, tx):
         self.mode = (
-            enter_functional_autocast(*self.target_values),
+            torch.amp._enter_autocast(*self.target_values),
             tx.output.create_node(
-                "call_function", enter_functional_autocast, (*self.target_values,), {}
+                "call_function", torch.amp._enter_autocast, (*self.target_values,), {}
             ),
         )
 
@@ -250,16 +250,6 @@ class AutocastModeVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "autocast"
-
-
-def enter_functional_autocast(*vals):
-    mode = torch.amp.autocast(*vals)
-    mode.__enter__()
-    return mode
-
-
-def exit_functional_autocast(mode):
-    mode.__exit__(None, None, None)
 
 
 class NullContextVariable(ContextWrappingVariable):
