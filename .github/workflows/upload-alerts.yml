@@ -31,7 +31,7 @@ jobs:
       - name: Upload alerts
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
-        uses: pytorch/test-infra/.github/actions/upload-alerts@b4dd1cc0e77980e77be1ecd0aa05d928b55eed30
+        uses: pytorch/test-infra/.github/actions/upload-alerts@e18db87fd8d6b546d0a9f23795594f4df59245c2
         with:
           alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
           organization: "pytorch"
