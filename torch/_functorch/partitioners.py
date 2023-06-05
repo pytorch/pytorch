@@ -12,7 +12,7 @@ import copy
 import os
 import itertools
 import sympy
-from collections import defaultdict
+from collections import defaultdict, deque
 from torch.fx.passes import graph_drawer
 from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
@@ -115,6 +115,10 @@ def _is_primal(node):
 
 def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
+
+def _is_not_a_tangent(node):
+    return node.op == "placeholder" and "tangents" not in node.target
+
 
 
 def _is_bwd_seed_offset(node):
@@ -471,6 +475,80 @@ def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, rec
     return new_graph, extra_rand_states
 
 
+def reorder(gm):
+    # Reorder the ops such that tangents are used as soon as possible
+    tangent_inputs = list(filter(_is_tangent, gm.graph.nodes))
+    non_tangent_inputs = list(filter(lambda x: _is_not_a_tangent(x), gm.graph.nodes))
+    # print(gm)
+
+    new_graph = fx.Graph()
+    env = {}
+
+
+    # Add new placeholder nodes in the order specified by the inputs
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            new_node = new_graph.placeholder(node.name)
+            # Can't use node_copy here as we may be turning previous call_function into placeholders
+            new_node.meta = node.meta
+            env[node] = new_node
+
+    def insert_the_graph_for(node):
+        if node in env:
+            return env[node]
+
+        if node.op == "output":
+            raise RuntimeError("Should not be here")
+
+        for arg in node.args:
+            if isinstance(arg, torch.fx.node.Node):
+                env[arg] = insert_the_graph_for(arg)
+
+        env[node] = new_graph.node_copy(node, lambda x: env[x])
+
+        return env[node]
+
+
+    def build(priority_inputs):
+        q = deque(priority_inputs)
+        inserted = set()
+        while len(q):
+            node = q.popleft()
+            # print(torch.fx.GraphModule(gm,new_graph))
+            # print("starting the work for ", node)
+            # print("#######", flush=True)
+            insert_the_graph_for(node)
+            for user in node.users:
+                should_append = user not in inserted and user.op != "output"
+                # print(node, "->", user, should_append)
+                if should_append:
+                    q.append(user)
+                    inserted.add(user)
+
+    build(tangent_inputs)
+    # Run the remaining ones - Why do we even need these?
+    build(non_tangent_inputs)
+
+    output_values = []
+
+    for node in gm.graph.nodes:
+        if node.op == "output":
+            all_outputs = node.args[0]
+            for o in all_outputs:
+                if o is None:
+                    output_values.append(None)
+                else:
+                    output_values.append(env[o])
+
+
+
+    new_graph.output(output_values)
+    new_gm = torch.fx.GraphModule(gm, new_graph)
+
+    # print(new_gm)
+    return new_gm
+
+
 def _extract_fwd_bwd_modules_special(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
@@ -575,6 +653,7 @@ def _extract_fwd_bwd_modules_special(joint_module: fx.GraphModule, saved_values,
 
     fwd_module = fx.GraphModule(joint_module, fwd_graph)
     bwd_module = fx.GraphModule(joint_module, bwd_graph)
+
     return fwd_module, bwd_module
 
 def cleanup_recompute_tags(joint_module):
@@ -859,6 +938,7 @@ def min_cut_rematerialization_partition(
     else:
         fw_module, bw_module = _extract_fwd_bwd_modules(
             joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+    bw_module = reorder(bw_module)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
         fw_module_nodes = {node.name for node in fw_module.graph.nodes if node.op == 'call_function'}
