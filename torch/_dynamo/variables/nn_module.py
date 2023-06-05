@@ -3,7 +3,6 @@ import inspect
 import itertools
 import types
 from contextlib import contextmanager
-from enum import Enum
 from typing import Dict, List
 
 import torch.nn
@@ -35,11 +34,6 @@ from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
-
-
-class InlineFunctionType(Enum):
-    FUNCTION = 1
-    METHOD = 2
 
 
 def initialize_lazy_module(tx, mod, args, kwargs):
@@ -245,35 +239,6 @@ class NNModuleVariable(VariableTracker):
             yield
         finally:
             del tx.nn_module_stack[self.module_key]
-
-    def _inline_user_function_return_helper(
-        self,
-        tx,
-        module,
-        name,
-        args,
-        kwargs,
-        options,
-        src=None,
-        function_type: InlineFunctionType = None,
-    ):
-        fn = getattr(module, name).__func__
-
-        if function_type == InlineFunctionType.FUNCTION:
-            assert src is not None, "source cannot be None for UserFunctionVariable"
-            variable = variables.UserFunctionVariable(fn, source=src, **options)
-        elif function_type == InlineFunctionType.METHOD:
-            variable = variables.UserMethodVariable(fn, self, **options)
-        else:
-            raise unimplemented(
-                "unimplemented argument function_type: InlineFunctionType"
-            )
-
-        return tx.inline_user_function_return(
-            variable,
-            [self] + list(args),
-            kwargs,
-        )
 
     def call_function(
         self,
@@ -584,15 +549,10 @@ class NNModuleVariable(VariableTracker):
                 assert isinstance(fn, types.FunctionType)
 
                 src = AttrSource(AttrSource(self.source, name), "__func__")
-                return self._inline_user_function_return_helper(
-                    tx,
-                    module,
-                    name,
-                    args,
+                return tx.inline_user_function_return(
+                    variables.UserFunctionVariable(fn, source=src, **options),
+                    [self] + list(args),
                     kwargs,
-                    options,
-                    src=src,
-                    function_type=InlineFunctionType.FUNCTION,
                 )
 
             assert self.source
@@ -637,46 +597,25 @@ class NNModuleVariable(VariableTracker):
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
-        elif name == "_get_abs_string_index":
+        elif (
+            name == "_get_abs_string_index"
+            or (
+                isinstance(module, torch.nn.modules.conv._ConvNd)
+                and name == "_conv_forward"
+            )
+            or (
+                isinstance(module, torch.nn.modules.conv._ConvTransposeNd)
+                and name == "_output_padding"
+            )
+        ):
             # Inline the function
-            src = AttrSource(AttrSource(self.source, name), "__func__")
-            return self._inline_user_function_return_helper(
-                tx,
-                module,
-                name,
-                args,
+            fn = getattr(module, name).__func__
+            fn_source = AttrSource(self.source, "__func__")
+            options["source"] = fn_source
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, **options),
+                [self] + args,
                 kwargs,
-                options,
-                src=src,
-                function_type=InlineFunctionType.FUNCTION,
-            )
-        elif (
-            isinstance(module, torch.nn.modules.conv._ConvNd)
-            and name == "_conv_forward"
-        ):
-            # inline the torch.nn.modules.conv._ConvNd._conv_forward
-            return self._inline_user_function_return_helper(
-                tx,
-                module,
-                name,
-                args,
-                kwargs,
-                options,
-                function_type=InlineFunctionType.METHOD,
-            )
-        elif (
-            isinstance(module, torch.nn.modules.conv._ConvTransposeNd)
-            and name == "_output_padding"
-        ):
-            # inline the torch.nn.modules.conv._ConvTransposeNd._output_padding
-            return self._inline_user_function_return_helper(
-                tx,
-                module,
-                name,
-                args,
-                kwargs,
-                options,
-                function_type=InlineFunctionType.METHOD,
             )
         # A loose heuristic, but seems to be generally good before we drop into the
         # manual handling of inputs

@@ -442,10 +442,15 @@ void onFunctionExit(
       auto fallback = kineto_ctx_ptr->fallback_;
       TORCH_INTERNAL_ASSERT(fallback != nullptr);
       torch::profiler::impl::cudaStubs()->record(
-          nullptr, &fallback->cuda_event_end_, nullptr);
+          nullptr, &fallback->device_event_end_, nullptr);
     } catch (const std::exception& e) {
       LOG(WARNING) << "Failed to record CUDA event. " << e.what();
     }
+  } else if (config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
+    auto fallback = kineto_ctx_ptr->fallback_;
+    TORCH_INTERNAL_ASSERT(fallback != nullptr);
+    torch::profiler::impl::privateuse1Stubs()->record(
+        nullptr, &fallback->device_event_end_, nullptr);
   }
 
   if (fn.scope() == at::RecordScope::USER_SCOPE) {
@@ -519,7 +524,8 @@ void prepareProfiler(
   }
   TORCH_CHECK(
       config.state == ProfilerState::KINETO ||
-          config.state == ProfilerState::KINETO_GPU_FALLBACK,
+          config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+          config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
       /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
@@ -594,7 +600,9 @@ void enableProfiler(
 
   TORCH_CHECK(
       config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK || config.global());
+      config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+      config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
+      config.global());
   TORCH_CHECK(!activities.empty(), "No activities specified.");
   TORCH_INTERNAL_ASSERT(
       has_cpu || !config.global(),
@@ -620,6 +628,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       state_ptr &&
           (config.state == ProfilerState::KINETO ||
            config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+           config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
            config.state == ProfilerState::KINETO_ONDEMAND ||
            config.state == ProfilerState::NVTX ||
            config.state == ProfilerState::ITT),
@@ -634,14 +643,15 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     return std::make_unique<ProfilerResult>();
   }
 
-  // Shared among NVTX, KINETO, KINETO_GPU_FALLBACK
+  // Shared among NVTX, KINETO, KINETO_GPU_FALLBACK, KINETO_PRIVATEUSE1_FALLBACK
   std::unique_ptr<ProfilerResult> result;
   if (state_ptr->config().state == ProfilerState::NVTX) {
     result = std::make_unique<ProfilerResult>();
   }
 
   if (config.state == ProfilerState::KINETO ||
-      config.state == ProfilerState::KINETO_GPU_FALLBACK) {
+      config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+      config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
     auto kineto_state_ptr =
         std::static_pointer_cast<KinetoThreadLocalState>(state_ptr);
     auto trace = kineto_state_ptr->finalizeTrace();
@@ -774,6 +784,17 @@ int64_t KinetoEvent::cudaElapsedUs() const {
   return -1;
 }
 
+int64_t KinetoEvent::privateuse1ElapsedUs() const {
+  auto privateuse1_event_start = fallbackStart();
+  auto privateuse1_event_end = fallbackEnd();
+  if (!privateuse1_event_start || !privateuse1_event_end) {
+    return -1;
+  }
+  return (int64_t)torch::profiler::impl::privateuse1Stubs()->elapsed(
+      &privateuse1_event_start, &privateuse1_event_end);
+  return -1;
+}
+
 void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
   return result_->visit(c10::overloaded(
       [&in](const ExtraFields<EventType::TorchOp>& e) -> void {
@@ -829,8 +850,8 @@ TYPED_ATTR(TorchOp, fwdThreadId, e.sequence_number_ >= 0 ? e.forward_tid_ : 0)
 TYPED_ATTR(TorchOp, scope, static_cast<uint8_t>(e.scope_))
 TYPED_ATTR(TorchOp, hasModuleHierarchy, !e.jit_modules_.empty())
 TYPED_ATTR(TorchOp, isAsync, e.is_async_)
-TYPED_ATTR(TorchOp, fallbackStart, e.gpu_fallback_.cuda_event_start_)
-TYPED_ATTR(TorchOp, fallbackEnd, e.gpu_fallback_.cuda_event_end_)
+TYPED_ATTR(TorchOp, fallbackStart, e.device_fallback_.device_event_start_)
+TYPED_ATTR(TorchOp, fallbackEnd, e.device_fallback_.device_event_end_)
 TYPED_ATTR(
     TorchOp,
     flops,

@@ -408,7 +408,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
 
   if (profilingConfig.state == ProfilerState::KINETO ||
-      profilingConfig.state == ProfilerState::KINETO_GPU_FALLBACK) {
+      profilingConfig.state == ProfilerState::KINETO_GPU_FALLBACK ||
+      profilingConfig.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
     profilingConfig = ProfilerConfig(
         ProfilerState::CPU,
         profilingConfig.report_input_shapes,
