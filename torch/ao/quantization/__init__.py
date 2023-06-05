@@ -12,10 +12,12 @@ from .quantization_mappings import *  # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
-from typing import Union
+from typing import Union, List, Callable, Tuple, Optional
+from torch import Tensor
+import torch
 
-ObserverOrFakeQuantizer = Union[ObserverBase, FakeQuantizeBase]
-ObserverOrFakeQuantizer.__module__ = "torch.ao.quantization"
+ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
+ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
 
 __all__ = [
     "DeQuantStub",
@@ -31,6 +33,7 @@ __all__ = [
     "MovingAveragePerChannelMinMaxObserver",
     "NoopObserver",
     "ObserverBase",
+    "ObserverOrFakeQuantize",
     "Pattern",
     "PerChannelMinMaxObserver",
     "PlaceholderObserver",
@@ -133,7 +136,6 @@ __all__ = [
     "script_qconfig_dict",
     "swap_module",
     "weight_observer_range_neg_127_to_127",
-    "ObserverOrFakeQuantizer",
 ]
 
 def default_eval_fn(model, calib_data):
@@ -143,3 +145,29 @@ def default_eval_fn(model, calib_data):
     """
     for data, target in calib_data:
         model(data)
+
+class _DerivedObserverOrFakeQuantize(ObserverBase):
+    r""" This observer is used to describe an observer whose quantization parameters
+    are derived from other observers
+    """
+    def __init__(
+        self,
+        dtype: torch.dtype,
+        obs_or_fqs: List[ObserverOrFakeQuantize],
+        derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]],
+        quant_min: Optional[int]=None,
+        quant_max: Optional[int]=None,
+        qscheme: Optional[torch.qscheme]=None,
+    ):
+        super().__init__(dtype)
+        self.obs_or_fqs = obs_or_fqs
+        self.derive_qparams_fn = derive_qparams_fn
+        self.quant_min = quant_min
+        self.quant_max = quant_max
+        self.qscheme = qscheme
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x
+
+    def calculate_qparams(self):
+        return self.derive_qparams_fn(self.obs_or_fqs)
