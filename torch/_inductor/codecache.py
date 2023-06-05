@@ -251,7 +251,7 @@ def code_hash(code):
 
 def get_code_path(source_code: Union[str, bytes], ext: str, extra: str, binary=False):
     if binary:
-        source_code = str(source_code)
+        source_code = repr(source_code)
     basename = code_hash(source_code + extra)
     subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{ext}")
