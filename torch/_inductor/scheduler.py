@@ -950,7 +950,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         return cls(node1.scheduler, fused_nodes)
 
     def __init__(self, scheduler: "Scheduler", nodes: List[SchedulerNode]):
-        super().__init__(scheduler, nodes)
+        super().__init__(scheduler, nodes, None)
         # TODO: ensure all buffers are on the same device in lowerings
         self.group = (nodes[0].get_device(), 0)
         self.snodes = nodes
@@ -981,6 +981,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         return len(self.snodes) == len(other.snodes) and all(
             self.scheduler.can_fuse(l, r) for l, r in zip(self.snodes, other.snodes)
         )
+
+    def prepare_for_codegen(self):
+        for node in self.snodes:
+            node.prepare_for_codegen()
 
 
 def pick_loop_order(stride_lengths, sizes, priority_idx=()):
@@ -1479,6 +1483,17 @@ class Scheduler:
         Check if the loop ordering algorithm can find a loop order that
         works for both node1 and node2.
         """
+        if node1.is_foreach() or node2.is_foreach():
+            if (
+                node1.is_foreach()
+                and node2.is_foreach()
+                and len(node1.get_nodes()) == len(node2.get_nodes())
+            ):
+                for a, b in zip(node1.get_nodes(), node2.get_nodes()):
+                    if not self.can_fuse_loop_orders(a, b):
+                        return False
+                return True
+            return False
         try:
             FusedSchedulerNode.select_loop_orders((node1, node2))
         except FusionFailed as e:
