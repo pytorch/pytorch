@@ -1150,7 +1150,7 @@ static std::string reportProcessMemoryInfo(int device) {
           pci_id, &nvml_device));
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
-  auto size = procs.size();
+  std::vector<decltype(procs)>::size_type size = procs.size();
   nvmlReturn_t r;
   while ((r = DriverAPI::get()->nvmlDeviceGetComputeRunningProcesses_(
               nvml_device, &size, procs.data())) ==
