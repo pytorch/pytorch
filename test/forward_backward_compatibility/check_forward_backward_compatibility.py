@@ -362,6 +362,7 @@ ALLOW_LIST = [
     ("aten::_nested_view_from_buffer_copy", datetime.date(2023, 5, 1)),
     ("aten::_nested_view_from_buffer", datetime.date(2023, 5, 1)),
     ("aten::_scaled_dot_product_flash_attention_backward", datetime.date(2023, 6, 1)),
+    ("mkldnn::_convolution_pointwise_.binary", datetime.date(2023, 7, 1)),
     # These ops were moved to python under the c10d_functional namespace
     ("aten::wait_tensor", datetime.date(9999, 1, 30)),
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
