@@ -5,8 +5,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
                         _dispatch_sqrt, _default_to_fused_or_foreach, _capturable_doc,
                         _differentiable_doc, _foreach_doc, _fused_doc, _maximize_doc)
-from torch.utils._foreach_utils import (_group_tensors_by_device_and_dtype,
-                                        _get_fused_kernels_supported_devices)
 
 __all__ = ['Adam', 'adam']
 
@@ -38,16 +36,14 @@ class Adam(Optimizer):
                 raise RuntimeError("`fused` does not support `differentiable`")
             self._step_supports_amp_scaling = True
             # TODO(crcrpar): [low prec params & their higher prec copy]
-            # Support AMP with FP16/BF16 model params which would need
+            # Suppor AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
-            fused_supported_devices = _get_fused_kernels_supported_devices()
             if not all(
-                p.device.type in fused_supported_devices and
-                torch.is_floating_point(p) for pg in self.param_groups for p in pg['params']
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
             ):
-                raise RuntimeError("`fused=True` requires all the params to be floating point Tensors of "
-                                   f"supported devices: {fused_supported_devices}.")
+                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
@@ -427,7 +423,8 @@ def _multi_tensor_adam(params: List[Tensor],
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
          device_max_exp_avg_sqs, device_state_steps) in grouped_tensors.values():
 
@@ -535,7 +532,8 @@ def _fused_adam(
 ) -> None:
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, dtype) in grouped_tensors:
         (
             device_params,

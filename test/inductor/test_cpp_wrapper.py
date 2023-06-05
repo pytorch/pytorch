@@ -21,6 +21,7 @@ try:
             test_cpu_repro,
             test_foreach,
             test_mkldnn_pattern_matcher,
+            test_pattern_matcher,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
@@ -28,6 +29,7 @@ try:
         import test_cpu_repro
         import test_foreach
         import test_mkldnn_pattern_matcher
+        import test_pattern_matcher
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
@@ -92,7 +94,7 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
             code = test_torchinductor.run_and_get_cpp_code(
                 func, *func_inputs if func_inputs else []
             )
-            self.assertEqual("load_inline" in code, True)
+            self.assertEqual("CppWrapperCodeCache" in code, True)
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -222,6 +224,7 @@ if RUN_CUDA:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_scalar_input"),
+        BaseTest("test_scaled_dot_product_efficient_attention"),
         BaseTest("test_sort"),
         BaseTest("test_silu"),  # single input, single output
         BaseTest("test_sum_dtype"),  # float64
@@ -232,6 +235,11 @@ if RUN_CUDA:
             device=None,
             tests=test_foreach.ForeachTests(),
         ),  # test foreach
+        BaseTest(
+            "test_cat_slice_cat",
+            device=None,
+            tests=test_pattern_matcher.TestPaternMatcher(),
+        ),
     ]:
         make_test_case(item.name, item.device, item.tests)
 

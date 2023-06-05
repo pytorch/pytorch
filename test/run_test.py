@@ -1434,7 +1434,11 @@ def get_selected_tests(options) -> List[ShardedTest]:
     # Do sharding
     test_file_times_config = test_file_times.get(test_config, {})
     shards = calculate_shards(
-        num_shards, selected_tests, test_file_times_config, must_serial=must_serial
+        num_shards,
+        selected_tests,
+        test_file_times_config,
+        must_serial=must_serial,
+        debug=TEST_WITH_ROCM,
     )
     _, tests_from_shard = shards[which_shard - 1]
     selected_tests = tests_from_shard
