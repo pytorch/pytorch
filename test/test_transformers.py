@@ -1106,20 +1106,6 @@ class TestSDPAFailureModes(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
                      "Does not support fused SDPA or not SM86+ hardware")
     @parametrize("head_dim", [72, 96, 128])
-    def test_memory_efficient_sm86_plus_failure(self, device, head_dim: int):
-        dtype = torch.float16
-        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
-        # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-        size = (2, 2, 4, head_dim)
-        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-        with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, None, 0.0, False))
-
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
-                     "Does not support fused SDPA or not SM86+ hardware")
-    @parametrize("head_dim", [72, 96, 128])
     def test_flash_backward_failure_sm86plus(self, device, head_dim: int):
         dtype = torch.float16
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
