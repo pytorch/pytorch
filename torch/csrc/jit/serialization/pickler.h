@@ -311,13 +311,13 @@ inline std::array<
     c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
     at::COMPILE_TIME_MAX_DEVICE_TYPES>&
 GetBackendMetaSerialization() {
-// The array to save function pointer for BackendMeta serialization.
-// key is the DeviceType, value is std::pair obj.
-// value.first represent get function and value.seconde represent set function
-static std::array<
-    c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
-    at::COMPILE_TIME_MAX_DEVICE_TYPES>
-    BackendMetaSerialization;
+  // The array to save function pointer for BackendMeta serialization.
+  // key is the DeviceType, value is std::pair obj.
+  // value.first represent get function and value.seconde represent set function
+  static std::array<
+      c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
+      at::COMPILE_TIME_MAX_DEVICE_TYPES>
+      BackendMetaSerialization;
   return BackendMetaSerialization;
 }
 
