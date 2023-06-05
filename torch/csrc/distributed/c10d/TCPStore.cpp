@@ -896,8 +896,24 @@ class TCPClient {
       const SocketAddress& addr,
       const TCPStoreOptions& opts);
 
-  void sendRaw(uint8_t* data, size_t lenght) {
-    tcputil::sendBytes(socket_.handle(), data, lenght);
+  void sendCommand(QueryType type) {
+    tcputil::sendValue<QueryType>(socket_.handle(), type);
+  }
+
+  void sendCommandForKey(QueryType type, const std::string& key);
+
+  void sendBytes(const std::vector<std::uint8_t>& value) {
+    tcputil::sendVector<std::uint8_t>(socket_.handle(), value);
+  }
+
+  void sendString(const std::string& value, bool more = true) {
+    tcputil::sendString(socket_.handle(), value, more);
+  }
+  void sendStrings(c10::ArrayRef<std::string> value);
+
+  template <typename T>
+  void sendValue(const T& value) {
+    tcputil::sendValue<T>(socket_.handle(), value);
   }
 
   std::vector<std::uint8_t> receiveBits() {
@@ -925,6 +941,29 @@ std::unique_ptr<TCPClient> TCPClient::connect(
       addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
   return std::make_unique<TCPClient>(std::move(socket));
+}
+
+void TCPClient::sendCommandForKey(QueryType type, const std::string& key) {
+  tcputil::sendValue<QueryType>(socket_.handle(), type);
+
+  bool withValue = type == QueryType::SET || type == QueryType::COMPARE_SET ||
+      type == QueryType::ADD;
+
+  tcputil::sendString(socket_.handle(), key, withValue);
+}
+
+void TCPClient::sendStrings(c10::ArrayRef<std::string> value) {
+  std::size_t size = value.size();
+
+  tcputil::sendBytes<std::size_t>(socket_.handle(), &size, 1, size > 0);
+
+  if (value.empty()) {
+    return;
+  }
+
+  for (auto pos = value.begin(), last = value.end() - 1; pos <= last; ++pos) {
+    tcputil::sendString(socket_.handle(), *pos, pos != last);
+  }
 }
 
 void TCPClient::setTimeout(std::chrono::milliseconds value) {
@@ -996,52 +1035,6 @@ void TCPCallbackClient::setCallback(
 
   daemon_->waitForCallbackRegistration();
 }
-
-class SendBuffer {
-  // ethernet mtu 1500 - 40 (ip v6 header) - 20 (tcp header)
-  const size_t FLUSH_WATERMARK = 1440;
-  std::vector<uint8_t> buffer;
-  detail::TCPClient& client;
-
-  void maybeFlush() {
-    if (buffer.size() >= FLUSH_WATERMARK) {
-      flush();
-    }
-  }
-
- public:
-  SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
-      : client(client) {
-    buffer.reserve(32); // enough for most commands
-    buffer.push_back((uint8_t)cmd);
-  }
-
-  void appendString(const std::string& str) {
-    appendValue<uint64_t>(str.size());
-    buffer.insert(buffer.end(), str.begin(), str.end());
-    maybeFlush();
-  }
-
-  void appendBytes(const std::vector<uint8_t>& vec) {
-    appendValue<uint64_t>(vec.size());
-    buffer.insert(buffer.end(), vec.begin(), vec.end());
-    maybeFlush();
-  }
-
-  template <typename T>
-  void appendValue(T value) {
-    uint8_t* begin = (uint8_t*)&value;
-    buffer.insert(buffer.end(), begin, begin + sizeof(T));
-    maybeFlush();
-  }
-
-  void flush() {
-    if (buffer.size() > 0) {
-      client.sendRaw(buffer.data(), buffer.size());
-      buffer.clear();
-    }
-  }
-};
 
 } // namespace detail
 
@@ -1123,10 +1116,8 @@ void TCPStore::waitForWorkers() {
 
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  detail::SendBuffer buffer(*client_, detail::QueryType::SET);
-  buffer.appendString(keyPrefix_ + key);
-  buffer.appendBytes(data);
-  buffer.flush();
+  client_->sendCommandForKey(detail::QueryType::SET, keyPrefix_ + key);
+  client_->sendBytes(data);
 }
 
 std::vector<uint8_t> TCPStore::compareSet(
@@ -1134,11 +1125,9 @@ std::vector<uint8_t> TCPStore::compareSet(
     const std::vector<uint8_t>& expectedValue,
     const std::vector<uint8_t>& desiredValue) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  detail::SendBuffer buffer(*client_, detail::QueryType::COMPARE_SET);
-  buffer.appendString(keyPrefix_ + key);
-  buffer.appendBytes(expectedValue);
-  buffer.appendBytes(desiredValue);
-  buffer.flush();
+  client_->sendCommandForKey(detail::QueryType::COMPARE_SET, keyPrefix_ + key);
+  client_->sendBytes(expectedValue);
+  client_->sendBytes(desiredValue);
 
   return client_->receiveBits();
 }
@@ -1150,10 +1139,7 @@ std::vector<uint8_t> TCPStore::get(const std::string& key) {
 
 std::vector<uint8_t> TCPStore::doGet(const std::string& key) {
   doWait(key, timeout_);
-  detail::SendBuffer buffer(*client_, detail::QueryType::GET);
-  buffer.appendString(key);
-  buffer.flush();
-
+  client_->sendCommandForKey(detail::QueryType::GET, key);
   return client_->receiveBits();
 }
 
@@ -1164,10 +1150,7 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
 
 bool TCPStore::deleteKey(const std::string& key) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  detail::SendBuffer buffer(*client_, detail::QueryType::DELETE_KEY);
-  buffer.appendString(keyPrefix_ + key);
-  buffer.flush();
-
+  client_->sendCommandForKey(detail::QueryType::DELETE_KEY, keyPrefix_ + key);
   auto numDeleted = client_->receiveValue<std::int64_t>();
   return numDeleted == 1;
 }
@@ -1178,31 +1161,27 @@ void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
 }
 
 int64_t TCPStore::incrementValueBy(const std::string& key, int64_t delta) {
-  detail::SendBuffer buff(*client_, detail::QueryType::ADD);
-  buff.appendString(key);
-  buff.appendValue<std::int64_t>(delta);
-  buff.flush();
-
+  client_->sendCommandForKey(detail::QueryType::ADD, key);
+  client_->sendValue<std::int64_t>(delta);
   return client_->receiveValue<std::int64_t>();
 }
 
 int64_t TCPStore::getNumKeys() {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  detail::SendBuffer buffer(*client_, detail::QueryType::GETNUMKEYS);
-  buffer.flush();
-
+  client_->sendCommand(detail::QueryType::GETNUMKEYS);
   return client_->receiveValue<std::int64_t>();
 }
 
 bool TCPStore::check(const std::vector<std::string>& keys) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  detail::SendBuffer buffer(*client_, detail::QueryType::CHECK);
-  buffer.appendValue(keys.size());
-
+  std::vector<std::string> prefixedKeys{};
+  prefixedKeys.reserve(keys.size());
   for (const std::string& key : keys) {
-    buffer.appendString(keyPrefix_ + key);
+    prefixedKeys.emplace_back(keyPrefix_ + key);
   }
-  buffer.flush();
+
+  client_->sendCommand(detail::QueryType::CHECK);
+  client_->sendStrings(prefixedKeys);
 
   auto response = client_->receiveValue<detail::CheckResponseType>();
   if (response == detail::CheckResponseType::READY) {
@@ -1237,12 +1216,8 @@ void TCPStore::doWait(
   // TODO: Should we revert to the original timeout at the end of the call?
   client_->setTimeout(timeout);
 
-  detail::SendBuffer buffer(*client_, detail::QueryType::WAIT);
-  buffer.appendValue(keys.size());
-  for (const std::string& key : keys) {
-    buffer.appendString(key);
-  }
-  buffer.flush();
+  client_->sendCommand(detail::QueryType::WAIT);
+  client_->sendStrings(keys);
 
   auto response = client_->receiveValue<detail::WaitResponseType>();
   if (response != detail::WaitResponseType::STOP_WAITING) {
@@ -1254,10 +1229,8 @@ void TCPStore::append(
     const std::string& key,
     const std::vector<uint8_t>& data) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
-  detail::SendBuffer buffer(*client_, detail::QueryType::APPEND);
-  buffer.appendString(keyPrefix_ + key);
-  buffer.appendBytes(data);
-  buffer.flush();
+  client_->sendCommandForKey(detail::QueryType::APPEND, keyPrefix_ + key);
+  client_->sendBytes(data);
 }
 
 std::vector<std::vector<uint8_t>> TCPStore::multiGet(
@@ -1270,12 +1243,8 @@ std::vector<std::vector<uint8_t>> TCPStore::multiGet(
   }
   doWait(prefixedKeys, timeout_);
 
-  detail::SendBuffer buffer(*client_, detail::QueryType::MULTI_GET);
-  buffer.appendValue(keys.size());
-  for (auto& key : prefixedKeys) {
-    buffer.appendString(key);
-  }
-  buffer.flush();
+  client_->sendCommand(detail::QueryType::MULTI_GET);
+  client_->sendStrings(prefixedKeys);
 
   std::vector<std::vector<uint8_t>> result;
   result.reserve(keys.size());
@@ -1293,13 +1262,12 @@ void TCPStore::multiSet(
       "multiSet keys and values vectors must be of same size");
   const std::lock_guard<std::mutex> lock(activeOpLock_);
 
-  detail::SendBuffer buffer(*client_, detail::QueryType::MULTI_SET);
-  buffer.appendValue<std::int64_t>(keys.size());
+  client_->sendCommand(detail::QueryType::MULTI_SET);
+  client_->sendValue<std::int64_t>(keys.size());
   for (auto i : c10::irange(keys.size())) {
-    buffer.appendString(keyPrefix_ + keys[i]);
-    buffer.appendBytes(values[i]);
+    client_->sendString(keyPrefix_ + keys[i], true);
+    client_->sendBytes(values[i]);
   }
-  buffer.flush();
 }
 
 bool TCPStore::hasExtendedApi() const {
