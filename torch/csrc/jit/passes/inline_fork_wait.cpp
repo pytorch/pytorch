@@ -4,7 +4,7 @@
 namespace torch {
 namespace jit {
 
-void InlineForkWait(
+static void InlineForkWait(
     Block* b,
     std::unordered_map<Value*, Value*>& future_remap) {
   auto nodes = b->nodes();

@@ -4,7 +4,6 @@ from typing import (
 
 import torch
 from torch._C import _add_docstr
-import torch.backends.opt_einsum as opt_einsum
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
@@ -327,6 +326,7 @@ def einsum(*args: Any) -> Tensor:
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
     """
+    import torch.backends.opt_einsum as opt_einsum
     # This wrapper exists to support variadic args.
     if len(args) < 2:
         raise ValueError('einsum(): must specify the equation string and at least one operand, '
@@ -1726,7 +1726,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     Example::
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
-        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU
