@@ -28,6 +28,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     requires_nccl,
     _dynamo_dist_per_rank_init,
+    skip_if_rocm,
 )
 import torch._dynamo.logging
 from torch._dynamo.comptime import comptime
@@ -212,6 +213,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     sparingly for integration tests.
     """
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     @patch.object(config, "optimize_ddp", False)
     def test_ddp_baseline_aot_eager_multiprocess(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
