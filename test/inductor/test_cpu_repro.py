@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import itertools
+import os
 import sys
 import unittest
 from typing import Callable
@@ -32,6 +33,8 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.inductor.graph_matching import match_output_code_with_fx_graph
+from torch.utils.inductor.graph_merger import merge_fx_graphs
 
 try:
     try:
@@ -1849,6 +1852,44 @@ class CPUReproTests(TestCase):
             ],
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
+
+    def test_debug_tool_graph_matching(self):
+        def fn(x1, x2):
+            x = x1.pow(5)
+            x = torch.sin(x)
+            y = torch.ops.aten.bmm(x, x2)
+            y = torch.neg(y)
+            y = torch.mean(y)
+            return y
+
+        opt_fn = torch.compile(fn)
+        x1 = torch.rand([2, 3, 10], dtype=torch.float32)
+        x2 = torch.rand([2, 10, 3], dtype=torch.float32)
+
+        with config.patch({"trace.enabled": True}):
+            dbg_log = run_and_get_cpp_code(opt_fn, x1, x2)
+            self.assertTrue("Debug trace" in dbg_log)
+            matched_output_code_path = match_output_code_with_fx_graph(dbg_log)
+            self.assertTrue(os.path.exists(matched_output_code_path))
+            with open(matched_output_code_path, "r") as matched_output_code:
+                print(matched_output_code.read())
+
+    def test_debug_tool_graph_merger(self):
+        def fn(x):
+            x = x.pow(5)
+            print("Add print for graph breaking purpose")
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn)
+        x = torch.rand([2, 3], dtype=torch.float32)
+
+        with config.patch({"trace.enabled": True}):
+            dbg_log = run_and_get_cpp_code(opt_fn, x)
+            self.assertTrue("Debug trace" in dbg_log)
+            single_graph_path = merge_fx_graphs(dbg_log)
+            self.assertTrue(os.path.exists(single_graph_path))
+            with open(single_graph_path, "r") as single_graph:
+                print(single_graph.read())
 
 
 if __name__ == "__main__":
