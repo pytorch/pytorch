@@ -4,7 +4,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch._utils import is_compiling
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
 __all__ = ["ASGD", "asgd"]
@@ -294,7 +293,7 @@ def _multi_tensor_asgd(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
     for (grouped_params, grouped_grads, grouped_axs, grouped_mus,
          grouped_etas, grouped_state_steps) in grouped_tensors.values():
         if maximize:
