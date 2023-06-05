@@ -2567,6 +2567,7 @@ class TestPartitioning(AOTTestCase):
         res.sum().backward()
 
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_functional_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But
         # currently the plan is to introduce these operators at the partitioner
