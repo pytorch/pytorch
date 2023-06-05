@@ -252,7 +252,6 @@ class WrapperCodeGen(CodeGen):
         self.prefix = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
         self.src_to_kernel = {}
-        self.kernel_to_hash = {}
         self.kenel_numel_expr = set()
         self.lines = []
         self.declare = ""
@@ -1187,10 +1186,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 name, call_args, grid, device_index, cuda
             )
 
-        params = CudaKernelParamCache.get(self.kernel_to_hash.get(name, None))
+        params = CudaKernelParamCache.get(name)
         assert (
             params is not None
-        ), "cuda kernel parameters should already exist at this moment"
+        ), f"cuda kernel parameters for {name} should already exist at this moment"
 
         self.generate_load_kernel(name, params)
 
