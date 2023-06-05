@@ -1014,16 +1014,21 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if preserve_tos:
             self.push(tos)
 
+    break_graph_if_unsupported(push=1)
     def FOR_ITER(self, inst):
         it = self.pop()
         if isinstance(it, ListIteratorVariable):
             self.output.guards.update(it.guards)
             try:
+                if self.current_loop_count >= 5:
+                    unimplemented("loop too long chief")
                 val, next_iter = it.next_variables()
                 self.replace_all(it, next_iter)
                 self.push(next_iter)
                 self.push(val)
+                self.current_loop_count += 1
             except StopIteration:
+                self.current_loop_count = 0
                 self.jump(inst)
         else:
             unimplemented(f"FOR_ITER {typestr(it)}")
@@ -1899,6 +1904,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.random_calls = []
 
         self.strict_checks_enabled = False
+
+        # Keep tracks of loop iterations
+        self.current_loop_count = 0
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
