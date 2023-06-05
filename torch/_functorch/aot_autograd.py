@@ -66,6 +66,10 @@ OutputType = Enum(
         "alias_of_intermediate_base_is_user_output",
         # See Note [Intermediate Bases Optimization]
         "unsafe_view_alias",
+        # output is an alias, but has a custom autograd.Function backward.
+        # In this case, we don't want to do view-replay, since we won't be able to replay the custom function.
+        # Instead, we'll treat this output "normally", and trace its backward into the graph.
+        "custom_function_view",
     )
 )
 
@@ -490,7 +494,7 @@ class ViewAndMutationMeta:
         aliased_out_indices = [
             i
             for i, m in enumerate(self.output_info)
-            if m.output_type not in [OutputType.non_alias, OutputType.unsafe_view_alias]
+            if m.output_type not in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
         ]
 
         self.mutated_inp_indices = mutated_inp_indices
@@ -504,7 +508,8 @@ class ViewAndMutationMeta:
         self.aliased_out_indices = aliased_out_indices
         self.num_outputs = len(self.output_info)
         self.num_outputs_non_aliased = len(
-            [x for x in self.output_info if x.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]]
+            [x for x in self.output_info
+             if x.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]]
         )
         self.num_outputs_aliased_to_inputs = len(
             [
@@ -798,6 +803,10 @@ def run_functionalized_fw_and_collect_metadata(
             if not isinstance(o, torch.Tensor):
                 output_type = OutputType.non_alias
                 base_idx = None
+            elif curr_storage in inp_storage_refs and o.grad_fn is not None \
+                    and isinstance(o.grad_fn, torch.autograd.function.BackwardCFunction):
+                output_type = OutputType.custom_function_view
+                base_idx = None
             elif curr_storage in inp_storage_refs:
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
@@ -905,7 +914,8 @@ def run_functionalized_fw_and_collect_metadata(
         f_output_tangents = [
             o
             for o, info in zip(flat_f_outs, output_info)
-            if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias] and issubclass(info.raw_type, torch.Tensor)
+            if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
+            and issubclass(info.raw_type, torch.Tensor)
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
@@ -1185,7 +1195,7 @@ def fn_prepped_for_autograd(
         # For outputs that are aliases of intermediates, we will have returned the output's _base as an output in the graph instead,
         # which we *should* send to grad()
         output_grad_mask = [
-            meta.output_info[i].output_type in [OutputType.non_alias, OutputType.unsafe_view_alias]
+            meta.output_info[i].output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
             # Also, only tensor outputs should participate in the backward
             # (in particular, Symint outputs in the forward graph shouldn't get tangents)
             and issubclass(meta.output_info[i].raw_type, torch.Tensor)
@@ -2500,7 +2510,7 @@ def create_runtime_wrapper(
             for i, (o, info) in enumerate(zip(
                 fw_outs_no_intermediate_bases, runtime_metadata.output_info
             )):
-                if info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias:
+                if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]:
                     fw_outs_including_aliases.append(o)
                     continue
                 if trace_joint:
@@ -2946,7 +2956,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 out_tangents_filtered = [
                     x
                     for x, info in zip(out_tangents, out_info)
-                    if (info.output_type == OutputType.non_alias or info.output_type == OutputType.unsafe_view_alias)
+                    if info.output_type in [OutputType.non_alias, OutputType.unsafe_view_alias, OutputType.custom_function_view]
                     and issubclass(info.raw_type, torch.Tensor)
                 ]
                 # intermediate bases always require gradients, and always participate in the backward graph.
