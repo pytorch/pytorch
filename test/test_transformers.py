@@ -1859,15 +1859,7 @@ class TestSDPA(NNTestCase):
 
         # Create real output
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-            # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            if isSM86or89Device and head_dim in range(65, 129):
-                self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
-                                                                                       dropout_p=dropout_p,
-                                                                                       is_causal=is_causal, scale=scale))
-                return
-            else:
-                out = F.scaled_dot_product_attention(
-                    query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+            out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             # High Precision Math Reference
