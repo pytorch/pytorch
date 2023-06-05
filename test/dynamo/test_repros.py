@@ -3328,6 +3328,72 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_sum_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/100698
+        @torch.compile(backend="eager")
+        def fn(param):
+            return torch.sum(**param)
+
+        params = {
+            "dim": 0,
+            "keepdim": False,
+            "dtype": torch.int16,
+            "input": torch.Tensor([1, 2]).to(torch.int16),
+            "out": torch.empty(0, dtype=torch.int32),
+        }
+
+        def eager_test(expectFail=False):
+            out = None
+            try:
+                if "out" in params:
+                    params["out"] = torch.empty(0, dtype=torch.int32)
+                    torch.sum(**params)
+                    out = params["out"]
+                else:
+                    out = torch.sum(**params)
+                self.assertEqual(out, 3)
+            except RuntimeError:
+                self.assertTrue(expectFail)
+            return out
+
+        def dynamo_test(expectFail=False):
+            out = None
+            try:
+                if "out" in params:
+                    params["out"] = torch.empty(0, dtype=torch.int32)
+                    fn(params)
+                    out = params["out"]
+                else:
+                    out = fn(params)
+                self.assertEqual(out, 3)
+            except torch._dynamo.exc.TorchRuntimeError:
+                self.assertTrue(expectFail)
+            return out
+
+        # If both out and dtype are specified then the dtype
+        # has to match the out dtype
+        eager_test(True)
+        dynamo_test(True)
+
+        params["dtype"] = torch.int32
+        eager_test()
+        dynamo_test()
+
+        # If dtype is not specified but out is specified the dtype is
+        # internally set to match the out dtype
+        del params["dtype"]
+        eager_test()
+        dynamo_test()
+
+        # If neither dtype nor out is specified then the dtype is set
+        # to torch.int64 for bool and integral dtypes else it's set to
+        # the input dtype
+        del params["out"]
+        out = eager_test()
+        self.assertEqual(out.dtype, torch.int64)
+        out = dynamo_test()
+        self.assertEqual(out.dtype, torch.int64)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
