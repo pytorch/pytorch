@@ -349,7 +349,7 @@ void multi_tensor_apply_for_fused_optimizer(
     if (static_cast<decltype(num_tensors)>(num_zero_tensors) == num_tensors) {
       continue;
     }
-    const int64_t chunks =
+    const auto chunks =
         (tensor_lists[0]
                      [tensor_index -
                       static_cast<decltype(tensor_index)>(

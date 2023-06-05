@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/OpMathType.h>
 #include <ATen/native/ForeachUtils.h>
+#include <c10/macros/Macros.h>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/Pow.cuh>
 
@@ -85,10 +86,11 @@ __device__ void load_args(
     const index_t n) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
-    const auto i = i_start + threadIdx.x + ii * blockDim.x;
+    const index_t i = i_start + threadIdx.x + ii * blockDim.x;
     for (int r_index = 0; r_index < depth; r_index++) {
       r_args[r_index][ii] = 0;
       if (i < n && i < chunk_size) {
+        CUDA_KERNEL_ASSERT(i > -1);
         r_args[r_index][ii] = args[r_index][i];
       }
     }
@@ -104,9 +106,11 @@ __device__ void store_args(
     const index_t n) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
-    const auto i = i_start + threadIdx.x + ii * blockDim.x;
-    if (i < n && i < chunk_size)
+    const index_t i = i_start + threadIdx.x + ii * blockDim.x;
+    if (i < n && i < chunk_size) {
+      CUDA_KERNEL_ASSERT(i > -1);
       dst[i] = src[ii];
+    }
   }
 }
 
@@ -130,8 +134,7 @@ __device__ __forceinline__ void binary_op_scalar(
          i_start * kILP < n && i_start * kILP < chunk_size;
          i_start += blockDim.x) {
       // load
-      load_store(
-          r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
+      load_store(r_args[0], args[0], static_cast<index_t>(0), i_start);
 #pragma unroll
       for (int ii = 0; ii < kILP; ii++) {
         r_args[0][ii] = static_cast<T>(
@@ -140,10 +143,7 @@ __device__ __forceinline__ void binary_op_scalar(
       }
       // store
       load_store(
-          args[res_arg_index],
-          r_args[0],
-          i_start,
-          static_cast<decltype(i_start)>(0));
+          args[res_arg_index], r_args[0], i_start, static_cast<index_t>(0));
     }
   } else {
     for (index_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -182,12 +182,9 @@ __device__ __forceinline__ void pointwise_op_scalar(
          i_start * kILP < n && i_start * kILP < chunk_size;
          i_start += blockDim.x) {
       // load
-      load_store(
-          r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
-      load_store(
-          r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
-      load_store(
-          r_args[2], args[2], static_cast<decltype(i_start)>(0), i_start);
+      load_store(r_args[0], args[0], static_cast<index_t>(0), i_start);
+      load_store(r_args[1], args[1], static_cast<index_t>(0), i_start);
+      load_store(r_args[2], args[2], static_cast<index_t>(0), i_start);
 #pragma unroll
       for (int ii = 0; ii < kILP; ii++) {
         r_args[0][ii] = static_cast<T>(
@@ -198,10 +195,7 @@ __device__ __forceinline__ void pointwise_op_scalar(
       }
       // store
       load_store(
-          args[res_arg_index],
-          r_args[0],
-          i_start,
-          static_cast<decltype(i_start)>(0));
+          args[res_arg_index], r_args[0], i_start, static_cast<index_t>(0));
     }
   } else {
     for (index_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -236,7 +230,7 @@ struct BinaryOpScalarFunctor {
       Op op,
       opmath_t scalar) {
     const int tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const int chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
@@ -286,7 +280,7 @@ struct BinaryOpListAlphaFunctor {
       Op op,
       opmath_t alpha) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
@@ -301,10 +295,8 @@ struct BinaryOpListAlphaFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(
-            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
-        load_store(
-            r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
+        load_store(r_args[0], args[0], static_cast<index_t>(0), i_start);
+        load_store(r_args[1], args[1], static_cast<index_t>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] = static_cast<T>(
@@ -313,10 +305,7 @@ struct BinaryOpListAlphaFunctor {
         }
         // store
         load_store(
-            args[res_arg_index],
-            r_args[0],
-            i_start,
-            static_cast<decltype(i_start)>(0));
+            args[res_arg_index], r_args[0], i_start, static_cast<index_t>(0));
       }
     } else {
       for (index_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -346,7 +335,7 @@ struct ZeroFunctor {
       const index_t arg_of_index_t,
       TensorListMetadata<1>& tl) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
@@ -365,8 +354,7 @@ struct ZeroFunctor {
           r_args[0][ii] = 0;
         }
         // store
-        load_store(
-            args[0], r_args[0], i_start, static_cast<decltype(i_start)>(0));
+        load_store(args[0], r_args[0], i_start, static_cast<index_t>(0));
       }
     } else {
       for (index_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -391,7 +379,7 @@ struct UnaryOpFunctor {
       TensorListMetadata<depth>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
@@ -406,8 +394,7 @@ struct UnaryOpFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(
-            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
+        load_store(r_args[0], args[0], static_cast<index_t>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] =
@@ -415,10 +402,7 @@ struct UnaryOpFunctor {
         }
         // store
         load_store(
-            args[res_arg_index],
-            r_args[0],
-            i_start,
-            static_cast<decltype(i_start)>(0));
+            args[res_arg_index], r_args[0], i_start, static_cast<index_t>(0));
       }
     } else {
       for (index_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -450,7 +434,7 @@ struct PointwiseOpScalarFunctor {
       Op op,
       opmath_t scalar) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
@@ -474,7 +458,7 @@ struct PointwiseOpScalarListFunctor {
       TensorListScalarListMetadata<opmath_t, depth>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
@@ -499,12 +483,12 @@ struct PointwiseOpListFunctor {
       TensorListMetadata<depth>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
-    const bool all_aligned =
-        init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    const bool all_aligned = init_args<depth>(
+        args, tl, static_cast<index_t>(chunk_idx), chunk_size, tensor_loc);
     n -= chunk_idx * chunk_size;
     T r_args[depth - 1][kILP];
 
@@ -514,10 +498,8 @@ struct PointwiseOpListFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(
-            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
-        load_store(
-            r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
+        load_store(r_args[0], args[0], static_cast<index_t>(0), i_start);
+        load_store(r_args[1], args[1], static_cast<index_t>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] = static_cast<T>(
@@ -556,12 +538,12 @@ struct TernaryOpListFunctor {
     static_assert(depth >= r_args_depth, "");
     static_assert(res_arg_index == depth - 1 || res_arg_index == 0, "");
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
-    const bool all_aligned =
-        init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    const bool all_aligned = init_args<depth>(
+        args, tl, static_cast<index_t>(chunk_idx), chunk_size, tensor_loc);
     n -= chunk_idx * chunk_size;
     T r_args[r_args_depth][kILP];
 
@@ -569,12 +551,9 @@ struct TernaryOpListFunctor {
       for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
-        load_store(
-            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
-        load_store(
-            r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
-        load_store(
-            r_args[2], args[2], static_cast<decltype(i_start)>(0), i_start);
+        load_store(r_args[0], args[0], static_cast<index_t>(0), i_start);
+        load_store(r_args[1], args[1], static_cast<index_t>(0), i_start);
+        load_store(r_args[2], args[2], static_cast<index_t>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] =
@@ -583,10 +562,7 @@ struct TernaryOpListFunctor {
                  static_cast<opmath_t>(r_args[2][ii]));
         }
         load_store(
-            args[res_arg_index],
-            r_args[0],
-            i_start,
-            static_cast<decltype(i_start)>(0));
+            args[res_arg_index], r_args[0], i_start, static_cast<index_t>(0));
       }
     } else {
       for (index_t i_start = 0; i_start < n && i_start < chunk_size;
@@ -619,12 +595,12 @@ struct TernaryOpScalarFunctor {
     static_assert(depth >= r_args_depth, "");
     static_assert(res_arg_index == depth - 1 || res_arg_index == 0, "");
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
-    const bool all_aligned =
-        init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    const bool all_aligned = init_args<depth>(
+        args, tl, static_cast<index_t>(chunk_idx), chunk_size, tensor_loc);
     n -= chunk_idx * chunk_size;
     T r_args[r_args_depth][kILP];
 
@@ -634,10 +610,8 @@ struct TernaryOpScalarFunctor {
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
-        load_store(
-            r_args[0], args[0], static_cast<decltype(i_start)>(0), i_start);
-        load_store(
-            r_args[1], args[1], static_cast<decltype(i_start)>(0), i_start);
+        load_store(r_args[0], args[0], static_cast<index_t>(0), i_start);
+        load_store(r_args[1], args[1], static_cast<index_t>(0), i_start);
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           r_args[0][ii] =
@@ -647,10 +621,7 @@ struct TernaryOpScalarFunctor {
         }
         // store
         load_store(
-            args[res_arg_index],
-            r_args[0],
-            i_start,
-            static_cast<decltype(i_start)>(0));
+            args[res_arg_index], r_args[0], i_start, static_cast<index_t>(0));
       }
     } else {
       for (index_t i_start = 0; i_start < n && i_start < chunk_size;

@@ -39,7 +39,7 @@ struct LpNormFunctor {
       opmath_t* output_per_tensor,
       const int max_chunks_per_tensor) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const index_t chunk_idx = tl.block_to_chunk[blockIdx.x];
     index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* x = (T*)tl.addresses[0][tensor_loc];
