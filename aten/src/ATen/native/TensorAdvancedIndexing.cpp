@@ -861,6 +861,30 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       return;
     }
 
+    // Fast path when dim = 0:
+    //
+    // `index_select` backward will call index_add, the fast path
+    // will do parallel on dim0 and vectorize on the rest of dims.
+    //
+    // the write conflicts when paralleling is handled by sorting indices first
+    // and then assign the indices with the same value to the same thread.
+    //
+    // the original impl will go sequential on dim0 and try to parallel/vectorize on
+    // the rest of dims, which is not performant for commonly used scenarios in Embedding.
+    //
+    if (dim == 0) {
+      // expand `index` to same shape as `source`.
+      std::vector<int64_t> expanded_sizes = source.sizes().vec();
+      std::vector<int64_t> expanded_strides(expanded_sizes.size(), 0);
+      expanded_strides[0] = 1;
+      auto index_expanded = index_contig.as_strided(expanded_sizes, expanded_strides);
+
+      if (can_use_expanded_index_path(result, dim, index_expanded, source, /*is_scatter_like*/true)) {
+        scatter_add_expanded_index_stub(self.device().type(), result, index_expanded, source);
+        return;
+      }
+    }
+
     // When the slice of source or result is noncontiguous,
     // original index_add is slow as it uses add for the sliced tensor,
     // which is serial on index and parallel on sliced tensor to avoid write conflict.
