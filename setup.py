@@ -1052,6 +1052,7 @@ def main():
         'py.typed',
         'bin/*',
         'test/*',
+        '*.pyi',
         '_C/*.pyi',
         'cuda/*.pyi',
         'fx/*.pyi',
