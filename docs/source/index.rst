@@ -59,7 +59,7 @@ Features described in this documentation are classified by release status:
    compile/deep-dive
    compile/cudagraph_trees
    compile/performance-dashboard
-   compile/profiling_torch_compile
+   compile/profiling_torch_compile_v2
    compile/torchfunc-and-torchcompile
    ir
    compile/dynamic-shapes
