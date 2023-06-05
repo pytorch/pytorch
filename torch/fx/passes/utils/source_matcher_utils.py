@@ -66,6 +66,7 @@ def get_source_partitions(
     """
     modules: Dict[Type, Dict[str, List[Node]]] = {}
 
+    logger.debug(f"Wanted Sources: {wanted_sources}")
     for node in graph.nodes:
         # The metadata source_fn should contain a tuple of a unique name for the
         # source, and the source function if the node is decomposed from a
@@ -74,7 +75,7 @@ def get_source_partitions(
 
         if (source_fn := node.meta.get("source_fn", None)) is None:
             continue
-
+        logger.debug(f"Node: {node.target}, source fn: {source_fn}")
         if source_fn[1] not in wanted_sources:
             continue
 
