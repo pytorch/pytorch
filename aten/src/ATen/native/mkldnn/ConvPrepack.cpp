@@ -91,7 +91,7 @@ ContextConv create(
       {stride_expanded.begin(), stride_expanded.end()},
       {dilation_expanded.begin(), dilation_expanded.end()},
       groups,
-      std::move(attr)};
+      attr};
 }
 
 void _mkldnn_convolution_out(

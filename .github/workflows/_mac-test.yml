@@ -208,21 +208,6 @@ jobs:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
-      - name: Archive conda environments
-        if: failure()
-        shell: bash
-        run: |
-          zip -1 -r runner_temp.zip "${RUNNER_TEMP}/"
-
-      - name: Store conda environments on GHA for debugging
-        uses: actions/upload-artifact@v3
-        if: failure()
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}-${{ steps.get-job-id.outputs.job-id }}-temp
-          retention-days: 14
-          if-no-files-found: warn
-          path: runner_temp.zip
-
       - name: Clean up disk space
         if: always()
         continue-on-error: true
