@@ -78,7 +78,7 @@ class ExportedProgram:
         call_spec: CallSpec,
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]],
         range_constraints: Dict[sympy.Symbol, RangeConstraint],
-        equality_constraints: Dict[InputDim, List[InputDim]],
+        equality_constraints: List[Tuple[InputDim, InputDim]],
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -88,7 +88,7 @@ class ExportedProgram:
         self.call_spec: CallSpec = call_spec
         self.state_dict: Dict[str, Any] = state_dict
         self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
-        self.equality_constraints: Dict[InputDim, List[InputDim]] = equality_constraints
+        self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
 
     def __call__(self, *args: Any) -> Any:
         if self.call_spec.in_spec is not None:
@@ -174,7 +174,7 @@ def _process_constraints(
     graph_module: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     example_inputs: List[torch.Tensor],
-) -> Tuple[Dict[sympy.Symbol, RangeConstraint], Dict[InputDim, List[InputDim]]]:
+) -> Tuple[Dict[sympy.Symbol, RangeConstraint], List[Tuple[InputDim, InputDim]]]:
     """
     Process the constraints stored in the graph module to return something more readable.
 
@@ -191,9 +191,8 @@ def _process_constraints(
             node.meta["val"] to their range constraints, which are a tuple
             containing (lower, upper) constraints.
 
-        equality_constraints (Dict[InputDim, List[InputDim]]): Mapping of (node,
-            dim) to a list of other (node, dim) tuples to mark that these
-            dimensions are equal.
+        equality_constraints (List[Tuple[InputDim, InputDim]]): List of tuples
+            of (node, dim) to mark that these dimensions are equal.
     """
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
     inline_constraints = graph_module.meta.get("inline_constraints", [])
@@ -213,9 +212,8 @@ def _process_constraints(
             tensor_id_to_nodes[id(example_input)].append(node.name)
             placeholder_nodes[node.name] = node
 
-    # Create dict mapping (node name, dim) to a list of other (node name, dim)
-    # to mark that they are equal
-    equality_constraints: Dict[InputDim, List[InputDim]] = defaultdict(list)
+    # Create list of (node name, dim) tuples to mark that they are equal
+    equality_constraints: List[Tuple[InputDim, InputDim]] = []
     # Create dict mapping (node name, dim) a list of range (lower, upper)
     # constraints
     multi_range_constraints: Dict[InputDim, List[RangeConstraint]] = defaultdict(list)
@@ -232,7 +230,7 @@ def _process_constraints(
             if shared := constraint.get("shared", None):
                 for other_node in tensor_id_to_nodes[shared["t_id"]]:
                     other_node_dim = InputDim(other_node, shared["dim"])
-                    equality_constraints[node_dim].append(other_node_dim)
+                    equality_constraints.append((node_dim, other_node_dim))
 
     # Create dict mapping symbol to a singular range (lower, upper)
     range_constraints: Dict[sympy.Symbol, RangeConstraint] = {}
