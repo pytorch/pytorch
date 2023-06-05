@@ -1,4 +1,4 @@
- # WARNING: the contents of this file must BOTH be valid Starlark (for Buck and
+# WARNING: the contents of this file must BOTH be valid Starlark (for Buck and
 
 # Bazel) as well as valid Python (for our cmake build).  This means that
 # load() directives are not allowed (as they are not recognized by Python).
