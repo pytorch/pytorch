@@ -59,7 +59,7 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 ### Frequently Asked Questions
 
 * Q: What is release branch cut  ?
-  * A: When bulk of the tracked feature merged into main branch, the release engineer starts the release process by creates a branch to prepare for a stable release. This allows PyTorch development flow to continue uninterrupted, while release engineering team on stabilizing the features and testing them in a series of  release candidates (RC). The activities in release branch will focus on testing, polishing new features and fixing regression. In general, new features are not supposed to be added to the branch after it was created.
+  * A: When bulk of the tracked features merged into the main branch, the release engineer starts the release process by creating the release branch. This allows PyTorch development flow to continue uninterrupted, while release engineering team focuses on stabilizing the features and testing them in a series of  release candidates (RC). The activities in release branch includes regression and performance testing, polishing new features and fixing release-specific bugs. In general, new features are not supposed to be added to the release branch after it was created.
 
 * Q: What is cherry-pick ?
   * A: A cherry pick is a process of merging a PR in the release branch after it PR was merged to main branch and after rlease branch cut. These are typically limited to ensure that the team has sufficient time to complete a thorough round of testing on a stable code base. Please see issue [tracker](https://github.com/pytorch/pytorch/issues/94937) for cherry-picking acceptance criteria and details.
