@@ -200,6 +200,36 @@ def forward(self, a_1):
             return torch.sin(x)
         self._test(f, (torch.randn(3),))
 
+    def test_pre_dispatch_preserves_params_buffers(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                return self.bn(x)
+
+        inp = torch.ones(3, 3, 3, 3)
+        m = Foo()
+        fx_g = make_fx(m, pre_dispatch=True)(inp)
+        # The important bit: params and buffers are encoded in the graph as:
+        #   bn_weight = self.bn_weight
+        #   bn_running_mean = self.bn_running_mean
+        # etc
+        self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: f32[3, 3, 3, 3]):
+        # No stacktrace found for following nodes
+        bn_weight = self.bn_weight
+        bn_bias = self.bn_bias
+        bn_running_mean = self.bn_running_mean
+        bn_running_var = self.bn_running_var
+        bn_num_batches_tracked = self.bn_num_batches_tracked
+        add_: i64[] = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = None
+        batch_norm: f32[3, 3, 3, 3] = torch.ops.aten.batch_norm.default(arg0_1, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, True);  arg0_1 = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+        return batch_norm
+        """)  # noqa: B950
+
     def test_scalar_device(self, device='cpu'):
         def f(a, b):
             return a + b

@@ -32,6 +32,7 @@ from torch.utils._python_dispatch import (
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
+import torch.nn as nn
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -417,10 +418,12 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
 
 
 class PythonKeyTracer(Tracer):
-    def __init__(self):
+    def __init__(self, maybe_params_buffers: Optional[Dict[str, torch.Tensor]] = None):
         super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
         self.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[var-annotated]
+        self.maybe_params_buffers = maybe_params_buffers
+        self.state_applied = maybe_params_buffers is None
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -428,6 +431,27 @@ class PythonKeyTracer(Tracer):
     def call_module(
             self, m: torch.nn.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
+        if not self.state_applied:
+            # Is there a better way to do this?
+            # Two hacky things going on here are:
+            # (1) we're directly modifying the params/buffers of the user (adding a secret proxy slot to each tensor)
+            # (2) The GraphModule that we create doesn't have the params/buffers on it already,
+            #     so I'm manually setattr'ing them here.
+            # (Mini brain dump for my own recollection below - will delete before this PR is merged).
+            # One option that I tried was to set things up so that the passed in `root` was already an nn module,
+            # with the correct params/buffers on it.
+            # More for my own recollection, the problems I hit were:
+            # (1) There are several places where we "lose" the nn module if the user originally passed in an nn module
+            # (2) Even if we try to mock up an nn module, the forward can't in varargs - we need fake_signature()
+            #     (but I couldn't get this to work)
+            # (3) I'm not sure of a way to mock up an nn module without manually copying over the state dict.
+            for fqn, param in self.maybe_params_buffers.items():
+                # can't set attributes with periods, so we flatten them here.
+                fqn_ = fqn.replace(".", "_")
+                setattr(self.root, fqn_, param)
+                proxy = self.create_proxy('get_attr', fqn_, (), {})
+                track_tensor(param, proxy, constant=None, tracer=self)
+            self.state_applied = True
         return forward(*args, **kwargs)
 
     # We don't want to turn getattr calls into proxies. So we just return the actual value.
@@ -710,7 +734,14 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
     @functools.wraps(f)
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
-        fx_tracer = PythonKeyTracer()
+        maybe_params_buffers = None
+        if isinstance(f, nn.Module):
+            maybe_params_buffers = {
+                **dict(f.named_parameters(remove_duplicate=False)),
+                **dict(f.named_buffers(remove_duplicate=False)),
+            }
+        # Open question: is this sufficiently BC-breaking that we should only consider doing it for pre_dispatch?
+        fx_tracer = PythonKeyTracer(maybe_params_buffers)
         fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
