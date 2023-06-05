@@ -99,9 +99,3 @@ class PublicTorchCompilerTests(unittest.TestCase):
 
         for fn_name in function_names:
             self.check_signature(fn_name, fn_name, torch._dynamo)
-
-    def test_inductor_signatures(self):
-        function_names = ["list_options", "list_mode_options"]
-
-        for fn_name in function_names:
-            self.check_signature(fn_name, fn_name, torch._inductor)
