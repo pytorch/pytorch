@@ -1,5 +1,5 @@
-extra_text Profiling to understand torch.compile performance v2
-===============================================================
+Profiling to understand torch.compile performance
+=================================================
 
 What to use torch.profiler for:
 -------------------------------
