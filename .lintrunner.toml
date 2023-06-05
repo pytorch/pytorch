@@ -240,7 +240,6 @@ exclude_patterns = [
     # in a follow up PR.
     # that are not easily converted to accepted c++
     'c10/cuda/**/*.cpp',
-    'c10/test/**/*.cpp',
     'torch/csrc/jit/passes/onnx/helper.cpp',
     'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
     'torch/csrc/jit/serialization/onnx.cpp',
