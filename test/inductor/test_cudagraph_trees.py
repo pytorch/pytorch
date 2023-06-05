@@ -46,6 +46,8 @@ requires_multigpu = functools.partial(
 )
 
 if not TEST_CUDA_GRAPH:
+    if __name__ == "__main__":
+        sys.exit(0)
     raise unittest.SkipTest("cuda graph test is skipped")
 
 

@@ -17,6 +17,8 @@ from torch.testing._internal.common_utils import (
 )
 
 if not TEST_CUDA_GRAPH:
+    if __name__ == "__main__":
+        sys.exit(0)
     raise unittest.SkipTest("cuda graph test is skipped")
 
 
