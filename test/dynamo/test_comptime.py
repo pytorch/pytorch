@@ -187,34 +187,38 @@ y = TensorVariable()
         self.assertExpectedInline(
             re.sub(r"\s+$", "", FILE.getvalue().rstrip(), flags=re.MULTILINE),
             """\
--Name: "L['x']"
-    Source: local
-    Create Function: TENSOR_MATCH
-    Guard Types: None
-    Code List: None
-    Object Weakref: None
-    Guarded Class Weakref: None
--Name: ''
-    Source: global
-    Create Function: GRAD_MODE
-    Guard Types: None
-    Code List: None
-    Object Weakref: None
-    Guarded Class Weakref: None
--Name: ''
-    Source: global
-    Create Function: DETERMINISTIC_ALGORITHMS
-    Guard Types: None
-    Code List: None
-    Object Weakref: None
-    Guarded Class Weakref: None
--Name: ''
-    Source: global
-    Create Function: DEFAULT_DEVICE
-    Guard Types: None
-    Code List: None
-    Object Weakref: None
-    Guarded Class Weakref: None""",
+-
+        local "L['x']" TENSOR_MATCH
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+-
+        global '' GRAD_MODE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+-
+        global '' DETERMINISTIC_ALGORITHMS
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
+-
+        global '' DEFAULT_DEVICE
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }""",
         )
 
     def test_graph_break(self):

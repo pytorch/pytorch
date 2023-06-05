@@ -181,6 +181,18 @@ class Guard:
         else:
             return str(obj_weakref)
 
+    def __repr__(self):
+        s = f"""
+        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
+        {{
+            'guard_types': {self.guard_types},
+            'code': {self.code_list},
+            'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
+            'guarded_class': {self.guarded_class_weakref}
+        }}
+        """
+        return s
+
     def __str__(self):
         output = f"Name: {repr(self.name)}\n"
         source = self.source.name.lower() if self.source else ""
