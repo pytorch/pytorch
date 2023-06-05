@@ -4808,10 +4808,16 @@ class CommonTemplate:
         # make_fx to do the testing. In future, we can move on torch.compile.
         def fn():
             rng_state1, a1 = torch.ops.run_and_save_rng_state(
-                torch.ops.aten.rand.default, [4, 4], dtype=torch.float32, device="cuda"
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device=self.device,
             )
             rng_state2, a2 = torch.ops.run_and_save_rng_state(
-                torch.ops.aten.rand.default, [4, 4], dtype=torch.float32, device="cuda"
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device=self.device,
             )
 
             b1 = torch.ops.run_with_rng_state(
@@ -4819,14 +4825,14 @@ class CommonTemplate:
                 torch.ops.aten.rand.default,
                 [4, 4],
                 dtype=torch.float32,
-                device="cuda",
+                device=self.device,
             )
             b2 = torch.ops.run_with_rng_state(
                 rng_state2,
                 torch.ops.aten.rand.default,
                 [4, 4],
                 dtype=torch.float32,
-                device="cuda",
+                device=self.device,
             )
 
             return (a1, a2, b1, b2)
