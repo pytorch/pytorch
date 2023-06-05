@@ -5,7 +5,6 @@ from typing import Callable, Union, List, Set, Tuple, Any, Dict
 
 __all__ = [
     "compile",
-    "is_enabled",
     "reset",
     "allow_in_graph",
     "list_backends",
@@ -23,12 +22,12 @@ def reset() -> None:
     """
     This function clears all compilation caches and restores the system to its initial state.
     It is recommended to call this function, especially after using operations like `torch.compile(...)`
-    to ensure a clean state before subsequent compilation.
+    to ensure a clean state before another unrelated compilation
 
     Usage:
     1. Call `reset()` to clear all compilation caches and restore the initial state.
     2. Perform any desired operations, such as `torch.compile(...)`.
-    3. If you need to start fresh or perform another `torch.compile(...)`, call `reset()` to ensure a clean state.
+    3. Call `reset()` again to ensure a clean state.
 
     """
 
@@ -56,9 +55,8 @@ def allow_in_graph(fn):
     Warning:
     - `allow_in_graph` skips TorchDynamo completely on the decorated function
     skipping all TorchDynamo safety checks (graph breaks, handling closures, etc).
-    - Therefore, one has to be very careful with `allow_in_graph`
-    Today, downstream components like AOT Autograd rely on TorchDynamo to take care of complex Python features
-    but `allow_in_graph` bypasses TorchDynamo.
+    - Therefore, one has to be very careful with `allow_in_graph` since subsystems like AOT Autograd rely on
+    torchdynamo
     - If not careful, this could lead to soundness and really hard-to-debug issues.
     """
 
