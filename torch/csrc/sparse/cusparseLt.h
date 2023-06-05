@@ -10,7 +10,7 @@
 #if !defined(CUSPARSELT_HEADER_)
 #define CUSPARSELT_HEADER_
 
-#include "cusparse.h" // cusparseStatus_t
+#include <cusparse.h> // cusparseStatus_t
 
 #include <driver_types.h> // cudaStream_t
 #include <library_types.h> // cudaDataType

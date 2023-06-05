@@ -2,6 +2,12 @@ import torch
 from .semi_structured_sparse_tensor import SemiStructuredSparseTensor
 import random
 
+__all__ = [
+    "to_semi_structured_sparse",
+    "is_semi_structured_sparse",
+    "gen_semi_structured_sparse_mask",
+    "SemiStructuredSparseTensor",
+]
 
 def gen_semi_structured_sparse_mask(r, c, dtype=torch.float16, device="cuda"):
     """
@@ -71,15 +77,3 @@ def to_semi_structured_sparse(
         return SemiStructuredSparseTensor(
             original_tensor.shape, compressed_tensor, None, transposed
         )
-
-
-def from_semi_structured_sparse(sparse_tensor):
-    raise NotImplementedError("Currently not supported")
-
-
-__all__ = [
-    "to_semi_structured_sparse",
-    "is_semi_structured_sparse",
-    "gen_semi_structured_sparse_mask",
-    "SemiStructuredSparseTensor",
-]
