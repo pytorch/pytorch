@@ -22,6 +22,7 @@ from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+from torch.fx.experimental.proxy_tensor import make_fx
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
@@ -637,6 +638,34 @@ def compile_fx_aot(
 
 _graph_counter = itertools.count(0)
 
+def remove_unused_item_calls(gm: torch.fx.GraphModule):
+    # torch.compile fails on https://github.com/pytorch/pytorch/blob/488a4303a5a5296b337053211bd24ef9745006e1/test/inductor/test_cpu_repro.py#L477  # noqa: B950
+    # It looks like we're trying to trace an OpOverloadPacket that has both a scalar and a tensor overload.
+    # The JIT overload resolution logic tries to run the scalar overload first,
+    # by coercing the last two arguments into scalars using .item.
+    # This seems to fail (which JIT catches and ignores, so it can try the next overload),
+    # but it still ends up baking an (unused) .item call in the graph, which causes AOTAutograd to choke later.
+    # TODO: decide if this is ok to land, vs. further root cause?
+    for node in reversed(gm.graph.nodes):
+        if node.target is torch.ops.aten.item.default and len(node.users) == 0:
+            gm.graph.erase_node(node)
+    gm.recompile()
+
+def create_pre_dispatch_graph(gm, example_inputs) -> torch.fx.GraphModule:
+    # Create a pre-dispatch, normalized ATen graph from our torch-graph
+    fake_mode = detect_fake_mode(example_inputs)
+    try:
+        # bleh
+        old = fake_mode.allow_non_fake_inputs
+        fake_mode.allow_non_fake_inputs = True
+        with fake_mode:
+            # Don't fakeify params/buffers, we need them later for e.g. cudagraphs
+            fake_example_inps = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, example_inputs)
+            model = make_fx(gm, pre_dispatch=True, _allow_non_fake_inputs=True)(*fake_example_inps)
+            remove_unused_item_calls(model)
+    finally:
+        fake_mode.allow_non_fake_inputs = old
+    return model
 
 def compile_fx(
     model_: torch.fx.GraphModule,
@@ -686,6 +715,7 @@ def compile_fx(
                 example_inputs_,
                 recursive_compile_fx,
             )
+        model_ = create_pre_dispatch_graph(model_, example_inputs_)
 
         # Since handle_dynamo_export_graph will trigger compile_fx again,
         # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
