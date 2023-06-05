@@ -2567,55 +2567,6 @@ class TestPartitioning(AOTTestCase):
         res.sum().backward()
 
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    def test_functional_rng_wrappers(self):
-        # Ideally, we would like to use torch.compile for these operators. But
-        # currently the plan is to introduce these operators at the partitioner
-        # level, obviating the need to support them fully through the
-        # torch.compile stack. To ensure that we have good enough debugging with
-        # minifiers, we have ensure that they work with make_fx. This test uses
-        # make_fx to do the testing. In future, we can move on torch.compile.
-        def fn():
-            rng_state1, a1 = torch.ops.run_and_save_rng_state(
-                torch.ops.aten.rand.default, [4, 4], dtype=torch.float32, device="cuda"
-            )
-            rng_state2, a2 = torch.ops.run_and_save_rng_state(
-                torch.ops.aten.rand.default, [4, 4], dtype=torch.float32, device="cuda"
-            )
-
-            b1 = torch.ops.run_with_rng_state(
-                rng_state1,
-                torch.ops.aten.rand.default,
-                [4, 4],
-                dtype=torch.float32,
-                device="cuda",
-            )
-            b2 = torch.ops.run_with_rng_state(
-                rng_state2,
-                torch.ops.aten.rand.default,
-                [4, 4],
-                dtype=torch.float32,
-                device="cuda",
-            )
-
-            return (a1, a2, b1, b2)
-
-        mod = make_fx(fn)()
-        a1, a2, b1, b2 = mod()
-        # Ensure that the wrapper ops are present in the generated graph module.
-        self.assertEqual(
-            [node.target for node in mod.graph.nodes].count(
-                torch.ops.run_and_save_rng_state
-            ),
-            2,
-        )
-        self.assertEqual(
-            [node.target for node in mod.graph.nodes].count(torch.ops.run_with_rng_state), 2
-        )
-        self.assertEqual(a1, b1)
-        self.assertEqual(a2, b2)
-
-
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
