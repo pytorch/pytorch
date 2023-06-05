@@ -6,6 +6,7 @@
 using namespace c10;
 using namespace c10::impl;
 
+// NOLINTBEGIN(*narrowing-conversions*)
 constexpr auto TestDeviceType = DeviceType::CUDA;
 using TestGuardImpl = FakeGuardImpl<TestDeviceType>;
 
@@ -192,3 +193,4 @@ TEST(InlineOptionalDeviceGuard, SetIndex) {
   ASSERT_EQ(g.current_device(), make_optional(dev(i)));
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
 }
+// NOLINTEND(*narrowing-conversions*)

@@ -2,6 +2,7 @@
 
 #include <gmock/gmock.h>
 
+// NOLINTBEGIN(modernize-unary-static-assert)
 using c10::string_view;
 
 namespace {
@@ -1665,3 +1666,4 @@ TEST(StringViewTest, testHash) {
 } // namespace test_hash
 
 } // namespace
+// NOLINTEND(modernize-unary-static-assert)
