@@ -10,6 +10,7 @@
 using namespace c10;
 using namespace c10::impl;
 
+// NOLINTBEGIN(*conversion*)
 static void checkData(
     const SizesAndStrides& sz,
     IntArrayRef sizes,
@@ -65,8 +66,8 @@ TEST(SizesAndStridesTest, Resize) {
   checkData(sz, {0, 0, 0, 0, 0}, {1, 0, 0, 0, 0});
 
   for (const auto ii : c10::irange(sz.size())) {
-    sz.size_at_unchecked(ii) = static_cast<int64_t>(ii + 1);
-    sz.stride_at_unchecked(ii) = static_cast<int64_t>(2 * (ii + 1));
+    sz.size_at_unchecked(ii) = ii + 1;
+    sz.stride_at_unchecked(ii) = 2 * (ii + 1);
   }
 
   checkData(sz, {1, 2, 3, 4, 5}, {2, 4, 6, 8, 10});
@@ -196,8 +197,8 @@ static SizesAndStrides makeBig(int offset = 0) {
   SizesAndStrides big;
   big.resize(8);
   for (const auto ii : c10::irange(big.size())) {
-    big.size_at_unchecked(ii) = static_cast<int64_t>(ii - 1 + offset);
-    big.stride_at_unchecked(ii) = static_cast<int64_t>(2 * (ii - 1 + offset));
+    big.size_at_unchecked(ii) = ii - 1 + offset;
+    big.stride_at_unchecked(ii) = 2 * (ii - 1 + offset);
   }
 
   return big;
@@ -418,3 +419,4 @@ TEST(SizesAndStridesTest, MoveAssignmentSelf) {
   selfMove(big, big);
   checkBig(big);
 }
+// NOLINTEND(*conversion*)
