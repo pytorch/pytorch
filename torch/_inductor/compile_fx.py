@@ -658,7 +658,13 @@ def compile_fx(
 
     if config.cpp_wrapper:
         # CudaWrapperCodeGen relies on kernel name to find the autotuned cubin file
-        with config.patch({"cpp_wrapper": False, "triton.unique_kernel_names": True}):
+        with config.patch(
+            {
+                "cpp_wrapper": False,
+                "triton.unique_kernel_names": True,
+                "triton.autotune_cublasLt": False,
+            }
+        ):
             return compile_fx(
                 model_,
                 example_inputs_,
