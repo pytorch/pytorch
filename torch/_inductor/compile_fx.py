@@ -239,6 +239,9 @@ def compile_fx_inner(
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
     
+    if cudagraphs is None:
+        cudagraphs = config.triton.cudagraphs
+    
     # Inputs to fx_codegen_and_compile
     graph_args = [gm, example_inputs]
     graph_kwargs = {
@@ -295,8 +298,8 @@ def compile_fx_inner(
             ):
                 boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
-            compiled_graph.__call__ = cudagraphify(
-                compiled_graph.__call__,
+            compiled_graph.current_callable = cudagraphify(
+                compiled_graph.get_current_callable(),
                 example_inputs,
                 static_input_idxs=range(num_fixed),
                 device_index=next(iter(compiled_graph.device_idxs)),
@@ -312,7 +315,7 @@ def compile_fx_inner(
             # know we are we running the backward even if we will not run it in cudagraphs
             if is_backward and config.triton.cudagraph_trees:
                 assert boxed_forward_device_index.value is not None
-                compiled_graph_inner = compiled_graph.__call__
+                compiled_graph_callable = compiled_graph.get_current_callable()
 
                 manager = torch._inductor.cudagraph_trees.get_manager(
                     boxed_forward_device_index.value, create_if_none_exists=False
@@ -322,9 +325,9 @@ def compile_fx_inner(
 
                 def compiled_artifact(new_inputs):
                     manager.set_to_running_backward()
-                    return compiled_graph_inner(new_inputs)
+                    return compiled_graph_callable(new_inputs)
 
-                compiled_graph.__call__ = compiled_artifact
+                compiled_graph.current_callable = compiled_artifact
 
             if len(set(compiled_graph.device_types)) > 1:
                 perf_hint_log.warning("skipping cudagraphs due to multiple devices")
@@ -384,9 +387,6 @@ def fx_codegen_and_compile(
         f"graph {graph_id}",
     )
     V.debug.fx_graph(gm, example_inputs)
-
-    if cudagraphs is None:
-        cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
@@ -459,7 +459,7 @@ def align_inputs(compiled_graph: CompiledFxGraph, inputs, static_input_idxs=()):
     if len(check_inputs) == 0:
         return compiled_graph
 
-    old_compiled_artifact = compiled_graph.__call__
+    old_compiled_artifact = compiled_graph.get_current_callable()
 
     def run(new_inputs):
         for i in check_inputs:
@@ -467,7 +467,7 @@ def align_inputs(compiled_graph: CompiledFxGraph, inputs, static_input_idxs=()):
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
         return old_compiled_artifact(new_inputs)
 
-    compiled_graph.__call__ = run
+    compiled_graph.current_callable = run
 
     return compiled_graph
 

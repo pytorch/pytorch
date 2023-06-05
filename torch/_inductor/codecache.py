@@ -349,6 +349,7 @@ class CompiledFxGraph:
     """Class holding a compiled FX graph"""
 
     compiled_artifact: Callable = None
+    current_callable: Callable = None
     cache_key: str = None
     artifact_path: str = None
     cache_linemap: List = None
@@ -358,6 +359,15 @@ class CompiledFxGraph:
     _boxed_call: bool = None
 
     def __call__(self, inputs) -> Any:
+        return self.get_current_callable()(inputs)
+    
+    def get_current_callable(self):
+        if self.current_callable is None:
+            return self._run_from_cache
+        else:
+            return self.current_callable
+    
+    def _run_from_cache(self, inputs):
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their disk cache location instead
         # TODO: When making an API that can save compiled models e2e to disk
