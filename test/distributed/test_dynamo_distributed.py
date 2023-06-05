@@ -584,16 +584,17 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             fsdp_m = FSDP(m, use_orig_params=True)
             opt_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
             outputs = opt_m(inputs)
-
             # far from an exhaustive check of all the expected guards, just check a couple of them.
             FileCheck() \
-                .check("""local "L['self']" TYPE_MATCH""") \
-                .check("""local "L['self']" ID_MATCH""") \
-                .check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""") \
-                .check(f"""{expected_guard_source} "L['self'].net" ID_MATCH""") \
-                .check(f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH""") \
-                .check(f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH""") \
+                .check('-Name: "L[\'self\']"\n    Source: local\n    Create Function: TYPE_MATCH') \
+                .check('-Name: "L[\'self\']"\n    Source: local\n    Create Function: ID_MATCH') \
+                .check(f'-Name: "L[\'self\'].net"\n    Source: {expected_guard_source}\n    Create Function: TYPE_MATCH') \
+                .check(f'-Name: "L[\'self\'].net"\n    Source: {expected_guard_source}\n    Create Function: ID_MATCH') \
+                .check(f'-Name: "L[\'self\'].net[0]"\n    Source: {expected_guard_source}\n    Create Function: TYPE_MATCH') \
+                .check(f'-Name: "L[\'self\'].net[0]"\n    Source: {expected_guard_source}\n    Create Function: ID_MATCH') \
                 .run(GUARDS_FILE.getvalue())
+
+
             self.assertTrue(same(correct_outputs, outputs))
 
     def test_fsdp_dup_tensors_same_source(self):
