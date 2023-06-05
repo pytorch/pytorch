@@ -404,17 +404,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__func__, self, source=source, **options
             )
-        elif isinstance(subobj, types.FunctionType):
+        elif isinstance(subobj, types.FunctionType) or (
+            isinstance(subobj, types.MethodType)
+            and isinstance(self.value, torch.nn.Module)
+        ):
+            if isinstance(subobj, types.MethodType):
+                func = subobj.__func__
+                source = AttrSource(source, "__func__") if source else None
+            else:
+                assert isinstance(subobj, types.FunctionType)
+                func = subobj
             # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
             dynamic_subobj = getattr(self.value, name)
             if inspect.ismethod(dynamic_subobj):
                 return variables.UserMethodVariable(
-                    subobj, self, source=source, **options
+                    func, self, source=source, **options
                 )
             elif inspect.isfunction(dynamic_subobj):
-                return variables.UserFunctionVariable(subobj, source=source, **options)
+                return variables.UserFunctionVariable(func, source=source, **options)
 
         if (
             name in getattr(value, "__dict__", {})

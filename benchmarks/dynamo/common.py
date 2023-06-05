@@ -1531,6 +1531,89 @@ class BenchmarkRunner:
 
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
+    def check_tolerance(
+        self, name, model, example_inputs, optimize_ctx, base_device="cpu"
+    ):
+        """
+        Checks tolerance based on https://pytorch.org/docs/stable/generated/torch.allclose.html.
+        """
+        tolerance_status = "pass"
+        if name in self.skip_accuracy_checks_large_models_dashboard:
+            tolerance_status = "pass_due_to_skip"
+            return tolerance_status
+        # Cast the model to float16/float32 as necessary
+        model, example_inputs = self.maybe_cast(model, example_inputs)
+
+        with self.pick_grad(name, self.args.training):
+            # Get results of native pytorch
+            reset_rng_state()
+            model_copy = copy.deepcopy(model)
+            model_copy = model_copy.to(base_device)
+            example_inputs_copy = copy.deepcopy(example_inputs)
+            example_inputs_copy = tree_map(
+                lambda x: x.to(base_device), example_inputs_copy
+            )
+            self.init_optimizer(name, base_device, model_copy.parameters())
+            correct_result = self.run_n_iterations(model_copy, example_inputs_copy)
+
+            # Run with Dynamo
+            # Sometime CI fails with random triton compilation failure which will be skipped for now
+            # TODO: revisit this after switching to new Triton runtime
+            reset_rng_state()
+            torch._dynamo.reset()
+            try:
+                self.init_optimizer(name, current_device, model.parameters())
+                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                new_result = optimized_model_iter_fn(model, example_inputs)
+            except Exception as e:
+                log.exception(e)
+                if (
+                    self.args.ci
+                    and isinstance(e, BackendCompilerFailed)
+                    and (
+                        "Internal Triton PTX codegen error" in str(e)
+                        or "cubin" in str(e)
+                    )
+                ):
+                    return "pass_due_to_skip"
+                else:
+                    print(
+                        "TorchDynamo optimized model failed to run because of following error"
+                    )
+                    return "fail_to_run"
+
+            def dump_max_mean_values(tol, ref, res):
+                if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
+                    for refi, resi in zip(ref, res):
+                        dump_max_mean_values(tol, refi, resi)
+                elif isinstance(ref, dict):
+                    for k in ref.keys():
+                        dump_max_mean_values(tol, ref[k], res[k])
+                elif isinstance(ref, torch.Tensor):
+                    res = res.to(base_device)
+                    t = torch.abs(ref - res) / (1 + torch.abs(ref))
+                    tol.append(t.flatten().to(torch.float32))
+                return tol
+
+            tol = []
+            dump_max_mean_values(tol, correct_result, new_result)
+            tol = torch.cat(tol)
+            tol = torch.tensor(tol)
+            max = torch.max(tol)
+            mean = torch.mean(tol)
+            div = torch.std(tol)
+            headers = ["dev", "name", "batch_size", "max", "mean", "std"]
+            fields = [
+                current_device,
+                current_name,
+                current_batch_size,
+                max.item(),
+                mean.item(),
+                div.item(),
+            ]
+            output_csv(output_filename, headers, fields)
+        return tolerance_status
+
     def run_performance_test(
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
@@ -1643,6 +1726,9 @@ class BenchmarkRunner:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
+            print(status)
+        elif self.args.tolerance:
+            status = self.check_tolerance(name, model, example_inputs, optimize_ctx)
             print(status)
         elif self.args.performance:
             status = self.run_performance_test(
@@ -2132,7 +2218,11 @@ def parse_args(args=None):
     mode_group.add_argument(
         "--performance", action="store_true", help="Measures performance speedup"
     )
-
+    mode_group.add_argument(
+        "--tolerance",
+        action="store_true",
+        help="extracts the tolerance for each model with small batch size and eval mode",
+    )
     run_mode_group = parser.add_mutually_exclusive_group(required=True)
     run_mode_group.add_argument(
         "--training",
@@ -2445,6 +2535,8 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
+        elif args.tolerance:
+            output_filename = f"tolerance_{args.backend}.csv"
         else:
             output_filename = f"speedup_{args.backend}.csv"
     elif args.recompile_profiler:
