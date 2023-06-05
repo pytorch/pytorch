@@ -238,10 +238,10 @@ def compile_fx_inner(
 ):
     if dynamo_utils.count_calls(gm.graph) == 0:
         return make_boxed_func(gm.forward)
-    
+
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
-    
+
     # Inputs to fx_codegen_and_compile
     graph_args = [gm, example_inputs]
     graph_kwargs = {

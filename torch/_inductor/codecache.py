@@ -360,13 +360,13 @@ class CompiledFxGraph:
 
     def __call__(self, inputs) -> Any:
         return self.get_current_callable()(inputs)
-    
+
     def get_current_callable(self):
         if self.current_callable is None:
             return self._run_from_cache
         else:
             return self.current_callable
-    
+
     def _run_from_cache(self, inputs):
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their disk cache location instead

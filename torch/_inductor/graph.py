@@ -4,7 +4,7 @@ import os
 import re
 import sys
 import time
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -186,9 +186,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
-        self.cache_key = None
-        self.cache_path = None
-        self.cache_linemap = None
+        self.cache_key: str = ""
+        self.cache_path: str = ""
+        self.cache_linemap: List[Tuple[int, str]] = []
 
     def warn_fallback(self, name):
         if name not in self._warned_fallback:
