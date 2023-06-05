@@ -1,8 +1,12 @@
 # Owner(s): ["module: inductor"]
+import copy
 import math
+import pickle
 import unittest
+from dataclasses import dataclass, field
 
 import torch
+from torch._config_utils import ConfigMixin
 
 from torch._dynamo.test_case import run_tests, TestCase
 
@@ -223,6 +227,46 @@ class TestInductorConfig(TestCase):
             torch._dynamo.exc.BackendCompilerFailed,
             lambda: torch.compile(fn, backend="eager", mode="nope")(inp),
         )
+
+    def test_config_mixin(self):
+        @dataclass
+        class Nest1(ConfigMixin):
+            a: int = 5
+
+        @dataclass
+        class Nest2(ConfigMixin):
+            n1: Nest1 = field(default_factory=Nest1)
+
+        @dataclass
+        class Nest3(ConfigMixin):
+            n2: Nest2 = field(default_factory=Nest2)
+
+        @dataclass
+        class Nest4(ConfigMixin):
+            n3: Nest3 = field(default_factory=Nest3)
+
+        c = Nest4()
+        self.assertEqual(c.to_dict(), {"n3.n2.n1.a": 5})
+
+        c.n3.n2.n1.a = 6
+        self.assertEqual(c.codegen_config("c"), "c.n3.n2.n1.a = 6")
+
+        state_dict = c.to_dict()
+        state_dict["n3.n2.n1.a"] = 7
+        self.assertEqual(c.n3.n2.n1.a, 7)
+
+        @c.patch("n3.n2.n1.a", 8)
+        def test_patch():
+            self.assertEqual(c.n3.n2.n1.a, 8)
+
+        test_patch()
+        # assert outside didnt change config value
+        self.assertEqual(c.n3.n2.n1.a, 7)
+
+    def test_config_pickle_ignore(self):
+        config = copy.deepcopy(torch._inductor.config)
+        config.trace.upload_tar = torch.ops.aten.add  # something unpickable
+        pickle.dumps(config)  # not throw
 
 
 if __name__ == "__main__":

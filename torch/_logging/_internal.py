@@ -133,6 +133,7 @@ def set_logs(
     recompiles: bool = False,
     output_code: bool = False,
     schedule: bool = False,
+    perf_hints: bool = False,
     modules: Optional[Dict[str, Union[int, bool]]] = None,
 ):
     """
@@ -220,6 +221,9 @@ def set_logs(
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
+
+        perf_hints (:class:`bool`):
+            Whether to emit the TorchInductor perf hints. Default: ``False``
 
         modules (dict):
             This argument provides an alternate way to specify the above log
@@ -315,6 +319,7 @@ def set_logs(
         recompiles=recompiles,
         output_code=output_code,
         schedule=schedule,
+        perf_hints=perf_hints,
     )
 
 

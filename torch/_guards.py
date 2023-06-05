@@ -17,6 +17,7 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
+    Tuple,
     TypeVar,
 )
 
@@ -345,7 +346,7 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
 
 
 class GlobalContextCheckpointState:
-    global_state: Dict[str, bool] = {}
+    global_state: Dict[str, Tuple[Callable, ...]] = {}
 
     def __init__(self, global_states):
         self.global_state = global_states
@@ -373,8 +374,17 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
     For example, torch.is_grad_enabled.
     """
 
+    _supported_global_states = {
+        "grad_enabled",
+        "autocast_enabled",
+        "autocast_cpu_enabled",
+        "autocast_gpu_dtype",
+        "autocast_cpu_dtype",
+        "autocast_cache_enabled",
+    }
+
     def __init__(self):
-        self.global_state: Dict[str, bool] = {}
+        self.global_state: Dict[str, Tuple[Callable, ...]] = {}
 
     def copy_graphstate(self):
         return GlobalContextCheckpointState(dict(self.global_state))
@@ -383,11 +393,11 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         assert isinstance(state, GlobalContextCheckpointState)
         self.global_state = state.global_state
         assert (
-            len(self.global_state) == 1
-            and list(self.global_state.keys())[0] == "is_grad_enabled"
-        ), "Only grad state is supported today in the global state"
-        for key, value in self.global_state.items():
-            torch.set_grad_enabled(value)
+            len(self.global_state) == len(self._supported_global_states)
+            and set(self.global_state.keys()) == self._supported_global_states
+        ), "Global state mismatch"
+        for func, args in self.global_state.values():
+            func(args)
 
 
 """

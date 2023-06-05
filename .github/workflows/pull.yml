@@ -246,7 +246,7 @@ jobs:
       docker-image-name: xla_base
       test-matrix: |
         { include: [
-          { config: "xla", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+          { config: "xla", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
 
   linux-bionic-py3_8-clang8-xla-test:
