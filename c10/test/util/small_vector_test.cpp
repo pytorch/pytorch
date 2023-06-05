@@ -13,7 +13,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/SmallVector.h>
 #include <gtest/gtest.h>
-#include <stdarg.h>
+#include <cstdarg>
 #include <list>
 
 using c10::SmallVector;
@@ -45,14 +45,13 @@ class Constructable {
     ++numConstructorCalls;
   }
 
-  Constructable(const Constructable& src) : constructed(true) {
-    value = src.value;
+  Constructable(const Constructable& src)
+      : constructed(true), value(src.value) {
     ++numConstructorCalls;
     ++numCopyConstructorCalls;
   }
 
-  Constructable(Constructable&& src) : constructed(true) {
-    value = src.value;
+  Constructable(Constructable&& src) : constructed(true), value(src.value) {
     src.value = 0;
     ++numConstructorCalls;
     ++numMoveConstructorCalls;
@@ -142,7 +141,7 @@ int Constructable::numCopyAssignmentCalls;
 int Constructable::numMoveAssignmentCalls;
 
 struct NonCopyable {
-  NonCopyable() {}
+  NonCopyable() = default;
   NonCopyable(NonCopyable&&) {}
   NonCopyable& operator=(NonCopyable&&) {
     return *this;
@@ -840,7 +839,7 @@ TYPED_TEST(DualSmallVectorsTest, MoveAssignment) {
   SCOPED_TRACE("MoveAssignTest-DualVectorTypes");
 
   // Set up our vector with four elements.
-  for (unsigned I = 0; I < 4; ++I)
+  for (int I = 0; I < 4; ++I)
     this->otherVector.push_back(Constructable(I));
 
   const Constructable* OrigDataPtr = this->otherVector.data();
@@ -885,7 +884,7 @@ TEST(SmallVectorCustomTest, NoAssignTest) {
   SmallVector<notassignable, 2> vec;
   vec.push_back(notassignable(x));
   x = 42;
-  EXPECT_EQ(42, vec.pop_back_val().x);
+  EXPECT_EQ(x, vec.pop_back_val().x);
 }
 
 struct MovedFrom {
@@ -927,7 +926,6 @@ struct EmplaceableArg {
 
   explicit EmplaceableArg(bool) : State(EAS_Arg) {}
 
- private:
   EmplaceableArg& operator=(EmplaceableArg&&) = delete;
   EmplaceableArg& operator=(const EmplaceableArg&) = delete;
 };
