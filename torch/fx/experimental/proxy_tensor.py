@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import weakref
 import operator
 from torch.utils._stats import count
+import logging
 
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
@@ -36,6 +37,9 @@ from torch.utils.weak import WeakTensorKeyDictionary
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
 aten = torch.ops.aten
 prim = torch.ops.prim
+
+log = logging.getLogger(__name__)
+not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
@@ -252,15 +256,25 @@ def inside_mode(proxy_mode):
         proxy_mode.is_inside_mode = old
 
 def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
+    unrecognized_types = []
+
+    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
+    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
+    # then we only want it to trace out proxies the first time that we hit an op.
+    if proxy_mode.is_inside_mode:
+        return func(*args, **kwargs)
+
     def can_handle_tensor(x):
-        return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
+        r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
+        if not r:
+            unrecognized_types.append(type(x))
+        return r
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
-        # When is_inside_mode is set, we are logically a fallthrough.
-        if not proxy_mode.is_inside_mode:
-            return NotImplemented
+        not_implemented_log.debug("ProxyTensorMode tensors without proxy had unrecognized subclasses: %s", unrecognized_types)
+        return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:
         with proxy_mode:
@@ -310,12 +324,6 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     # This is what the overload modification does.
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
-
-    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
-    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
-    # then we only want it to trace out proxies the first time that we hit an op.
-    if proxy_mode.is_inside_mode:
-        return func(*args, **kwargs)
 
     tracer = proxy_mode.tracer
     f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
