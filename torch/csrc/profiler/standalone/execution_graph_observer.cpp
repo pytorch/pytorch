@@ -242,7 +242,7 @@ struct FunctionCallContext : public ObserverContext {
 };
 
 // Opens the json file to write the execution graph.
-std::ofstream openOutputFile(const std::string& name) {
+static std::ofstream openOutputFile(const std::string& name) {
   std::ofstream stream;
   stream.open(name, std::ofstream::out | std::ofstream::trunc);
   if (!stream) {
@@ -253,7 +253,7 @@ std::ofstream openOutputFile(const std::string& name) {
   return stream;
 }
 
-void writeJsonNode(
+static void writeJsonNode(
     std::ofstream& out,
     const std::string& name,
     const uint64_t id,
@@ -302,7 +302,7 @@ inline std::string timeString(const std::time_t timepoint) {
   return oss.str();
 }
 
-bool initExecutionGraphStart(ExecutionGraphObserver& ob) {
+static bool initExecutionGraphStart(ExecutionGraphObserver& ob) {
   ob.out = openOutputFile(ob.file_name);
   // If somehow the output stream failed to open, finish observer here.
   if (!ob.out) {
@@ -331,7 +331,7 @@ bool initExecutionGraphStart(ExecutionGraphObserver& ob) {
 }
 
 // Write out Execution Graph to file
-void finalizeExecutionGraphOutput(ExecutionGraphObserver& ob) {
+static void finalizeExecutionGraphOutput(ExecutionGraphObserver& ob) {
   writeJsonNode(
       ob.out,
       "[pytorch|profiler|execution_graph|process]",
@@ -437,7 +437,7 @@ inline void appendValueInfo(
   shapes.push_back(getValueShape(val));
 }
 
-void recordOperatorStart(
+static void recordOperatorStart(
     ExecutionGraphObserver& ob,
     FunctionCallContext& fc,
     const RecordFunction& fn) {
@@ -503,7 +503,8 @@ void recordOperatorStart(
   }
 }
 
-std::unique_ptr<ObserverContext> onFunctionEnter(const RecordFunction& fn) {
+static std::unique_ptr<ObserverContext> onFunctionEnter(
+    const RecordFunction& fn) {
   using RunState = ExecutionGraphObserver::RunState;
   auto ob = ObserverManager::get();
   if (ob != nullptr && ob->getState() == RunState::enabled) {
@@ -542,7 +543,7 @@ inline std::string json_str_escape(const std::string& str) {
   return ostream.str();
 }
 
-void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
+static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
   using RunState = ExecutionGraphObserver::RunState;
   auto ob = ObserverManager::get();
   if (ob == nullptr || ctx_ptr == nullptr) {

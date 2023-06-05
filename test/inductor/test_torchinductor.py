@@ -6242,6 +6242,26 @@ class CommonTemplate:
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(*args, 256), opt_fn(*args, 256))
 
+    def test_cumsum_pattern_matcher_issue(self):
+        def fn(input_ids) -> torch.Tensor:
+            input_shape = input_ids.size()
+            input_ids = input_ids.view(-1, input_shape[-1])
+            batch_size, seq_length = input_shape
+            past_key_values_length = 0
+            mask_seq_length = past_key_values_length + seq_length
+            attention_mask = torch.ones(batch_size, mask_seq_length)
+            attention_mask = attention_mask.long()
+            return torch.cumsum(attention_mask, dim=1)
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.randn(2, 2)
+                opt = torch._dynamo.optimize("inductor")(fn)
+                res = opt(x)
+                ref = fn(x)
+                self.assertEqual(res, ref, atol=0, rtol=0)
+
     def test_slice(self):
         def fn(a, b):
             return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
