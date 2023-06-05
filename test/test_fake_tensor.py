@@ -632,6 +632,13 @@ class FakeTensorTest(TestCase):
         self.checkType(r3, "cpu", (4, 4))
         self.checkType(out, "cpu", (4, 4))
 
+    def test__adaptive_avg_pool2d_backward(self):
+        with FakeTensorMode():
+            grad_out = torch.rand(2, 3, 4, 4)
+            inp = torch.rand(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            grad_in = torch.ops.aten._adaptive_avg_pool2d_backward(grad_out, inp)
+            self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last)
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
