@@ -872,12 +872,15 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     // the original impl will go sequential on dim0 and try to parallel/vectorize on
     // the rest of dims, which is not performant for commonly used scenarios in Embedding.
     //
-    if (dim == 0) {
+    if (dim == 0 && alpha.equal(1.0)) {
+      // scatter_add supports only int64_t index
+      auto index_long = index_contig.to(kLong);
+
       // expand `index` to same shape as `source`.
       std::vector<int64_t> expanded_sizes = source.sizes().vec();
       std::vector<int64_t> expanded_strides(expanded_sizes.size(), 0);
       expanded_strides[0] = 1;
-      auto index_expanded = index_contig.as_strided(expanded_sizes, expanded_strides);
+      auto index_expanded = index_long.as_strided(expanded_sizes, expanded_strides);
 
       if (can_use_expanded_index_path(result, dim, index_expanded, source, /*is_scatter_like*/true)) {
         scatter_add_expanded_index_stub(self.device().type(), result, index_expanded, source);
