@@ -329,7 +329,7 @@ class Tensor(torch._C._TensorBase):
             if self.layout == torch.sparse_coo:
                 args_sparse = (
                     self.layout,
-                    (self._indices(), self._values(), self.size()),
+                    (self._indices(), self._values(), self.size(), self.is_coalesced()),
                 )
             else:
                 raise NotImplementedError(

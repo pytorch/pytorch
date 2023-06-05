@@ -18,9 +18,11 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
+from ..optimize_indexing import get_expr_range, range_expressable_in_32_bits
 from ..scheduler import SchedulerNode
 from ..utils import (
     cache_on_self,
@@ -29,6 +31,7 @@ from ..utils import (
     sympy_subs,
     sympy_symbol,
 )
+
 from ..virtualized import ops, V
 from .common import (
     BracesBuffer,
@@ -124,29 +127,29 @@ def reduction_init(reduction_type, dtype):
 
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     if reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     if reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
     if reduction_type == "any":
-        return f"{var} = {var} || {next_value}"
+        return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
-        return f"{var} = {reduction_type}_propagate_nan({var}, {next_value})"
+        return f"{reduction_type}_propagate_nan({var}, {next_value})"
     raise AssertionError(reduction_type)
 
 
 def reduction_combine_vec(reduction_type, var, next_value):
     if reduction_type == "max":
-        return f"{var} = at::vec::maximum({var}, {next_value})"
+        return f"at::vec::maximum({var}, {next_value})"
     elif reduction_type == "min":
-        return f"{var} = at::vec::minimum({var}, {next_value})"
+        return f"at::vec::minimum({var}, {next_value})"
     elif reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     elif reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     elif reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
     else:
         raise NotImplementedError()
 
@@ -372,6 +375,10 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.erfc()"
 
     @staticmethod
+    def erfinv(x):
+        return f"{x}.erfinv()"
+
+    @staticmethod
     def sqrt(x):
         return f"{x}.sqrt()"
 
@@ -444,8 +451,16 @@ class CppVecOverrides(OpOverrides):
         return f"({a} != 0) & ({b} != 0)"
 
     @staticmethod
+    def logical_not(a):
+        return f"{a} == 0"
+
+    @staticmethod
     def logical_or(a, b):
         return f"({a} != 0) | ({b} != 0)"
+
+    @staticmethod
+    def logical_xor(a, b):
+        return f"({a} != 0) ^ ({b} != 0)"
 
     @staticmethod
     def tan(a):
@@ -738,6 +753,10 @@ class CppOverrides(OpOverrides):
         return f"std::erfc({x})"
 
     @staticmethod
+    def erfinv(x):
+        return f"calc_erfinv({x})"
+
+    @staticmethod
     def sqrt(x):
         return f"std::sqrt({x})"
 
@@ -960,20 +979,40 @@ class CppOverrides(OpOverrides):
         return f"{a} && {b}"
 
     @staticmethod
+    def logical_not(a):
+        return f"!{a}"
+
+    @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
 
     @staticmethod
-    def bitwise_and(x, y):
-        return f"decltype({x})({x} & {y})"
+    def logical_xor(a, b):
+        return f"{a} != {b}"
 
     @staticmethod
-    def bitwise_or(x, y):
-        return f"decltype({x})({x} | {y})"
+    def bitwise_and(a, b):
+        return f"decltype({a})({a} & {b})"
 
     @staticmethod
-    def bitwise_xor(x, y):
-        return f"decltype({x})({x} ^ {y})"
+    def bitwise_not(a):
+        return f"decltype({a})(~{a})"
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return f"decltype({a})({a} | {b})"
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return f"decltype({a})({a} ^ {b})"
+
+    @staticmethod
+    def bitwise_left_shift(a, b):
+        return f"decltype({a})({a} << {b})"
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return f"decltype({a})({a} >> {b})"
 
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr):
@@ -1091,7 +1130,7 @@ class CppKernel(Kernel):
                     f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
             self.stores.writeline(
-                f"{reduction_combine(reduction_type, tmpvar, value)};"
+                f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, value)};"
             )
 
         if name not in V.graph.removed_buffers:
@@ -1372,7 +1411,6 @@ class CppVecKernel(CppKernel):
         assert reduction_type in {"max", "min", "sum", "prod", "xor_sum"}
         assert dtype == torch.float
         assert src_dtype == torch.float
-        reduce_map = {"max": "maximum", "min": "minimum"}
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
@@ -1380,16 +1418,10 @@ class CppVecKernel(CppKernel):
         if reduction_type not in self.reduction_omp_dec:
             vec_reduc_prefix = "#pragma omp declare reduction("
             vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
-            if reduction_type == "sum":
-                vec_reduc_prefix += "omp_out += omp_in"
-            elif reduction_type == "prod":
-                vec_reduc_prefix += "omp_out *= omp_in"
-            elif reduction_type == "xor_sum":
-                vec_reduc_prefix += "omp_out ^= omp_in"
-            else:
-                vec_reduc_prefix += (
-                    f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
-                )
+            vec_reduc_prefix += "omp_out = "
+            vec_reduc_prefix += reduction_combine_vec(
+                reduction_type, "omp_out", "omp_in"
+            )
             vec_reduc_prefix += ")"
             vec_reduc_prefix += " initializer("
             vec_reduc_prefix += "omp_priv={{"
@@ -1412,45 +1444,45 @@ class CppVecKernel(CppKernel):
             f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
         )
         self.stores.writeline(
-            f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+            f"{tmpvar_vec} = {reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
         )
 
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            reduce_all_body = "{"
-            if reduction_type == "sum":
-                reduce_all_body += "return x + y;"
-            elif reduction_type == "prod":
-                reduce_all_body += "return x * y;"
-            elif reduction_type == "xor_sum":
-                reduce_all_body += "return x ^ y;"
-            else:
-                reduce_all_body += (
-                    f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
-                )
-            reduce_all_body += "}"
+            reduce_all_body = (
+                "{ return " + reduction_combine_vec(reduction_type, "x", "y") + "; }"
+            )
             vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
-            next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
+            next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {tmpvar_vec})"
             self.reduction_suffix.writeline(
                 DeferredLine(
-                    name, f"{reduction_combine(reduction_type, tmpvar, next_value)};"
+                    name,
+                    f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, next_value)};",
                 )
             )
 
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
+            out_dtype = V.graph.get_dtype(name)
             if self.tiling_idx >= self.reduction_depth:
                 # Horizontal reduction
                 self.reduction_suffix.writeline(
-                    DeferredLine(name, f"{var}[{cexpr_index(index)}] = {tmpvar};")
+                    DeferredLine(
+                        name,
+                        f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({tmpvar});",
+                    )
                 )
             else:
                 # Vertical reduction
-                self.reduction_suffix.writeline(
-                    DeferredLine(
-                        name, f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
-                    )
-                )
+                store_line = f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
+                if out_dtype != dtype:
+                    if out_dtype == torch.bfloat16 and dtype == torch.float:
+                        store_line = f"store_float_as_bf16({var} + {cexpr_index(index)}, {tmpvar_vec});"
+                    else:
+                        raise AssertionError(
+                            f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
+                        )
+                self.reduction_suffix.writeline(DeferredLine(name, store_line))
 
         self.cse.store_cache[name] = tmpvar
 
@@ -1976,8 +2008,6 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def index_expr(expr, dtype):
-                current_node: torch.fx.Node = V.interpreter.current_node
-
                 assert len(self.ranges) == len(self.itervars)
                 if not len(self.ranges) or not all(
                     not isinstance(range, sympy.Expr) or sympy.simplify(range).is_number
@@ -1987,43 +2017,34 @@ class CppVecKernelChecker(CppVecKernel):
                     self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
                     return self.cse.newvar()
 
-                def mod_indexing_rep(x, y, z):
-                    if z.is_constant():
-                        return x / y
-
-                    # never really happens, we'll bail on optimizing
-                    return (x / y) % z
-
-                def indexing_div_rep(x, y):
-                    return x / y
+                def can_use_int32():
+                    free_symbols = list(expr.free_symbols)
+                    vars_ranges = {
+                        k: ValueRanges(0, v)
+                        for k, v in zip(self.itervars, self.ranges)
+                        if k in free_symbols
+                    }
+                    if not vars_ranges or len(vars_ranges) != len(free_symbols):
+                        i32_iinfo = numpy.iinfo(numpy.int32)
+                        return (
+                            expr.is_number
+                            and expr <= i32_iinfo.max
+                            and expr >= i32_iinfo.min
+                        )
+                    expr_ranges = get_expr_range(expr, vars_ranges)
+                    if math.isinf(expr_ranges.lower) or math.isinf(expr_ranges.upper):
+                        return False
+                    return range_expressable_in_32_bits(
+                        ValueRanges(int(expr_ranges.lower), int(expr_ranges.upper))
+                    )
 
                 with RecordOptimizationContext(__name__) as node_ctx:
                     assert len(self.ranges) == len(self.itervars)
-
                     opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
                     assert opt_ctx
-                    max_expr = expr.replace(
-                        ir.ModularIndexing, mod_indexing_rep
-                    ).replace(ir.FloorDiv, indexing_div_rep)
-                    min_expr = max_expr
-                    for idx in range(len(self.ranges)):
-                        max_expr = sympy.maximum(
-                            max_expr,
-                            self.itervars[idx],
-                            sympy.Interval(0, self.ranges[idx]),
-                        )
-                        min_expr = sympy.minimum(
-                            min_expr,
-                            self.itervars[idx],
-                            sympy.Interval(0, self.ranges[idx]),
-                        )
-                    i32_iinfo = numpy.iinfo(numpy.int32)
                     if (
                         dtype == torch.int64
-                        and max_expr.is_number
-                        and min_expr.is_number
-                        and max_expr <= i32_iinfo.max
-                        and min_expr >= i32_iinfo.min
+                        and can_use_int32()
                         and all(
                             user.target in VecCheckerProxy.bin_cmp_ops
                             for user in node_ctx.current_node.users
