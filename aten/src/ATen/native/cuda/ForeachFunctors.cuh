@@ -110,18 +110,23 @@ __device__ void store_args(
   }
 }
 
-template <int res_arg_index, typename Op, typename T, typename opmath_t>
+template <
+    int res_arg_index,
+    typename Op,
+    typename T,
+    typename opmath_t,
+    typename index_t>
 __device__ __forceinline__ void binary_op_scalar(
     T r_args[][kILP],
     T** args,
     opmath_t scalar,
-    const int64_t n,
-    const int64_t chunk_size,
+    const index_t n,
+    const int chunk_size,
     const bool all_aligned,
     Op op) {
   // to make things simple, we put aligned case in a different code path
   if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
-    for (int64_t i_start = threadIdx.x;
+    for (index_t i_start = threadIdx.x;
          i_start * kILP < n && i_start * kILP < chunk_size;
          i_start += blockDim.x) {
       // load
@@ -141,7 +146,7 @@ __device__ __forceinline__ void binary_op_scalar(
           static_cast<decltype(i_start)>(0));
     }
   } else {
-    for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+    for (index_t i_start = 0; i_start < n && i_start < chunk_size;
          i_start += blockDim.x * kILP) {
       // Regardless if depth is 1 (for inplace) or 2 (for out of place), r_args
       // has depth 1
@@ -157,18 +162,23 @@ __device__ __forceinline__ void binary_op_scalar(
   }
 }
 
-template <int res_arg_index, typename Op, typename T, typename opmath_t>
+template <
+    int res_arg_index,
+    typename Op,
+    typename T,
+    typename opmath_t,
+    typename index_t>
 __device__ __forceinline__ void pointwise_op_scalar(
     T r_args[][kILP],
     T** args,
     opmath_t scalar,
-    const int64_t n,
-    const int64_t chunk_size,
+    const index_t n,
+    const int chunk_size,
     const bool all_aligned,
     Op op) {
   // to make things simple, we put aligned case in a different code path
   if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
-    for (int64_t i_start = threadIdx.x;
+    for (index_t i_start = threadIdx.x;
          i_start * kILP < n && i_start * kILP < chunk_size;
          i_start += blockDim.x) {
       // load
@@ -194,7 +204,7 @@ __device__ __forceinline__ void pointwise_op_scalar(
           static_cast<decltype(i_start)>(0));
     }
   } else {
-    for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+    for (index_t i_start = 0; i_start < n && i_start < chunk_size;
          i_start += blockDim.x * kILP) {
       // Regardless if depth is 3 (for inplace) or 4 (for out of place), r_args
       // has depth 3
@@ -218,15 +228,16 @@ __device__ __forceinline__ void pointwise_op_scalar(
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpScalarFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op>
+  template <typename Op, typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListMetadata<depth>& tl,
       Op op,
       opmath_t scalar) {
     const int tensor_loc = tl.block_to_tensor[blockIdx.x];
     const int chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     const bool all_aligned =
@@ -242,14 +253,15 @@ struct BinaryOpScalarFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpScalarListFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op>
+  template <typename Op, typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListScalarListMetadata<opmath_t, depth>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     const bool all_aligned =
@@ -266,15 +278,16 @@ struct BinaryOpScalarListFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpListAlphaFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op>
+  template <typename Op, typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListMetadata<depth>& tl,
       Op op,
       opmath_t alpha) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     const bool all_aligned =
@@ -284,7 +297,7 @@ struct BinaryOpListAlphaFunctor {
 
     // to make things simple, we put aligned case in a different code path
     if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
-      for (int64_t i_start = threadIdx.x;
+      for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
@@ -306,7 +319,7 @@ struct BinaryOpListAlphaFunctor {
             static_cast<decltype(i_start)>(0));
       }
     } else {
-      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
@@ -327,12 +340,14 @@ struct BinaryOpListAlphaFunctor {
 
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct ZeroFunctor {
+  template <typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListMetadata<1>& tl) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     const auto all_aligned =
@@ -342,7 +357,7 @@ struct ZeroFunctor {
 
     // to make things simple, we put aligned case in a different code path
     if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
-      for (int64_t i_start = threadIdx.x;
+      for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
 #pragma unroll
@@ -354,7 +369,7 @@ struct ZeroFunctor {
             args[0], r_args[0], i_start, static_cast<decltype(i_start)>(0));
       }
     } else {
-      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
@@ -369,14 +384,15 @@ struct ZeroFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct UnaryOpFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op>
+  template <typename Op, typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListMetadata<depth>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     bool all_aligned =
@@ -386,7 +402,7 @@ struct UnaryOpFunctor {
 
     // to make things simple, we put aligned case in a different code path
     if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
-      for (int64_t i_start = threadIdx.x;
+      for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
@@ -405,7 +421,7 @@ struct UnaryOpFunctor {
             static_cast<decltype(i_start)>(0));
       }
     } else {
-      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
@@ -426,15 +442,16 @@ struct UnaryOpFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct PointwiseOpScalarFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op>
+  template <typename Op, typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListMetadata<depth>& tl,
       Op op,
       opmath_t scalar) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     const bool all_aligned =
@@ -450,14 +467,15 @@ struct PointwiseOpScalarFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct PointwiseOpScalarListFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op>
+  template <typename Op, typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListScalarListMetadata<opmath_t, depth>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     const bool all_aligned =
@@ -474,14 +492,15 @@ struct PointwiseOpScalarListFunctor {
 template <typename T, int depth>
 struct PointwiseOpListFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op>
+  template <typename Op, typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListMetadata<depth>& tl,
       Op op) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     const bool all_aligned =
@@ -491,7 +510,7 @@ struct PointwiseOpListFunctor {
 
     // to make things simple, we put aligned case in a different code path
     if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
-      for (int64_t i_start = threadIdx.x;
+      for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
@@ -509,7 +528,7 @@ struct PointwiseOpListFunctor {
         load_store(args[2], r_args[0], i_start, 0);
       }
     } else {
-      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<depth - 1>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
@@ -527,9 +546,10 @@ struct PointwiseOpListFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct TernaryOpListFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op>
+  template <typename Op, typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListMetadata<depth>& tl,
       Op op) {
     static_assert(depth == 3 || depth == 4, "");
@@ -537,7 +557,7 @@ struct TernaryOpListFunctor {
     static_assert(res_arg_index == depth - 1 || res_arg_index == 0, "");
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     const bool all_aligned =
@@ -546,7 +566,7 @@ struct TernaryOpListFunctor {
     T r_args[r_args_depth][kILP];
 
     if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
-      for (int64_t i_start = threadIdx.x;
+      for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         load_store(
@@ -569,7 +589,7 @@ struct TernaryOpListFunctor {
             static_cast<decltype(i_start)>(0));
       }
     } else {
-      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
@@ -588,9 +608,10 @@ struct TernaryOpListFunctor {
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct TernaryOpScalarFunctor {
   using opmath_t = at::opmath_type<T>;
-  template <typename Op>
+  template <typename Op, typename index_t>
   __device__ __forceinline__ void operator()(
       int chunk_size,
+      const index_t arg_of_index_t,
       TensorListMetadata<depth>& tl,
       Op op,
       opmath_t alpha) {
@@ -599,7 +620,7 @@ struct TernaryOpScalarFunctor {
     static_assert(res_arg_index == depth - 1 || res_arg_index == 0, "");
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
+    index_t n = tl.numel_for_tensor[tensor_loc];
 
     T* args[depth];
     const bool all_aligned =
@@ -609,7 +630,7 @@ struct TernaryOpScalarFunctor {
 
     // to make things simple, we put aligned case in a different code path
     if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
-      for (int64_t i_start = threadIdx.x;
+      for (index_t i_start = threadIdx.x;
            i_start * kILP < n && i_start * kILP < chunk_size;
            i_start += blockDim.x) {
         // load
@@ -632,7 +653,7 @@ struct TernaryOpScalarFunctor {
             static_cast<decltype(i_start)>(0));
       }
     } else {
-      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+      for (index_t i_start = 0; i_start < n && i_start < chunk_size;
            i_start += blockDim.x * kILP) {
         load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
 #pragma unroll
