@@ -693,6 +693,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(self.curr_node().cached_tensor_outputs, [None, None])
 
+        def test_empty_storage(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x + x + x), torch.zeros([0], device="cuda")
+
+            inp = torch.rand([4], device="cuda")
+            for _ in range(3):
+                out = foo(inp)
+                node = self.curr_node()
+                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x + x + x), torch.rand([4], device="cuda") + 10
+
+            inp = torch.rand([0], device="cuda")
+            for _ in range(3):
+                out = foo(inp)
+                node = self.curr_node()
+                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
             def foo(args):
@@ -894,7 +915,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.curr_node().expected_dead_indices_before_graph, [])
             self.assertEqual(
                 self.curr_node().expected_dead_indices_after_graph,
-                [(0, 1), (0, 2), (0, 3)],
+                [(0, 1), (0, 2)],
             )
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
