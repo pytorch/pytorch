@@ -61,19 +61,19 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             torch.zeros(3, 4),
             """\
 buf0 = reader.storage('c17fd92682ca5b304ac71074b558dda9e8eb4d66', 48)
-reader.tensor(buf0, (3, 4))  # x""",
+reader.tensor(buf0, (3, 4), is_leaf=True)  # x""",
         )
         test(
             torch.ones(3, 4, dtype=torch.int32),
             """\
 buf0 = reader.storage('7c221e2da0c58c700cc2996644dd13d042bd552e', 48, dtype_hint=torch.int32)
-reader.tensor(buf0, (3, 4), dtype=torch.int32)  # x""",
+reader.tensor(buf0, (3, 4), dtype=torch.int32, is_leaf=True)  # x""",
         )
         test(
             torch.empty((3, 4, 5, 6), memory_format=torch.channels_last).fill_(2),
             """\
 buf0 = reader.storage('49ebab3961d6221e64c4c72b0aefd976bdd2afc4', 1440)
-reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4))  # x""",
+reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         )
 
 
