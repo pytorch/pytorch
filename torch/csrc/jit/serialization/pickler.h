@@ -337,12 +337,12 @@ TORCH_API inline void TensorBackendMetaRegistry(
       "please expand the allowlist");
   // Register function pointer
   int device_type = static_cast<int>(t);
-  auto BackendMetaSerialization = GetBackendMetaSerialization();
+  auto& BackendMetaSerialization = GetBackendMetaSerialization();
   TORCH_CHECK(
       !BackendMetaSerialization[device_type].has_value(),
       "The tensor BackendMeta serialization function pointer for ",
       t,
-      "has been registered.");
+      " has been registered.");
   BackendMetaSerialization[device_type] =
       c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>(
           std::make_pair(get_fptr, set_fptr));
@@ -370,7 +370,7 @@ inline std::unordered_map<std::string, bool> getTensorMetadata(
   // Only add BackendMetaData for custom backend if the function pointer is
   // registered.
   int device_type = static_cast<int>(t.device().type());
-  auto BackendMetaSerialization = GetBackendMetaSerialization();
+  const auto& BackendMetaSerialization = GetBackendMetaSerialization();
   if (BackendMetaSerialization[device_type].has_value()) {
     // Pass the tensor and metadata map references as parameters to the custom
     // serialization function.
@@ -399,7 +399,7 @@ inline void setTensorMetadata(
   // Only set BackendMetaData for custom backend if the function pointer is
   // registered.
   int device_type = static_cast<int>(t.device().type());
-  auto BackendMetaSerialization = GetBackendMetaSerialization();
+  const auto& BackendMetaSerialization = GetBackendMetaSerialization();
   if (BackendMetaSerialization[device_type].has_value()) {
     // Pass the tensor and metadata map references as parameters to the custom
     // deserialization function.
