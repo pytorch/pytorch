@@ -160,12 +160,6 @@ class GraphSignature:
 
 
 @dataclass
-class RangeConstraint:
-    lower: int
-    upper: int
-
-
-@dataclass
 class GraphModule:
     graph: Graph
     buffers: Dict[str, TensorMeta]
