@@ -1,8 +1,10 @@
 from typing import Any, Dict, List, Optional
 
 import torch.fx
+from . import config
 
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
+InductorConfig = type(config)
 
 
 def compile(
