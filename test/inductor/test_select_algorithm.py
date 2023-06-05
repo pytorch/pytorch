@@ -211,7 +211,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(34, device="cuda"),
         )
         # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     def test_mm_dropout(self):
