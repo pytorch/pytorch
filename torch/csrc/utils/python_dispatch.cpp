@@ -649,14 +649,15 @@ void initDispatchBindings(PyObject* module) {
 
   // DEPRECATED, please don't use this. Instead use
   // torch._C._ExcludeDispatchKeyGuard
-  py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
-      .def(py::init<c10::DispatchKeySet>());
+  py_context_manager_DEPRECATED<
+      c10::impl::ExcludeDispatchKeyGuard,
+      c10::DispatchKeySet>(m, "ExcludeDispatchKeyGuard");
 
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
       m, "_ExcludeDispatchKeyGuard");
 
-  py::class_<at::AutoDispatchBelowAutograd>(m, "_AutoDispatchBelowAutograd")
-      .def(py::init<>());
+  py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
+      m, "_AutoDispatchBelowAutograd");
 
   // Prints out the name of every operator that has a kernel registered to the
   // Dispatcher under [dispatch_key]. If no arguments are specified, it'll print

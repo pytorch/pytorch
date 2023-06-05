@@ -45,7 +45,7 @@ __all__ = [
     'broadcast_multigpu', 'broadcast_object_list', 'destroy_process_group',
     'dist_backend', 'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
     'get_world_size', 'group', 'init_process_group', 'irecv',
-    'is_gloo_available', 'is_initialized', 'is_mpi_available',
+    'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
     'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
     'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
     'new_subgroups_by_enumeration', 'recv', 'reduce', 'reduce_multigpu',
@@ -857,6 +857,24 @@ def is_ucc_available() -> bool:
     Checks if the UCC backend is available.
     """
     return _UCC_AVAILABLE
+
+
+def is_backend_available(backend: str) -> bool:
+    """
+    Checks if the given backend is available and supports the built-in backends or
+    third-party backends through function ``Backend.register_backend``.
+
+    Args:
+        backend (str): Backend name.
+    Returns:
+        bool: Returns true if the backend is available otherwise false.
+    """
+    # If the backend has an ``is_backend_available`` function, return the result of that function directly
+    available_func = getattr(torch.distributed, f"is_{backend.lower()}_available", None)
+    if available_func:
+        return available_func()
+
+    return backend.lower() in Backend.backend_list
 
 
 def is_initialized() -> bool:
