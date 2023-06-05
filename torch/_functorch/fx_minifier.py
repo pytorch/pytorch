@@ -261,6 +261,9 @@ def minifier(
                 output = node
                 break
 
+        if isinstance(output.args[0], fx.Node):
+            return None
+
         output_args = sorted(output.args[0], key=lambda x: x.idx if isinstance(x, fx.Node) else int(1e9))
         if len(output_args) == 1:
             return None
