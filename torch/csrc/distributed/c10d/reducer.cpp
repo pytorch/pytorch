@@ -2239,4 +2239,9 @@ void Reducer::remove_autograd_hooks() {
   hooks_.clear();
 }
 
+void Reducer::check_finalized() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  ensure_prior_reduction_finished();
+}
+
 } // namespace c10d
