@@ -6,9 +6,9 @@ What to use torch.profiler for:
 
 torch.profiler is helpful for understanding the performance of your program at a kernel-level granularity - for example, it can show graph breaks and GPU utilization at the level of the program. The data provided by the profiler can often help users understand where to investigate further to understand model performance.
 
-To understand kernel-level performance, other toosl exist. NVIDIA's ncu tool can be used, or :ref:`inductor's profiling tools<TorchInductor GPU Profiling>``.
+To understand kernel-level performance, other toosl exist. NVIDIA's ncu tool can be used, or :ref:`inductor's profiling tools <torchinductor-gpu-profiling>`.
 
-See also the :ref:`general pytorch profiler guide <https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html>`.
+See also the `general pytorch profiler guide <https://pytorch.org/tutorials/recipes/recipes/profiler_recipe.html>`_.
 
 Basics of using torch.profiler and viewing traces
 -------------------------------------------------
@@ -43,7 +43,7 @@ Basics of using torch.profiler and viewing traces
 
     prof.export_chrome_trace("trace.json")
 
-**Viewing chrome traces**: In the Chrome browser, open :ref:`chrome://tracing` and load the json file. Use the “w” and “s” keys to zoom in and out, and use “a” and “d” to scroll left and right. “?” will show a “help” screen with a list of shortcuts.
+**Viewing chrome traces**: In the Chrome browser, open chrome://tracing and load the json file. Use the “w” and “s” keys to zoom in and out, and use “a” and “d” to scroll left and right. “?” will show a “help” screen with a list of shortcuts.
 
 .. figure:: ../_static/img/profiling_torch_compile/basic_chrome_trace.png
     :alt: Example of a basic chrome trace, visualized in the chrome://tracing viewer
