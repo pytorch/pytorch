@@ -8,6 +8,7 @@ import tempfile
 import test_c10d_spawn
 import torch
 import torch.distributed as c10d
+import torch.multiprocessing as mp
 import torch.nn as nn
 from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
@@ -83,6 +84,43 @@ if sys.version_info < (3, 9):
                 torch.tensor(range(4)).reshape(2, 2),
                 ProcessGroupShareTensorTest._init_pg_gloo,
                 self.world_size)
+
+
+class LargeScaleSpawnTest(TestCase):
+    def setUp(self):
+        # file store would delete on destruction
+        self.file = tempfile.NamedTemporaryFile(delete=False)  # noqa: P201
+
+    def tearDown(self):
+        try:
+            os.remove(self.file.name)
+        except OSError:
+            pass
+
+    @classmethod
+    def _gloo_spawn(cls, rank, world_size, file_name):
+        store = c10d.FileStore(file_name, world_size)
+        pg = c10d.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=rank,
+            world_size=world_size,
+        )
+        buffer = [None] * world_size
+        c10d.all_gather_object(buffer, rank, group=pg)
+        tc = TestCase()
+        tc.assertEqual(buffer, list(range(world_size)))
+
+    @requires_gloo()
+    def test_large_scale_spawn(self):
+        torch.set_default_device("cpu")
+        world_size = 160
+        mp.spawn(
+            self._gloo_spawn,
+            args=[world_size, self.file.name],
+            nprocs=world_size,
+            join=True,
+        )
 
 
 class DistributedDataParallelSingleProcessTest(TestCase):
