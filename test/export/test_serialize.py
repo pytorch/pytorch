@@ -40,7 +40,7 @@ class TestSerialize(TestCase):
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[0]
+        node = serialized.graph_module.graph.nodes[-7]
         self.assertEqual(node.target, "aten.var_mean.correction")
         # aten::native_layer_norm returns 3 tensnors
         self.assertEqual(len(node.outputs), 2)
@@ -65,7 +65,7 @@ class TestSerialize(TestCase):
         exported_module = export(MyModule(), (input,))
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[0]
+        node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "aten.split.Tensor")
         self.assertEqual(len(node.outputs), 1)
         # Input looks like:
@@ -108,7 +108,7 @@ class TestSerialize(TestCase):
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[0]
+        node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "aten.var_mean.correction")
         self.assertEqual(len(node.outputs), 2)
 
@@ -133,7 +133,7 @@ class TestSerialize(TestCase):
         exported_module = export(f, (x,))
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
-        node = serialized.graph_module.graph.nodes[1]
+        node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "aten.searchsorted.Tensor")
         self.assertEqual(len(node.inputs), 6)
         self.assertEqual(node.inputs[2].arg.as_bool, False)
