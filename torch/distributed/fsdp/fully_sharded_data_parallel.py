@@ -2041,11 +2041,12 @@ def _get_grad_norm(
 
     first_device = grads[0].device
     grouped_grads: Dict[
-        Tuple[torch.device, torch.dtype], List[List[Tensor]]
+        Tuple[torch.device, torch.dtype], List[List[torch.Tensor]]
     ] = _group_tensors_by_device_and_dtype(
         [[g.detach() for g in grads]]
     )  # type: ignore[assignment]
 
+    # Compute the gradient norm in FP32, where we treat the gradients as a single vector
     grad_norms = []
     for (device, _), [grads] in grouped_grads.items():
         if (foreach is None or foreach) and _has_foreach_support(grads, device=device):
