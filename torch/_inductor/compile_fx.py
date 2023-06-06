@@ -728,6 +728,13 @@ def compile_fx(
             model_outputs, _ = pytree.tree_flatten(model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
+            if torch._guards.TracingContext.get():
+                original_output_start_index = (
+                    torch._guards.TracingContext.get().fw_metadata.num_mutated_inputs
+                )
+            else:
+                original_output_start_index = 0
+
             if isinstance(model_, torch.fx.GraphModule):
                 *_, orig_model_outputs_node = model_.graph.nodes
                 assert orig_model_outputs_node.op == "output"
