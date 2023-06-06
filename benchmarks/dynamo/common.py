@@ -127,7 +127,6 @@ CI_SKIP[CI("aot_eager", training=False)] = [
     "detectron2_maskrcnn_r_50_fpn",
     "hf_BigBird",  # OOM
     "tacotron2",  # AssertionError: Deduped args out of bounds
-    "llama", # Torchbench llama is not suitable for training
     # Huggingface
     "BartForConditionalGeneration",  # OOM
     "DebertaV2ForQuestionAnswering",  # OOM
@@ -145,7 +144,6 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     "mobilenet_v2_quantized_qat",  # fp64_OOM
     "resnet50_quantized_qat",  # fp64_OOM
     "pytorch_struct",
-    "llama", # Torchbench llama is not suitable for training
     # Huggingface
     "MBartForConditionalGeneration",  # OOM
     "M2M100ForConditionalGeneration",  # OOM
@@ -233,7 +231,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     # TorchBench
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
-    "llama", # Torchbench llama is not suitable for training
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
