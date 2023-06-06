@@ -1578,7 +1578,6 @@ make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
 make_fallback(aten.avg_pool3d_backward)
-make_fallback(aten.bitwise_or_, warn=False)
 make_fallback(aten._cdist_backward)
 make_fallback(aten.diagonal_backward, warn=False)
 make_fallback(aten._embedding_bag_dense_backward)
@@ -4027,12 +4026,14 @@ sub = register_pointwise(aten.sub, allow_alpha=True)
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
 register_pointwise(aten.abs)
-register_pointwise(aten.bitwise_and)
-register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
-register_pointwise(aten.bitwise_or)
-register_pointwise(aten.bitwise_xor)
-register_pointwise(aten.bitwise_left_shift)
-register_pointwise(aten.bitwise_right_shift)
+bitwise_and = register_pointwise(aten.bitwise_and)
+bitwise_left_shift = register_pointwise(aten.bitwise_left_shift)
+bitwise_not = register_pointwise(
+    aten.bitwise_not, override_fn_when_input_bool="logical_not"
+)
+bitwise_or = register_pointwise(aten.bitwise_or)
+bitwise_right_shift = register_pointwise(aten.bitwise_right_shift)
+bitwise_xor = register_pointwise(aten.bitwise_xor)
 register_pointwise_numeric(aten.lgamma)
 erf = register_pointwise_numeric(aten.erf)
 register_lowering(
@@ -4043,7 +4044,30 @@ register_pointwise_numeric(aten.log1p)
 register_pointwise_numeric(aten.tan)
 register_pointwise_numeric(aten.tanh)
 register_pointwise_numeric_ldf64(aten.log)
-register_pointwise(aten.logical_not, convert_input_to_bool=True)
+logical_and = register_pointwise(
+    aten.logical_and,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+logical_not = register_pointwise(
+    aten.logical_not,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+logical_or = register_pointwise(
+    aten.logical_or,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+logical_xor = register_pointwise(
+    aten.logical_xor,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
@@ -4061,29 +4085,6 @@ register_pointwise(aten.ge, override_return_dtype=torch.bool)
 gt = register_pointwise(aten.gt, override_return_dtype=torch.bool)
 register_pointwise(aten.eq, override_return_dtype=torch.bool)
 register_pointwise(aten.ne, override_return_dtype=torch.bool)
-logical_and = register_pointwise(
-    aten.logical_and,
-    type_promotion_kind=None,
-    convert_input_to_bool=True,
-    override_return_dtype=torch.bool,
-)
-register_lowering(aten.__and__, type_promotion_kind=None)(logical_and)
-register_lowering(aten.__or__, type_promotion_kind=None)(
-    register_pointwise(
-        aten.logical_or,
-        type_promotion_kind=None,
-        convert_input_to_bool=True,
-        override_return_dtype=torch.bool,
-    )
-)
-logical_xor = register_pointwise(
-    aten.logical_xor,
-    name="bitwise_xor",
-    type_promotion_kind=None,
-    convert_input_to_bool=True,
-    override_return_dtype=torch.bool,
-)
-register_lowering(aten.__xor__, type_promotion_kind=None)(logical_xor)
 
 register_pointwise_numeric(aten.cosh)
 register_pointwise_numeric(aten.sinh)
@@ -4115,12 +4116,35 @@ def register_inplace(aten_op, outplace_op):
 
 
 register_inplace(aten.add_, add)
+register_inplace(aten.bitwise_and_, bitwise_and)
+register_inplace(aten.bitwise_left_shift_, bitwise_left_shift)
+register_inplace(aten.bitwise_not_, bitwise_not)
+register_inplace(aten.bitwise_or_, bitwise_or)
+register_inplace(aten.bitwise_right_shift_, bitwise_right_shift)
+register_inplace(aten.bitwise_xor_, bitwise_xor)
 register_inplace(aten.mul_, mul)
 register_inplace(aten.div_.Tensor, div)
 register_inplace(aten.div_.Tensor_mode, div_mode)
+register_inplace(aten.logical_and_, logical_and)
+register_inplace(aten.logical_not_, logical_not)
+register_inplace(aten.logical_or_, logical_or)
+register_inplace(aten.logical_xor_, logical_xor)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
+
+
+register_lowering(aten.__and__)(bitwise_and)
+register_lowering(aten.__lshift__)(bitwise_left_shift)
+register_lowering(aten.__or__)(bitwise_or)
+register_lowering(aten.__rshift__)(bitwise_right_shift)
+register_lowering(aten.__xor__)(bitwise_xor)
+
+register_inplace(aten.__iand__, aten.__and__)
+register_inplace(aten.__ilshift__, aten.__lshift__)
+register_inplace(aten.__ior__, aten.__or__)
+register_inplace(aten.__irshift__, aten.__rshift__)
+register_inplace(aten.__ixor__, aten.__xor__)
 
 
 @register_lowering(aten.sym_size)

@@ -9,8 +9,7 @@ GPU time are the most interesting ones. Once we decide the kernels, we
 may also want to run individual kernels directly and inspect its perf.
 We have tools to cover everything mentioned above.
 
-Relevant Environment Variables
-==============================
+## Relevant Environment Variables
 
 -  TORCHINDUCTOR_UNIQUE_KERNEL_NAMES
 
@@ -32,8 +31,7 @@ Relevant Environment Variables
       one with the best perf. This will increase compilation time with
       the hope to improve perf.
 
-Breakdown Model GPU Time
-========================
+## Breakdown Model GPU Time
 
 Below are the steps to breakdown execution time of a model into
 individual kernels. We take mixnet_l as an example.
@@ -135,8 +133,7 @@ is helpful for a few reasons
 -  if a kernel takes 2% of time, improving it by 2x will bring in 1%
    overall gain which should be nice
 
-Benchmark Individual Triton Kernel
-==================================
+## Benchmark Individual Triton Kernel
 
 Let’s say we want to take a closer look at
 triton_red_fused\__native_batch_norm_legit_functional_16 which is the

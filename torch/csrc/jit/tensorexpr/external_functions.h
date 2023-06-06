@@ -7,15 +7,18 @@
 #include <vector>
 
 #define FOR_ALL_EXTERNAL_FUNCTIONS(_)   \
+  _(nnc_aten_adaptive_avg_pool2d)       \
+  _(nnc_aten_addmm)                     \
   _(nnc_aten_conv2d)                    \
   _(nnc_aten_conv1d)                    \
   _(nnc_aten_conv1d_out)                \
+  _(nnc_aten_dequantize)                \
+  _(nnc_aten_dequantize_out)            \
+  _(nnc_aten_embedding)                 \
   _(nnc_aten_matmul)                    \
   _(nnc_aten_mv)                        \
   _(nnc_aten_mm)                        \
-  _(nnc_aten_adaptive_avg_pool2d)       \
   _(nnc_aten_mean)                      \
-  _(nnc_aten_addmm)                     \
   _(nnc_aten_max_red)                   \
   _(nnc_aten_max_red_out)               \
   _(nnc_aten_quantized_conv1d)          \
@@ -35,12 +38,14 @@
   _(nnc_aten_quantized_mul_scalar_out)  \
   _(nnc_aten_quantized_relu)            \
   _(nnc_aten_quantized_sigmoid)         \
+  _(nnc_aten_quantized_sigmoid_out)     \
   _(nnc_aten_quantize_per_tensor)       \
   _(nnc_aten_quantize_per_tensor_out)   \
-  _(nnc_aten_dequantize)                \
-  _(nnc_aten_dequantize_out)            \
+  _(nnc_aten_triangular_solve)          \
   _(nnc_aten_upsample_nearest2d)        \
-  _(nnc_aten_upsample_nearest2d_out)
+  _(nnc_aten_upsample_nearest2d_out)    \
+  _(nnc_prepacked_conv2d_clamp_run)     \
+  _(nnc_prepacked_linear_clamp_run)
 
 #define DECLARE_EXTERNAL_FUNCTION(NAME) \
   TORCH_API void NAME(                  \

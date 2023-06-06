@@ -708,6 +708,16 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
 
+  m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
+    return at::functionalization::impl::replace_(a, b);
+  });
+  m.def("_propagate_xla_data", [](const at::Tensor& a, const at::Tensor& b) {
+    at::functionalization::impl::propagate_xla_data(a, b);
+  });
+  m.def("_commit_update", [](const at::Tensor& a) {
+    return at::functionalization::impl::commit_update(a);
+  });
+
   m.def("_are_functorch_transforms_active", []() {
     auto include_set = c10::impl::tls_local_dispatch_key_set().included_;
     return (
