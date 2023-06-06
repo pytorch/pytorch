@@ -4765,6 +4765,10 @@ class MultiOutputNoSizeAssert(MultiOutput):
     Works like MultiOutput but doesn't assert size. This must be a property guaranteed by the op emiting this.
     """
 
+    def __init__(self, layout, input, index):
+        super().__init__(layout, input, [])
+        self.index = index
+
     def codegen(self, wrapper):
         wrapper.writeline(
             f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
