@@ -8,6 +8,7 @@ from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same
 from torch._inductor.compile_fx import compile_fx
 from torch._inductor.decomposition import decompositions
+from torch._inductor.lowering import lowerings
 from torch._inductor.utils import gen_gm_and_inputs
 from torch.utils._pytree import tree_map_only
 
