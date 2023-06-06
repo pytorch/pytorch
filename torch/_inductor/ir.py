@@ -121,6 +121,15 @@ def validate_ir(node_or_nodes):
     _check_tensorbox(node_or_nodes)
 
 
+def ops_wrapper(name):
+    assert isinstance(name, str)
+
+    def fn(*args, **kwargs):
+        return getattr(ops, name)(*args, **kwargs)
+
+    return fn
+
+
 def inverse_reorder(order):
     inv_order = dict(zip(order, range(len(order))))
 
@@ -144,6 +153,9 @@ def fuse_reindexing(reindex1, reindex2):
         return reindex1(reindex2(index))
 
     return reindex
+
+
+NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 
 
 def stride_order2fill_order(order):
@@ -171,6 +183,7 @@ def get_stride_order(seq: Sequence[int]):
 def ir_node_to_tensor(x, guard_shape=True):
     if x is None:
         return None
+
     if not guard_shape:
         shape_fn = V.graph.sizevars.size_hint
     else:
@@ -507,6 +520,51 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
+REDUCTION_COMBINE_FN = {
+    "any": ops_wrapper("logical_or"),
+    "max": ops_wrapper("maximum"),
+    "min": ops_wrapper("minimum"),
+    "prod": ops_wrapper("mul"),
+    "sum": ops_wrapper("add"),
+    "xor_sum": ops_wrapper("bitwise_xor"),
+}
+
+
+def get_reduction_combine_fn(reduction_type, dtype):
+    if reduction_type in REDUCTION_COMBINE_FN:
+        combine_fn = REDUCTION_COMBINE_FN[reduction_type]
+    elif reduction_type in {"argmax", "argmin"}:
+
+        def combine_fn(a, b):
+            a_value, a_index = a
+            b_value, b_index = b
+
+            if reduction_type == "argmin":
+                mask = ops.lt(a_value, b_value)
+            else:
+                mask = ops.gt(a_value, b_value)
+
+            equal = ops.eq(a_value, b_value)
+            if is_float_dtype(dtype):
+                a_isnan = ops.ne(a_value, a_value)
+                b_isnan = ops.ne(b_value, b_value)
+                mask = ops.logical_or(mask, ops.gt(a_isnan, b_isnan))
+                equal = ops.logical_or(equal, ops.logical_and(a_isnan, b_isnan))
+
+            mask = ops.logical_or(
+                mask, ops.logical_and(equal, ops.lt(a_index, b_index))
+            )
+            return (
+                ops.where(mask, a_value, b_value),
+                ops.where(mask, a_index, b_index),
+            )
+
+    else:
+        raise NotImplementedError(f"unknown reduction_type={reduction_type}")
+
+    return combine_fn
+
+
 @dataclasses.dataclass
 class Reduction(Loops):
     reduction_ranges: List[Expr]
@@ -743,74 +801,13 @@ class Reduction(Loops):
             )
 
     @staticmethod
-    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type):
+    def _unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type, src_dtype):
         """Convert inner_fn from a reduction to an pointwise"""
         reduction_ranges = [
             V.graph.sizevars.guard_static_shape(x) for x in reduction_ranges
         ]
 
-        if reduction_type == "sum":
-
-            def combine_fn(a, b):
-                return ops.add(a, b)
-
-        elif reduction_type == "prod":
-
-            def combine_fn(a, b):
-                return ops.mul(a, b)
-
-        elif reduction_type == "xor_sum":
-
-            def combine_fn(a, b):
-                return ops.bitwise_xor(a, b)
-
-        elif reduction_type == "min":
-
-            def combine_fn(a, b):
-                return ops.minimum(a, b)
-
-        elif reduction_type == "max":
-
-            def combine_fn(a, b):
-                return ops.maximum(a, b)
-
-        elif reduction_type == "any":
-
-            def combine_fn(a, b):
-                return ops.logical_or(a, b)
-
-        elif reduction_type == "argmin":
-
-            def combine_fn(a, b):
-                a_value, a_index = a
-                b_value, b_index = b
-                mask = ops.lt(b_value, a_value)
-                a_isnan = ops.ne(a_value, a_value)
-                b_isnan = ops.ne(b_value, b_value)
-                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
-
-                return (
-                    ops.where(mask, b_value, a_value),
-                    ops.where(mask, b_index, a_index),
-                )
-
-        elif reduction_type == "argmax":
-
-            def combine_fn(a, b):
-                a_value, a_index = a
-                b_value, b_index = b
-                mask = ops.gt(b_value, a_value)
-                a_isnan = ops.ne(a_value, a_value)
-                b_isnan = ops.ne(b_value, b_value)
-                mask = ops.logical_or(mask, ops.gt(b_isnan, a_isnan))
-
-                return (
-                    ops.where(mask, b_value, a_value),
-                    ops.where(mask, b_index, a_index),
-                )
-
-        else:
-            raise NotImplementedError(f"unknown reduction_type={reduction_type}")
+        combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
 
         def fn(index):
             return functools.reduce(
@@ -916,7 +913,9 @@ class Reduction(Loops):
             return Pointwise.create(
                 device,
                 dst_dtype,
-                cls._unroll_reduction_fn(inner_fn, reduction_ranges, reduction_type),
+                cls._unroll_reduction_fn(
+                    inner_fn, reduction_ranges, reduction_type, src_dtype
+                ),
                 ranges,
             )
 
@@ -2848,6 +2847,10 @@ class ExternKernel(InputsKernel):
         as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
         assert is_stride_order_storage_and_layout(x, order)
         return x
+
+    @classmethod
+    def require_channels_last(cls, x):
+        return cls.require_stride_order(x, NHWC_STRIDE_ORDER)
 
     @classmethod
     def require_contiguous(cls, x):
