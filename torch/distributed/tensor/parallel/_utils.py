@@ -152,4 +152,5 @@ def _create_1d_device_mesh(device_mesh: DeviceMesh, tp_mesh_dim: int = 0) -> Dev
             res_sub_mesh = sub_mesh
 
     res_sub_mesh._dim_group_ranks = [device_mesh._dim_group_ranks[tp_mesh_dim]]
+    res_sub_mesh._dim_group_tags = [device_mesh._dim_group_tags[tp_mesh_dim]]
     return res_sub_mesh
