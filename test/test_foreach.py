@@ -1070,12 +1070,12 @@ class TestForeach(TestCase):
         nested_tensorlists = [list1, list2, list3]
         grouped_tensors = torch.utils._foreach_utils._group_tensors_by_device_and_dtype(nested_tensorlists, with_indices=True)
         num_tensors_seen = 0
-        for (device, dtype), ([l1, l2, l3], indices) in grouped_tensors:
-            for t in itertools.chain(l1, l2, l3):
+        for (device, dtype), ([l1, l2, l3], indices) in grouped_tensors.items():
+            self.assertEquals(l2, [None])
+            for t in itertools.chain(l1, l3):
                 self.assertEquals(t.device, device)
                 self.assertEquals(t.dtype, dtype)
                 num_tensors_seen += 1
-                self.assertEquals(len(l2), 0)
                 for i, index in enumerate(indices):
                     self.assertEquals(l1[i], list1[index])
                     self.assertEquals(l3[i], list3[index])
