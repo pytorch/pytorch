@@ -28,6 +28,7 @@ namespace c10 {
 // If you add a new (non-privateuse) backend here,
 // make sure to add an Autograd<Backend> fallthrough kernel
 // in aten/src/ATen/core/VariableFallbackKernel.cpp
+// Meta must be at the end so that meta key in tls triggers meta kernels
 
 #define C10_FORALL_BACKEND_COMPONENTS(_, extra) \
   _(CPU, extra)                                 \
@@ -40,11 +41,12 @@ namespace c10 {
   _(HPU, extra)                                 \
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
-  _(Meta, extra)                                \
   _(MTIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
-  _(PrivateUse3, extra)
+  _(PrivateUse3, extra)                         \
+  _(Meta, extra)
+
 
 // WARNING!  If we add a new per-backend functionality key that has higher
 // priority than Autograd, then make sure you update EndOfRuntimeBackendKeys
