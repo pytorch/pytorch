@@ -29,7 +29,7 @@ static std::vector<optional<at::Tensor>> get_boxed_opt_tensor_vector() {
 static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
   static std::vector<at::Tensor> tensors;
   std::vector<at::OptionalTensorRef> optional_tensors;
-  const size_t SIZE = 5;
+  constexpr size_t SIZE = 5;
   for (size_t i = 0; i < SIZE * 2; i++) {
     if (i % 2 == 0) {
       if (tensors.size() + 1 < i / 2) {
