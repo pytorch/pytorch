@@ -1986,19 +1986,6 @@ def emit_body(
                                 )
                             )
                 else:
-                    for _foreach_arg in differentiable_inputs:
-                        if not (
-                            is_tensor_type(_foreach_arg.type)
-                            or is_tensor_list_type(_foreach_arg.type)
-                        ):
-                            pattern = _foreach_arg.name
-                            if isinstance(_foreach_arg.type, ListType):
-                                pattern += "[i]"
-                            foreach_forward_grad_formula = (
-                                foreach_forward_grad_formula.replace(
-                                    _foreach_arg.name, pattern
-                                )
-                            )
                     if (
                         "result" in foreach_forward_grad_formula
                         and "result[i]" not in foreach_forward_grad_formula
