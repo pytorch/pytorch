@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
@@ -16,13 +15,9 @@ from torch.distributed.fsdp.api import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    skip_if_lt_x_gpu,
     with_comms,
 )
-
-
-def p0(line):
-    if dist.get_rank() == 0:
-        print(line)
 
 
 class TestDummyModel(torch.nn.Module):
@@ -41,12 +36,9 @@ class TestDummyModel(torch.nn.Module):
         return torch.rand(8, 8, device="cuda")
 
 
-class TestShardUtilsDistributedDTensor(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
-
+class TestDtensorShardedOptimStateDict(DTensorTestBase):
     @with_comms
+    @skip_if_lt_x_gpu(2)
     def test_dtensor_sharded_optim_state_dict(self):
         model = FSDP(TestDummyModel().cuda())
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
