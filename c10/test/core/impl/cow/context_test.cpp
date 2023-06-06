@@ -5,6 +5,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+// NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
 namespace c10::impl {
 namespace {
 
@@ -35,15 +36,15 @@ class ContextTest : public testing::Test {
 };
 
 TEST_F(ContextTest, Basic) {
-  auto& context = *new cow::Context(new_delete_tracker());
+  auto context_ptr = new cow::Context(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
-  context.increment_refcount();
+  context_ptr->increment_refcount();
 
   {
     // This is in a sub-scope because this call to decrement_refcount
     // is expected to give us a shared lock.
-    auto result = context.decrement_refcount();
+    auto result = context_ptr->decrement_refcount();
     ASSERT_THAT(
         std::holds_alternative<cow::Context::NotLastReference>(result),
         testing::IsTrue());
@@ -51,7 +52,7 @@ TEST_F(ContextTest, Basic) {
   }
 
   {
-    auto result = context.decrement_refcount();
+    auto result = context_ptr->decrement_refcount();
     ASSERT_THAT(
         std::holds_alternative<cow::Context::LastReference>(result),
         testing::IsTrue());
@@ -65,12 +66,13 @@ TEST_F(ContextTest, Basic) {
 
 TEST_F(ContextTest, delete_context) {
   // This is effectively the same thing as decrement_refcount() above.
-  auto& context = *new cow::Context(new_delete_tracker());
+  auto context_ptr = new cow::Context(new_delete_tracker());
   ASSERT_THAT(delete_count(), testing::Eq(0));
 
-  cow::delete_context(&context);
+  cow::delete_context(context_ptr);
   ASSERT_THAT(delete_count(), testing::Eq(1));
 }
 
 } // namespace
 } // namespace c10::impl
+// NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
