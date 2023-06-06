@@ -154,8 +154,12 @@ class ComputeCodegenUnboxedKernels:
 
     use_aten_lib: bool
 
-    @method_with_native_function
-    def __call__(self, f: NativeFunction) -> str:
+    def __call__(self, unbox_kernel_entry: Tuple[NativeFunction, Tuple[ETKernelKey, BackendMetadata]]) -> str:
+        f: NativeFunction = unbox_kernel_entry[0]
+        kernel_key: ETKernelKey = unbox_kernel_entry[1][0]
+        kernel_meta: BackendMetadata = unbox_kernel_entry[1][1]
+
+        # TODO: Update to use Kernel Selector
         if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
             return ""
         sig: Union[CppSignature, ExecutorchCppSignature]
@@ -203,13 +207,14 @@ class ComputeCodegenUnboxedKernels:
                 ret_prefix = ""
 
         return f"""
-Operator(
+Kernel(
     "{f.namespace}::{f.func.name}",
+    "{kernel_key.to_native_string()}",
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
-        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}({"context, "}{args_str});
+        {ret_prefix}torch::executor::{kernel_meta.cpp_namespace}::{kernel_meta.kernel}({"context, "}{args_str});
 
         {return_assignment}
     }}
@@ -223,19 +228,28 @@ def gen_unboxing(
     cpu_fm: FileManager,
     selector: SelectiveBuilder,
     use_aten_lib: bool,
+    kernel_index: ETKernelIndex,
 ) -> None:
-    def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
-        return fn.root_name
+    # Iterable type for write_sharded is a Tuple of (native_function, (kernel_key, metadata))
+    def key_func(item: Tuple[NativeFunction, Tuple[ETKernelKey, BackendMetadata]]) -> str:
+        return item[0].root_name + ":" + item[1][0].to_native_string()
+
+    items: List[Tuple[NativeFunction, Tuple[ETKernelKey, BackendMetadata]]] = [
+        (native_function, (kernel_key, metadata))
+        for native_function in native_functions
+        for kernel_key, metadata in kernel_index.get_kernels(native_function).items()
+    ]
 
     cpu_fm.write_sharded(
         "RegisterCodegenUnboxedKernels.cpp",
-        native_functions,
+        items,
         key_fn=key_func,
-        env_callable=lambda fn: {
-            "unboxed_ops": [ComputeCodegenUnboxedKernels(selector, use_aten_lib)(fn)],
+        env_callable=lambda unbox_kernel_entry: {
+            "unboxed_ops": [ComputeCodegenUnboxedKernels(selector, use_aten_lib)(unbox_kernel_entry)],
+            "fn_header": ["NativeFunctions.h" if use_aten_lib else "Functions.h"],
         },
         num_shards=1,
-        sharded_keys={"unboxed_ops"},
+        sharded_keys={"unboxed_ops", "fn_header"},
     )
 
 
@@ -853,6 +867,7 @@ def main() -> None:
             cpu_fm=cpu_fm,
             selector=selector,
             use_aten_lib=options.use_aten_lib,
+            kernel_index=kernel_index,
         )
         if custom_ops_native_functions:
             gen_custom_ops(
