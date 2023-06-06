@@ -708,8 +708,8 @@ def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, gr
     # NCCL's PG::all_gather with multiple tensors is broken, it only works for the multi-device setting
     #  and fails if you mix same-size with different-size tensor lists.
     # _coalescing_manager crashed NCCL when used with all_gather_into_tensor.
-    work_list = []
     if input_tensors[0].is_cpu:
+        work_list = []
         out_tensors_sliced = [
             list(torch.chunk(out_tensor, dist.get_world_size(group)))
             for out_tensor in output_tensors
@@ -717,11 +717,9 @@ def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, gr
         for shard, out_tensor in zip(input_tensors, out_tensors_sliced):
             work = c10d.all_gather(out_tensor, shard, group=group, async_op=async_op)
             work_list.append(work)
+        return work_list
     else:
-        for shard, out_tensor in zip(input_tensors, output_tensors):
-            work = c10d.all_gather_into_tensor(out_tensor, shard, group=group, async_op=async_op)
-            work_list.append(work)
-    return work_list
+        return c10d._all_gather_into_tensor_coalesced(output_tensors, input_tensors, group=group, async_op=async_op)
 
 def _reduce_scatter_tensor_coalesced_fallback(output_tensors, input_tensors, op, group, async_op=False):
     # All the same reasons as the all_gather fallback

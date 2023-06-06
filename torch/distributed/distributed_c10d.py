@@ -4227,6 +4227,65 @@ def _get_group_tag(pg: ProcessGroup) -> str:
     return tag
 
 
+@_exception_logger
+def _all_gather_into_tensor_coalesced(output_tensor_list, input_tensor_list, group=None, async_op=False):
+    """
+    Gather tensors from all ranks and put them in a list of output tensors by coalescing.
+
+    Args:
+        output_tensor_list (List[Tensor]): Output tensor list to accommodate tensor elements
+            from all ranks. It must be correctly sized to have one of the
+            following forms:
+            (i) a concatenation of all the input tensors along the primary
+            dimension; for definition of "concatenation", see ``torch.cat()``;
+            (ii) a stack of all the input tensors along the primary dimension;
+            for definition of "stack", see ``torch.stack()``.
+            Examples below may better explain the supported output forms.
+        input_tensor_list (List[Tensor]): Tensor list to be gathered from current rank.
+            Different from the ``all_gather`` API, the input tensors in this
+            API must have the same size across all ranks.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        async_op (bool, optional): Whether this op should be an async op
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group
+
+    .. warning::
+        The Gloo backend does not support this API.
+
+    """
+    _check_tensor_list(input_tensor_list, "input_tensor")
+    _check_tensor_list(output_tensor_list, "output_tensor")
+    if _rank_not_in_group(group):
+        _warn_not_in_group("_all_gather_into_tensor_coalesced")
+        return
+
+    _ensure_all_tensors_same_dtype(input_tensor_list, input_tensor_list[0])
+    _ensure_all_tensors_same_dtype(output_tensor_list, input_tensor_list[0])
+
+    if _rank_not_in_group(group):
+        _warn_not_in_group("all_gather")
+        return
+
+    input_tensor_list = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list
+    ]
+    output_tensor_list = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in output_tensor_list
+    ]
+
+    group = group or _get_default_group()
+    work = group.allgather_into_tensor_coalesced(output_tensor_list, input_tensor_list)
+
+    if async_op:
+        return work
+    else:
+        work.wait()
+
+
+
 # This ops are not friently to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.
 dynamo_unsupported_distributed_c10d_ops = [
