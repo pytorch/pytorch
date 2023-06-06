@@ -2,9 +2,10 @@ from dataclasses import dataclass
 import copy
 import math
 import operator
+import traceback
 from collections import OrderedDict
 from functools import partial
-from typing import Dict, List, NamedTuple
+from typing import Dict, List, NamedTuple, Tuple
 
 import sympy
 
@@ -26,8 +27,8 @@ class InputDim(NamedTuple):
 
 @dataclass
 class RangeConstraint:
-    min_val: int
-    max_val: int
+    min_val: sympy.Integer
+    max_val: sympy.Integer
 
 
 def _convert_to_int(val):
@@ -54,11 +55,11 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def __init__(
         self,
         range_constraints: Dict[sympy.Symbol, RangeConstraint],
-        equality_constraints: Dict[InputDim, List[InputDim]],
+        equality_constraints: List[Tuple[InputDim, InputDim]],
     ):
         super().__init__()
         self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
-        self.equality_constraints: Dict[InputDim, List[InputDim]] = equality_constraints
+        self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         graph_module = copy.deepcopy(graph_module)
@@ -67,12 +68,11 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         # Add runtime asserts for input shape constraints. We do this after all
         # placeholder nodes so that we can handle both (unary) predicates and
         # (binary) relations.
-        placeholder_nodes: Dict[str, torch.fx.Node] = OrderedDict()
+        inputdim_to_node: Dict[InputDim, torch.fx.Node] = OrderedDict()
         for node in graph.nodes:
             if node.op != "placeholder":
                 continue
 
-            placeholder_nodes[node.name] = node
             if (
                 "val" not in node.meta or
                 not isinstance(node.meta["val"], FakeTensor)
@@ -80,39 +80,52 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 continue
 
             fake_tensor_shape = node.meta["val"].shape
+            prev_node = node
             for dim, shape in enumerate(fake_tensor_shape):
+                with graph.inserting_after(prev_node):
+                    dim_node = graph.call_function(
+                        torch.ops.aten.sym_size.int, (node, dim)
+                    )
+                input_dim = InputDim(node.name, dim)
+                inputdim_to_node[input_dim] = dim_node
+                prev_node = dim_node
+
                 if isinstance(shape, SymInt):
                     # If the shape is dynamic, add range assertions
                     symbol = shape.node._expr
                     assert symbol in self.range_constraints
 
-                    with graph.inserting_after(node):
-                        self._insert_range_assert_inplace(
-                            graph, node, dim, self.range_constraints[symbol]
-                        )
+                    self._insert_range_assert_inplace(
+                        graph, input_dim, dim_node, self.range_constraints[symbol]
+                    )
                 else:
                     # If no dynamism is specified, we assume all dimensions #
                     # are specialized
                     assert isinstance(shape, int)
-                    with graph.inserting_after(node):
-                        self._insert_specialized_shape_assert_inplace(
-                            graph, node, dim, shape,
-                        )
+                    self._insert_specialized_shape_assert_inplace(
+                        graph, input_dim, dim_node, shape,
+                    )
 
         # Add runtime assertions on equality constraints on the inputs
         with graph.inserting_after(
-            list(placeholder_nodes.values())[-1]
+            list(inputdim_to_node.values())[-1]
         ):
-            self._insert_equality_assert_inplace(graph, placeholder_nodes)
+            self._insert_equality_assert_inplace(graph, inputdim_to_node)
 
         # Add runtime asserts for inline constraints
-        return super().call(graph_module)
+        val = super().call(graph_module)
+
+        # Populate the stack trace with dummy vals to respect IR
+        for node in val.graph_module.graph.nodes:
+            if not hasattr(node.meta, "stack_trace"):
+                node.meta["stack_trace"] = traceback.format_exc(-1)
+
+        return PassResult(val.graph_module, val.modified)
 
     def _insert_specialized_shape_assert_inplace(
-        self, graph: torch.fx.Graph, node: torch.fx.Node, dim: int, shape: int,
+        self, graph: torch.fx.Graph, input_dim: InputDim, dim_node: torch.fx.Node, shape: int,
     ):
-        assert_msg = f"Input {node.name}.shape[{dim}] is specialized at {shape}"
-        dim_node = graph.call_function(torch.ops.aten.sym_size, (node, dim))
+        assert_msg = f"Input {input_dim.input_name}.shape[{input_dim.dim}] is specialized at {shape}"
         with graph.inserting_after(dim_node):
             eq_node = graph.call_function(operator.eq, (dim_node, shape))
         with graph.inserting_after(eq_node):
@@ -121,17 +134,16 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             _ = graph.call_function(torch.ops.aten._assert_async.msg, (tensor_eq_node, assert_msg))
 
     def _insert_range_assert_inplace(
-        self, graph: torch.fx.Graph, node: torch.fx.Node, dim: int, range: RangeConstraint
+        self, graph: torch.fx.Graph, input_dim: InputDim, dim_node: torch.fx.Node, range: RangeConstraint
     ):
         """
         Add runtime asserts for user-specified range constraints for
         each placeholder's dynamic dimension.
         """
 
-        dim_node = graph.call_function(torch.ops.aten.sym_size, (node, dim))
         min_val, max_val = _convert_range_to_int(range)
         assert_msg = (
-            f"Input {node.name}.shape[{dim}] is "
+            f"Input {input_dim.input_name}.shape[{input_dim.dim}] is "
             f"outside of specified dynamic range [{min_val}, {max_val}]"
         )
         # TODO (tmanlaibaatar) we are making an assumption that graph generated for
@@ -153,31 +165,27 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
     def _insert_equality_assert_inplace(
         self,
         graph: torch.fx.Graph,
-        placeholder_nodes: Dict[str, torch.fx.Node],
+        inputdim_to_node: Dict[InputDim, torch.fx.Node],
     ):
-        for input_dim, equalities in self.equality_constraints.items():
-            node = placeholder_nodes[input_dim.input_name]
-            dim_node = graph.call_function(
-                torch.ops.aten.sym_size, (node, input_dim.dim),
+        for input_dim, other_input_dim in self.equality_constraints:
+            dim_node = inputdim_to_node[input_dim]
+            assert_msg = (
+                f"Input {input_dim.input_name}.shape[{input_dim.dim}] is "
+                f"not equal to input {other_input_dim.input_name}.shape[{other_input_dim.dim}]"
             )
-            with graph.inserting_after(dim_node):
-                for other_input_dim in equalities:
-                    assert_msg = (
-                        f"Input {input_dim.input_name}.shape[{input_dim.dim}] is "
-                        f"not equal to input {other_input_dim.input_name}.shape[{other_input_dim.dim}]"
-                    )
-                    other_node = placeholder_nodes[other_input_dim.input_name]
-                    other_dim_node = graph.call_function(
-                        torch.ops.aten.sym_size, (other_node, other_input_dim.dim),
-                    )
 
-                    with graph.inserting_after(other_dim_node):
-                        self._insert_assert_async_inplace(
-                            graph,
-                            operator.eq,
-                            (dim_node, other_dim_node),
-                            assert_msg
-                        )
+            other_dim_node = inputdim_to_node[other_input_dim]
+            self._insert_assert_async_inplace(
+                graph,
+                operator.eq,
+                (dim_node, other_dim_node),
+                assert_msg
+            )
+
+    def _create_dummy_node_metadata(self):
+        return NodeMetadata({
+            "stack_trace": traceback.format_exc(-1)
+        })
 
     def _insert_assert_async_inplace(self, graph, operator, args, assert_msg):
         """
@@ -216,7 +224,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             messages = []
             if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
                 symbol = val.node._expr
-                if symbol.name.startswith("i"):
+                if isinstance(symbol, sympy.Symbol) and symbol.name.startswith("i"):
                     # We only care about unbacked symints for these inline
                     # constraints, which are prefixed with 'i'
                     constraint = self.range_constraints[symbol]
@@ -232,10 +240,10 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                     for cb, msg in zip(cbs, msgs):
                         def sym_size_cb(proxy, assert_msg, dim):
                             dim_proxy = super(_AddRuntimeAssertionsForConstraintsPass, self).call_operator(
-                                torch.ops.aten.sym_size,
+                                torch.ops.aten.sym_size.int,
                                 (proxy, dim),
                                 {},
-                                NodeMetadata({}),
+                                self._create_dummy_node_metadata(),
                             )
                             cb(proxy=dim_proxy, assert_msg=assert_msg)
                         call_backs.append(partial(sym_size_cb, dim=i))
@@ -258,11 +266,11 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         Inserts assert_async call_function nodes in the graph. This function is
         called **during** the interpreter-based pass.
         """
-        cmp = super().call_operator(operator, (lower, upper), {}, NodeMetadata({}))
-        cmp_tensor = super().call_operator(torch.ops.aten.scalar_tensor.default, (cmp,), {}, NodeMetadata({}))
+        cmp = super().call_operator(operator, (lower, upper), {}, self._create_dummy_node_metadata())
+        cmp_tensor = super().call_operator(torch.ops.aten.scalar_tensor.default, (cmp,), {}, self._create_dummy_node_metadata())
         super().call_operator(
             torch.ops.aten._assert_async.msg,
             (cmp_tensor, assert_msg),
             {},
-            NodeMetadata({}),
+            self._create_dummy_node_metadata(),
         )

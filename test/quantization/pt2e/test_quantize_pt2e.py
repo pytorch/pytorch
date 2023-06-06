@@ -16,6 +16,7 @@ from torch.ao.quantization import (
     QConfigMapping,
 )
 from torch.ao.quantization._pt2e.quantizer import (
+    ComposableQuantizer,
     DerivedQuantizationSpec,
     OperatorConfig,
     QNNPackQuantizer,
@@ -24,6 +25,9 @@ from torch.ao.quantization._pt2e.quantizer import (
     Quantizer,
     FixedQParamsQuantizationSpec,
     SharedQuantizationSpec,
+)
+from torch.ao.quantization._pt2e.quantizer.composable_quantizer import (  # noqa: F811
+    ComposableQuantizer,
 )
 from torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer import (
     get_symmetric_quantization_config,
@@ -53,6 +57,7 @@ from torch.ao.quantization.quantize_fx import (
     prepare_qat_fx,
 )
 from torch.fx import Node
+
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
@@ -60,6 +65,108 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
+
+# TODO: Move to common utils or use existing quant utils to fetch model instances
+class TestHelperModules:
+    class Conv2dPropAnnotaton(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 3, 3)
+            self.linear = torch.nn.Linear(3, 3)
+
+        def forward(self, x):
+            x = self.conv(x)
+            x = x.view(-1, 3)
+            x = torch.nn.functional.hardtanh(x, -0.5, 0.5)
+            x = self.linear(x)
+            return x
+
+    class Conv2dWithObsSharingOps(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 3, 3)
+            self.hardtanh = torch.nn.Hardtanh()
+            self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+        def forward(self, x):
+            x = self.conv(x)
+            x = self.adaptive_avg_pool2d(x)
+            x = self.hardtanh(x)
+            x = torch.mean(x)
+            return x
+
+    class Conv2dWithTwoLinearPermute(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 16, 3)
+            self.linear1 = torch.nn.Linear(16, 8, bias=False)
+            self.linear2 = torch.nn.Linear(8, 8)
+
+        def forward(self, x):
+            conv_out = self.conv(x)
+            permute_out = torch.permute(conv_out, (0, 2, 3, 1))
+            return self.linear2(self.linear1(permute_out))
+
+    class Conv2dWithTwoLinear(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 16, 3)
+            self.linear1 = torch.nn.Linear(64, 8, bias=False)
+            self.linear2 = torch.nn.Linear(8, 8)
+
+        def forward(self, x):
+            conv_out = self.conv(x)
+            reshape_out = torch.reshape(conv_out, (2, 64))
+            return self.linear2(self.linear1(reshape_out))
+
+    class ConvLinearWPermute(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 8, 3)
+            self.linear1 = torch.nn.Linear(8, 8)
+
+        def forward(self, x):
+            conv_out = self.conv(x)
+            permute_out = torch.permute(conv_out, (0, 2, 3, 1))
+            return self.linear1(permute_out)
+
+    class TwoLinearModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear1 = torch.nn.Linear(8, 16, bias=False)
+            self.linear2 = torch.nn.Linear(16, 8)
+
+        def forward(self, x):
+            return self.linear2(self.linear1(x))
+
+    class ConvMaxPool2d(torch.nn.Module):
+        def __init__(self):
+            super(TestHelperModules.ConvMaxPool2d, self).__init__()
+            self.conv = torch.nn.Conv2d(2, 2, 1)
+            self.pool = torch.nn.MaxPool2d(1, 1)
+
+        def forward(self, x):
+            x = self.conv(x)
+            x = self.pool(x)
+            return x
+
+    class ConvWithBNRelu(torch.nn.Module):
+        def __init__(self, relu, bn=True, bias=True):
+            super().__init__()
+            self.conv = torch.nn.Conv2d(3, 3, 3, bias=bias)
+            if bn:
+                self.bn = torch.nn.BatchNorm2d(3)
+            else:
+                self.bn = torch.nn.Identity()
+            if relu:
+                self.relu = torch.nn.ReLU()
+            else:
+                self.relu = torch.nn.Identity()
+
+        def forward(self, x):
+            x = self.conv(x)
+            x = self.bn(x)
+            return self.relu(x)
 
 
 @skipIfNoQNNPACK
@@ -81,7 +188,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         expected_node_occurrence,
         expected_node_list=None,
         check_against_fx_quant=False,
-        fx_qconfig=None,
+        fx_qconfig_mapping=None,
     ):
 
         m_eager = model.eval()
@@ -110,7 +217,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
         )
         if check_against_fx_quant:
-            qconfig_mapping = QConfigMapping().set_global(fx_qconfig)
+            qconfig_mapping = fx_qconfig_mapping
             backend_config = get_executorch_backend_config()
             m_copy = copy.deepcopy(m_eager)
             m_fx = prepare_fx(
@@ -135,14 +242,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             self.assertTrue(torch.allclose(fx_quant_output, pt2_quant_output))
 
     def test_simple_quantizer(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x):
-                return self.conv(x)
-
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 for node in model.graph.nodes:
@@ -207,21 +306,14 @@ class TestQuantizePT2E(QuantizationTestCase):
             torch.ops.quantized_decomposed.quantize_per_tensor,
         ]
         self._test_quantizer(
-            M(), example_inputs, BackendAQuantizer(), node_occurrence, node_list
+            TestHelperModules.ConvWithBNRelu(relu=False, bn=False),
+            example_inputs,
+            BackendAQuantizer(),
+            node_occurrence,
+            node_list,
         )
 
     def test_max_pool2d_quantizer(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(2, 2, 1)
-                self.pool = torch.nn.MaxPool2d(1, 1)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.pool(x)
-                return x
-
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 act_qspec = QuantizationSpec(
@@ -298,7 +390,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             def get_supported_operators(cls) -> List[OperatorConfig]:
                 pass
 
-        m = M()
+        m = TestHelperModules.ConvMaxPool2d()
         x = torch.rand(1, 2, 14, 14)
         example_inputs = (x,)
         node_occurrence = {
@@ -319,18 +411,10 @@ class TestQuantizePT2E(QuantizationTestCase):
             torch.ops.quantized_decomposed.dequantize_per_tensor,
         ]
         self._test_quantizer(
-            M(), example_inputs, BackendAQuantizer(), node_occurrence, node_list
+            m, example_inputs, BackendAQuantizer(), node_occurrence, node_list
         )
 
     def test_derived_qspec(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x):
-                return self.conv(x)
-
         class BackendAQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 for node in model.graph.nodes:
@@ -405,7 +489,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             def get_supported_operators(cls) -> List[OperatorConfig]:
                 pass
 
-        m = M().eval()
+        m = TestHelperModules.ConvWithBNRelu(relu=False, bn=False).eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
         # program capture
@@ -503,14 +587,6 @@ class TestQuantizePT2E(QuantizationTestCase):
         )
 
     def test_qnnpack_quantizer_conv(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-
-            def forward(self, x):
-                return self.conv(x)
-
         quantizer = QNNPackQuantizer()
         operator_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
@@ -528,22 +604,19 @@ class TestQuantizePT2E(QuantizationTestCase):
             torch.ops.aten.convolution.default,
             torch.ops.quantized_decomposed.quantize_per_tensor,
         ]
-        self._test_quantizer(M(), example_inputs, quantizer, node_occurrence, node_list)
+        self._test_quantizer(
+            TestHelperModules.ConvWithBNRelu(relu=False, bn=False),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
 
     def test_qnnpack_quantizer_linear(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = torch.nn.Linear(8, 16, bias=False)
-                self.linear2 = torch.nn.Linear(16, 8)
-
-            def forward(self, x):
-                return self.linear2(self.linear1(x))
-
         quantizer = QNNPackQuantizer()
         operator_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
-        m_eager = M().eval()
+        m_eager = TestHelperModules.TwoLinearModule().eval()
 
         # Test with 2d inputs
         example_inputs_2d = (torch.randn(9, 8),)
@@ -556,25 +629,20 @@ class TestQuantizePT2E(QuantizationTestCase):
             torch.ops.quantized_decomposed.quantize_per_channel: 2,
             torch.ops.quantized_decomposed.dequantize_per_channel: 2,
         }
+        qconfig = default_per_channel_symmetric_qnnpack_qconfig
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
         for example_inputs in [example_inputs_2d, example_inputs_3d, example_inputs_4d]:
-            qconfig = default_per_channel_symmetric_qnnpack_qconfig
             self._test_quantizer(
-                m_eager, example_inputs, quantizer, node_occurrence, [], True, qconfig
+                m_eager,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                [],
+                True,
+                qconfig_mapping,
             )
 
     def test_qnnpack_quantizer_conv_linear_no_permute(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 16, 3)
-                self.linear1 = torch.nn.Linear(64, 8, bias=False)
-                self.linear2 = torch.nn.Linear(8, 8)
-
-            def forward(self, x):
-                conv_out = self.conv(x)
-                reshape_out = torch.reshape(conv_out, (2, 64))
-                return self.linear2(self.linear1(reshape_out))
-
         quantizer = QNNPackQuantizer()
         operator_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
@@ -586,37 +654,20 @@ class TestQuantizePT2E(QuantizationTestCase):
             torch.ops.quantized_decomposed.dequantize_per_channel: 3,
         }
         qconfig = default_per_channel_symmetric_qnnpack_qconfig
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
         # Test with 2d inputs
         example_inputs = (torch.randn(2, 3, 4, 4),)
         self._test_quantizer(
-            M(), example_inputs, quantizer, node_occurrence, [], True, qconfig
+            TestHelperModules.Conv2dWithTwoLinear(),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            [],
+            True,
+            qconfig_mapping,
         )
 
     def test_qnnpack_quantizer_conv_linear(self):
-        """
-        This test fails because linear decompositon changes due to the presence of
-        permute node. In the below linear 1 is decomposed as
-        %t_default : [#users=1] = call_function[target=torch.ops.aten.t.default](args = (%_param_constant2,), kwargs = {})
-        %clone_default : [#users=1] = call_function[target=torch.ops.aten.clone.default](args = (%permute_default,), kwargs = {memory_format: torch.contiguous_format})  # noqa: B950
-        %_unsafe_view_default : [#users=1] = call_function[target=torch.ops.aten._unsafe_view.default](args = (%clone_default, [8, 16]), kwargs = {})  # noqa: B950
-        %mm_default : [#users=1] = call_function[target=torch.ops.aten.mm.default](args = (%_unsafe_view_default, %t_default), kwargs = {})  # noqa: B950
-        %view_default : [#users=1] = call_function[target=torch.ops.aten.view.default](args = (%mm_default, [2, 2, 2, 8]), kwargs = {})  # noqa: B950
-
-        Note the presence of cline and unsafe_view. This is due to permute
-        """
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 16, 3)
-                self.linear1 = torch.nn.Linear(16, 8, bias=False)
-                self.linear2 = torch.nn.Linear(8, 8)
-
-            def forward(self, x):
-                conv_out = self.conv(x)
-                permute_out = torch.permute(conv_out, (0, 2, 3, 1))
-                return self.linear2(self.linear1(permute_out))
-
         quantizer = QNNPackQuantizer()
         operator_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
@@ -630,29 +681,22 @@ class TestQuantizePT2E(QuantizationTestCase):
             torch.ops.quantized_decomposed.dequantize_per_channel: 3,
         }
         qconfig = default_per_channel_symmetric_qnnpack_qconfig
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
         self._test_quantizer(
-            M(), example_inputs, quantizer, node_occurrence, [], True, qconfig
+            TestHelperModules.Conv2dWithTwoLinearPermute(),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            [],
+            True,
+            qconfig_mapping,
         )
 
     def test_qnnpack_quantizer_obs_sharing_ops(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.hardtanh = torch.nn.Hardtanh()
-                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.adaptive_avg_pool2d(x)
-                x = self.hardtanh(x)
-                x = torch.mean(x)
-                return x
-
         quantizer = QNNPackQuantizer()
         operator_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
-        m = M().eval()
+        m = TestHelperModules.Conv2dWithObsSharingOps().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
@@ -677,28 +721,13 @@ class TestQuantizePT2E(QuantizationTestCase):
             torch.ops.quantized_decomposed.quantize_per_tensor,
             torch.ops.quantized_decomposed.dequantize_per_tensor,
         ]
-        self._test_quantizer(M(), example_inputs, quantizer, node_occurrence, node_list)
+        self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
 
     def test_propagate_annotation(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.linear = torch.nn.Linear(3, 3)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = x.view(-1, 3)
-                x = torch.nn.functional.hardtanh(x, -0.5, 0.5)
-                x = self.linear(x)
-                return x
-
-        import torch.ao.quantization._pt2e.quantizer.qnnpack_quantizer as qq
-
         quantizer = QNNPackQuantizer()
-        operator_config = qq.get_symmetric_quantization_config(is_per_channel=True)
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
-        m = M().eval()
+        m = TestHelperModules.Conv2dPropAnnotaton().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
         # program capture
@@ -727,21 +756,12 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
     def test_qnnpack_quantizer_dynamic_linear(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = torch.nn.Linear(8, 16, bias=False)
-                self.linear2 = torch.nn.Linear(16, 8)
-
-            def forward(self, x):
-                return self.linear2(self.linear1(x))
-
         quantizer = QNNPackQuantizer()
         operator_config = get_symmetric_quantization_config(
             is_per_channel=True, is_dynamic=True
         )
         quantizer.set_global(operator_config)
-        m_eager = M().eval()
+        m_eager = TestHelperModules.TwoLinearModule().eval()
 
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
@@ -762,33 +782,29 @@ class TestQuantizePT2E(QuantizationTestCase):
             activation=act_affine_quant_obs,
             weight=per_channel_weight_observer_range_neg_127_to_127,
         )
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
         # Test with 2d inputs
         example_inputs_2d = (torch.randn(9, 8),)
         example_inputs_4d = (torch.randn(9, 10, 11, 8),)
         for example_inputs in [example_inputs_2d, example_inputs_4d]:
             # program capture
             self._test_quantizer(
-                m_eager, example_inputs, quantizer, node_occurrence, [], True, qconfig
+                m_eager,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                [],
+                True,
+                qconfig_mapping,
             )
 
     def test_qnnpack_quantizer_dynamic_linear_with_conv(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 8, 3)
-                self.linear1 = torch.nn.Linear(8, 8)
-
-            def forward(self, x):
-                conv_out = self.conv(x)
-                permute_out = torch.permute(conv_out, (0, 2, 3, 1))
-                return self.linear1(permute_out)
-
         quantizer = QNNPackQuantizer()
         operator_config = get_symmetric_quantization_config(
             is_per_channel=False, is_dynamic=True
         )
         quantizer.set_global(operator_config)
-        m_eager = M().eval()
+        m_eager = TestHelperModules.ConvLinearWPermute().eval()
 
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
@@ -811,28 +827,105 @@ class TestQuantizePT2E(QuantizationTestCase):
         )
         # Test with 2d inputs
         example_inputs = (torch.randn(2, 3, 4, 4),)
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
         self._test_quantizer(
-            m_eager, example_inputs, quantizer, node_occurrence, [], True, qconfig
+            m_eager,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            [],
+            True,
+            qconfig_mapping,
+        )
+
+    def test_composable_quantizer_linear_conv(self):
+        dynamic_quantizer = QNNPackQuantizer()
+        operator_config_dynamic = get_symmetric_quantization_config(
+            is_per_channel=False, is_dynamic=True
+        )
+        dynamic_quantizer.set_global(operator_config_dynamic)
+        static_quantizer = QNNPackQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        static_quantizer.set_global(operator_config)
+        # Note that dynamic quantization must be applied first here.
+        # this is because static quantizer also quantizes linear with static qspec
+        # and if we apply static_quantizer first then dynamic_quantizer cannot be applied
+        composable_quantizer = ComposableQuantizer(
+            [dynamic_quantizer, static_quantizer]
+        )
+        m_eager = TestHelperModules.ConvLinearWPermute().eval()
+
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+            torch.ops.quantized_decomposed.quantize_per_tensor: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor: 3,
+            torch.ops.quantized_decomposed.quantize_per_channel: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel: 1,
+        }
+        act_affine_quant_obs = observer.PlaceholderObserver.with_args(
+            dtype=torch.qint8,
+            qscheme=torch.per_tensor_affine,
+            quant_min=-128,
+            quant_max=127,
+            eps=2**-12,
+            is_dynamic=True,
+        )
+        dynamic_qconfig = QConfig(
+            activation=act_affine_quant_obs,
+            weight=weight_observer_range_neg_127_to_127,
+        )
+        # Test with 2d inputs
+        example_inputs = (torch.randn(2, 3, 4, 4),)
+        qconfig = default_per_channel_symmetric_qnnpack_qconfig
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        qconfig_mapping.set_object_type(torch.nn.Linear, dynamic_qconfig)
+        self._test_quantizer(
+            m_eager,
+            example_inputs,
+            composable_quantizer,
+            node_occurrence,
+            [],
+            True,
+            qconfig_mapping,
+        )
+
+    def test_composable_quantizer_throw(self):
+        class BadQuantizer(Quantizer):
+            def annotate(self, gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for n in gm.graph.nodes:
+                    n.meta["quantization_annotation"] = None
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+            @classmethod
+            def get_supported_operators(cls) -> List[OperatorConfig]:
+                pass
+
+        quantizer = QNNPackQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        bad_quantizer = BadQuantizer()
+        composable_quantizer = ComposableQuantizer([quantizer, bad_quantizer])
+        m_eager = TestHelperModules.ConvLinearWPermute().eval()
+        example_inputs = (torch.randn(2, 3, 4, 4),)
+        self.assertRaises(
+            RuntimeError,
+            lambda: self._test_quantizer(
+                m_eager, example_inputs, composable_quantizer, {}
+            ),
         )
 
     def test_prepare_qat_conv_bn_fusion(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn = torch.nn.BatchNorm2d(3)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                return x
-
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        m = TestHelperModules.ConvWithBNRelu(relu=False)
         self._verify_symmetric_qnnpack_qat_graph(
-            M(), example_inputs, is_per_channel=False, has_relu=False
+            m, example_inputs, is_per_channel=False, has_relu=False
         )
+        m = TestHelperModules.ConvWithBNRelu(relu=False)
         self._verify_symmetric_qnnpack_qat_graph(
-            M(), example_inputs, is_per_channel=True, has_relu=False
+            m, example_inputs, is_per_channel=True, has_relu=False
         )
 
     def test_prepare_qat_conv_bn_fusion_constant_args(self):
@@ -872,21 +965,6 @@ class TestQuantizePT2E(QuantizationTestCase):
         )
 
     def test_prepare_qat_conv_bn_fusion_no_conv_bias(self):
-        class M1(torch.nn.Module):
-            """
-            Single conv + BN with no conv bias.
-            """
-
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(3, 3, 3, bias=False)
-                self.bn1 = torch.nn.BatchNorm2d(3)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.bn1(x)
-                return x
-
         class M2(torch.nn.Module):
             """
             Mixed conv + BN with and without conv bias.
@@ -906,18 +984,22 @@ class TestQuantizePT2E(QuantizationTestCase):
                 x = self.bn2(x)
                 return x
 
+        m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
         example_inputs = (torch.randn(3, 3, 5, 5),)
         self._verify_symmetric_qnnpack_qat_graph(
-            M1(), example_inputs, is_per_channel=False, has_relu=False, has_bias=False
+            m1, example_inputs, is_per_channel=False, has_relu=False, has_bias=False
         )
+        m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
         self._verify_symmetric_qnnpack_qat_graph(
-            M1(), example_inputs, is_per_channel=True, has_relu=False, has_bias=False
+            m1, example_inputs, is_per_channel=True, has_relu=False, has_bias=False
         )
+        m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
         self._verify_symmetric_qnnpack_qat_numerics(
-            M1(), example_inputs, is_per_channel=False
+            m1, example_inputs, is_per_channel=False
         )
+        m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
         self._verify_symmetric_qnnpack_qat_numerics(
-            M1(), example_inputs, is_per_channel=True
+            m1, example_inputs, is_per_channel=True
         )
         self._verify_symmetric_qnnpack_qat_numerics(
             M2(), example_inputs, is_per_channel=False
@@ -927,25 +1009,14 @@ class TestQuantizePT2E(QuantizationTestCase):
         )
 
     def test_prepare_qat_conv_bn_relu_fusion(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn = torch.nn.BatchNorm2d(3)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                x = self.relu(x)
-                return x
-
+        m1 = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_qnnpack_qat_graph(
-            M(), example_inputs, is_per_channel=False, has_relu=True
+            m1, example_inputs, is_per_channel=False, has_relu=True
         )
+        m1 = TestHelperModules.ConvWithBNRelu(relu=True)
         self._verify_symmetric_qnnpack_qat_graph(
-            M(), example_inputs, is_per_channel=True, has_relu=True
+            m1, example_inputs, is_per_channel=True, has_relu=True
         )
 
     def test_prepare_qat_conv_bn_fusion_getitem_placeholder(self):
@@ -1021,10 +1092,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         original_conv_bn_getitem_meta = original_conv_bn_getitem_node.meta[
             "quantization_annotation"
         ]
-        maxpool_getitem_meta = maxpool_getitem_node.meta["quantization_annotation"]
         conv_bn_getitem_meta = conv_bn_getitem_node.meta["quantization_annotation"]
         self.assertEqual(conv_bn_getitem_meta, original_conv_bn_getitem_meta)
-        self.assertNotEqual(conv_bn_getitem_meta, maxpool_getitem_meta)
 
     def _verify_symmetric_qnnpack_qat_graph(
         self,
@@ -1163,46 +1232,25 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertEqual(eps, 1e-5)
 
     # TODO: merge these numerics tests with the graph tests above
-    def test_prepare_qat_conv_bn_numerics(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn = torch.nn.BatchNorm2d(3)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                return x
-
+    def test_qat_conv_bn_numerics(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=False)
         example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=False
+            m, example_inputs, is_per_channel=False, verify_convert=True,
         )
         self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=True
+            m, example_inputs, is_per_channel=True, verify_convert=True,
         )
 
-    def test_prepare_qat_conv_bn_relu_numerics(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn = torch.nn.BatchNorm2d(3)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                x = self.relu(x)
-                return x
-
+    def test_qat_conv_bn_relu_numerics(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        # TODO: verify convert numerics in a future PR
         self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=False
+            m, example_inputs, is_per_channel=False, verify_convert=False,
         )
         self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=True
+            m, example_inputs, is_per_channel=True, verify_convert=False,
         )
 
     def _verify_symmetric_qnnpack_qat_numerics(
@@ -1256,33 +1304,15 @@ class TestQuantizePT2E(QuantizationTestCase):
         self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
         if verify_convert:
+            model_pt2e.eval()
             model_pt2e = convert_pt2e(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
-
+            model_fx.eval()
             model_fx = _convert_to_reference_decomposed_fx(
-                model_fx, backend_config=backend_config
+                model_fx, backend_config=backend_config,
             )
             quant_result_fx = model_fx(*example_inputs)
-            self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
-
-    def test_convert_qat_conv_bn_numerics(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.bn = torch.nn.BatchNorm2d(3)
-
-            def forward(self, x):
-                x = self.conv(x)
-                x = self.bn(x)
-                return x
-
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-        self._verify_symmetric_qnnpack_qat_numerics(
-            M(), example_inputs, is_per_channel=False
-        )
-        # TODO: enable in a separate PR
-        # self._verify_symmetric_qnnpack_qat_numerics(M(), example_inputs, is_per_channel=True)
+            self.assertEqual(quant_result_pt2e, quant_result_fx)
 
 
 class TestQuantizePT2EModels(QuantizationTestCase):
