@@ -47,7 +47,6 @@ namespace c10 {
   _(PrivateUse3, extra)                         \
   _(Meta, extra)
 
-
 // WARNING!  If we add a new per-backend functionality key that has higher
 // priority than Autograd, then make sure you update EndOfRuntimeBackendKeys
 
