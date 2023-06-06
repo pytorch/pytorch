@@ -862,7 +862,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
         self.supports_intermediate_hooks = False
-        self.expr_printer = torch._inductor.codegen.cpp.cexpr
+
+        from .cpp import cexpr
+
+        self.expr_printer = cexpr
 
     def write_header(self):
         if V.graph.aot_mode:
