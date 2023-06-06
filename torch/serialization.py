@@ -884,16 +884,14 @@ def load(
                         return _load(opened_zipfile,
                                      map_location,
                                      _weights_only_unpickler,
-                                     'data.pkl',
-                                     overall_storage,
+                                     overall_storage=overall_storage,
                                      **pickle_load_args)
                     except RuntimeError as e:
                         raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
                 return _load(opened_zipfile,
                              map_location,
                              pickle_module,
-                             'data.pkl',
-                             overall_storage,
+                             overall_storage=overall_storage,
                              **pickle_load_args)
         if weights_only:
             try:
