@@ -1159,7 +1159,8 @@ struct HelperInterpLinear : public HelperInterpBase {
     int64_t ndims,
     int64_t reshape_dim,
     bool align_corners,
-    const c10::optional<double> opt_scale
+    const c10::optional<double> opt_scale,
+    bool antialias
   ) {
 
     std::vector<Tensor> indices_weights;
@@ -1172,6 +1173,7 @@ struct HelperInterpLinear : public HelperInterpBase {
         auto interp_size = HelperInterpLinear::interp_size;
         int unused;
         scalar_t unused_2;
+        auto align_corners_delta = (align_corners && !antialias) ? 0.5 : 0.0;
 
         std::tie(indices_weights, unused, unused_2) = HelperInterpLinear::_compute_indices_weights_aa<scalar_t>(
             input_size,
@@ -1182,8 +1184,8 @@ struct HelperInterpLinear : public HelperInterpBase {
             scale,
             interp_size,
             &HelperInterpLinear::aa_filter<scalar_t>,
-            /*antialias=*/true,
-            /*align_corners_delta=*/0.0);
+            /*antialias=*/antialias,
+            /*align_corners_delta=*/align_corners_delta);
       }
     );
     return indices_weights;
@@ -1293,7 +1295,8 @@ struct HelperInterpCubic : public HelperInterpBase {
     int64_t ndims,
     int64_t reshape_dim,
     bool align_corners,
-    const c10::optional<double> opt_scale
+    const c10::optional<double> opt_scale,
+    bool antialias
   ) {
 
     std::vector<Tensor> indices_weights;
@@ -1306,6 +1309,7 @@ struct HelperInterpCubic : public HelperInterpBase {
         auto interp_size = HelperInterpCubic::interp_size;
         int unused;
         scalar_t unused_2;
+        auto align_corners_delta = (align_corners && !antialias) ? 0.5 : 0.0;
 
         std::tie(indices_weights, unused, unused_2) = HelperInterpCubic::_compute_indices_weights_aa<scalar_t>(
             input_size,
@@ -1316,8 +1320,8 @@ struct HelperInterpCubic : public HelperInterpBase {
             scale,
             interp_size,
             &HelperInterpCubic::aa_filter<scalar_t>,
-            /*antialias=*/true,
-            /*align_corners_delta*/0.0);
+            /*antialias=*/antialias,
+            /*align_corners_delta*/align_corners_delta);
       }
     );
     return indices_weights;
@@ -1475,9 +1479,9 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
   unsigned int weights_precision = 0;
   int unused;
 
-  if (input_scalar_type == at::kByte) {
+  if (F::interp_size == 2 && input_scalar_type == at::kByte) {
+    // This is special branch to provide uint8 dtype support for bilinear mode only
     std::tie(indices_weights, unused, weights_precision) =
-      // TODO: change that to F:: once / if bicubic mode supports uint8 after all
       HelperInterpLinear::compute_indices_int16_weights_aa(
         input.size(interp_dim), oshape[interp_dim],
         input.stride(interp_dim) * input.element_size(),
@@ -1485,12 +1489,12 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
         antialias);
     TORCH_INTERNAL_ASSERT(weights_precision > 0);
   } else {
-    TORCH_INTERNAL_ASSERT(antialias);
     indices_weights =
       F::compute_indices_weights_aa(
         input_scalar_type, input.size(interp_dim), oshape[interp_dim],
         input.stride(interp_dim) * input.element_size(),
-        input.dim(), interp_dim, align_corners, scales[interp_dim - 2]);
+        input.dim(), interp_dim, align_corners, scales[interp_dim - 2],
+        antialias);
   }
 
   TensorIteratorConfig config;
@@ -1801,6 +1805,11 @@ void upsample_bicubic2d_kernel_impl(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
+
+  // We explicitly checking for non-supported uint8 dtype
+  TORCH_CHECK(input.scalar_type() != at::kByte,
+      "'upsample_bicubic2d_aa_kernel_impl' not implemented for 'Byte'");
+
   upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
     output, input, align_corners, {scales_h, scales_w});
 }
@@ -1811,6 +1820,10 @@ void upsample_bicubic2d_aa_kernel_impl(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
+
+  // We explicitly checking for non-supported uint8 dtype
+  TORCH_CHECK(input.scalar_type() != at::kByte,
+      "'upsample_bicubic2d_aa_kernel_impl' not implemented for 'Byte'");
 
   separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
     output, input, align_corners, {scales_h, scales_w},

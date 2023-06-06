@@ -16448,6 +16448,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_renorm,
            error_inputs_func=error_inputs_renorm,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # RuntimeError: Difference from float64 is larger with decomposition
                # linalg_vector_norm.default than original on output 0.
@@ -17581,12 +17583,6 @@ op_db: List[OpInfo] = [
                     torch.bfloat16: tol(atol=1e-2, rtol=1e-2),
                 }),
                 'TestUnaryUfuncs'),
-        ),
-        skips=(
-            # Error: input types 'tensor<20xf16>' and 'tensor<1xf32>' are not broadcast compatible
-            # See issue: https://github.com/pytorch/pytorch/issues/101946
-            DecorateInfo(unittest.skip('Skipped!'), "TestConsistency", "test_output_match", dtypes=(torch.float16,),),
-            DecorateInfo(unittest.skip('Skipped!'), "TestConsistency", "test_output_grad_match", dtypes=(torch.float16,),),
         ),
     ),
     OpInfo(
