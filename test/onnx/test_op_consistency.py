@@ -56,6 +56,9 @@ TESTED_OPS: frozenset[str] = frozenset(
     [
         "atan",
         "atan2",
+        # "atleast_1d",  # How to support list input?
+        # "atleast_2d",  # How to support list input?
+        # "atleast_3d",  # How to support list input?
         "broadcast_to",
         "ceil",
         "expand",
@@ -192,11 +195,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "unflatten",
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
-    ),
-    xfail(
-        "vstack",
-        matcher=lambda sample: len(sample.input[0].shape) < 2,
-        reason="fixme: Need aten::at_least2d supported",
     ),
 )
 

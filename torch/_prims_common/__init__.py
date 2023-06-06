@@ -1485,7 +1485,7 @@ def make_contiguous_strides_for(
 
 
 def make_channels_last_1d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
-    check(
+    torch._check(
         len(shape) == 3,
         lambda: "Only tensors of rank 3 can use the channels_last_1d memory format",
     )

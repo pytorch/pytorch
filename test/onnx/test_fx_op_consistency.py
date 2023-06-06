@@ -106,7 +106,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "fmod",
         "full",
         "full_like",
-        "hstack",
+        "hstack",  # aten::cat is invoked instead
         "index_put",
         "logit",
         # "new_empty",  non-deterministic
@@ -131,7 +131,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "scatter_add",
         "scatter_reduce",
         "unflatten",
-        "vstack",  # TODO: Why this can pass all tests, FX graph auto promote?
+        "vstack",  # aten::cat is invoked instead
     ]
 )
 
