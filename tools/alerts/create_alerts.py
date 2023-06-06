@@ -211,7 +211,6 @@ def classify_jobs(
     :param filtered_jobs_names: set of job names to actually consider
     :return:
     """
-    print(sha_grid[:1])
     job_data = map_job_data(all_job_names, sha_grid)
     job_statuses: List[JobStatus] = []
     for job in job_data:
