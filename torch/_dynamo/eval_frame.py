@@ -7,7 +7,6 @@ import functools
 import inspect
 import logging
 import os
-import re
 import sys
 import textwrap
 import threading
@@ -143,6 +142,12 @@ class OptimizedModule(torch.nn.Module):
             assert len(kwargs) == 0
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._forward(*args, **kwargs)
+
+    def __dir__(self):
+        orig_mod_attrs = self._orig_mod.__dir__()
+        return orig_mod_attrs + [
+            attr for attr in super().__dir__() if attr not in orig_mod_attrs
+        ]
 
 
 def remove_from_cache(f):
@@ -703,6 +708,14 @@ class Constraint(ConstraintTarget):
             "dim": self.dim,
             "min": self.constraint_range.vr.lower,
             "max": self.constraint_range.vr.upper,
+            "shared": (
+                None
+                if self.shared is None
+                else {
+                    "t_id": self.shared.t_id,
+                    "dim": self.shared.dim,
+                }
+            ),
         }
 
     def __eq__(self, other):
@@ -723,15 +736,32 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
-        arg_len: int,
+        flat_args: Tuple[Any],
         matched_input_elements_positions: List[int],
         matched_output_elements_positions: List[int],
+        example_fake_inputs: List[torch.Tensor],
     ):
         super().__init__(m)
-        self.new_args = [
-            super(FlattenInputOutputSignature, self).placeholder(f"arg{i}", (), {})
-            for i in range(0, arg_len)
-        ]
+
+        matched_input_elements_to_fake = {
+            val: example_fake_inputs[ix]
+            for ix, val in enumerate(matched_input_elements_positions)
+        }
+        fake_mode = _guards.detect_fake_mode(example_fake_inputs)
+
+        self.new_args = []
+        for i in range(0, len(flat_args)):
+            arg = super(FlattenInputOutputSignature, self).placeholder(
+                f"arg{i}", (), {}
+            )
+            if i in matched_input_elements_to_fake:
+                arg.node.meta["val"] = matched_input_elements_to_fake[i]
+            else:
+                # Fill node.mata["val"] with faketensor from the input,
+                # if it's not found in matched_input_elements_positions
+                if fake_mode is not None and isinstance(flat_args[i], torch.Tensor):
+                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+            self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
         self.matched_output_elements_positions = matched_output_elements_positions
 
@@ -921,7 +951,9 @@ def export(
             constraint_violation_error = e
     remove_from_cache(f)
 
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
+    if (
+        shape_env := getattr(fake_mode, "shape_env", None)
+    ) is not None and not skipfiles.check(inspect.getsourcefile(call_to_inspect)):
         dim_constraints = shape_env.dim_constraints
         assert dim_constraints is not None
         dim_constraints.solve()
@@ -956,14 +988,13 @@ def export(
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
+    # NB: This is mostly hitting the cache; Dynamo already converted these
+    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
     assert graph_captured_result is not None
     flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
-
-    # NB: This is mostly hitting the cache; Dynamo already converted these
-    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
         memo: Dict[torch.Tensor, torch.Tensor] = {}
@@ -1016,9 +1047,10 @@ def export(
 
     new_graph = FlattenInputOutputSignature(
         graph,
-        len(flat_args),
+        flat_args,
         matched_input_elements_positions,
         matched_output_elements_positions,
+        example_fake_inputs,
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
@@ -1027,14 +1059,6 @@ def export(
         if constraints
         else []
     )
-
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        # Inline constraints added by users correspond to unbacked symbols in shape_env,
-        new_graph.meta["inline_constraints"] = {
-            k: v
-            for k, v in shape_env.var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
@@ -1124,9 +1148,6 @@ def export(
     )
 
     new_graph.recompile()
-    # TODO remove this once Executorch uses proper functionalization
-    new_graph._matched_input_elements_positions = matched_input_elements_positions
-
     return (new_graph, out_guards)
 
 
@@ -1252,13 +1273,7 @@ class TorchPatcher:
             if opt in excluded_opts:
                 opt.step = disable(opt.step)
 
-            opt._cuda_graph_capture_health_check = disable(
-                opt._cuda_graph_capture_health_check
-            )
             opt.zero_grad = disable(opt.zero_grad)
-
-            if hasattr(opt, "_init_group"):
-                opt._init_group = disable(opt._init_group)
 
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook

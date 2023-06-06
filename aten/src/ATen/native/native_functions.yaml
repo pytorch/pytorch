@@ -2521,21 +2521,21 @@
   device_guard: False
 
 # decomposes to eye.m
-- func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: eye(SymInt n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: eye
 
-- func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: eye.m(SymInt n, SymInt m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: eye
 
-- func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
+- func: eye.out(SymInt n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
     MPS: eye_out_mps
 
-- func: eye.m_out(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+- func: eye.m_out(SymInt n, SymInt m, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
@@ -2988,6 +2988,12 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: index_put
+
+- func: _unsafe_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  device_check: NoCheck   # delegate to _index_put_impl_ after clone, which leverages TensorIterator
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _unsafe_index_put
 
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3565,6 +3571,7 @@
   structured: True
   dispatch:
     CPU, CUDA: aminmax_out
+    MPS: aminmax_out_mps
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
   dispatch:
@@ -3661,6 +3668,11 @@
     QuantizedCPU: quantized_max_pool2d
     QuantizedCUDA: quantized_max_pool2d_cudnn
   autogen: quantized_max_pool2d.out
+
+- func: quantized_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
+  dispatch:
+    QuantizedCPU: quantized_max_pool3d
+  autogen: quantized_max_pool3d.out
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
@@ -8823,8 +8835,10 @@
     CPU, CUDA: linalg_solve_triangular
     MPS: linalg_solve_triangular_mps
 
-- func: linalg_vander(Tensor x, *, int? N=None) -> Tensor
+- func: linalg_vander(Tensor x, *, SymInt? N=None) -> Tensor
   python_module: linalg
+  dispatch:
+    CompositeImplicitAutograd: linalg_vander_symint
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
@@ -14120,7 +14134,7 @@
     CUDA: _efficient_attention_forward
   tags: nondeterministic_seeded
 
-- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor out, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int max_seqlen_k, int max_seqlen_q, Tensor logsumexp, float dropout_p, Tensor rng_seed, Tensor rng_offset, int custom_mask_type, *, float? scale=None) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor out, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int max_seqlen_k, int max_seqlen_q, Tensor logsumexp, float dropout_p, Tensor rng_seed, Tensor rng_offset, int custom_mask_type, *, float? scale=None, int? num_splits_key=None) -> (Tensor, Tensor, Tensor, Tensor)
   device_check: NoCheck
   variants: function
   dispatch:
