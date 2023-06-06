@@ -18,6 +18,7 @@ from torch.ao.quantization import (
 from torch.ao.quantization._pt2e.quantizer import (
     ComposableQuantizer,
     DerivedQuantizationSpec,
+    EmbeddingQuantizer,
     OperatorConfig,
     QNNPackQuantizer,
     QuantizationAnnotation,
@@ -47,6 +48,7 @@ from torch.ao.quantization.qconfig import (
     default_per_channel_symmetric_qnnpack_qat_qconfig,
     default_per_channel_symmetric_qnnpack_qconfig,
     default_symmetric_qnnpack_qat_qconfig,
+    float_qparams_weight_only_qconfig,
     per_channel_weight_observer_range_neg_127_to_127,
     QConfig,
     weight_observer_range_neg_127_to_127,
@@ -168,6 +170,14 @@ class TestHelperModules:
             x = self.bn(x)
             return self.relu(x)
 
+    class EmbeddingModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
+
+        def forward(self, indices):
+            return self.emb(indices)
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
@@ -206,6 +216,7 @@ class TestQuantizePT2E(QuantizationTestCase):
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
+        print(m)
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
@@ -915,6 +926,74 @@ class TestQuantizePT2E(QuantizationTestCase):
             lambda: self._test_quantizer(
                 m_eager, example_inputs, composable_quantizer, {}
             ),
+        )
+
+    def test_embedding_quantizer(self):
+        m_eager = TestHelperModules.EmbeddingModule().eval()
+        indices = torch.tensor(
+            [
+                9,
+                6,
+                5,
+                7,
+                8,
+                8,
+                9,
+                2,
+                8,
+                6,
+                6,
+                9,
+                1,
+                6,
+                8,
+                8,
+                3,
+                2,
+                3,
+                6,
+                3,
+                6,
+                5,
+                7,
+                0,
+                8,
+                4,
+                6,
+                5,
+                8,
+                2,
+                3,
+            ]
+        )
+        example_inputs = (indices,)
+
+        quantizer = EmbeddingQuantizer()
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_channel: 1,
+            torch.ops.quantized_decomposed.dequantize_per_channel: 1,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_channel,
+            torch.ops.quantized_decomposed.dequantize_per_channel,
+            torch.ops.aten.embedding.default,
+        ]
+        # Compare against short term workflow
+        # cannot compare against fx quant because of the numerical differences coming
+        # from quantize and dequantize ops
+        qconfig = default_per_channel_symmetric_qnnpack_qconfig
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        qconfig_mapping = qconfig_mapping.set_object_type(
+            torch.nn.Embedding, float_qparams_weight_only_qconfig
+        )
+        self._test_quantizer(
+            m_eager,
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+            True,
+            qconfig_mapping,
         )
 
     def test_prepare_qat_conv_bn_fusion(self):
