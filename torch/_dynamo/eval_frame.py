@@ -795,7 +795,6 @@ def export(
     tracing_mode: str = "symbolic",
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
-    functionalize: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -819,9 +818,6 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
-
-        functionalize (bool): If True, the resulting aten graph module will be functional. You will need to
-        set aten_graph=True to see the effect. By default, this flag will be false.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -849,12 +845,6 @@ def export(
     f = innermost_fn(f)
     call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
     original_signature = inspect.signature(call_to_inspect)
-
-    if functionalize and not aten_graph:
-        raise UserError(
-            UserErrorType.ANTI_PATTERN,
-            "TorchDynamo won't functionalize non-aten graphs. Please set `functionalize` to true",
-        )
 
     graph = None
     out_guards = None
@@ -1015,19 +1005,7 @@ def export(
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
-                if functionalize:
-                    torch._enable_functionalization(reapply_views=True)
-                    try:
-                        return pytree.tree_map(
-                            from_fun,
-                            torch.fx.Interpreter(graph).run(
-                                *pytree.tree_map(to_fun, args)
-                            ),
-                        )
-                    finally:
-                        torch._disable_functionalization()
-                else:
-                    return torch.fx.Interpreter(graph).run(*args)
+                return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
             try:
