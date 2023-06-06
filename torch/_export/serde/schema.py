@@ -13,10 +13,6 @@ class _Union:
         obj = cls(**{**{f.name: None for f in fields(cls)}, **kwargs})
         return obj
 
-    @classmethod
-    def fields(cls):
-        return Enum("FieldEnum", {f.name: f.name for f in fields(cls)})
-
     def __post_init__(self):
         assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1
 
