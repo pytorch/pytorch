@@ -46,7 +46,7 @@ __all__ = [
 ]
 
 
-def reset() -> None:
+def reset():
     """Clear all compile caches and restore initial state"""
     for weak_code in convert_frame.input_codes.seen + convert_frame.output_codes.seen:
         code = weak_code()
