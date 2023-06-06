@@ -15,7 +15,6 @@ import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
-    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -23,6 +22,7 @@ from torch._prims_common import (
     is_integer_dtype,
 )
 from torch._subclasses.meta_utils import MetaConverter
+from torch._utils import render_call
 from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -558,13 +558,17 @@ def index_tensor(fake_mode, func, *args, **kwargs):
 # takes in multiple-devices, dont default to default device handling
 @register_op_impl(aten.index_put.default)
 @register_op_impl(aten._unsafe_index_put.default)
-def index_put(fake_mode, func, *args, **kwargs):
+@register_op_impl(aten.copy.default)
+@register_op_impl(aten.slice_scatter.default)
+def multi_device_op_default(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
 
-# same with index_put, but return the input
+# same with multi_device_op_default, but return the input
 @register_op_impl(aten.index_put_.default)
-def index_put_(fake_mode, func, *args, **kwargs):
+@register_op_impl(aten.copy.out)
+@register_op_impl(aten.slice_scatter.out)
+def multi_device_op_out(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
@@ -934,11 +938,17 @@ class FakeTensor(torch.Tensor):
         # on
         if not fake_mode.allow_meta:
             assert device.type != "meta"
-        # normalize cuda device.
+        # normalize device.
         if device.type == "cuda":
             init_cuda_context()
-            if device.index is None:
-                device = torch.device(f"cuda:{torch.cuda.current_device()}")
+
+        if (
+            device.type in ["cuda", "hpu", torch._C._get_privateuse1_backend_name()]
+            and device.index is None
+        ):
+            device = torch.device(
+                f"{device.type}:{getattr(torch, device.type).current_device()}"
+            )
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
@@ -1417,12 +1427,12 @@ class FakeTensorMode(TorchDispatchMode):
             if not isinstance(x, FakeTensor):
                 if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
                     raise Exception(
-                        f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {func}(*{args}, **{kwargs})"
+                        f"Can't call metadata mutating ops on non-Fake Tensor inputs. Found in {render_call(func, args, kwargs)}"
                     )
                 if not self.allow_non_fake_inputs:
                     raise Exception(
                         f"Please convert all Tensors to FakeTensors first or instantiate FakeTensorMode "
-                        f"with 'allow_non_fake_inputs'. Found in {func}(*{args}, **{kwargs}) "
+                        f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
                     )
 
                 x = converter(self, x)
@@ -1466,7 +1476,7 @@ class FakeTensorMode(TorchDispatchMode):
                 ) = FakeTensor._find_common_device(func, args, kwargs)
 
             if isinstance(e, FakeTensor):
-                check(
+                torch._check(
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )

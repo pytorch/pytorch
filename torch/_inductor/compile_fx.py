@@ -29,9 +29,10 @@ from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import post_grad_passes
+from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
+from .pattern_matcher import clone_graph
 from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
 
@@ -193,7 +194,12 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                     "cpp_wrapper": False,
                     "cudagraphs": False,
                 }
-                compiled = inner_compile(gm, example_inputs, **kwargs_patched)
+                # clone_graph(gm) makes sure no graph modification from the first pass will
+                # leak to the second pass. It does increase memory pressure, but the problem
+                # can be alleviated once we have parameters as FakeTensor.
+                compiled = inner_compile(
+                    clone_graph(gm), example_inputs, **kwargs_patched
+                )
                 if detect_fake_mode(example_inputs):
 
                     def materialize(x):
@@ -234,6 +240,7 @@ def compile_fx_inner(
     aot_mode=False,
     is_inference=False,
     boxed_forward_device_index=None,
+    user_visible_outputs=frozenset(),
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -257,6 +264,24 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
+
+    # Convert view to reshape in the graph. This is necessary primarily for
+    # layout optimization. Do it unconditionally for uniformity.
+    #
+    # It's needed because when we do layout optimization, an contiguous tensor
+    # in eager mode may becomes a channels last tensor. A view op previously
+    # can be applied to the contiguous tensor may not be able to be applied
+    # on the channels tensor any more. An error like
+    #   RuntimeError: view size is not compatible with input tensor's size and stride
+    #   (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+    # will be printed.
+    #
+    # Replace view op to reshape op in this case.
+    # As an example, timm_resnest/botnet26t_256/convnext_base etc. will fail if we don't do this.
+    #
+    # Also this has to be done before FakeTensorProp below to avoid the failed
+    # .view() call.
+    view_to_reshape(gm)
 
     fake_mode = detect_fake_mode(example_inputs)
     if not fake_mode:
@@ -285,6 +310,7 @@ def compile_fx_inner(
             graph_id=graph_id,
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
+            user_visible_outputs=user_visible_outputs,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
@@ -689,6 +715,51 @@ def compile_fx(
 
         num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
         fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
+        user_visible_outputs = set()
+
+        if config.keep_output_stride:
+            *_, model_outputs_node = model.graph.nodes
+            assert model_outputs_node.op == "output"
+            model_outputs, _ = pytree.tree_flatten(model_outputs_node.args)
+            num_model_outputs = len(model_outputs)
+
+            if isinstance(model_, torch.fx.GraphModule):
+                *_, orig_model_outputs_node = model_.graph.nodes
+                assert orig_model_outputs_node.op == "output"
+                orig_model_outputs, _ = pytree.tree_flatten(
+                    orig_model_outputs_node.args
+                )
+                num_orig_model_outputs = len(orig_model_outputs)
+                original_output_start_index = model.meta.get(
+                    "original_output_start_index", 0
+                )
+            else:
+                num_orig_model_outputs = num_model_outputs
+                original_output_start_index = 0
+
+            assert num_orig_model_outputs <= num_model_outputs
+
+            # We makes the following assumption
+            # For inference
+            #   len(orig_model_outputs) == len(model_outputs)
+            # For training
+            #   len(orig_model_outputs) <= len(model_outputs)
+            # During training, most of the time the model_outputs starts with
+            # orignal module's outputs followed by saved activations.
+            # But this can be not true if the model have inplace updated tensors.
+            # AOTAutograd will make those tensors being returned before the orignal
+            # module's output.
+            # To make things safe, we'll use original_output_start_index field
+            # set by AOTAutograd to decide where the original module outputs start.
+
+            user_visible_outputs = {
+                n.name
+                for n in model_outputs[
+                    original_output_start_index : original_output_start_index
+                    + num_orig_model_outputs
+                ]
+            }
+
         return inner_compile(
             model,
             example_inputs,
@@ -697,6 +768,7 @@ def compile_fx(
             graph_id=graph_id,
             is_inference=is_inference,
             boxed_forward_device_index=forward_device,
+            user_visible_outputs=user_visible_outputs,
         )
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
