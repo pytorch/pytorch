@@ -258,7 +258,7 @@ class CachingAutotuner(KernelInterface):
         else:
             grid_x, grid_y, grid_z = grid
 
-        key = launcher.fn.module.split(".")[-1]
+        key = launcher.fn.fn.__qualname__  # unique kernel name
         params = {
             "mangled_name": launcher.bin.metadata["name"],
             "grid_x": grid_x,
@@ -334,7 +334,7 @@ class CachingAutotuner(KernelInterface):
 
         (launcher,) = self.launchers
         if launcher.store_cubin:
-            self.save_cuda_kernel(grid, stream, self.launchers[0])
+            self.save_cuda_kernel(grid, stream, launcher)
 
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
@@ -842,6 +842,18 @@ def template(num_stages, num_warps, meta, filename=None):
     """
     return cached_autotune(
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
+        meta=meta,
+        heuristic_type=HeuristicType.TEMPLATE,
+        filename=filename,
+    )
+
+
+def foreach(meta, num_warps, filename=None):
+    """
+    Compile a triton foreach kernel
+    """
+    return cached_autotune(
+        [triton.Config({}, num_stages=1, num_warps=num_warps)],
         meta=meta,
         heuristic_type=HeuristicType.TEMPLATE,
         filename=filename,

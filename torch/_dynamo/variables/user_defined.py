@@ -404,19 +404,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__func__, self, source=source, **options
             )
-        elif isinstance(subobj, types.FunctionType):
-            # Check `__dict__` to bypass the function descriptor protocol to
-            # accurately check for static method
-            is_staticmethod = name in type(self.value).__dict__ and isinstance(
-                type(self.value).__dict__[name], staticmethod
-            )
-            if is_staticmethod:
-                # Use `UserFunctionVariable` to avoid doubly passing in `self`
-                # as an argument, which happens if using `UserMethodVariable`
-                return variables.UserFunctionVariable(
-                    subobj, name, source=source, **options
+        elif isinstance(subobj, types.FunctionType) or (
+            isinstance(subobj, types.MethodType)
+            and isinstance(self.value, torch.nn.Module)
+        ):
+            if isinstance(subobj, types.MethodType):
+                func = subobj.__func__
+                source = AttrSource(source, "__func__") if source else None
+            else:
+                assert isinstance(subobj, types.FunctionType)
+                func = subobj
+            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
+            # Static lookup can't tell us it's a method or function correctly,
+            # so we trigger dynamic lookup here to get the correct type.
+            dynamic_subobj = getattr(self.value, name)
+            if inspect.ismethod(dynamic_subobj):
+                return variables.UserMethodVariable(
+                    func, self, source=source, **options
                 )
-            return variables.UserMethodVariable(subobj, self, source=source, **options)
+            elif inspect.isfunction(dynamic_subobj):
+                return variables.UserFunctionVariable(func, source=source, **options)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -510,3 +517,61 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ).add_options(
             key, self
         )
+
+
+class ProcessGroupVariable(UserDefinedObjectVariable):
+    """
+    We don't want a ProcessGroup object to end up in our output graph.
+
+    But it's common for dynamo to intercept a PG that is then used to get info like
+    rank() or world_size(), as well as passed to utility functions in distributed_c10d
+    which desugar it into plain types like a ranklist and tag.
+
+    For convenience and proper guarding, we construct a variable type.
+
+    TODO: make it possible to use ProcessGroupVariable as input to simple functions
+          like _expand_group without dynamo complaining about making a proxy for it.
+          It is not a tensor-like type, and we don't want a proxy- but dynamo assumes
+          torch library functions are dealing with tensor-like types and would have proxies
+          for their args.
+    TODO: should we make this inherit VT instead of UDOV? Do we want any of the default behaviors
+          or just graph-break whenever one of our special cases is not hit?
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(value, **kwargs)
+
+    def as_python_constant(self):
+        return self.value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "rank":
+            return variables.ConstantVariable(self.value.rank())
+        if name == "size":
+            return variables.ConstantVariable(self.value.size())
+
+        # TODO should this just raise unimplemented?
+        return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name in ["rank", "size"]:
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+            ).add_options(self)
+        # TODO should this just raise unimplemented?
+        return super().var_getattr(tx, name)
+
+    @staticmethod
+    def is_process_group(value):
+        # we can't rely on importing/accessing torch distributed, it is not always built.
+        if torch.distributed.is_available():
+            from torch._C._distributed_c10d import ProcessGroup
+
+            return istype(value, ProcessGroup)
+        return False

@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -693,6 +694,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(self.curr_node().cached_tensor_outputs, [None, None])
 
+        def test_empty_storage(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x + x + x), torch.zeros([0], device="cuda")
+
+            inp = torch.rand([4], device="cuda")
+            for _ in range(3):
+                out = foo(inp)
+                node = self.curr_node()
+                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return (x + x + x), torch.rand([4], device="cuda") + 10
+
+            inp = torch.rand([0], device="cuda")
+            for _ in range(3):
+                out = foo(inp)
+                node = self.curr_node()
+                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
             def foo(args):
@@ -1104,6 +1126,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_CUDA_GRAPH:
+        if __name__ == "__main__":
+            sys.exit(0)
+        raise unittest.SkipTest("cuda graph test is skipped")
 
     if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")

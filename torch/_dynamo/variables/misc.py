@@ -18,6 +18,7 @@ from ..utils import (
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
+from .dicts import DefaultDictVariable
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -623,6 +624,18 @@ class SkipFilesVariable(VariableTracker):
                 None if len(args) == 0 else args[0],
                 **options,
             )
+        elif (
+            self.value is collections.defaultdict
+            and len(args) <= 1
+            and DefaultDictVariable.is_supported_arg(args[0])
+        ):
+            return DefaultDictVariable(
+                {},
+                collections.defaultdict,
+                args[0],
+                mutable_local=MutableLocal(),
+                **options,
+            )
         # Fold through the functions(e.g, collections.namedtuple)
         # that inputs & outputs are all python constants
         elif (
@@ -649,6 +662,34 @@ class SkipFilesVariable(VariableTracker):
                 items, mutable_local=MutableLocal(), **options
             )
         elif (
+            self.value is itertools.chain
+            and not kwargs
+            and all(arg.has_unpack_var_sequence(tx) for arg in args)
+        ):
+            seqs = [arg.unpack_var_sequence(tx) for arg in args]
+            items = []
+            for item in itertools.chain(*seqs):
+                items.append(item)
+            return variables.ListIteratorVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
+        elif (
+            self.value is itertools.combinations
+            and not kwargs
+            and len(args) == 2
+            and args[0].has_unpack_var_sequence(tx)
+            and args[1].is_python_constant()
+        ):
+            iterable = args[0].unpack_var_sequence(tx)
+            r = args[1].as_python_constant()
+
+            items = []
+            for item in itertools.combinations(iterable, r):
+                items.append(variables.TupleVariable(list(item), **options))
+            return variables.ListIteratorVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
+        elif (
             self.value is functools.wraps
             and not kwargs
             and len(args) == 1
@@ -661,6 +702,16 @@ class SkipFilesVariable(VariableTracker):
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps, **options)
+        elif self.value is collections.deque and not kwargs:
+            if len(args) == 0:
+                items = []
+            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                items = args[0].unpack_var_sequence(tx)
+            else:
+                unimplemented("deque() with more than 1 arg not supported")
+            return variables.lists.DequeVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -713,6 +764,8 @@ class NumpyVariable(VariableTracker):
             unimplemented(f"numpy.{self.value}()")
         import torch_np
 
+        from ..utils import numpy_to_tensor_wrapper
+
         from .builder import wrap_fx_proxy_cls
         from .tensor import NumpyNdarrayVariable
 
@@ -725,7 +778,7 @@ class NumpyVariable(VariableTracker):
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    func,
+                    numpy_to_tensor_wrapper(func),
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=None,
