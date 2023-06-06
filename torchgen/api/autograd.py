@@ -495,6 +495,7 @@ def gen_foreach_derivativeinfo(
                 )
             elif foreach_arg.type.is_tensor_like():
                 # Assuming TensorList / Tensor
+                assert isinstance(foreach_arg.type, ListType)
                 for suffix in ("_p", "_t"):
                     curr_expr = ref_arg.name + suffix
                     if curr_expr in modified_formula:
