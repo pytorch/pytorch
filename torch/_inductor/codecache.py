@@ -28,6 +28,7 @@ from functools import partial
 from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, Dict, List, Set, Union
+import weakref
 
 import torch
 
@@ -379,25 +380,26 @@ class CompiledFxGraph:
 
     def get_current_callable(self):
         if self.current_callable is None:
-            return self._run_from_cache
+            # This prevents a circular reference that prevents GC of the CompiledFxGraph
+            return functools.partial(_run_from_cache, weakref.proxy(self))
         else:
             return self.current_callable
 
-    def _run_from_cache(self, inputs):
-        # We can't really serialize callables that may be C++/Triton/etc.,
-        # so we serialize their disk cache location instead
-        # TODO: When making an API that can save compiled models e2e to disk
-        # this will need to be better
-        if self.compiled_artifact is None:
-            from .codecache import PyCodeCache
+def _run_from_cache(compiled_graph: CompiledFxGraph, inputs):
+    # We can't really serialize callables that may be C++/Triton/etc.,
+    # so we serialize their disk cache location instead
+    # TODO: When making an API that can save compiled models e2e to disk
+    # this will need to be better
+    if compiled_graph.compiled_artifact is None:
+        from .codecache import PyCodeCache
 
-            self.compiled_artifact = PyCodeCache.load_by_key_path(
-                self.cache_key,
-                self.artifact_path,
-                self.cache_linemap if self.cache_linemap is not None else (),
-            ).call
+        compiled_graph.compiled_artifact = PyCodeCache.load_by_key_path(
+            compiled_graph.cache_key,
+            compiled_graph.artifact_path,
+            compiled_graph.cache_linemap if compiled_graph.cache_linemap is not None else (),
+        ).call
 
-        return self.compiled_artifact(inputs)
+    return compiled_graph.compiled_artifact(inputs)
 
 
 def cpp_compiler():
