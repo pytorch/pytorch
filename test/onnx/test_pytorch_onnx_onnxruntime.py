@@ -757,6 +757,63 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = Logit(eps=1e-6)
         self.run_test(model, torch.randn(1, 3, 640, 640))
 
+    class Atleast1d(torch.nn.Module):
+        def forward(self, t, w, x, y, z):
+            return torch.atleast_1d((t, w, x, y, z))
+
+    class Atleast2d(torch.nn.Module):
+        def forward(self, t, w, x, y, z):
+            return torch.atleast_2d((t, w, x, y, z))
+
+    class Atleast3d(torch.nn.Module):
+        def forward(self, t, w, x, y, z):
+            return torch.atleast_3d((t, w, x, y, z))
+
+    class Atleast1dTensor(torch.nn.Module):
+        def forward(self, x):
+            return torch.atleast_1d(x)
+
+    class Atleast2dTensor(torch.nn.Module):
+        def forward(self, x):
+            return torch.atleast_2d(x)
+
+    class Atleast3dTensor(torch.nn.Module):
+        def forward(self, x):
+            return torch.atleast_3d(x)
+
+    @skipScriptTest()  # tracing uses prim::ListUnpack to avoid onnx::SequenceConstruct
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @common_utils.parametrize("module_class", (Atleast1d, Atleast2d, Atleast3d))
+    def test_atleast_nd_list_input(self, module_class: torch.nn.Module):
+        inputs = (
+            torch.tensor(1.0),
+            torch.randn(2),
+            torch.randn(2, 3),
+            torch.randn(2, 3, 4),
+            torch.randn(2, 3, 4, 5),
+        )
+        self.run_test(module_class(), inputs)
+
+    @skipScriptTest()  # tracing uses prim::ListUnpack to avoid onnx::SequenceConstruct
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @common_utils.parametrize(
+        "module_class", (Atleast1dTensor, Atleast2dTensor, Atleast3dTensor)
+    )
+    @common_utils.parametrize(
+        "inputs",
+        [
+            torch.tensor(1.0),
+            torch.randn(2),
+            torch.randn(2, 3),
+            torch.randn(2, 3, 4),
+            torch.randn(2, 3, 4, 5),
+        ],
+    )
+    def test_atleast_nd_single_tensor_input(
+        self, module_class: torch.nn.Module, inputs: torch.Tensor
+    ):
+        self.run_test(module_class(), inputs)
+
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_mixed_optional(self):

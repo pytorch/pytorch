@@ -1414,25 +1414,15 @@ def get_grouped_native_functions(
     )
 
 
-# Return native function declarations grouped by their namespaces.
-def get_native_function_declarations(
+def get_ns_grouped_kernels(
     *,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
     native_function_decl_gen: Callable[
         [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], List[str]
     ] = dest.compute_native_function_declaration,
-) -> List[str]:
-    """
-    Generate kernel declarations, in `NativeFunction(s).h`.
-    :param grouped_native_functions: a sequence of `NativeFunction` or `NativeFunctionGroup`.
-    :param backend_indices: kernel collections grouped by dispatch key.
-    :param native_function_decl_gen: callable to generate kernel declaration for each `NativeFunction`.
-    :return: a list of string, from the string with all declarations, grouped by namespaces, split by newline.
-    """
-    declarations: List[str] = []
+) -> Dict[str, List[str]]:
     ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
-    newline = "\n"
     for f in grouped_native_functions:
         native_function_namespaces = set()
         dispatch_keys = set()
@@ -1450,7 +1440,15 @@ def get_native_function_declarations(
             ns_grouped_kernels[namespace].extend(
                 native_function_decl_gen(f, backend_idx)
             )
+    return ns_grouped_kernels
 
+
+def get_native_function_declarations_from_ns_grouped_kernels(
+    *,
+    ns_grouped_kernels: Dict[str, List[str]],
+) -> List[str]:
+    declarations: List[str] = []
+    newline = "\n"
     for namespace, kernels in ns_grouped_kernels.items():
         ns_helper = NamespaceHelper(
             namespace_str=namespace,
@@ -1470,6 +1468,33 @@ def get_native_function_declarations(
             )
         )
     return declarations
+
+
+# Return native function declarations grouped by their namespaces.
+def get_native_function_declarations(
+    *,
+    grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+    backend_indices: Dict[DispatchKey, BackendIndex],
+    native_function_decl_gen: Callable[
+        [Union[NativeFunctionsGroup, NativeFunction], BackendIndex], List[str]
+    ] = dest.compute_native_function_declaration,
+) -> List[str]:
+    """
+    Generate kernel declarations, in `NativeFunction(s).h`.
+    :param grouped_native_functions: a sequence of `NativeFunction` or `NativeFunctionGroup`.
+    :param backend_indices: kernel collections grouped by dispatch key.
+    :param native_function_decl_gen: callable to generate kernel declaration for each `NativeFunction`.
+    :return: a list of string, from the string with all declarations, grouped by namespaces, split by newline.
+    """
+
+    ns_grouped_kernels = get_ns_grouped_kernels(
+        grouped_native_functions=grouped_native_functions,
+        backend_indices=backend_indices,
+        native_function_decl_gen=native_function_decl_gen,
+    )
+    return get_native_function_declarations_from_ns_grouped_kernels(
+        ns_grouped_kernels=ns_grouped_kernels
+    )
 
 
 def get_kernel_namespace(
