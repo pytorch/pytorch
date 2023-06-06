@@ -20,7 +20,6 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     skip_if_rocm
 )
-from torch.testing._internal.common_utils import skipIfRocm
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.utils import has_triton, run_and_get_triton_code
 import torch._dynamo.logging
