@@ -20,7 +20,6 @@ from torch.optim.lr_scheduler import (
 )
 from torch.testing._internal.common_utils import (
     TestCase,
-    run_tests,
     TEST_WITH_UBSAN,
     load_tests,
     gradcheck,
@@ -2074,4 +2073,4 @@ class TestDifferentiableOptimizer(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    print("These tests should be run through test/test_optim.py instead")
