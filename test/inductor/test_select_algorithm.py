@@ -43,6 +43,13 @@ def patches(fn):
 
 
 class TestSelectAlgorithm(TestCase):
+    def check_counter(self, counter, expected):
+        if not inductor_config.cpp_wrapper:
+            self.assertEqual(counter, expected)
+        elif not dynamo_config.dynamic_shapes:
+            # cpp_wrapper for the CUDA backend runs two passes
+            self.assertEqual(counter, 2 * expected)
+
     @patches
     def test_linear_relu(self):
         @torch.compile
@@ -55,7 +62,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(16, device="cuda"),
         )
         # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
         # It would be nice to assert this got fused into a single kernel, but that
         # only happens if we select a triton template (and not aten).
 
@@ -72,8 +79,7 @@ class TestSelectAlgorithm(TestCase):
         )
 
         foo(*inps)
-        # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
     @patches
@@ -102,7 +108,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(8, 32, device="cuda"),
             torch.randn(32, 8, device="cuda"),
         )
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     def test__int_mm(self):
@@ -205,7 +211,7 @@ class TestSelectAlgorithm(TestCase):
             torch.randn(34, device="cuda"),
         )
         # Autotuning checks correctness of each version
-        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
     def test_mm_dropout(self):
