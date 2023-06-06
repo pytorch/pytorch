@@ -79,7 +79,7 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   return output;
 }
 
-static Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
+Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
   // Tensor self = self_.contiguous();
   // Tensor mat2 = mat2_.contiguous();
   // self [N, n_heads, *, head_dim]

@@ -812,7 +812,7 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   return new_tensor;
 }
 
-static Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
+Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
   // This code turns a matrix into a sequence of blocks
   //
   // Given matrix
@@ -841,7 +841,7 @@ static Tensor _tile_tensor(const Tensor& self, IntArrayRef blocksize) {
       .contiguous();
 }
 
-static Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize, const int64_t dense_dim) {
+Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize, const int64_t dense_dim) {
   if (self.dim() == 2 + dense_dim) {
     return _tile_tensor(self, blocksize);
   }
@@ -860,7 +860,7 @@ static Tensor _batch_tile_tensor(const Tensor& self, IntArrayRef blocksize, cons
   return self.reshape(tiled_sizes).transpose(n_batch_dim + 1, n_batch_dim + 2).contiguous();
 }
 
-static Tensor _mask_to_indices(const Tensor& mask) {
+Tensor _mask_to_indices(const Tensor& mask) {
   // This function returns a vector of the indices at which given
   // boolean mask is True. at::nonzero can achieve the same, but
   // we yet have to compare the performance difference.
@@ -871,7 +871,7 @@ static Tensor _mask_to_indices(const Tensor& mask) {
       .masked_select(mask);
 }
 
-static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
+std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
     Tensor not_zero_mask,
     ScalarType index_dtype,
     Device index_device) {
