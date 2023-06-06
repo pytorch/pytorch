@@ -145,6 +145,10 @@ class DataTypePropagation:
 
     def propagate_graph(self, graph: torch.fx.Graph):
         assert graph.nodes
+        graph_dtype = None
+        # For masked_subblock, we use output's dtype to represent
+        # the dtype of this subgraph. For other cases, graph_dtype
+        # might be None
         for node in graph.nodes:
             if OptimizationContext.key in node.meta:
                 opt_ctx = node.meta[OptimizationContext.key]
@@ -153,8 +157,9 @@ class DataTypePropagation:
 
             opt_ctx.dtype = self.deduce_node_dtype(node)
             node.meta[OptimizationContext.key] = opt_ctx
-        if node.target == "output":
-            return node.meta[OptimizationContext.key].dtype
+            if node.target == "output":
+                graph_dtype = opt_ctx.dtype
+        return graph_dtype
 
     def propagate(self):
         self.propagate_graph(self.graphs["root"])
