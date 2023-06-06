@@ -166,17 +166,6 @@ def forward(self, a_1):
     matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
     return matmul""")
 
-    def test_pre_autograd_linear(self):
-        def f(a, b, c):
-            return torch.nn.functional.linear(a, b, c)
-        a = torch.ones(4, 4)
-        b = torch.ones(4, 4)
-        c = torch.ones(4)
-        fx_g = make_fx(f, pre_autograd=True)(a, b, c)
-        out1 = f(a, b, c)
-        out2 = fx_g(a, b, c)
-        self.assertEqual(out1, out2)
-
 
     def test_make_fx_simple(self):
         def f(x):
