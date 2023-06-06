@@ -170,7 +170,6 @@ def register_run_and_save_rng_state_op():
 
     @run_and_save_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, **kwargs):
-        # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
         if kwargs.get("device"):
             device = kwargs.get("device")
             device_type = device if isinstance(device, str) else device.type  # type: ignore[union-attr]
@@ -269,7 +268,6 @@ def register_run_with_rng_state_op():
 
     @run_with_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(rng_state, op, *args, **kwargs):
-        # with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.BackendSelect)):
         if kwargs.get("device"):
             device = kwargs.get("device")
             device_type = device if isinstance(device, str) else device.type  # type: ignore[union-attr]
