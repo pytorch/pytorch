@@ -3450,7 +3450,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with TemporaryFileName() as f:
             state_dict = DummyModel().state_dict()
             torch.save(state_dict, f)
-            result = torch.load(f, _mmap=True)
+            result = torch.load(f, _mmap=True, weights_only=weights_only)
             result_non_mmap = torch.load(f, _mmap=False, weights_only=weights_only)
 
         model_mmap_state_dict = DummyModel()
