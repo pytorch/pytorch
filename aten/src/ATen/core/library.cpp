@@ -67,7 +67,7 @@ Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, c
             *ns_, debugString(file_, line_)
           )
         );
-        // fallthrough
+        [[fallthrough]];
       case FRAGMENT:
         TORCH_CHECK(
           ns_.has_value(),
