@@ -316,7 +316,7 @@ class SerializationMixin:
                 torch.save({"tensor": x}, f)
                 f.seek(0)
                 y = torch.load(f, weights_only=weights_only)
-                self.assertEqual(x, y["tensor"])
+                self.assertEqual(x, y["tensor"], exact_is_coalesced=True)
         _test_serialization(lambda x: x.to_sparse())
         _test_serialization(lambda x: x.to_sparse_csr())
         _test_serialization(lambda x: x.to_sparse_csc())
