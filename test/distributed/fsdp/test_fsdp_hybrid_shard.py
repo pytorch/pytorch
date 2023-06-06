@@ -154,10 +154,10 @@ class TestFSDPHybridShard(FSDPTest):
     @skip_if_lt_x_gpu(4)
     def test_hsdp_save_load_state_dict(self):
         model = MyModel().cuda()
-        num_node_devices = torch.cuda.device_count()  # 8
-        shard_rank_lists = [i for i in range(0, num_node_devices // 2)], [
-            i for i in range(num_node_devices // 2, num_node_devices)
-        ]
+        num_node_devices = torch.cuda.device_count()
+        shard_rank_lists = list(range(0, num_node_devices // 2)), list(
+            range(num_node_devices // 2, num_node_devices)
+        )
         shard_groups = (
             dist.new_group(shard_rank_lists[0]),
             dist.new_group(shard_rank_lists[1]),
@@ -168,11 +168,9 @@ class TestFSDPHybridShard(FSDPTest):
         my_replicate_group = None
         my_rank = self.rank
         # Create groups like (0, 4), (1, 5), (2, 6) etc and assign appropriately
-        shard_factor = len(shard_rank_lists[0])  # 4
+        shard_factor = len(shard_rank_lists[0])
         for i in range(num_node_devices // 2):
-            replicate_group_ranks = [
-                j for j in range(i, num_node_devices, shard_factor)
-            ]
+            replicate_group_ranks = list(range(i, num_node_devices, shard_factor))
             replicate_group = dist.new_group(replicate_group_ranks)
             if my_rank in replicate_group_ranks:
                 my_replicate_group = replicate_group
