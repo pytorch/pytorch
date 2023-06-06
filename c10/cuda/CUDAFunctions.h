@@ -112,7 +112,7 @@ C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
 }
 
 C10_CUDA_API bool hasPrimaryContext(DeviceIndex device_index);
-C10_CUDA_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
+C10_CUDA_API c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext();
 
 } // namespace cuda
 } // namespace c10

@@ -148,9 +148,9 @@ void warn_or_error_on_sync() {
   }
 }
 
-c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
+c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
   // check current device first
-  int64_t current_device_index = current_device();
+  auto current_device_index = current_device();
   if (current_device_index >= 0) {
     if (hasPrimaryContext(current_device_index)) {
       return current_device_index;
