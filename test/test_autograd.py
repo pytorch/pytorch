@@ -7462,6 +7462,78 @@ for shape in [(1,), ()]:
                 gc.collect()
                 self.assertIsNone(ref_())
 
+    @parametrize("use_custom_function", [True, False])
+    @parametrize("use_tensor_hook", [True, False])
+    def test_hook_closure_cycle(self, use_custom_function, use_tensor_hook):
+        # This creates a cycle between the hook and grad_fn_b
+        # hook -> closure -> grad_fn_b (python) -> grad_fn (cpp) -> hook (cpp)
+        # -> dict -> hook
+        #
+        # This test is testing that the grad_fn_b (python) only traverses the
+        # dict if it is the only one holding a reference to the grad_fn_b (cpp)
+        # shared_ptr
+        #
+        # See: https://github.com/pytorch/pytorch/issues/102174
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        class Test():
+            pass
+
+        count = [0]
+
+        def scope():
+            a = torch.tensor(1., requires_grad=True)
+            if use_custom_function:
+                b = Function.apply(a)
+            else:
+                b = a.clone()
+            grad_fn_b = b.grad_fn
+            obj = Test()
+
+            def hook(*args):
+                # Make sure this hook's closure holds onto grad_fn_b
+                # This forms a cycle between the hook and grad_fn_b
+                # We also hold onto a sentinel object 'obj' to track
+                # whether this cycle is still alive. See 'ref' below.
+                grad_fn_b
+                obj
+                count[0] += 1
+            if use_tensor_hook:
+                b.register_hook(hook)
+            else:
+                b.grad_fn.register_hook(hook)
+            c = b.clone()
+            ref = weakref.ref(obj)
+            return c, ref
+
+        with disable_gc():
+            out, ref = scope()
+            out.backward(retain_graph=True)
+
+            gc.collect()
+
+            # Make sure gc does not clear the cycle noted above.
+            # e.g. the hook is alive and gets fired even after gc runs
+            out.backward(retain_graph=True)
+            self.assertEqual(count[0], 2)
+
+            # ref is still alive because the use_count of the cpp grad_fn
+            # shared_ptr > 1 since (1) the python grad_fn is alive, and (2) the
+            # rest of the graph holds onto the shared_ptr
+            self.assertIsNotNone(ref())
+
+            # Then delete the rest of the graph and check that ref is dead
+            del out
+            gc.collect()
+            self.assertIsNone(ref())
+
     def test_full_backward_hook_double_backward(self):
         x = torch.rand(1, requires_grad=True)
         y = torch.rand_like(x)

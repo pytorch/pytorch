@@ -1,7 +1,7 @@
 import operator
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from functorch.experimental import control_flow
@@ -75,7 +75,7 @@ class ExportTracer(PythonKeyTracer):
         # propagate the fake tensor or sym nodes
         def make_val(
             x: Argument,
-        ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, None]:
+        ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, int, None]:
             if isinstance(x, FakeTensor):
                 return x
             elif isinstance(x, torch.Tensor):
@@ -95,7 +95,7 @@ class ExportTracer(PythonKeyTracer):
                     )
                     fake_tensor = None
                 return fake_tensor
-            elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool, int)):
                 return x
             else:
                 return None
@@ -129,14 +129,6 @@ class ExportPassBase(PassBase):
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
     """
-
-    def get_valid_dialects(self) -> List[Type]:
-        """
-        Returns a list of valid dialects (operator namespace modules) that this
-        pass can run under. Returning an empty list implies this pass can run in
-        any dialect.
-        """
-        return []
 
     class ExportInterpreter(fx.Interpreter):
         """
@@ -214,9 +206,6 @@ class ExportPassBase(PassBase):
 
         def run_node(self, n: torch.fx.Node) -> Argument:
             self.node = n
-            if self.callback._processing_placeholders and n.op != "placeholder":
-                self.callback._processing_placeholders = False
-                self.callback.postprocess_placeholders()
             self.callback.node_debug_str = n.format_node()
             return super().run_node(n)
 
@@ -232,9 +221,6 @@ class ExportPassBase(PassBase):
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self._initialized = True
         self.node_debug_str: typing.Optional[str] = None
-        # state that keeps track of when placeholders are still being processed
-        # (note that placeholders are always processed before other nodes)
-        self._processing_placeholders = True
 
     def _fx(
         self,
@@ -299,12 +285,6 @@ class ExportPassBase(PassBase):
         self.tracer.set_metadata(arg_proxy.node, arg)
         return ProxyValue(arg, arg_proxy)
 
-    def postprocess_placeholders(self):
-        """
-        Hook to post-process placeholders before they are passed to FX nodes.
-        """
-        pass
-
     def call_operator(
         self,
         op,
@@ -312,11 +292,6 @@ class ExportPassBase(PassBase):
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        op_dialect = getattr(torch.ops, str(op).split('.')[0])
-        valid_dialects = self.get_valid_dialects()
-        if len(valid_dialects) != 0 and op_dialect not in valid_dialects:
-            raise ExportPassBaseError(f"Expecting op of dialects: {valid_dialects}, got: {op}")
-
         return self._fx("call_function", op, args, kwargs, meta)
 
     def call_sym(
