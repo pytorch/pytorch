@@ -16,11 +16,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 
-if not TEST_CUDA_GRAPH:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("cuda graph test is skipped")
-
 
 def composed(*decs):
     def deco(f):
@@ -211,5 +206,12 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_CUDA_GRAPH:
+        if __name__ == "__main__":
+            import sys
+
+            sys.exit(0)
+        raise unittest.SkipTest("cuda graph test is skipped")
 
     run_tests()

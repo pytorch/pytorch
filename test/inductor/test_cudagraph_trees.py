@@ -45,11 +45,6 @@ requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
 )
 
-if not TEST_CUDA_GRAPH:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise unittest.SkipTest("cuda graph test is skipped")
-
 
 def cdata(t):
     return t.untyped_storage()._cdata
@@ -1131,6 +1126,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_CUDA_GRAPH:
+        if __name__ == "__main__":
+            sys.exit(0)
+        raise unittest.SkipTest("cuda graph test is skipped")
 
     if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")
