@@ -1150,7 +1150,7 @@ static std::string reportProcessMemoryInfo(int device) {
           pci_id, &nvml_device));
 
   std::vector<nvmlProcessInfo_v1_t> procs(8);
-  std::vector<decltype(procs)>::size_type size = procs.size();
+  auto size = procs.size();
   nvmlReturn_t r;
   while ((r = DriverAPI::get()->nvmlDeviceGetComputeRunningProcesses_(
               nvml_device, &size, procs.data())) ==
@@ -1205,7 +1205,7 @@ class DeviceCachingAllocator {
   // outstanding cuda events
   ska::flat_hash_map<
       cuda::CUDAStream,
-      std::deque<std::pair<EventPool::Event, Block*>>>
+      std::deque<std::pair<EventPool::Event, Block*>>>f
       cuda_events;
 
   // record used memory.
