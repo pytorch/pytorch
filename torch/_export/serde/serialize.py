@@ -236,25 +236,11 @@ def serialize_signature(sig: ep.ExportGraphSignature) -> GraphSignature:
         backward_signature = None
 
     graph_signature = GraphSignature(
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> lint
         inputs_to_parameters=sig.inputs_to_parameters,  # type: ignore[arg-type]
         inputs_to_buffers=sig.inputs_to_buffers,  # type: ignore[arg-type]
         user_inputs=sig.user_inputs,  # type: ignore[arg-type]
         user_outputs=sig.user_outputs,  # type: ignore[arg-type]
         buffers_to_mutate=sig.buffers_to_mutate,  # type: ignore[arg-type]
-<<<<<<< HEAD
-=======
-        inputs_to_parameters=sig.inputs_to_parameters,
-        inputs_to_buffers=sig.inputs_to_buffers,
-        user_inputs=sig.user_inputs,
-        user_outputs=sig.user_outputs,
-        buffers_to_mutate=sig.buffers_to_mutate,
->>>>>>> idk what happened
-=======
->>>>>>> lint
         backward_signature=backward_signature,
     )
     return graph_signature
@@ -415,11 +401,7 @@ class GraphModuleSerializer:
             if arg.op == "get_attr":
                 return Argument.create(as_tensor=TensorArgument(name=str(arg.target)))
             elif self.is_sym_int_arg(arg):
-<<<<<<< HEAD
-                return Argument.create(as_sym_int=SymIntArgument.create(as_name=arg.name))
-=======
                 return Argument.create(as_sym_int=SymIntArgument.create(asName=arg.name))
->>>>>>> idk what happened
             else:
                 return Argument.create(as_tensor=TensorArgument(name=arg.name))
         elif isinstance(arg, bool):
@@ -504,11 +486,6 @@ class GraphModuleSerializer:
         returns = node.target._schema.returns
 
         # Check single value return
-<<<<<<< HEAD
-        if len(returns) == 0:
-            return []
-=======
->>>>>>> idk what happened
         if _is_single_tensor_return(node.target):
             return [Argument.create(as_tensor=self.serialize_tensor_output(node.name, meta_val))]
         elif len(returns) == 1 and isinstance(returns[0].real_type, torch.SymIntType):  # type: ignore[attr-defined]
@@ -560,12 +537,8 @@ class GraphModuleSerializer:
                 self.node = node
                 getattr(self, f"handle_{node.op}")(node)
             except Exception as e:
-<<<<<<< HEAD
-                raise SerializeError(f"Failed serializing node {node}") from e
-=======
                 if not isinstance(e, SerializeError):
                     raise SerializeError(f"Failed serializing node {node}") from e
->>>>>>> idk what happened
 
         graph = Graph(
             inputs=self.inputs,

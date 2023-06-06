@@ -4,8 +4,6 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 from torch._export import export
-from torch._export.serde.serialize import ExportedProgramSerializer
-from torch._export.serde.serialize import ExportedProgramSerializer
 from torch._export.serde.serialize import (
     ExportedProgramSerializer,
     deserialize,
@@ -39,27 +37,11 @@ class TestSerialize(TestCase):
                 torch.ones([512]),
                 torch.ones([512]),
             ),
-<<<<<<< HEAD
-<<<<<<< HEAD
-        )
-
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-7]
-        self.assertEqual(node.target, "aten.var_mean.correction")
-=======
-        ).module
-
-        serialized, _ = serialize(exported_module)
-        node = serialized.graph.nodes[0]
-        self.assertEqual(node.target.name, "aten.var_mean.correction")
->>>>>>> [export] Initial serialization
-=======
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[0]
         self.assertEqual(node.target, "aten.var_mean.correction")
->>>>>>> idk what happened
         # aten::native_layer_norm returns 3 tensnors
         self.assertEqual(len(node.outputs), 2)
 
@@ -80,27 +62,11 @@ class TestSerialize(TestCase):
 
         input = torch.arange(10.0).reshape(5, 2)
         input.requires_grad = True
-<<<<<<< HEAD
-<<<<<<< HEAD
-        exported_module = export(MyModule(), (input,))
-
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "aten.split.Tensor")
-=======
-        exported_module = export(MyModule(), (input,)).module
-
-        serialized, _ = serialize(exported_module)
-        node = serialized.graph.nodes[0]
-        self.assertEqual(node.target.name, "aten.split.Tensor")
->>>>>>> [export] Initial serialization
-=======
         exported_module = export(MyModule(), (input,))
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[0]
         self.assertEqual(node.target, "aten.split.Tensor")
->>>>>>> idk what happened
         self.assertEqual(len(node.outputs), 1)
         # Input looks like:
         # tensor([[0, 1],
@@ -139,27 +105,11 @@ class TestSerialize(TestCase):
         exported_module = export(
             MyModule(),
             (torch.ones([512, 512], requires_grad=True),),
-<<<<<<< HEAD
-<<<<<<< HEAD
-        )
-
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-        node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "aten.var_mean.correction")
-=======
-        ).module
-
-        serialized, _ = serialize(exported_module)
-        node = serialized.graph.nodes[0]
-        self.assertEqual(node.target.name, "aten.var_mean.correction")
->>>>>>> [export] Initial serialization
-=======
         )
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[0]
         self.assertEqual(node.target, "aten.var_mean.correction")
->>>>>>> idk what happened
         self.assertEqual(len(node.outputs), 2)
 
         # check the names are unique
@@ -180,41 +130,17 @@ class TestSerialize(TestCase):
             return torch.searchsorted(x, values, side="right", right=True)
 
         x, _ = torch.sort(torch.randn(3, 4))
-<<<<<<< HEAD
-<<<<<<< HEAD
-        exported_module = export(f, (x,))
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
-
-        node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "aten.searchsorted.Tensor")
-=======
-        exported_module = export(f, (x,)).module
-        serialized, _ = serialize(exported_module)
-
-        node = serialized.graph.nodes[1]
-        self.assertEqual(node.target.name, "aten.searchsorted.Tensor")
->>>>>>> [export] Initial serialization
-=======
         exported_module = export(f, (x,))
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[1]
         self.assertEqual(node.target, "aten.searchsorted.Tensor")
->>>>>>> idk what happened
         self.assertEqual(len(node.inputs), 6)
         self.assertEqual(node.inputs[2].arg.as_bool, False)
         self.assertEqual(node.inputs[3].arg.as_bool, True)
         self.assertEqual(node.inputs[4].arg.as_string, "right")
         self.assertEqual(node.inputs[5].arg.as_none, ())
-<<<<<<< HEAD
-<<<<<<< HEAD
 
-=======
-    
->>>>>>> [export] Initial serialization
-=======
-
->>>>>>> idk what happened
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
