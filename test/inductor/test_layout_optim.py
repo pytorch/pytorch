@@ -204,6 +204,40 @@ class TestLayoutOptim(TestCase):
         y = f(x)
         self.assertTrue(torch.equal(y, torch.ones(3, 2).cuda() * 2))
 
+    def test_mutate_base_for_conv_output(self):
+        class Model(nn.Module):
+            def __init__(self, manual_graph_break=False):
+                super().__init__()
+                self.conv = nn.Conv2d(3, 512, kernel_size=3, stride=2, bias=False)
+
+            def forward(self, x):
+                x = self.conv(x)
+                y = x.view(-1)
+                x.mul_(2)
+                return y
+
+            def get_example_inputs(self):
+                return (torch.rand(2, 3, 16, 16),)
+
+        self.verify_accuracy_for_infer(Model)
+
+    def test_mutate_view_for_conv_output(self):
+        class Model(nn.Module):
+            def __init__(self, manual_graph_break=False):
+                super().__init__()
+                self.conv = nn.Conv2d(3, 512, kernel_size=3, stride=2, bias=False)
+
+            def forward(self, x):
+                x = self.conv(x)
+                y = x.view(-1)
+                y.mul_(2)
+                return x
+
+            def get_example_inputs(self):
+                return (torch.rand(2, 3, 16, 16),)
+
+        self.verify_accuracy_for_infer(Model)
+
 
 if __name__ == "__main__":
     if HAS_CUDA and not TEST_WITH_ROCM:
