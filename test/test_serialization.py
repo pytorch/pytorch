@@ -3461,8 +3461,6 @@ class TestSerialization(TestCase, SerializationMixin):
         self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
 
 
-
-
 class TestWrapperSubclass(torch.Tensor):
     elem: torch.Tensor
     __slots__ = ['elem', 'other']
