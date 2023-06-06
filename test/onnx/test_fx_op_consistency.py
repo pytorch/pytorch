@@ -414,15 +414,15 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "nn.functional.adaptive_avg_pool1d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool2d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool3d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
     ),
     xfail(
         "nn.functional.conv1d",
