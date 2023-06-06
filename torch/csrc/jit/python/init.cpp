@@ -1349,6 +1349,7 @@ void initJITBindings(PyObject* module) {
                 name, reinterpret_cast<const char*>(data), size);
           })
       .def("archive_name", &PyTorchStreamWriter::archiveName)
+      .def("serialization_id", &PyTorchStreamWriter::serializationId)
       .def(
           "get_all_written_records",
           &PyTorchStreamWriter::getAllWrittenRecords);
@@ -1473,6 +1474,7 @@ void initJITBindings(PyObject* module) {
                     at::CPU(scalar_type).typeMeta());
             return at::Tensor(std::move(ptr));
           })
+      .def("serialization_id", &PyTorchStreamReader::serializationId)
       .def("get_all_records", [](PyTorchStreamReader& self) {
         return self.getAllRecords();
       });

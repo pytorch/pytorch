@@ -11,6 +11,7 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
+from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.testing._internal.common_dist_composable import (
@@ -169,6 +170,38 @@ class TestModelCheckpointing(FSDPTest):
             FSDP.set_state_dict_type(load_model, StateDictType.SHARDED_STATE_DICT)
         load_model.load_state_dict(state_dict)
         self._check_model_parity(load_model, save_model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_full_state_dict_save_load_mixed_sharding(self):
+        """
+        Tests that the full state dict saved from a module with ``fully_shard``
+        and ``no_shard`` applied on the module matches that of an equivalent
+        local module. Also ensures that this state_dict can be reloaded into
+        a composable module and is equivalent to the original composable module.
+        """
+        local_model = CompositeParamModel(device=torch.device("cuda"))
+
+        def _create_mixed_shard_on_model(mod: nn.Module):
+            fully_shard(mod.u1)
+            fully_shard(mod, strategy=ShardingStrategy.NO_SHARD)
+            return mod
+
+        save_composable = copy.deepcopy(local_model)
+        save_composable = _create_mixed_shard_on_model(save_composable)
+        local_sd = local_model.state_dict()
+        composable_sd = save_composable.state_dict()
+        self._check_state_dict_parity(local_sd, composable_sd)
+
+        # Validate load
+        load_composable = copy.deepcopy(local_model)
+        load_composable = _create_mixed_shard_on_model(load_composable)
+        _zero_model(load_composable, summon_full=False)
+        for p in load_composable.parameters():
+            self.assertEqual(0, p.sum())
+
+        sd = {k: v.clone() for k, v in composable_sd.items()}
+        load_composable.load_state_dict(sd)
+        self._check_model_parity(load_composable, save_composable)
 
     def _check_state_dict_parity(self, local_sd: Dict, composable_sd: Dict):
         """Checks that ``local_sd`` and ``composable_sd`` are the same."""
