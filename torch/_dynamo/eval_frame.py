@@ -143,9 +143,6 @@ class OptimizedModule(torch.nn.Module):
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._forward(*args, **kwargs)
 
-    def __dir__(self):
-        return self._orig_mod.__dir__()
-
 
 def remove_from_cache(f):
     """
@@ -984,24 +981,6 @@ def export(
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
     if aten_graph:
-        memo: Dict[torch.Tensor, torch.Tensor] = {}
-
-        def to_fun(t):
-            if isinstance(t, torch.Tensor):
-                if t in memo:
-                    return memo[t]
-                r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
-                memo[t] = r
-                return r
-            else:
-                return t
-
-        def from_fun(t):
-            if not isinstance(t, torch.Tensor) or not torch._is_functional_tensor(t):
-                return t
-            torch._sync(t)
-            return torch._from_functional_tensor(t)
-
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
@@ -1248,13 +1227,7 @@ class TorchPatcher:
             if opt in excluded_opts:
                 opt.step = disable(opt.step)
 
-            opt._cuda_graph_capture_health_check = disable(
-                opt._cuda_graph_capture_health_check
-            )
             opt.zero_grad = disable(opt.zero_grad)
-
-            if hasattr(opt, "_init_group"):
-                opt._init_group = disable(opt._init_group)
 
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
