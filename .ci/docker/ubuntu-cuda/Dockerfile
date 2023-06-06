@@ -85,14 +85,6 @@ COPY ./common/install_cmake.sh install_cmake.sh
 RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
 RUN rm install_cmake.sh
 
-ARG INDUCTOR_BENCHMARKS
-COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
-COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/huggingface.txt huggingface.txt
-COPY ci_commit_pins/timm.txt timm.txt
-RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
-RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
-
 ARG TRITON
 # Install triton, this needs to be done before sccache because the latter will
 # try to reach out to S3, which docker build runners don't have access
@@ -102,6 +94,14 @@ COPY ci_commit_pins/triton.txt triton.txt
 COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton.txt triton_version.txt
+
+ARG INDUCTOR_BENCHMARKS
+COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/huggingface.txt huggingface.txt
+COPY ci_commit_pins/timm.txt timm.txt
+RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
+RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
