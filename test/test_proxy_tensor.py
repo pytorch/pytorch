@@ -146,7 +146,7 @@ class TestGenericProxyTensor(TestCase):
         r2 = f(*new_inps)
         self.assertEqual(r1, r2)
 
-    def test_pre_autograd_mode_stack(self):
+    def test_pre_dispatch_mode_stack(self):
         def f(a):
             b = torch.ones(4, 4)
             return torch.matmul(a, b)
@@ -155,22 +155,80 @@ class TestGenericProxyTensor(TestCase):
         # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
         # so our mode never sees it - it goes directly to the BackendSelect key.
         inp = torch.ones(4, 4)
-        # Test that make_fx(pre_autograd=True) clears caches properly.
+        # Test that make_fx(pre_dispatch=True) clears caches properly.
         from torch._dispatch.python import enable_python_dispatcher
         with enable_python_dispatcher():
             out1 = f(inp)
-        fx_g = make_fx(f, pre_autograd=True)(inp)
+        fx_g = make_fx(f, pre_dispatch=True)(inp)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, a_1):
     ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
     matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
     return matmul""")
 
+    def test_pre_dispatch_linear(self):
+        def f(a, b, c):
+            return torch.nn.functional.linear(a, b, c)
+        a = torch.ones(4, 4)
+        b = torch.ones(4, 4)
+        c = torch.ones(4)
+        fx_g = make_fx(f, pre_dispatch=True)(a, b, c)
+        out1 = f(a, b, c)
+        out2 = fx_g(a, b, c)
+        self.assertEqual(out1, out2)
+
+    def test_pre_dispatch_no_grad(self):
+        def f(a):
+            b = a.sin()
+            torch.set_grad_enabled(False)
+            c = b.cos()
+            torch.set_grad_enabled(True)
+            return b + c.sin()
+        a1 = torch.randn(4, requires_grad=True)
+        a2 = a1.clone().detach().requires_grad_(True)
+        a_tmp = a1.clone().detach().requires_grad_(True)
+        fx_g = make_fx(f, pre_dispatch=True)(a_tmp)
+        out1 = f(a1)
+        out2 = fx_g(a2)
+        self.assertEqual(out1, out2)
+        out1.sum().backward()
+        out2.sum().backward()
+        self.assertEqual(a1.grad, a2.grad)
 
     def test_make_fx_simple(self):
         def f(x):
             return torch.sin(x)
         self._test(f, (torch.randn(3),))
+
+    def test_pre_dispatch_preserves_params_buffers(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bn = torch.nn.BatchNorm2d(3)
+
+            def forward(self, x):
+                return self.bn(x)
+
+        inp = torch.ones(3, 3, 3, 3)
+        m = Foo()
+        fx_g = make_fx(m, pre_dispatch=True)(inp)
+        # The important bit: params and buffers are encoded in the graph as:
+        #   bn_weight = self.bn_weight
+        #   bn_running_mean = self.bn_running_mean
+        # etc
+        self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: f32[3, 3, 3, 3]):
+        # No stacktrace found for following nodes
+        bn_weight = self.bn_weight
+        bn_bias = self.bn_bias
+        bn_running_mean = self.bn_running_mean
+        bn_running_var = self.bn_running_var
+        bn_num_batches_tracked = self.bn_num_batches_tracked
+        add_: i64[] = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = None
+        batch_norm: f32[3, 3, 3, 3] = torch.ops.aten.batch_norm.default(arg0_1, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, True);  arg0_1 = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+        return batch_norm
+        """)  # noqa: B950
 
     def test_scalar_device(self, device='cpu'):
         def f(a, b):

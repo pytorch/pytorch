@@ -10,7 +10,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._dispatch.python import enable_python_dispatcher
+from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
@@ -21,6 +21,8 @@ import operator
 from torch.utils._stats import count
 import logging
 
+from torch.overrides import TorchFunctionMode
+
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
     _pop_mode_temporarily,
@@ -30,6 +32,7 @@ from torch.utils._python_dispatch import (
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
+import torch.nn as nn
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -246,16 +249,7 @@ def fetch_tensor_proxy(tracer):
 
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
 
-@contextlib.contextmanager
-def inside_mode(proxy_mode):
-    old = proxy_mode.is_inside_mode
-    proxy_mode.is_inside_mode = True
-    try:
-        yield
-    finally:
-        proxy_mode.is_inside_mode = old
-
-def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
+def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     unrecognized_types = []
 
     def can_handle_tensor(x):
@@ -277,7 +271,7 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
                 return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_autograd:
+    if not pre_dispatch:
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -356,12 +350,6 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
-    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
-    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
-    # then we only want it to trace out proxies the first time that we hit an op.
-    if proxy_mode.is_inside_mode:
-        return func(*args, **kwargs)
-
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
@@ -377,8 +365,7 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
         else:
             args[0].proxy = proxy_out
 
-    with inside_mode(proxy_mode):
-        out = func(*args, **kwargs)
+    out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -426,20 +413,17 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     else:
         constant = None
 
-    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
-    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
-    # then we only want it to trace out proxies the first time that we hit an op.
-    # In particular, track_tensor_tree can call detach().
-    with inside_mode(proxy_mode):
-        track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
+    track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out
 
 
 class PythonKeyTracer(Tracer):
-    def __init__(self):
+    def __init__(self, maybe_params_buffers: Optional[Dict[str, torch.Tensor]] = None):
         super().__init__(autowrap_modules=())
         self.tensor_tracker = WeakTensorKeyDictionary()
         self.symnode_tracker = weakref.WeakKeyDictionary()  # type: ignore[var-annotated]
+        self.maybe_params_buffers = maybe_params_buffers
+        self.state_applied = maybe_params_buffers is None
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
@@ -447,6 +431,27 @@ class PythonKeyTracer(Tracer):
     def call_module(
             self, m: torch.nn.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
+        if not self.state_applied:
+            # Is there a better way to do this?
+            # Two hacky things going on here are:
+            # (1) we're directly modifying the params/buffers of the user (adding a secret proxy slot to each tensor)
+            # (2) The GraphModule that we create doesn't have the params/buffers on it already,
+            #     so I'm manually setattr'ing them here.
+            # (Mini brain dump for my own recollection below - will delete before this PR is merged).
+            # One option that I tried was to set things up so that the passed in `root` was already an nn module,
+            # with the correct params/buffers on it.
+            # More for my own recollection, the problems I hit were:
+            # (1) There are several places where we "lose" the nn module if the user originally passed in an nn module
+            # (2) Even if we try to mock up an nn module, the forward can't in varargs - we need fake_signature()
+            #     (but I couldn't get this to work)
+            # (3) I'm not sure of a way to mock up an nn module without manually copying over the state dict.
+            for fqn, param in self.maybe_params_buffers.items():
+                # can't set attributes with periods, so we flatten them here.
+                fqn_ = fqn.replace(".", "_")
+                setattr(self.root, fqn_, param)
+                proxy = self.create_proxy('get_attr', fqn_, (), {})
+                track_tensor(param, proxy, constant=None, tracer=self)
+            self.state_applied = True
         return forward(*args, **kwargs)
 
     # We don't want to turn getattr calls into proxies. So we just return the actual value.
@@ -486,9 +491,9 @@ def dispatch_trace(
     return GraphModule(tracer.root, graph, name)
 
 
-def wrap_key(f, tensors, tracer, pre_autograd: bool):
+def wrap_key(f, tensors, tracer, pre_dispatch: bool):
     flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
-    dk = torch._C.DispatchKey.AutogradFunctionality if pre_autograd else None
+    dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
 
     @functools.wraps(f)
     def wrapped(*proxies):
@@ -530,16 +535,35 @@ def set_original_aten_op(func):
 
 
 
+# This mode is **only** used for pre_dispatch tracing.
+# In particular, we need to make sure that autograd/autocast API's
+# that do not desugar into dispatcher operators stay in the graph.
+class ProxyTorchFunctionMode(TorchFunctionMode):
+
+    def __init__(self, tracer):
+        self.tracer = tracer
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        pre_dispatch_ops = [
+            torch._C._set_grad_enabled,
+            torch.amp._enter_autocast,
+            torch.amp._exit_autocast,
+        ]
+        if func in pre_dispatch_ops:
+            return self.tracer.create_node("call_function", func, args, {})
+            # Don't actually run the function! We just want to trace the calls
+            # into a graph. We don't actualy want to change global autograd state.
+        return func(*args, **kwargs)
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, tracing_mode, pre_autograd=False):
-        dk = torch._C.DispatchKey.AutogradFunctionality if pre_autograd else None
+    def __init__(self, tracer, tracing_mode, pre_dispatch=False):
+        dk = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
         super().__init__(dk)
         self.tracer = tracer
         self.tracing_mode = tracing_mode
         self.enable_tracing = True
-        self.pre_autograd = pre_autograd
-        self.is_inside_mode = False
+        self.pre_dispatch = pre_dispatch
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
         self._managers = []
@@ -572,7 +596,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
-        return proxy_call(self, func, self.pre_autograd, args, kwargs)
+        return proxy_call(self, func, self.pre_dispatch, args, kwargs)
 
 
 class ProxySymDispatchMode(SymDispatchMode):
@@ -701,7 +725,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, *, pre_autograd=False):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, *, pre_dispatch=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -710,7 +734,14 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
     @functools.wraps(f)
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
-        fx_tracer = PythonKeyTracer()
+        maybe_params_buffers = None
+        if isinstance(f, nn.Module):
+            maybe_params_buffers = {
+                **dict(f.named_parameters(remove_duplicate=False)),
+                **dict(f.named_buffers(remove_duplicate=False)),
+            }
+        # Open question: is this sufficiently BC-breaking that we should only consider doing it for pre_dispatch?
+        fx_tracer = PythonKeyTracer(maybe_params_buffers)
         fake_tensor_mode: Any = nullcontext()
         if tracing_mode == "real":
             fake_tensor_mode = nullcontext()
@@ -738,12 +769,19 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
+        pre_dispatch_mode: Any = nullcontext()
         # pre-autograd tracing uses per-dispatch-key modes,
         # which requires the python dispatcher
-        if tracing_mode == "symbolic" or pre_autograd:
+        if tracing_mode == "symbolic" or pre_dispatch:
             python_dispatcher_mode = enable_python_dispatcher()
+        if pre_dispatch:
+            pre_dispatch_mode = enable_pre_dispatch()
 
-        proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode, pre_autograd=pre_autograd)
+        proxy_function_mode: Any = nullcontext()
+        if pre_dispatch:
+            proxy_function_mode = ProxyTorchFunctionMode(fx_tracer)
+
+        proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode, pre_dispatch=pre_dispatch)
 
         arg_count = 0
 
@@ -783,9 +821,9 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         # We also disable tracing by any other tensor proxy-based tracers except the current. The
         # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
         # thus irrelevant to any external functional trace.
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
+        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
              sym_mode, proxy_mode, disable_autocast_cache(), disable_proxy_modes_tracing(enable_current=True):
-            t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_autograd), tracer=fx_tracer, concrete_args=tuple(phs))
+            t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if tracing_mode == "symbolic":
