@@ -369,10 +369,7 @@ class _ReaderView(io.IOBase):
         elif __whence == os.SEEK_END:
             __whence = os.SEEK_SET
             __offset = (self.offset + self.len) - __offset
-        try:
-            return self.base_stream.seek(__offset, __whence)
-        except BaseException as ex:
-            raise ex
+        return self.base_stream.seek(__offset, __whence)
 
     def tell(self) -> int:
         return self.base_stream.tell() - self.offset
