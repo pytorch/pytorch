@@ -145,11 +145,14 @@ class TestSerialize(TestCase):
 class TestDeserialize(TestCase):
     def check_graph(self, fn, inputs) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
-        exported_module = export(fn, inputs, {})
-        serialized_struct, state_dict = serialize(exported_module)
+        # TODO(angelayi): test better with some sort of wrapper around all
+        # export tests
+
+        ep = export(fn, inputs, [])
+        serialized_struct, state_dict = serialize(ep)
         deserialized_ep = deserialize(serialized_struct, state_dict)
 
-        orig_outputs = exported_module(*inputs)
+        orig_outputs = ep(*inputs)
         loaded_outputs = deserialized_ep(*inputs)
 
         flat_orig_outputs, _ = pytree.tree_flatten(orig_outputs)

@@ -53,7 +53,7 @@ class SerializeError(RuntimeError):
     pass
 
 
-def _reverse_map(d):
+def _reverse_map(d: Dict[Any, Enum]):
     return {v.value: k for k, v in d.items()}
 
 
@@ -74,7 +74,7 @@ _TORCH_TO_SERIALIZE_DTYPE = {
 }
 
 
-_SERIALIZE_TO_TORCH_DTYPE = _reverse_map(_TORCH_TO_SERIALIZE_DTYPE)
+_SERIALIZE_TO_TORCH_DTYPE = _reverse_map(_TORCH_TO_SERIALIZE_DTYPE)  # type: ignore[arg-type]
 
 
 _TORCH_TO_SERIALIZE_LAYOUT = {
@@ -88,7 +88,7 @@ _TORCH_TO_SERIALIZE_LAYOUT = {
 }
 
 
-_SERIALIZE_TO_TORCH_LAYOUT = _reverse_map(_TORCH_TO_SERIALIZE_LAYOUT)
+_SERIALIZE_TO_TORCH_LAYOUT = _reverse_map(_TORCH_TO_SERIALIZE_LAYOUT)  # type: ignore[arg-type]
 
 
 _TORCH_TO_SERIALIZE_MEMORY_FORMAT = {
@@ -99,7 +99,7 @@ _TORCH_TO_SERIALIZE_MEMORY_FORMAT = {
 }
 
 
-_SERIALIZE_TO_TORCH_MEMORY_FORMAT = _reverse_map(_TORCH_TO_SERIALIZE_MEMORY_FORMAT)
+_SERIALIZE_TO_TORCH_MEMORY_FORMAT = _reverse_map(_TORCH_TO_SERIALIZE_MEMORY_FORMAT)  # type: ignore[arg-type]
 
 
 _SYM_INT_OPS = {
@@ -214,25 +214,17 @@ def serialize_operator(target) -> str:
 
 
 def deserialize_operator(serialized_target: str):
-    module = None
     if serialized_target.startswith("_operator"):
         module = operator
-        serialized_target = serialized_target.removeprefix("_operator.")  # type: ignore[attr-defined]
-    elif serialized_target.startswith("torch.nn"):
-        module = torch.nn
-        serialized_target = serialized_target.removeprefix("torch.nn.")  # type: ignore[attr-defined]
+        serialized_target_names = serialized_target.split(".")[1:]
     elif serialized_target.startswith("torch._ops"):
         module = torch.ops
-        serialized_target = serialized_target.removeprefix("torch._ops.")  # type: ignore[attr-defined]
-    elif serialized_target.startswith("torch"):
-        module = torch
-        serialized_target = serialized_target.removeprefix("torch.")  # type: ignore[attr-defined]
+        serialized_target_names = serialized_target.split(".")[2:]
     else:
         return serialized_target
 
-    assert module is not None
     target = module
-    for name in serialized_target.split("."):
+    for name in serialized_target_names:
         if not hasattr(target, name):
             return serialized_target
         else:
@@ -653,8 +645,7 @@ class GraphModuleDeserializer:
     ) -> Union[int, torch.SymInt, bool, torch.SymBool]:
         val = s.value
         if s.type == "as_symbol":
-            # TODO(angelayi)
-            return 0
+            raise NotImplementedError("TODO(angelayi)")
         elif s.type == "as_int":
             assert isinstance(val, int)
             return val
@@ -701,7 +692,7 @@ class GraphModuleDeserializer:
                     log.warning(f"Could not find operator {target}. Returning fake operator.")  # noqa: G004
 
                     def fake_op(x):
-                        return x
+                        raise NotImplementedError("Fake op is not meant to be run.")
                     fake_op.__name__ = target
                     target = fake_op
 
@@ -756,6 +747,8 @@ class GraphModuleDeserializer:
         return torch.fx.GraphModule({}, graph), sig, call_spec
 
     def sync_serialized_node(self, name: str, fx_node: torch.fx.Node):
+        if name in self.serialized_name_to_node:
+            raise SerializeError(f"Node {name} has already been deserialized before.")
         self.serialized_name_to_node[name] = fx_node
         fx_node.meta["val"] = self.serialized_name_to_meta[name]
 
