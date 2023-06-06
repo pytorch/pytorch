@@ -10,8 +10,7 @@ class _Union:
     @classmethod
     def create(cls, **kwargs):
         assert len(kwargs) == 1
-        obj = cls(**{**{f.name: None for f in fields(cls)}, **kwargs})
-        return obj
+        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})
 
     def __post_init__(self):
         assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1
