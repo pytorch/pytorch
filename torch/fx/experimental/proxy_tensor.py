@@ -274,42 +274,6 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
             if r is not NotImplemented:
                 return r
 
-    # When we trace through a torch.tensor invocation, you never actually
-    # see a torch.ops.aten.tensor call. Instead, the way this function is
-    # implemented internally is that we allocate a plain tensor (this is
-    # *guaranteed* to be a plain tensor, we disable all modes when doing
-    # so), and then call at::lift_fresh on it (to give modes a chance to do
-    # their stuff).  Furthermore, the tensor argument to lift_fresh is guaranteed
-    # to be freshly allocated, so we want lift_fresh to be a no-op (directly
-    # returning the input argument).
-    #
-    # Here is the basic problem: when we trace this sequence of executions
-    # into an FX graph, what happens to this call sequence?  Traditionally,
-    # tensor constants get interned as buffers on the FX GraphModule.  But
-    # this is dangerous.  Consider:
-    #
-    #       x = torch.tensor(1)
-    #       x.add_(2)
-    #
-    # Naively, this traces into:
-    #
-    #       t = self._tensor_constant0  # initialized to torch.tensor(1)
-    #       x = torch.ops.aten.lift_fresh(t)
-    #       x.add_(2)
-    #
-    # If lift_fresh returns t directly, the subsequent add_ call will
-    # modify the tensor constant. Really, the problem is we've violated
-    # the invariant the the argument to lift is fresh.  So what we should
-    # preserve the invariant by replacing lift_fresh with lift_fresh_copy:
-    #
-    #       t = self._tensor_constant0  # initialized to torch.tensor(1)
-    #       x = torch.ops.aten.lift_fresh_copy(t)
-    #       x.add_(2)
-    #
-    # This is what the overload modification does.
-    if func is torch.ops.aten.lift_fresh.default:
-        func = torch.ops.aten.lift_fresh_copy.default
-
     tracer = proxy_mode.tracer
     f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
 
@@ -346,6 +310,42 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         fetch_sym_proxy(proxy_mode.tracer),
         pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
     )
+
+    # When we trace through a torch.tensor invocation, you never actually
+    # see a torch.ops.aten.tensor call. Instead, the way this function is
+    # implemented internally is that we allocate a plain tensor (this is
+    # *guaranteed* to be a plain tensor, we disable all modes when doing
+    # so), and then call at::lift_fresh on it (to give modes a chance to do
+    # their stuff).  Furthermore, the tensor argument to lift_fresh is guaranteed
+    # to be freshly allocated, so we want lift_fresh to be a no-op (directly
+    # returning the input argument).
+    #
+    # Here is the basic problem: when we trace this sequence of executions
+    # into an FX graph, what happens to this call sequence?  Traditionally,
+    # tensor constants get interned as buffers on the FX GraphModule.  But
+    # this is dangerous.  Consider:
+    #
+    #       x = torch.tensor(1)
+    #       x.add_(2)
+    #
+    # Naively, this traces into:
+    #
+    #       t = self._tensor_constant0  # initialized to torch.tensor(1)
+    #       x = torch.ops.aten.lift_fresh(t)
+    #       x.add_(2)
+    #
+    # If lift_fresh returns t directly, the subsequent add_ call will
+    # modify the tensor constant. Really, the problem is we've violated
+    # the invariant the the argument to lift is fresh.  So what we should
+    # preserve the invariant by replacing lift_fresh with lift_fresh_copy:
+    #
+    #       t = self._tensor_constant0  # initialized to torch.tensor(1)
+    #       x = torch.ops.aten.lift_fresh_copy(t)
+    #       x.add_(2)
+    #
+    # This is what the overload modification does.
+    if func is torch.ops.aten.lift_fresh.default:
+        func = torch.ops.aten.lift_fresh_copy.default
 
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
