@@ -4,13 +4,13 @@
 #  CUSPARSELT_INCLUDE_DIRS - the CUSPARSELT include directory
 
 find_path(CUSPARSELT_INCLUDE_PATH
-        HINTS "/data/home/jessecai/libcusparse_lt-linux-x86_64-0.4.0.7-archive/include"
+        HINTS "/home/jessecai/local/libcusparse_lt-linux-x86_64-0.4.0.7-archive/include"
         NAMES cusparseLt.h
         DOC "The directory where CUSPARSELT includes reside"
 )
 
 find_path(CUSPARSELT_LIBRARY_PATH
-        HINTS "/data/home/jessecai/libcusparse_lt-linux-x86_64-0.4.0.7-archive/lib"
+        HINTS "/home/jessecai/local/libcusparse_lt-linux-x86_64-0.4.0.7-archive/lib"
         NAMES libcusparseLt.so
         DOC "The directory where CUSPARSELT lib reside"
 )
