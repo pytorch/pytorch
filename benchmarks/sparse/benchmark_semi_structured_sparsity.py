@@ -4,7 +4,7 @@ from torch import nn
 from tqdm import tqdm
 import pandas as pd
 import argparse
-from torch.sparse import to_semi_structured_sparse
+from torch.sparse import to_semi_structured_sparse, SemiStructuredSparseTensor
 from torch.sparse.semi_structured import gen_semi_structured_sparse_mask
 
 
@@ -31,6 +31,8 @@ class Model(nn.Module):
 
 
 def test_linear(m, k, n, dtype, contiguous, backend):
+
+    SemiStructuredSparseTensor.fuse_transpose = contiguous
     mask = gen_semi_structured_sparse_mask(
         m, k, dtype=dtype
     )

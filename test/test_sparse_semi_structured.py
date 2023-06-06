@@ -27,7 +27,6 @@ CUSPARSELT_SUPPORTED_DTYPES = [torch.int8, torch.float16, torch.bfloat16, torch.
 
 class TestSemiStructuredSparse(TestCase):
 
-    @skip("cusparselt not in build")
     @dtypes(*CUSPARSELT_SUPPORTED_DTYPES)
     def test_to_semi_structured_sparse(self, dtype):
         a = gen_semi_structured_sparse_mask(128, 128, dtype=dtype)
@@ -40,7 +39,6 @@ class TestSemiStructuredSparse(TestCase):
         assert isinstance(a, torch.Tensor)
         assert isinstance(a_sparse, SemiStructuredSparseTensor)
 
-    @skip("cusparselt not in build")
     @dtypes(*CUSPARSELT_SUPPORTED_DTYPES)
     def test_mm_sparse_first_NT_T(self, dtype, device):
         A = gen_semi_structured_sparse_mask(64, 64, dtype=dtype)
@@ -66,7 +64,6 @@ class TestSemiStructuredSparse(TestCase):
 
         assert correct
 
-    @skip("cusparselt not in build")
     @parametrize("inference_mode", [subtest(False), subtest(True)])
     @parametrize("contiguous_output", [subtest(False), subtest(True)])
     def test_linear(self, inference_mode, contiguous_output, device):
@@ -88,13 +85,11 @@ class TestSemiStructuredSparse(TestCase):
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-5, atol=1e-5)
 
-    @skip("cusparselt not in build")
     def test_kept_elements(self):
         A = gen_semi_structured_sparse_mask(64, 64)
         A_sparse = to_semi_structured_sparse(A)
         assert A_sparse.kept_elements.shape == (64, 32)
 
-    @skip("cusparselt not in build")
     def test_metadata(self):
         A = gen_semi_structured_sparse_mask(64, 64)
         A_sparse = to_semi_structured_sparse(A)

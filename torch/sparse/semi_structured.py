@@ -1,7 +1,16 @@
+import warnings
+import random
+
 import torch
 
 
-class SemiStructuredSparseTensor(torch.Tensor):
+__all__ = [
+    "to_sparse_semi_structured",
+    "SparseSemiStructuredTensor",
+]
+
+
+class SparseSemiStructured(torch.Tensor):
     """
     This class implementes semi-structured (2:4) sparsity as a Tensor subclass.
 
@@ -21,7 +30,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
     In this case, we store some additional metadata containg the sparse matrix descriptor in order for
     faster matmul performance.
 
-    When this cslt object is not set, we will default to using CUTLASS kernels and _structured_sparse_linear.
+    In the future, when this cslt object is not set, we can use _structured_sparse_linear.
     """
 
     # When fuse_transpose is set to True, we fuse a .T into the cuSPASRELt matmul operation.
@@ -36,6 +45,16 @@ class SemiStructuredSparseTensor(torch.Tensor):
         kwargs["dtype"] = compressed_tensor.dtype
         kwargs["layout"] = compressed_tensor.layout
         kwargs["requires_grad"] = False
+
+        warnings.warn(
+            (
+                "The PyTorch API of MaskedTensors is in prototype stage "
+                "and will change in the near future. Please open a Github issue "
+                "for features requests and see our documentation on the torch.masked "
+                "module for further information about the project."
+            ),
+            UserWarning,
+        )
 
         return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)  # type: ignore[attr-defined]
 
@@ -63,7 +82,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         return self.compressed_tensor[num_kept_elements:].view(m, -1).view(torch.int16)
 
     def __repr__(self):
-        return f"SemiStructruredSparseTensor(shape={self.shape} \n kept_elements={self.kept_elements} \n metadata={self.metadata})"
+        return f"SparseSemiStructruredTensor(shape={self.shape} \n kept_elements={self.kept_elements} \n metadata={self.metadata})"
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
@@ -72,7 +91,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         # since we create a new compressed tensor, the tensor will already be detached
         # this effecitvely functions as a no-op.
         if func is torch.ops.aten.detach.default:
-            return SemiStructuredSparseTensor(
+            return SparseSemiStructuredTensor(
                 args[0].shape,
                 args[0].compressed_tensor,
                 args[0].cslt,
@@ -83,7 +102,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
         # we just keep track of how many times we have been transposed. If it's an odd number of times, we'll
         # throw an error since we can't handle this situation.
         if func is torch.ops.aten.t.default:
-            return SemiStructuredSparseTensor(
+            return SparseSemiStructuredTensor(
                 args[0].shape,
                 args[0].compressed_tensor,
                 args[0].cslt,
@@ -100,7 +119,7 @@ class SemiStructuredSparseTensor(torch.Tensor):
             # since it will be slower to have the second matrix be sparse.
             # It may be using the same transpose trick we are using below
             if (
-                isinstance(input_A, SemiStructuredSparseTensor)
+                isinstance(input_A, SparseSemiStructuredTensor)
                 and not input_A.transposed
             ):
                 return input_A.cslt.addmm(
@@ -111,11 +130,11 @@ class SemiStructuredSparseTensor(torch.Tensor):
             # We do this by taking advantage of some transpose properties:
             # F.linear(x) = addmm(bias, input, weight.t()) = b + xW' = (b + xW')''
             #        = (W''x' + b')' = (Wx' + b')' = W.cslt.addmm(input, ).T
-            elif isinstance(input_B, SemiStructuredSparseTensor) and input_B.transposed:
+            elif isinstance(input_B, SparseSemiStructuredTensor) and input_B.transposed:
                 res = input_B.t().cslt.addmm(input_A.T, bias, True, cls.fuse_transpose)  # type: ignore[attr-defined]
                 return res if cls.fuse_transpose else res.T
 
-            raise NotImplementedError(
+            raise NotImplemented(
                 (
                     f"func: {func} is currently not supported for ",
                     f"opA: {input_A.transposed} A: {input_A}",
@@ -127,16 +146,16 @@ class SemiStructuredSparseTensor(torch.Tensor):
             input_A, input_B = args
 
             if (
-                isinstance(input_A, SemiStructuredSparseTensor)
+                isinstance(input_A, SparseSemiStructuredTensor)
                 and not input_A.transposed
             ):
                 return input_A.cslt.mm(input_B, not input_B.is_contiguous(), False)  # type: ignore[attr-defined]
 
-            elif isinstance(input_B, SemiStructuredSparseTensor) and input_B.transposed:
+            elif isinstance(input_B, SparseSemiStructuredTensor) and input_B.transposed:
                 res = input_B.t().cslt.mm(input_A.T, True, cls.fuse_transpose)  # type: ignore[attr-defined]
                 return res if cls.fuse_transpose else res.T
 
-            raise NotImplementedError(
+            raise NotImplemented(
                 (
                     f"func: {func} is currently not supported for ",
                     f"opA: {input_A.transposed} A: {input_A}",
@@ -149,8 +168,77 @@ class SemiStructuredSparseTensor(torch.Tensor):
         # We handle this case in order to support with torch.inference_mode()
         if func is torch.ops.aten.linear.default:
             input, weight, bias = args
-            if isinstance(weight, SemiStructuredSparseTensor):
+            if isinstance(weight, SparseSemiStructuredTensor):
                 res = weight.t().cslt.addmm(input.T, bias, True, cls.fuse_transpose)  # type: ignore[attr-defined]
                 return res if cls.fuse_transpose else res.T
 
-        raise NotImplementedError(f"{func} on {args} is not implemented!")
+        raise NotImplemented(f"{func} on {args} is not implemented!")
+
+
+def to_sparse_semi_structured(
+    original_tensor: torch.Tensor,
+    transposed=False,
+    backend="cusparselt",
+):
+    # This code calculates the size of the compressed tensor.
+
+    num_bytes = original_tensor.nelement() * original_tensor.element_size()
+
+    # compression factor is different based on dtype
+    if original_tensor.dtype in {torch.float16, torch.bfloat16, torch.float32}:
+        compression_factor = 9
+    elif original_tensor.dtype is torch.int8:
+        compression_factor = 10
+
+    compressed_size_bytes = num_bytes * compression_factor // 16
+    compressed_size = compressed_size_bytes // original_tensor.element_size()
+
+    compressed_tensor = torch.empty(
+        (compressed_size,),
+        dtype=original_tensor.dtype,
+        device=original_tensor.device,
+    )
+
+    if backend == "cusparselt":
+        cslt = torch.classes.cusparselt.CusparseLt(compressed_tensor)
+        cslt.compress(original_tensor, False)
+
+        return SparseSemiStructuredTensor(
+            original_tensor.shape, compressed_tensor, cslt, transposed
+        )
+    else:
+        return SparseSemiStructuredTensor(
+            original_tensor.shape, compressed_tensor, None, transposed
+        )
+
+
+def _rand_sparse_semi_structured_mask(r, c, dtype=torch.float16, device="cuda"):
+    """
+    This function returns a 1:2 sparse matrix of size (r, c).
+    Note that this means this matrix will also be 2:4 and 4:8 sparse as well.
+    """
+
+    choices = [[0, 1], [1, 0]]
+
+    mask_entries = [random.choice(choices) for i in range(r * c // 2)]
+
+    return (
+        torch.tensor(mask_entries, dtype=dtype, device=device)
+        .reshape(r, c)
+        .contiguous()
+    )
+
+
+def _is_sparse_semi_structured(tensor: torch.Tensor, zeros_per_block=2):
+    """
+    Return whether a tensor is semi_structured sparse
+    """
+
+    if not tensor.is_contiguous():
+        raise Exception("Tensor is not contiguous")
+
+    block_size = 2 * zeros_per_block
+    contiguous_flattened = tensor.view(-1)
+    # okay if not the same tensor since values will be the same
+    block_tensor = contiguous_flattened.reshape(-1, block_size)
+    return ((block_tensor == 0).sum(dim=1) == zeros_per_block).all()
