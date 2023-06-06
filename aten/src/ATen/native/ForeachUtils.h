@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <c10/util/irange.h>
+#include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -235,8 +236,8 @@ FlatMap _group_tensors_by_first_tensors_device_and_dtype(
     const bool with_indices) {
   FlatMap grouped_tensors_with_indices;
 
-  TORCH_CHECK_GT(nested_tensorlist.size(), 0);
-  TORCH_CHECK_GT(nested_tensorlist[0].size(), 0);
+  TORCH_CHECK(nested_tensorlist.size() > 0);
+  TORCH_CHECK(nested_tensorlist[0].size() > 0);
   const auto num_lists = nested_tensorlist.size();
   const auto num_tensors = nested_tensorlist[0].size();
 
