@@ -1,13 +1,12 @@
 import operator
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from functorch.experimental import control_flow
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._export.graph_module import get_export_meta, make_export_graph_module
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
@@ -76,7 +75,7 @@ class ExportTracer(PythonKeyTracer):
         # propagate the fake tensor or sym nodes
         def make_val(
             x: Argument,
-        ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, None]:
+        ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, int, None]:
             if isinstance(x, FakeTensor):
                 return x
             elif isinstance(x, torch.Tensor):
@@ -96,7 +95,7 @@ class ExportTracer(PythonKeyTracer):
                     )
                     fake_tensor = None
                 return fake_tensor
-            elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool, int)):
                 return x
             else:
                 return None
@@ -130,14 +129,6 @@ class ExportPassBase(PassBase):
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
     """
-
-    def get_valid_dialects(self) -> List[Type]:
-        """
-        Returns a list of valid dialects (operator namespace modules) that this
-        pass can run under. Returning an empty list implies this pass can run in
-        any dialect.
-        """
-        return []
 
     class ExportInterpreter(fx.Interpreter):
         """
@@ -301,11 +292,6 @@ class ExportPassBase(PassBase):
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        op_dialect = getattr(torch.ops, str(op).split('.')[0])
-        valid_dialects = self.get_valid_dialects()
-        if len(valid_dialects) != 0 and op_dialect not in valid_dialects:
-            raise ExportPassBaseError(f"Expecting op of dialects: {valid_dialects}, got: {op}")
-
         return self._fx("call_function", op, args, kwargs, meta)
 
     def call_sym(
@@ -374,7 +360,6 @@ class ExportPassBase(PassBase):
         with fx_traceback.preserve_node_meta():
             interpreter.run(*inputs_data)
 
-        # TODO(angelayi): Update this with the exported graph module class
         new_graph_module = torch.fx.GraphModule(self.tracer.root, self.tracer.graph)
 
         self.tracer = prev_tracer
@@ -411,7 +396,4 @@ class ExportPassBase(PassBase):
         with fake_tensor_mode, dispatcher_mode:  # type: ignore[assignment, union-attr]
             result = self.call_submodule(graph_module, tuple(inputs))
 
-        gm = result.graph_module
-        meta = get_export_meta(graph_module)
-        export_graph_module = make_export_graph_module(gm, gm.graph, meta.in_spec, meta.out_spec)
-        return PassResult(export_graph_module, True)
+        return result

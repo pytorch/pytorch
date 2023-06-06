@@ -3,6 +3,7 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/DispatchStub.h>
@@ -472,14 +473,15 @@ bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
-  // Check that the gpu is capable of running flash attention
+bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
+  // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm50 = dprops->major >= 5;
-  if (!(is_sm50)) {
+  bool is_gte_sm50 = dprops->major >= 5;
+  bool is_lte_sm90 = dprops->major <= 9;
+  if (!(is_gte_sm50 && is_lte_sm90)) {
     if (debug) {
       TORCH_WARN(
-          "Mem Efficient Attention only supports sm5x or greater gpu architectures. Attempting to run on a sm ",
+          "Mem Efficient Attention only supported gpu architectures in the range [sm50, sm90]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -521,26 +523,6 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
   return true;
 }
 
-bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
-  auto& ctx = at::globalContext();
-  if (ctx.deterministicAlgorithms()) {
-    if (ctx.deterministicAlgorithmsWarnOnly()) {
-      TORCH_WARN_ONCE(
-          "Memory Efficient attention is a non-deterministic algorithm. ",
-          "To explicitly disable Memory Efficient attention call torch.use_deterministic_algorithms(True, warn_only=False).");
-      // Warn the user but don't disable the kernel.
-      return true;
-    } else {
-      if (debug) {
-        TORCH_WARN(
-            "Memory Efficient attention is a non-deterministic algorithm and torch.use_deterministic_algorithms(True) has been set.");
-      }
-      return false;
-    }
-  }
-  // Determinism is not set so we can use the kernel.
-  return true;
-}
 
 bool use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
@@ -582,13 +564,15 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
   return false;
 #endif
   // Constraints specific to mem efficient attention
-  constexpr auto mem_efficient_dtypes =
+  constexpr auto default_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+  constexpr auto sm50_mem_efficient_dtypes =
+      array_of<at::ScalarType>(at::kHalf, at::kFloat);
 
   //  Define gate functions that determine if a flash kernel can be ran
   constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
-      check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
+      check_mem_efficient_hardware_support,
       check_requires_grad_and_nested,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
@@ -596,17 +580,18 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_head_dim_size_mem_efficient,
       check_head_dim_gt64_and_sm_ge86_lt90,
       check_for_seq_len_0_nested_tensor,
-      check_for_non_zero_dropout,
-      check_use_deterministic_algorithms);
+      check_for_non_zero_dropout);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
-  if (!check_tensor_dtype(params, mem_efficient_dtypes, debug)) {
-    return false;
+
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major == 5) {
+    return check_tensor_dtype(params, sm50_mem_efficient_dtypes, debug);
   }
-  return true;
+  return check_tensor_dtype(params, default_mem_efficient_dtypes, debug);
 }
 } // namespace
 

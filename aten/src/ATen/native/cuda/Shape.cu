@@ -1,8 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/TensorShape.h>
@@ -25,17 +27,42 @@ namespace at::native {
 
 constexpr int CAT_ARRAY_BATCH_SIZE = 128;
 constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
+constexpr int ALIGNED_VEC_LOAD_BYTES = 16;
 
 namespace {
+
+inline bool is_aligned_vec4(const void* ptr) {
+  auto iptr = reinterpret_cast<uintptr_t>(ptr);
+  return !(iptr % alignof(int4));
+}
 
 inline bool getCatGrid(ptrdiff_t nTensors, dim3& grid) {
   const int numSM = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-  //X dim of grid for cat array cooperates on a single tensor in the cat.
-  //Given half of the GPU, full utilization will always occur.
+  // X dim of grid for cat array cooperates on a single tensor in the cat.
+  // Given half of the GPU, full utilization will always occur.
+
+  // This will have cating two tensors fill the entire grid, but prevent
+  // many threads from needlessly load meta data if their sizes is small.
+
   grid = dim3( 2LL * numSM, (long long) nTensors );
 
   return true;
+}
+
+template<typename T>
+inline std::tuple<dim3, dim3> getCatGridContig(unsigned int max_elements_per_tensor,
+  ptrdiff_t nTensors) {
+  constexpr unsigned int threads_per_block = 128;
+  constexpr unsigned int min_aligned_vec_per_thread = 1;
+
+  unsigned int elements_per_thread = ALIGNED_VEC_LOAD_BYTES / sizeof(T) *
+    min_aligned_vec_per_thread;
+  unsigned int max_threads = ceil_div(max_elements_per_tensor, elements_per_thread);
+  dim3 block = dim3(threads_per_block);
+  dim3 grid = dim3(ceil_div(max_threads, threads_per_block), (long long)nTensors);
+
+  return std::make_tuple(grid, block);
 }
 
 // Similar to any other IndexToOffset calculation for copying along a given
@@ -54,7 +81,7 @@ struct CatArrIndexToOffset {
     // it is the linear index of the permuted contiguous tensor
     IndexType offset = 0;
 
-#pragma unroll
+    #pragma unroll
     for (int i = Dims - 1; i >= 1; --i) {
       IndexType curDimSize = i == concatDim ? dimSize : tensorSize[i];
       IndexType nextDimIndex = linearIndex / curDimSize;
@@ -139,6 +166,65 @@ __global__ void CatArrayBatchedCopy(
     }
 }
 
+/*
+  Specialized implementation of the CatArrayBatchedCopy written to generate wide memory loads
+  to improve memory bandwidth throughput.
+*/
+
+template <typename T, typename IndexType, int Dims, int batch_size, int stride_size>
+__global__ void CatArrayBatchedCopy_aligned16_contig(
+    T* output,
+    CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
+    TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
+    const int concatDim,
+    IndexType dimStride) {
+
+    // This kernel tries to use 128 bit loads
+    constexpr int kILP = ALIGNED_VEC_LOAD_BYTES / sizeof(T);
+    IndexType inputOffset = (blockIdx.x * blockDim.x + threadIdx.x) * kILP;
+    IndexType inputStride = gridDim.x * blockDim.x * kILP;
+
+    IndexType nElements = inputs.nElements[blockIdx.y];
+    if (inputOffset >= nElements) {
+      return;
+    }
+
+    const T* data = inputs.input[blockIdx.y];
+    IndexType offset = inputs.offset[blockIdx.y];
+    IndexType dimSize = inputs.dimSize[blockIdx.y];
+    IndexType dataOffset = offset * dimStride;
+
+    IndexType v_elementOffset[kILP];
+    T reg_data[kILP];
+
+    while (inputOffset + kILP <= nElements) {
+      for (int i = 0; i < kILP; ++i) {
+        v_elementOffset[i] = CatArrIndexToOffset<IndexType, Dims>::compute(os.tensorSize,
+          os.tensorStride, dimSize, concatDim, inputOffset + i);
+      }
+
+      using LT = at::native::memory::aligned_vector<T, kILP>;
+      ((LT*)reg_data)[0] = const_cast<LT*>((LT*)(data + inputOffset))[0];
+
+      #pragma unroll
+      for (int i = 0; i < kILP; ++i) {
+        output[dataOffset + v_elementOffset[i]] = reg_data[i];
+      }
+
+      inputOffset += inputStride;
+    }
+
+    // Handle remaining tail in case nElements does not divide
+    // exactly to kILP
+
+    while (inputOffset < nElements) {
+      v_elementOffset[0] = CatArrIndexToOffset<IndexType, Dims>::compute(os.tensorSize,
+        os.tensorStride, dimSize, concatDim, inputOffset);
+      output[dataOffset + v_elementOffset[0]] = data[inputOffset];
+      inputOffset++;
+    }
+}
+
 template <typename scalar_t, int batch_size, int stride_size>
 void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
@@ -171,6 +257,14 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
 
+  // If all batches are contiguous we can call a specialized implementation
+  // which requires the input tensor addresses to be aligned to a
+  // 16 Byte boundary.
+
+  bool isContig = true;
+  bool isAligned = true;
+  unsigned int max_elements_per_tensor = 0;
+
   // Now we loop
   int batchCounter = 0;
   int64_t offset = 0;
@@ -185,10 +279,16 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       if (inputs[i+batchCounter].get().numel() > 0) {
         dimSize = inputs[i+batchCounter].get().size(dimension);
       }
+
       catMetaData.input[batchCounter] = inputs[i+batchCounter].get().const_data_ptr<scalar_t>();
       catMetaData.offset[batchCounter] = offset;
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
+
+      // If at least one of the inputs is not aligned, we can't call the
+      // CatArrayBatchedCopy_aligned16_contig
+      isAligned &= is_aligned_vec4(catMetaData.input[batchCounter]);
+
       if (stride_size > 1) {
         auto strides = inputs[i+batchCounter].get().strides();
         auto sizes = inputs[i+batchCounter].get().sizes();
@@ -197,22 +297,31 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
           catMetaData.tensorStride[batchCounter].tensorStride[j] = strides[j];
         }
         catMetaData.isContiguous[batchCounter] = false;
+        isContig = false;
       } else {
         catMetaData.isContiguous[batchCounter] = true;
       }
-      // update offset
-      offset += dimSize;
-    }
-    // Next, let's consider how we set our kernel launch parameters.
-    // We borrow from THCApply, which the kernel's internal indexing
-    // is based on.
-    dim3 applyBlock = dim3(32*16);
 
-    //Get grid where x dim fills half gpu and y dim is number of tensors.
-    //This will have cating two tensors fill the entire grid, but prevent
-    //many threads from needlessly load meta data if their sizes is small.
-    dim3 catGrid;
-    getCatGrid(batchCounter, catGrid);
+      // Update offset
+      offset += dimSize;
+
+      // We need max elements per tensor to compute grid parameters
+      max_elements_per_tensor = std::max(max_elements_per_tensor,
+        catMetaData.nElements[batchCounter]);
+    }
+
+
+    dim3 applyBlock, catGrid;
+
+    if (isContig && sizeof(scalar_t) > 2) {
+      std::tuple<dim3, dim3> launchParams = getCatGridContig<scalar_t>(
+          max_elements_per_tensor, batchCounter);
+      catGrid = std::get<0>(launchParams);
+      applyBlock = std::get<1>(launchParams);
+    } else {
+      applyBlock = dim3(32 * 16);
+      getCatGrid(batchCounter, catGrid);
+    }
 
     if (memory_format != c10::MemoryFormat::Contiguous) {
       switch (dimension) {
@@ -227,9 +336,15 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     }
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-    CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
-        catGrid, applyBlock, 0, stream.stream()>>>(\
-            data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]); \
+    if (isContig && isAligned && sizeof(scalar_t) >= 4 && sizeof(scalar_t) <= 8) {\
+      CatArrayBatchedCopy_aligned16_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+          catGrid, applyBlock, 0, stream.stream()>>>(\
+              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+    } else {\
+      CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+          catGrid, applyBlock, 0, stream.stream()>>>(\
+              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+    }\
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     switch (nDims) {
       case 1:
