@@ -82,6 +82,12 @@ class SymInt(_Union):
 
 
 @dataclass
+class SymBool(_Union):
+    as_symbol: str
+    as_bool: bool
+
+
+@dataclass
 class TensorMeta:
     dtype: ScalarType
     sizes: List[SymInt]
@@ -96,6 +102,12 @@ class TensorMeta:
 class SymIntArgument(_Union):
     as_name: str
     as_int: int
+
+
+@dataclass
+class SymBoolArgument(_Union):
+    as_name: str
+    as_bool: bool
 
 
 @dataclass
