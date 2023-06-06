@@ -110,7 +110,7 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
   struct BadHash {
     size_t operator()(const int64_t input) {
       return input % 2;
-    };
+    }
   };
 
   using bad_hash_dict =

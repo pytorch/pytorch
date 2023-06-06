@@ -387,8 +387,9 @@ class DispatchKeySet final {
   DispatchKey highestFunctionalityKey() const {
     auto functionality_idx = indexOfHighestBit();
     // This means that none of the functionality bits were set.
-    if (functionality_idx < num_backends)
+    if (functionality_idx < num_backends) {
       return DispatchKey::Undefined;
+    }
     // The first num_backend bits in the keyset don't correspond to real
     // dispatch keys.
     return static_cast<DispatchKey>(functionality_idx - num_backends);
@@ -405,8 +406,9 @@ class DispatchKeySet final {
     auto backend_idx =
         DispatchKeySet(repr_ & full_backend_mask).indexOfHighestBit();
     // all zeros across the backend bits means that no backend bits are set.
-    if (backend_idx == 0)
+    if (backend_idx == 0) {
       return BackendComponent::InvalidBit;
+    }
     return static_cast<BackendComponent>(backend_idx);
   }
 

@@ -338,8 +338,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   }
 
   std::vector<Use> uses = observer_out->uses();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Node* embedding_bag_float_op;
+  Node* embedding_bag_float_op = nullptr;
   // We expect that the output of the weight observer will be consumed by the
   // embedding_bag operator.
   for (const Use& use : uses) {
@@ -444,17 +443,19 @@ void insertQuantizationOps(
     quantize_func = "quantize_per_tensor";
   }
   Value* original_val = observer->input(1);
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Node *quant, *choose_qparams, *dequant;
+  Node* quant = nullptr;
+  Node* choose_qparams = nullptr;
+  Node* dequant = nullptr;
   // Temporary solution to quantize embedding_bag operators. Will be re-written
   // once we support quantization of embedding_bag weights.
   auto embedding_bag_name = getEmbeddingBagObsName(module, observer);
   if (isEmbeddingBagOp(observer, embedding_bag_name)) {
     if (isWeight(module, observer_out)) {
       auto op_name = embedding_bag_name.value();
-      Node* dequant = insertEmbeddingBagOps(observer, op_name);
+      Node* this_dequant = insertEmbeddingBagOps(observer, op_name);
       observer_out->replaceAllUsesWith(original_val);
-      original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
+      original_val->replaceAllUsesAfterNodeWith(
+          this_dequant, this_dequant->output());
     } else {
       // Special case for embedding bag operators indices input - we don't
       // quantize the input but we still need to insert observers for it because
@@ -543,8 +544,9 @@ void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
       user->replaceInputWith(dequant_out, std::get<2>(quant_ops)->output());
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Node *choose_qparams, *quant, *dequant;
+  Node* choose_qparams = nullptr;
+  Node* quant = nullptr;
+  Node* dequant = nullptr;
   for (const auto& n : nodes_to_rewrite) {
     std::tie(choose_qparams, quant, dequant) = n;
     dequant->removeAllInputs();

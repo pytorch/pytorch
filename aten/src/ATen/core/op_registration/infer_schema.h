@@ -24,7 +24,7 @@ struct ArgumentDef final {
   GetTypeFn* getTypeFn;
   GetTypeFn* getFakeTypeFn;
   constexpr ArgumentDef(): getTypeFn(nullptr), getFakeTypeFn(nullptr) {}
-  explicit constexpr ArgumentDef(GetTypeFn *getTypeFn, GetTypeFn *getFakeTypeFn): getTypeFn(getTypeFn), getFakeTypeFn(getFakeTypeFn) {}
+  explicit constexpr ArgumentDef(GetTypeFn* getTypeFn, GetTypeFn* getFakeTypeFn): getTypeFn(getTypeFn), getFakeTypeFn(getFakeTypeFn) {}
 };
 
 template<bool V>

@@ -49,7 +49,7 @@ TORCH_API torch::jit::Function* checkObjectSortSchema(
     std::stringstream& why_not);
 
 // A comparator that checks ordering of two IValues of same type.
-typedef std::function<bool(const IValue& a, const IValue& b)> IValueComparator;
+using IValueComparator = std::function<bool(const IValue& a, const IValue& b)>;
 
 TORCH_API IValueComparator getLessThanComparator(const IValue& v);
 TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
@@ -84,7 +84,7 @@ struct StreamData3Holder : c10::intrusive_ptr_target {
       val = d;
     }
     StreamData3Holder() = delete;
-    struct c10::StreamData3 val;
+    struct c10::StreamData3 val{};
 };
 
 } // namespace ivalue
@@ -680,7 +680,7 @@ public:
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
   IValue(const char* v) : IValue(std::string(v)) {}
-  IValue(c10::string_view v) : IValue(std::string(v)) {};
+  IValue(c10::string_view v) : IValue(std::string(v)) {}
   bool isString() const {
     return Tag::String == tag;
   }
@@ -886,20 +886,15 @@ public:
   }
 
   at::Scalar toScalar() const {
-    if (isDouble())
-      return toDouble();
-    else if (isInt())
-      return toInt();
-    else if (isComplexDouble())
-      return toComplexDouble();
-    else if (isBool())
-      return toBool();
-    else if (isSymInt())
-      return toSymInt();
-    else if (isSymFloat())
-      return toSymFloat();
-    else if (isSymBool())
-      return toSymBool();
+    // clang-format off
+    if (isDouble())             { return toDouble(); }
+    else if (isInt())           { return toInt(); }
+    else if (isComplexDouble()) { return toComplexDouble(); }
+    else if (isBool())          { return toBool(); }
+    else if (isSymInt())        { return toSymInt(); }
+    else if (isSymFloat())      { return toSymFloat(); }
+    else if (isSymBool())       { return toSymBool(); }
+    // clang-format on
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -1274,7 +1269,7 @@ public:
     } u;
     at::Tensor as_tensor;
     Payload() : u() {}
-    ~Payload() {}
+    ~Payload() {};
   };
 
   IValue(const Payload& p, Tag t) : tag(t) {

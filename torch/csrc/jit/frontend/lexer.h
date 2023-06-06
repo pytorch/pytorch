@@ -205,8 +205,9 @@ struct TORCH_API SharedParserData {
     if (pos.has_next()) {
       if (*pos == '#' && !isTypeComment(pos)) {
         // skip comments
-        while (pos.has_next() && *pos != '\n')
+        while (pos.has_next() && *pos != '\n') {
           ++pos;
+        }
         // tail call, handle whitespace and more comments
         return match(pos, continuation, whitespace_token, kind, start, end);
       }
@@ -241,7 +242,7 @@ struct TORCH_API SharedParserData {
     // invariant: the next token is not whitespace or newline
     *start = pos;
     // check for a valid number
-    size_t len;
+    size_t len = 0;
     if (isNumber(pos.rest_line(), 0, &len)) {
       *end = *start;
       *end += len;
@@ -320,8 +321,9 @@ struct TORCH_API SharedParserData {
     // http://en.cppreference.com/w/cpp/string/byte/strtof
     // but we want only the number part, otherwise 1+3 will turn into two
     // adjacent numbers in the lexer
-    if (first == '-' || first == '+' || isalpha(first))
+    if (first == '-' || first == '+' || isalpha(first)) {
       return false;
+    }
     const char* startptr = str.data() + start;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* endptr;
@@ -347,8 +349,9 @@ struct TORCH_API SharedParserData {
   // as elsewhere, backslash and new line should be ignored
   bool isString(c10::string_view str, size_t start, size_t* len) {
     char quote = str[start];
-    if (quote != '\"' && quote != '\'')
+    if (quote != '\"' && quote != '\'') {
       return false;
+    }
     int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
 
     // end is now set past the opening quotation marks
@@ -428,8 +431,9 @@ struct Lexer {
   }
   // Return the current token, and then move to the next one
   Token next() {
-    if (next_tokens.empty())
+    if (next_tokens.empty()) {
       reportError("Lexer invariant violated: empty token queue");
+    }
     Token r = std::move(next_tokens.front());
     next_tokens.erase(next_tokens.begin());
     if (next_tokens.empty()) {
@@ -439,8 +443,9 @@ struct Lexer {
   }
   // Skip the current token if it matches the given kind
   bool nextIf(int kind) {
-    if (cur().kind != kind)
+    if (cur().kind != kind) {
       return false;
+    }
     next();
     return true;
   }
