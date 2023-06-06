@@ -1398,6 +1398,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         out_dtype = opt_mod(mod)
         self.assertEqual(out_dtype, torch.float32)
 
+    def test_dir(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.register_buffer("buf0", torch.randn(10, 10))
+                self.register_parameter(
+                    name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
+                )
+
+            def forward(self, x):
+                return self.r(torch.sin(x)) + self.buf0
+
+        mod = MockModule()
+        mod_keys = dir(mod)
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+        opt_mod_keys = dir(opt_mod)
+
+        # Check user-defined attributes, parameters and buffers
+        self.assertIn("linear", opt_mod_keys)
+        self.assertIn("buf0", opt_mod_keys)
+        self.assertIn("param0", opt_mod_keys)
+
+        # Check all attributes, parameters and buffers
+        self.assertTrue(len(set(mod_keys).difference(opt_mod_keys)) == 0)
+
     def test_recursion(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
