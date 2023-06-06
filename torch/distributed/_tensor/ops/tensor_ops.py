@@ -40,6 +40,7 @@ aten = torch.ops.aten
         aten.clone.default,
         aten.contiguous.default,
         aten.copy_.default,
+        aten.set_.source_Tensor,
         aten.detach.default,
         aten.equal.default,
         aten.is_same_size.default,

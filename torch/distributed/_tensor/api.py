@@ -207,6 +207,13 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # TODO: consider all_gather the local tensors for better debugging
         return f"DTensor(local_tensor={self._local_tensor}, device_mesh={self._spec.mesh}, placements={self._spec.placements})"
 
+    def __getstate__(self):
+        print(f"get state, {self._local_tensor}")
+        return self._local_tensor, self._spec
+
+    def __setstate__(self, state):
+        self._local_tensor, self._spec = state
+
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
