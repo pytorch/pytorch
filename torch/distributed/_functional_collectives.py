@@ -493,7 +493,7 @@ def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TY
     return list(map(_maybe_wrap_tensor, tensor_list))
 
 
-def all_gather_into_tensor_coalesced(self: List[torch.Tensor], group: RANK_TYPES, tag: str = "") -> List[List[torch.Tensor]]:
+def all_gather_into_tensor_coalesced(self: List[torch.Tensor], group: RANK_TYPES, tag: str = "") -> List[torch.Tensor]:
     """
     Gather a list of tensors across from all machines.
 

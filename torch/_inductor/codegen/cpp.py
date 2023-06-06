@@ -451,8 +451,16 @@ class CppVecOverrides(OpOverrides):
         return f"({a} != 0) & ({b} != 0)"
 
     @staticmethod
+    def logical_not(a):
+        return f"{a} == 0"
+
+    @staticmethod
     def logical_or(a, b):
         return f"({a} != 0) | ({b} != 0)"
+
+    @staticmethod
+    def logical_xor(a, b):
+        return f"({a} != 0) ^ ({b} != 0)"
 
     @staticmethod
     def tan(a):
@@ -971,20 +979,40 @@ class CppOverrides(OpOverrides):
         return f"{a} && {b}"
 
     @staticmethod
+    def logical_not(a):
+        return f"!{a}"
+
+    @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
 
     @staticmethod
-    def bitwise_and(x, y):
-        return f"decltype({x})({x} & {y})"
+    def logical_xor(a, b):
+        return f"{a} != {b}"
 
     @staticmethod
-    def bitwise_or(x, y):
-        return f"decltype({x})({x} | {y})"
+    def bitwise_and(a, b):
+        return f"decltype({a})({a} & {b})"
 
     @staticmethod
-    def bitwise_xor(x, y):
-        return f"decltype({x})({x} ^ {y})"
+    def bitwise_not(a):
+        return f"decltype({a})(~{a})"
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return f"decltype({a})({a} | {b})"
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return f"decltype({a})({a} ^ {b})"
+
+    @staticmethod
+    def bitwise_left_shift(a, b):
+        return f"decltype({a})({a} << {b})"
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return f"decltype({a})({a} >> {b})"
 
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr):
@@ -1435,18 +1463,26 @@ class CppVecKernel(CppKernel):
 
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
+            out_dtype = V.graph.get_dtype(name)
             if self.tiling_idx >= self.reduction_depth:
                 # Horizontal reduction
                 self.reduction_suffix.writeline(
-                    DeferredLine(name, f"{var}[{cexpr_index(index)}] = {tmpvar};")
+                    DeferredLine(
+                        name,
+                        f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({tmpvar});",
+                    )
                 )
             else:
                 # Vertical reduction
-                self.reduction_suffix.writeline(
-                    DeferredLine(
-                        name, f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
-                    )
-                )
+                store_line = f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
+                if out_dtype != dtype:
+                    if out_dtype == torch.bfloat16 and dtype == torch.float:
+                        store_line = f"store_float_as_bf16({var} + {cexpr_index(index)}, {tmpvar_vec});"
+                    else:
+                        raise AssertionError(
+                            f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
+                        )
+                self.reduction_suffix.writeline(DeferredLine(name, store_line))
 
         self.cse.store_cache[name] = tmpvar
 
