@@ -783,6 +783,7 @@ def is_start_of_fx_graph(graph, node):
     return node is next(iter(graph.nodes))
 
 
+# match: copy_, relu_, _set_grad_enabled, manual_seed, enter_functional_autocast, etc
 _mutation_op_re = re.compile(r"_$|(\b|_)(set|enter|exit|seed)(\b|_)")
 
 
