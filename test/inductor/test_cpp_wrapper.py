@@ -21,6 +21,8 @@ try:
             test_cpu_repro,
             test_foreach,
             test_mkldnn_pattern_matcher,
+            test_pattern_matcher,
+            test_select_algorithm,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
@@ -28,6 +30,8 @@ try:
         import test_cpu_repro
         import test_foreach
         import test_mkldnn_pattern_matcher
+        import test_pattern_matcher
+        import test_select_algorithm
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
@@ -233,6 +237,26 @@ if RUN_CUDA:
             device=None,
             tests=test_foreach.ForeachTests(),
         ),  # test foreach
+        BaseTest(
+            "test_cat_slice_cat",
+            device=None,
+            tests=test_pattern_matcher.TestPaternMatcher(),
+        ),
+        BaseTest(
+            "test_addmm",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_linear_relu",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_convolution1",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
     ]:
         make_test_case(item.name, item.device, item.tests)
 
