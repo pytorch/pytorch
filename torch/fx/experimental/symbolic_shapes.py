@@ -519,14 +519,14 @@ class RelaxedUnspecConstraint(Constraint):
     unspecialized."  However, this constraint doesn't say very much about what
     specialization is permitted; for example, if we guard on a size being
     even, this would still be acceptable under an unspec constraint.  This
-    makes UnspecConstraint useful for eager mode, where your backend compiler
+    makes RelaxedUnspecConstraint useful for eager mode, where your backend compiler
     may add constraints to otherwise dynamic dimensions; we can't assert that
     there are NO guards as this is brittle because compilers should be able to
     add extra constraints.  If you want to assert that there are no guards,
     use StrictMinMaxConstraint with an unbounded ValueRanges.
     """
     def render(self, source: Source):
-        return f"UnspecConstraint({source.name()})"
+        return f"RelaxedUnspecConstraint({source.name()})"
 
 # NB: None here indicates the client constraint is whatever is implicitly
 # inferred by guards from tracing, and that a backend can add whatever guards
@@ -1750,8 +1750,36 @@ class DimConstraints:
         # LocalSource.name() wraps the name with L[""]. We use regular
         # expression to do the replacement to avoid traversing up
         # the source hierarchy manually.
-        def unwrap_local_source(source_name):
-            return re.sub(r"L\['(.+?)'\]", r'\1', source_name)
+        def extract_and_rewrite_local(dc):
+            match = re.search(r"L\['(.+?)'\]", dc)
+            if match is None:
+                return
+            arg = match.expand(r'\1')
+            dc = re.sub(r"L\['(.+?)'\]", r'\1', dc)
+            return arg, dc
+
+        def group(results, args_index):
+            groups = defaultdict(list)
+            for dc in results:
+                local = extract_and_rewrite_local(dc)
+                if local is None:
+                    # This can happen, e.g., with `assume_constant_result`.
+                    # In that case, we drop the constraint.
+                    # TODO(avik) Maybe we should generate an assertion here?
+                    continue
+                arg, dc = local
+                if arg in args_index:
+                    groups[args_index[arg]].append(dc)
+                else:
+                    # This can happen, e.g., with decorators that change the signature.
+                    # In that case, we drop the constraint. Seems hard to do better. :/
+                    # TODO(avik) Maybe warn that `arg` in not in `signature`?
+                    continue
+            sorted_groups = []
+            for idx, dcs in sorted(groups.items()):
+                _, arg = idx
+                sorted_groups.append((arg, sorted(dcs)))
+            return sorted_groups
 
         # Instead of 2 <= dynamic_dim(...) simply suggest dynamic_dim(...).
         # There is no change in behavior since 2 is the default lower bound.
@@ -1759,24 +1787,46 @@ class DimConstraints:
             return re.sub(r"2 <= dynamic_dim(.+)", r"dynamic_dim\1", dc)
 
         signature = original_signature.replace(return_annotation=inspect.Signature.empty)
+        args_index = {}
+        for i, arg in enumerate(signature.parameters.keys()):
+            args_index[arg] = (i, arg)
+
+        def print_results(grouped, indent, result_fn):
+            nonlocal buf
+
+            space = False
+            for arg, results in grouped:
+                if space:
+                    buf += "\n"
+                else:
+                    space = True
+                buf += f"\n{indent}# {arg}:"
+                for result in results:
+                    buf += f"\n{indent}{result_fn(result)}"
 
         buf = ""
         indent = 4 * " "
         if self._static_results:
-            sorted_static_results = [unwrap_local_source(res) for res in sorted(self._static_results)]
+            grouped_static_results = group(self._static_results, args_index)
             buf += "\nThe following dimensions have been specialized and CANNOT be dynamic."
             buf += f"\n```\ndef specializations{str(signature)}:"
-            for result in sorted_static_results:
-                buf += f"\n{indent}assert {result}"
+            print_results(
+                grouped_static_results,
+                indent,
+                lambda result: f"assert {result}",
+            )
             buf += "\n```\n"
         if self._dynamic_results:
-            sorted_dynamic_results = sorted(self._dynamic_results)
+            grouped_dynamic_results = group(self._dynamic_results, args_index)
             buf += "\nThe following dimensions CAN be dynamic."
             buf += "\nYou can use the following code to specify the constraints they must satisfy:"
             buf += f"\n```\ndef specify_constraints{str(signature)}:"
             buf += f"\n{indent}return ["
-            for result in sorted_dynamic_results:
-                buf += f"\n{indent*2}{remove_default_lower_bound(unwrap_local_source(result))},"
+            print_results(
+                grouped_dynamic_results,
+                indent * 2,
+                lambda result: f"{remove_default_lower_bound(result)},",
+            )
             buf += f"\n{indent}]\n```\n"
         return buf
 
@@ -2235,9 +2285,21 @@ class ShapeEnv:
                 elif isinstance(-s, sympy.Symbol):
                     symbol_to_source[-s].append(NegateSource(source))
                 else:
-                    if constraint is not None:
-                        # TODO: Maybe non-strict constraint shouldn't error
-                        # here?  Check what happens in practice
+                    constraint_violated = False
+                    if isinstance(constraint, StrictMinMaxConstraint):
+                        constraint_violated = True
+                    elif isinstance(constraint, RelaxedUnspecConstraint):
+                        if s.free_symbols:
+                            # TODO: Maybe non-strict constraint shouldn't error
+                            # here?  Check what happens in practice
+                            constraint_violated = True
+                        else:
+                            i = int(s)
+                            # Don't complain about 0/1 specialization, we
+                            # expect to have to compile in this case anyway
+                            if i not in (0, 1):
+                                constraint_violated = True
+                    if constraint_violated:
                         def hint(s):
                             if s.free_symbols:
                                 return (
@@ -2265,12 +2327,19 @@ class ShapeEnv:
             else:
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
-                if constraint is not None:
+                constraint_violated = False
+                if isinstance(constraint, StrictMinMaxConstraint):
+                    constraint_violated = True
+                elif isinstance(constraint, RelaxedUnspecConstraint):
+                    # Don't complain about 0/1 specialization, we
+                    # expect to have to compile in this case anyway
+                    if val not in (0, 1):
+                        constraint_violated = True
+                if constraint_violated:
                     msg = (
                         f"Could not validate constraint {constraint.render(source)} as "
-                        f"{source.name()} was inferred to be constant.  For more information "
-                        # TODO: fold this into TORCH_LOGS
-                        "about why it is constant, set torch._dynamo.config.print_specializations = True"
+                        f"{source.name()} was inferred to be constant ({val}).  For more information "
+                        "about why it is constant, run with TORCH_LOGS=dynamic"
                     )
                     record_constraint_violation(constraint.warn_only, msg)
 
