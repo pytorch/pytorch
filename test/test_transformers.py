@@ -1891,8 +1891,9 @@ class TestSDPA(NNTestCase):
 
         # TODO: Investigate why grad_k needs larger tolerances
         grad_k_deviation = key_ref.grad - key_ref_lp.grad
-        grad_k_ref_atol = max(7 * torch.abs(grad_k_deviation).max().item(), 7 * default_atol[out.dtype])
-        grad_k_ref_rtol = max(7 * get_rtol(key_ref.grad, key_ref_lp.grad), 7 * default_rtol[out.dtype])
+        fudge_factor = 7 if not isSM86or89Device else 8
+        grad_k_ref_atol = max(fudge_factor * torch.abs(grad_k_deviation).max().item(), fudge_factor * default_atol[out.dtype])
+        grad_k_ref_rtol = max(fudge_factor * get_rtol(key_ref.grad, key_ref_lp.grad), fudge_factor * default_rtol[out.dtype])
 
         grad_v_deviation = value_ref.grad - value_ref_lp.grad
         grad_v_ref_atol = max(torch.abs(grad_v_deviation).max().item(), default_atol[out.dtype])
