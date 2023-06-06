@@ -745,7 +745,7 @@ def load(
     pickle_module: Any = None,
     *,
     weights_only: bool = False,
-    _mmap: bool = True,
+    _mmap: bool = False,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -866,6 +866,7 @@ def load(
             # If we want to actually tail call to torch.jit.load, we need to
             # reset back to the original position.
             orig_position = opened_file.tell()
+            overall_storage = None
             with _open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn("'torch.load' received a zip file that looks like a TorchScript archive"
@@ -873,14 +874,27 @@ def load(
                                   " silence this warning)", UserWarning)
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
+                if _mmap:
+                    if not isinstance(f, str):
+                        raise ValueError("f must be a string filename in order to use mmap argument")
+                    size = os.path.getsize(f)
+                    overall_storage = torch.UntypedStorage.from_file(f, False, size)
                 if weights_only:
                     try:
-                        return _load(opened_zipfile, map_location, _weights_only_unpickler, **pickle_load_args)
+                        return _load(opened_zipfile,
+                                     map_location,
+                                     _weights_only_unpickler,
+                                     'data.pkl',
+                                     overall_storage,
+                                     **pickle_load_args)
                     except RuntimeError as e:
                         raise pickle.UnpicklingError(UNSAFE_MESSAGE + str(e)) from None
-                size = os.path.getsize(f)
-                overall_storage = torch.UntypedStorage.from_file(f, False, size)
-                return _load(opened_zipfile, map_location, pickle_module, 'data.pkl', _mmap, overall_storage, **pickle_load_args)
+                return _load(opened_zipfile,
+                             map_location,
+                             pickle_module,
+                             'data.pkl',
+                             overall_storage,
+                             **pickle_load_args)
         if weights_only:
             try:
                 return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
@@ -1175,8 +1189,9 @@ class StorageType():
         return f'StorageType(dtype={self.dtype})'
 
 
-def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', _mmap=False, overall_storage=None, **pickle_load_args):
+def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall_storage=None, **pickle_load_args):
     restore_location = _get_restore_location(map_location)
+    mmap = overall_storage is not None
 
     loaded_storages = {}
 
@@ -1188,10 +1203,12 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', _mmap=F
         if byteorderdata not in [b'little', b'big']:
             raise ValueError('Unknown endianness type: ' + byteorderdata.decode())
 
+    if mmap and (byteorderdata is not None) and (byteorderdata.decode() != sys.byteorder):
+        raise RuntimeError('mmap is not supported with byteswapping')
+
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
-        if _mmap:
-            # TODO: Error out if need to byteswap
+        if mmap:
             storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset:storage_offset + numel]
         else:
@@ -1263,7 +1280,9 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', _mmap=F
     result = unpickler.load()
 
     torch._utils._validate_loaded_sparse_tensors()
-
+    torch._C._log_api_usage_metadata(
+        "torch.load.metadata", {"serialization_id": zip_file.serialization_id()}
+    )
     return result
 
 
