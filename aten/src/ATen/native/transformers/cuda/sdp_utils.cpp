@@ -470,8 +470,7 @@ struct SMVersion {
  * @return True if the current CUDA device architecture is within the specified range, false otherwise.
  */
 template <typename lower_bound, typename upper_bound>
-bool check_sm_version() {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
+bool check_sm_version(cudaDeviceProp * dprops) {
   bool is_gte_lower_bound = dprops->major > lower_bound::major ||
       (dprops->major == lower_bound::major &&
        dprops->minor >= lower_bound::minor);
@@ -485,11 +484,11 @@ bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   // Check that the gpu is capable of running flash attention
   using sm75 = SMVersion<7, 5>;
   using sm90 = SMVersion<9, 0>;
-  if (!check_sm_version<sm75, sm90>()) {
-    auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (!check_sm_version<sm75, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention only supports {sm75, sm8x, sm90} gpu architectures. Attempting to run on a sm ",
+          "Flash attention only supports gpu architectures in the range [sm75, sm90]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -504,11 +503,11 @@ bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
-  if (!check_sm_version<sm50, sm90>()) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (!check_sm_version<sm50, sm90>(dprops)) {
     if (debug) {
-      auto dprops = at::cuda::getCurrentDeviceProperties();
       TORCH_WARN(
-          "Mem Efficient Attention only supported gpu architectures in the range [sm50, sm90]. Attempting to run on a sm ",
+          "Mem Efficient Attention only supports gpu architectures in the range [sm50, sm90]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -526,14 +525,16 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
   // size is greater than 64 And the device is between in the range [sm86, sm89]
   using sm86 = SMVersion<8, 6>;
   using sm89 = SMVersion<8, 9>;
-  bool is_sm86_or_sm89 = check_sm_version<sm86, sm89>();
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm86_or_sm89 = check_sm_version<sm86, sm89>(dprops);
   bool is_head_dim_gt64 = params.query.sym_size(-1) > 64;
   if (input_requires_grad(params) && is_sm86_or_sm89 && is_head_dim_gt64) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention currently doesn't support training with head_dim greater than 64 on [sm86, sm89] or newer.",
+          "Flash attention currently doesn't support training with head_dim greater than 64 on gpu architectures in the range[sm86, sm89].",
           "Attempting to run with head_dim: ",
-          params.query.sym_size(-1));
+          params.query.sym_size(-1), " on a sm ", dprops->major, ".",
+          dprops->minor, " gpu.");
     }
     return false;
   }
