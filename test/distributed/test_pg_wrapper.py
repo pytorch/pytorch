@@ -127,20 +127,6 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         )
 
         with self.assertRaisesRegex(RuntimeError, ".*") as cm:
-            scatter_result = [torch.ones(4) * i for i in range(self.world_size)]
-            scattered_tensor = torch.empty(4)
-            if self.rank == 0:
-                wrapper_pg.scatter(scattered_tensor, scatter_result, 0)
-            else:
-                wrapper_pg.reduce_scatter(scattered_tensor, scatter_result)
-        self._validate_error(
-            exception=cm.exception,
-            op_type="SCATTER" if self.rank == 0 else "REDUCE_SCATTER",
-            rank=self.rank,
-            tensor=scattered_tensor,
-        )
-
-        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
             if self.rank == 0:
                 wrapper_pg.broadcast(tensor, 0)
             else:

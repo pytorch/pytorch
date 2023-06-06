@@ -5,13 +5,12 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/native/SparseTensorUtils.h>
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
-#include <c10/core/GradMode.h>
 #include <c10/core/StreamGuard.h>
-#include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 
 #include <cstddef>

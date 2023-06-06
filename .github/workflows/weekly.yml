@@ -15,7 +15,7 @@ jobs:
       repo-name: xla
       branch: master
     secrets:
-      MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+      UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
       PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-triton-commit-hash:
@@ -26,5 +26,5 @@ jobs:
       branch: main
       pin-folder: .ci/docker/ci_commit_pins
     secrets:
-      MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+      UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
       PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
