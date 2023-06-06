@@ -80,7 +80,9 @@ inline bfloat16 fetch_value<bfloat16>(volatile bfloat16 *addr) {
   return bfloat16(addr->x);
 }
 
-template <typename T> void atomic_add(volatile T *addr, T offset) {
+template <typename T>
+typename std::enable_if<!std::is_integral<T>::value>::type
+atomic_add(volatile T *addr, T offset) {
   typedef typename AsIntegerType<T>::type alt_type;
 
   static_assert(sizeof(std::atomic<alt_type>) == sizeof(T),
@@ -97,6 +99,18 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
     reinterpret_cast<T *>(&desired)[0] = val + offset;
   } while (!atomic_addr->compare_exchange_weak(expected, desired,
                                                std::memory_order_relaxed));
+}
+
+// Since C++20 float is supported by fetch_add, but the performance may not
+// better than compare_exchange_weak, which can be checked by microbenchmark
+// inductor_cpu_atomic.py
+template <typename T>
+typename std::enable_if<std::is_integral<T>::value>::type
+atomic_add(volatile T *addr, T offset) {
+  static_assert(sizeof(std::atomic<T>) == sizeof(T),
+                "std::atomic issue");
+  std::atomic<T> *atomic_addr = (std::atomic<T> *)addr;
+  atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
 // This function is used to convert bool or uint8 to float mask for

@@ -706,6 +706,8 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   int64_t oheight = iheight + ptop + pbottom;
   int64_t owidth  = iwidth + pleft + pright;
 
+  at::native::padding::check_valid_input<3>(input, paddingSize);
+
   TORCH_CHECK(owidth == gradOutput_.size(dimw),
       "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
       gradOutput_.size(dimw));
