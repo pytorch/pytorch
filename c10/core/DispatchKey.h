@@ -44,8 +44,8 @@ namespace c10 {
   _(MTIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
-  _(PrivateUse3, extra)                         \
-  _(Meta, extra)
+  _(Meta, extra)                                \
+  _(PrivateUse3, extra)
 
 // WARNING!  If we add a new per-backend functionality key that has higher
 // priority than Autograd, then make sure you update EndOfRuntimeBackendKeys
