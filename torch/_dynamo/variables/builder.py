@@ -55,7 +55,6 @@ from ..utils import (
     preserve_rng_state,
     requires_higher_order_op,
     tensor_always_has_static_shape,
-    torch_np,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -98,8 +97,11 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
+
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
+from .optimizer import OptimizerVariable
 from .tensor import (
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
@@ -267,6 +269,8 @@ class VariableBuilder:
                 cls.wrap_literal,
             ),
         ]
+        if config.numpy_ndarray_as_tensor:
+            entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
         for ts, fn in entries:
@@ -578,6 +582,12 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, torch.optim.Optimizer):
+            return OptimizerVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            )
         elif ProcessGroupVariable.is_process_group(value):
             return ProcessGroupVariable(
                 value,
@@ -885,6 +895,41 @@ class VariableBuilder:
             )
 
         return tensor_variable
+
+    def wrap_numpy_ndarray(self, value):
+        assert isinstance(value, np.ndarray)
+
+        source = self.get_source()
+        tensor_value = torch.from_numpy(value)
+
+        proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value)
+        )
+        options = {"source": source}
+        numpy_ndarray_variable = wrap_fx_proxy_cls(
+            target_cls=NumpyNdarrayVariable,
+            tx=self.tx,
+            proxy=proxy,
+            example_value=tensor_value,
+            **options,
+        )
+
+        self.tx.output.input_source_to_var[source] = numpy_ndarray_variable
+        example_value = numpy_ndarray_variable.proxy.node.meta["example_value"]
+
+        # is_unspecialized should be true because we are wrapping a np.ndarray as argument input, and it needs to be
+        # converted to a tensor.
+        grapharg = GraphArg(
+            source,
+            tensor_value,
+            is_unspecialized=True,
+            fake_tensor=example_value,
+            is_tensor=True,
+            example_strong_ref=tensor_value,
+        )
+        proxy.node.meta["grapharg"] = grapharg
+
+        return numpy_ndarray_variable
 
     def wrap_unspecialized_primitive(self, value):
         if self.name in self.tx.output.unspec_variable_map:
@@ -1203,9 +1248,21 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif config.numpy_ndarray_as_tensor and isinstance(example_value, torch_np.ndarray):
+    elif (
+        isinstance(example_value, int)
+        and config.numpy_ndarray_as_tensor
+        and not config.dynamic_shapes
+    ):
         proxy.node.meta["example_value"] = example_value
-        return target_cls(proxy, **options)
+        return ConstantVariable(example_value, **options)
+    elif (
+        istype(example_value, torch.Size)
+        and all(isinstance(x, int) for x in example_value)
+        and target_cls is TupleVariable
+    ):  # convert torch.Size to tuple
+        return TupleVariable(
+            [ConstantVariable(x, **options) for x in example_value], **options
+        )
     elif isinstance(example_value, int) and proxy.node.target in [
         getattr,
         operator.getitem,

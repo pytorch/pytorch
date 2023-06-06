@@ -187,7 +187,7 @@ class DeviceMesh(object):
                     -1, self.mesh.size(dim)
                 )
                 # multi-dim mesh, create subgroups by looping over the pg_ranks
-                # each dim and append the groups
+                # for each dim and append the groups
                 for dim_mesh in pg_ranks_by_dim:
                     subgroup_ranks = dim_mesh.tolist()
                     # call new_group regardless of the current rank in the
@@ -347,7 +347,7 @@ class DeviceMesh(object):
         gather_dim: int = 0,
     ) -> torch.Tensor:
         """
-        all_gather the tensor on each rank to the a bigger tensor on a
+        all_gather the tensor on each rank to a bigger tensor on a
         device mesh dimension.
 
         Args:
