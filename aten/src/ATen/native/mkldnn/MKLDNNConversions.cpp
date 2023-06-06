@@ -6,7 +6,6 @@
 #include <ATen/native/utils/ParamUtils.h>
 #include <torch/library.h>
 #include <ATen/MatrixRef.h>
-#include <ATen/ops/zeros.h>
 #include <tuple>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -19,6 +18,7 @@
 #include <ATen/ops/mkldnn_reorder_conv2d_weight_native.h>
 #include <ATen/ops/mkldnn_reorder_conv3d_weight_native.h>
 #include <ATen/ops/to_mkldnn_native.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 
