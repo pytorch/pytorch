@@ -1078,6 +1078,7 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
+    @skipIfTorchDynamo("Unsupported mutation of step")
     def test_adadelta(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 4e-3
@@ -1120,6 +1121,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
+    @skipIfTorchDynamo("Unsupported mutation of step")
     def test_adadelta_complex(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 2e-2
@@ -1328,6 +1330,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.RAdam(None, lr=1e-2, weight_decay=-1)
 
+    @skipIfTorchDynamo("Unsupported mutation of step")
     def test_rmsprop(self):
         for foreach in (False, True):
             self._test_basic_cases(
@@ -1788,9 +1791,9 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     )
 
 
+@skipIfTorchDynamo("Differentiable optimizers not supported")
 class TestDifferentiableOptimizer(TestCase):
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_sgd(self):
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1809,7 +1812,6 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_adam(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1836,7 +1838,6 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_rmsprop(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1870,7 +1871,6 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_adadelta(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1893,7 +1893,6 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_adagrad(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1915,7 +1914,6 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_adamax(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1963,7 +1961,6 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_rprop(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1986,7 +1983,6 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_adamw(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -2012,7 +2008,6 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_nadam(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -2036,7 +2031,6 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-    @skipIfTorchDynamo("Differentiable optimizers not supported")
     def test_radam(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
