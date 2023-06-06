@@ -45,58 +45,21 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
-class OpDtypeClassifier:
-    @staticmethod
-    @functools.lru_cache(None)
-    def placeholder_ops():
-        return ["placeholder"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def index_ops():
-        return ["get_index", "index_expr"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def load_store_ops():
-        return ["load", "store"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def reduction_ops():
-        return ["reduction"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def boolean_ops():
-        return [
-            "is_inf",
-            "is_nan",
-            "bitwise_xor",
-            "logical_not",
-            "signbit",
-            "le",
-            "lt",
-            "ge",
-            "gt",
-            "eq",
-            "ne",
-        ]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def explicit_dtype_ops():
-        return ["constant", "to_dtype", "index_expr"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def rand_ops():
-        return ["rand", "randn"]
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def with_subblock_ops():
-        return ["masked_subblock"]
+@functools.lru_cache(None)
+def boolean_ops():
+    return (
+        "is_inf",
+        "is_nan",
+        "bitwise_xor",
+        "logical_not",
+        "signbit",
+        "le",
+        "lt",
+        "ge",
+        "gt",
+        "eq",
+        "ne",
+    )
 
 
 class DataTypePropagation:
@@ -109,10 +72,7 @@ class DataTypePropagation:
     def deduce_node_dtype_by_inputs(self, node: torch.fx.Node):
         inputs = node.all_input_nodes
         input_nodes = [
-            n
-            for n in inputs
-            if isinstance(n, torch.fx.Node)
-            and n.op not in OpDtypeClassifier.placeholder_ops()
+            n for n in inputs if isinstance(n, torch.fx.Node) and n.op != "placeholder"
         ]
         if len(input_nodes) == 0:
             return None
@@ -137,32 +97,48 @@ class DataTypePropagation:
         return dtype
 
     def deduce_node_dtype(self, node: torch.fx.Node):
-        if node.target in OpDtypeClassifier.boolean_ops():
+        if node.target in boolean_ops():
             return torch.bool
 
-        if node.op in OpDtypeClassifier.placeholder_ops():
+        if node.op == "placeholder":
             return None
 
-        if node.target in OpDtypeClassifier.explicit_dtype_ops():
+        if node.target == "output":
+            # we can infer output node if it only have 1 arg
+            if len(node.args) != 1:
+                return None
+
+        if node.target in (
+            "constant",
+            "to_dtype",
+            "index_expr",
+        ):
             return node.args[-1]
 
-        if node.target in OpDtypeClassifier.rand_ops():
+        if node.target in (
+            "rand",
+            "randn",
+        ):
             return torch.float
 
-        if node.target in OpDtypeClassifier.index_ops():
+        if node.target in (
+            "get_index",
+            "index_expr",
+        ):
             return torch.int64
 
-        if node.target in OpDtypeClassifier.load_store_ops():
+        if node.target in (
+            "load",
+            "store",
+        ):
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
-        if node.target in OpDtypeClassifier.reduction_ops():
+        if node.target == "reduction":
             _, _, dtype, _, _, _, _ = node.args
             return dtype
 
-        if any(
-            node.target.startswith(op) for op in OpDtypeClassifier.with_subblock_ops()
-        ):
+        if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
 
         return self.deduce_node_dtype_by_inputs(node)

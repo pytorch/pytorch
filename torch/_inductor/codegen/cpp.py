@@ -43,7 +43,6 @@ from .common import (
     IndentedBuffer,
     Kernel,
     KernelArgs,
-    OpDtypeClassifier,
     OpOverrides,
     OptimizationContext,
 )
@@ -127,29 +126,29 @@ def reduction_init(reduction_type, dtype):
 
 def reduction_combine(reduction_type, var, next_value):
     if reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     if reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     if reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
     if reduction_type == "any":
-        return f"{var} = {var} || {next_value}"
+        return f"{var} || {next_value}"
     if reduction_type in ("min", "max"):
-        return f"{var} = {reduction_type}_propagate_nan({var}, {next_value})"
+        return f"{reduction_type}_propagate_nan({var}, {next_value})"
     raise AssertionError(reduction_type)
 
 
 def reduction_combine_vec(reduction_type, var, next_value):
     if reduction_type == "max":
-        return f"{var} = at::vec::maximum({var}, {next_value})"
+        return f"at::vec::maximum({var}, {next_value})"
     elif reduction_type == "min":
-        return f"{var} = at::vec::minimum({var}, {next_value})"
+        return f"at::vec::minimum({var}, {next_value})"
     elif reduction_type == "sum":
-        return f"{var} += {next_value}"
+        return f"{var} + {next_value}"
     elif reduction_type == "prod":
-        return f"{var} *= {next_value}"
+        return f"{var} * {next_value}"
     elif reduction_type == "xor_sum":
-        return f"{var} ^= {next_value}"
+        return f"{var} ^ {next_value}"
     else:
         raise NotImplementedError()
 
@@ -451,8 +450,16 @@ class CppVecOverrides(OpOverrides):
         return f"({a} != 0) & ({b} != 0)"
 
     @staticmethod
+    def logical_not(a):
+        return f"{a} == 0"
+
+    @staticmethod
     def logical_or(a, b):
         return f"({a} != 0) | ({b} != 0)"
+
+    @staticmethod
+    def logical_xor(a, b):
+        return f"({a} != 0) ^ ({b} != 0)"
 
     @staticmethod
     def tan(a):
@@ -973,20 +980,40 @@ class CppOverrides(OpOverrides):
         return f"{a} && {b}"
 
     @staticmethod
+    def logical_not(a):
+        return f"!{a}"
+
+    @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
 
     @staticmethod
-    def bitwise_and(x, y):
-        return f"decltype({x})({x} & {y})"
+    def logical_xor(a, b):
+        return f"{a} != {b}"
 
     @staticmethod
-    def bitwise_or(x, y):
-        return f"decltype({x})({x} | {y})"
+    def bitwise_and(a, b):
+        return f"decltype({a})({a} & {b})"
 
     @staticmethod
-    def bitwise_xor(x, y):
-        return f"decltype({x})({x} ^ {y})"
+    def bitwise_not(a):
+        return f"decltype({a})(~{a})"
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return f"decltype({a})({a} | {b})"
+
+    @staticmethod
+    def bitwise_xor(a, b):
+        return f"decltype({a})({a} ^ {b})"
+
+    @staticmethod
+    def bitwise_left_shift(a, b):
+        return f"decltype({a})({a} << {b})"
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return f"decltype({a})({a} >> {b})"
 
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr):
@@ -1104,7 +1131,7 @@ class CppKernel(Kernel):
                     f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
             self.stores.writeline(
-                f"{reduction_combine(reduction_type, tmpvar, value)};"
+                f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, value)};"
             )
 
         if name not in V.graph.removed_buffers:
@@ -1378,7 +1405,6 @@ class CppVecKernel(CppKernel):
         assert reduction_type in {"max", "min", "sum", "prod", "xor_sum"}
         assert dtype == torch.float
         assert src_dtype == torch.float
-        reduce_map = {"max": "maximum", "min": "minimum"}
 
         vec_ns = "at::vec"
         vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
@@ -1386,16 +1412,10 @@ class CppVecKernel(CppKernel):
         if reduction_type not in self.reduction_omp_dec:
             vec_reduc_prefix = "#pragma omp declare reduction("
             vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
-            if reduction_type == "sum":
-                vec_reduc_prefix += "omp_out += omp_in"
-            elif reduction_type == "prod":
-                vec_reduc_prefix += "omp_out *= omp_in"
-            elif reduction_type == "xor_sum":
-                vec_reduc_prefix += "omp_out ^= omp_in"
-            else:
-                vec_reduc_prefix += (
-                    f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
-                )
+            vec_reduc_prefix += "omp_out = "
+            vec_reduc_prefix += reduction_combine_vec(
+                reduction_type, "omp_out", "omp_in"
+            )
             vec_reduc_prefix += ")"
             vec_reduc_prefix += " initializer("
             vec_reduc_prefix += "omp_priv={{"
@@ -1418,45 +1438,45 @@ class CppVecKernel(CppKernel):
             f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
         )
         self.stores.writeline(
-            f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+            f"{tmpvar_vec} = {reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
         )
 
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
-            reduce_all_body = "{"
-            if reduction_type == "sum":
-                reduce_all_body += "return x + y;"
-            elif reduction_type == "prod":
-                reduce_all_body += "return x * y;"
-            elif reduction_type == "xor_sum":
-                reduce_all_body += "return x ^ y;"
-            else:
-                reduce_all_body += (
-                    f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
-                )
-            reduce_all_body += "}"
+            reduce_all_body = (
+                "{ return " + reduction_combine_vec(reduction_type, "x", "y") + "; }"
+            )
             vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
-            next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
+            next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}& y) {reduce_all_body}, {tmpvar_vec})"
             self.reduction_suffix.writeline(
                 DeferredLine(
-                    name, f"{reduction_combine(reduction_type, tmpvar, next_value)};"
+                    name,
+                    f"{tmpvar} = {reduction_combine(reduction_type, tmpvar, next_value)};",
                 )
             )
 
         if name not in V.graph.removed_buffers:
             var = self.args.output(name)
+            out_dtype = V.graph.get_dtype(name)
             if self.tiling_idx >= self.reduction_depth:
                 # Horizontal reduction
                 self.reduction_suffix.writeline(
-                    DeferredLine(name, f"{var}[{cexpr_index(index)}] = {tmpvar};")
+                    DeferredLine(
+                        name,
+                        f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({tmpvar});",
+                    )
                 )
             else:
                 # Vertical reduction
-                self.reduction_suffix.writeline(
-                    DeferredLine(
-                        name, f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
-                    )
-                )
+                store_line = f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
+                if out_dtype != dtype:
+                    if out_dtype == torch.bfloat16 and dtype == torch.float:
+                        store_line = f"store_float_as_bf16({var} + {cexpr_index(index)}, {tmpvar_vec});"
+                    else:
+                        raise AssertionError(
+                            f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
+                        )
+                self.reduction_suffix.writeline(DeferredLine(name, store_line))
 
         self.cse.store_cache[name] = tmpvar
 
@@ -2089,9 +2109,9 @@ class CppKernelProxy(CppKernel):
             for _node in sub_block.graph.nodes:
                 # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
                 # the data type as well.
-                if (
-                    _node.op in OpDtypeClassifier.placeholder_ops()
-                    or _node.target in OpDtypeClassifier.index_ops()
+                if _node.op == "placeholder" or _node.target in (
+                    "get_index",
+                    "index_expr",
                 ):
                     continue
 

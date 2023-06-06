@@ -1,4 +1,5 @@
 import functools
+import logging
 from enum import auto, Enum
 from typing import (
     Any,
@@ -13,6 +14,7 @@ from typing import (
 )
 
 import torch
+import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
@@ -37,8 +39,14 @@ from torch.distributed.fsdp.flat_param import (
     HandleTrainingState,
     RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES,
 )
-from torch.distributed.utils import _apply_to_tensors, _p_assert, _to_kwargs
+from torch.distributed.utils import (
+    _apply_to_tensors,
+    _cast_forward_inputs,
+    _p_assert,
+    _to_kwargs,
+)
 
+log = logging.getLogger(__name__)
 
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
@@ -622,38 +630,6 @@ def _root_cast_forward_input(state: _FSDPState, args, kwargs) -> Tuple[Any, Any]
     return args, kwargs
 
 
-def _cast_forward_inputs(
-    input_dtype: Optional[torch.dtype],
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Prepares the forward inputs by casting them to ``input_dtype`` if it is not ``None``.
-    """
-    # TODO: For mixed precision, cast to reduced-precision in a single `to()` call.
-    if input_dtype is not None:
-        args, kwargs = _cast_fp_inputs_to_dtype(input_dtype, *args, **kwargs)
-    return args, kwargs
-
-
-def _cast_fp_inputs_to_dtype(
-    dtype: torch.dtype,
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Casts floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
-    This respects the existing ``requires_grad`` on the tensors.
-    """
-
-    def cast_fn(x: torch.Tensor) -> torch.Tensor:
-        if not torch.is_floating_point(x) or x.dtype == dtype:
-            return x
-        return x.to(dtype)
-
-    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
-
-
 @no_type_check
 def _pre_backward_hook(
     state: _FSDPState,
@@ -735,6 +711,19 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
+    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
+    # Below logging of module names this post-bwd hook fires for can help debug certain
+    # cases where hooks don't fire, such as under certain activation checkpoint configs.
+    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
+        param_to_fqn = state._exec_order_data.param_to_fqn
+        handle_params = handle.flat_param._params  # only populated for use_orig_params
+        param_fqns = [
+            param
+            for param_list in [param_to_fqn[p] for p in handle_params]
+            for param in param_list
+        ]
+        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
+
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(

@@ -6096,7 +6096,7 @@ class CommonTemplate:
 
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
-        from torch._inductor.codegen.common import OpDtypeClassifier
+        from torch._inductor.codegen.common import boolean_ops
         from torch._inductor.compile_fx import _shape_env_from_inputs
         from torch._inductor.debug import DebugContext
         from torch._inductor.graph import GraphLowering
@@ -6149,25 +6149,32 @@ class CommonTemplate:
                 DataTypePropagation.propagate_scheduler_node(scheduler_node)
                 root_graph = scheduler_node._body.root_block.graph
                 for node in root_graph.nodes:
-                    if node.op in OpDtypeClassifier.placeholder_ops():
+                    if node.op == "placeholder":
                         self.assertEqual(get_data_type(node), None)
-                    elif node.target in OpDtypeClassifier.boolean_ops():
+                    elif node.target in boolean_ops():
                         self.assertEqual(get_data_type(node), torch.bool)
-                    elif node.target in OpDtypeClassifier.explicit_dtype_ops():
+                    elif node.target in (
+                        "constant",
+                        "to_dtype",
+                        "index_expr",
+                    ):
                         self.assertEqual(get_data_type(node), node.args[-1])
-                    elif node.target in OpDtypeClassifier.index_ops():
+                    elif node.target in (
+                        "get_index",
+                        "index_expr",
+                    ):
                         self.assertEqual(get_data_type(node), torch.int64)
-                    elif node.target in OpDtypeClassifier.load_store_ops():
+                    elif node.target in (
+                        "load",
+                        "store",
+                    ):
                         self.assertEqual(
                             get_data_type(node), V.graph.get_dtype(node.args[1])
                         )
-                    elif node.target in OpDtypeClassifier.reduction_ops():
+                    elif node.target == "reduction":
                         _, _, dtype, _, _, _, _ = node.args
                         self.assertEqual(get_data_type(node), dtype)
-                    elif any(
-                        node.target.startswith(op)
-                        for op in OpDtypeClassifier.with_subblock_ops()
-                    ):
+                    elif node.target.startswith("masked_subblock"):
                         """
                         masked_subblocks:
                         opcode       name       target     args                        kwargs
@@ -6233,6 +6240,26 @@ class CommonTemplate:
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(*args, 256), opt_fn(*args, 256))
 
+    def test_cumsum_pattern_matcher_issue(self):
+        def fn(input_ids) -> torch.Tensor:
+            input_shape = input_ids.size()
+            input_ids = input_ids.view(-1, input_shape[-1])
+            batch_size, seq_length = input_shape
+            past_key_values_length = 0
+            mask_seq_length = past_key_values_length + seq_length
+            attention_mask = torch.ones(batch_size, mask_seq_length)
+            attention_mask = attention_mask.long()
+            return torch.cumsum(attention_mask, dim=1)
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.randn(2, 2)
+                opt = torch._dynamo.optimize("inductor")(fn)
+                res = opt(x)
+                ref = fn(x)
+                self.assertEqual(res, ref, atol=0, rtol=0)
+
     def test_slice(self):
         def fn(a, b):
             return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
@@ -6276,6 +6303,27 @@ class CommonTemplate:
             return x < y
 
         self.common(fn, (torch.randn(26),))
+
+    @skipIfRocm
+    def test_scaled_dot_product_efficient_attention(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(q, k, v, compute_log_sumexp):
+            return aten._scaled_dot_product_efficient_attention(
+                q, k, v, compute_log_sumexp
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                False,
+            ),
+            check_lowp=False,
+        )
 
 
 @dataclasses.dataclass
