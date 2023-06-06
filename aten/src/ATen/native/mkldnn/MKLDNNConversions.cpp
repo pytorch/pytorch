@@ -108,7 +108,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype
                       cpu_tensor_cont.template data_ptr<uint8_t>());
   } else {
     TORCH_CHECK(cpu_tensor.scalar_type() == ScalarType::Char,
-            "Expect uint8 input of cpu_tensor");
+            "Expect int8 input of cpu_tensor");
     dtensor.feed_from(dtensor.get_dims(),
                       ideep::tensor::data_type::s8,
                       cpu_tensor_cont.template data_ptr<int8_t>());
