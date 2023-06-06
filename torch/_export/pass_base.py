@@ -1,7 +1,7 @@
 import operator
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from functorch.experimental import control_flow
@@ -129,14 +129,6 @@ class ExportPassBase(PassBase):
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
     """
-
-    def get_valid_dialects(self) -> List[Type]:
-        """
-        Returns a list of valid dialects (operator namespace modules) that this
-        pass can run under. Returning an empty list implies this pass can run in
-        any dialect.
-        """
-        return []
 
     class ExportInterpreter(fx.Interpreter):
         """
@@ -300,11 +292,6 @@ class ExportPassBase(PassBase):
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        op_dialect = getattr(torch.ops, str(op).split('.')[0])
-        valid_dialects = self.get_valid_dialects()
-        if len(valid_dialects) != 0 and op_dialect not in valid_dialects:
-            raise ExportPassBaseError(f"Expecting op of dialects: {valid_dialects}, got: {op}")
-
         return self._fx("call_function", op, args, kwargs, meta)
 
     def call_sym(

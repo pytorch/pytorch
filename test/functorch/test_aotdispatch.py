@@ -458,6 +458,25 @@ def forward(self, primals_1):
             out_test = f_compiled(*inp)
             self.assertEqual(out_ref, out_test)
 
+    # https://github.com/pytorch/pytorch/issues/93363
+    def test_mutates_input_noncontiguous(self):
+        def f(a):
+            a.add_(1)
+            return ()
+
+        f_compiled = aot_function(f, nop)
+        ref = torch.ones(4, requires_grad=True) + 0
+        ref_view = ref[0::2]
+
+        test = torch.ones(4, requires_grad=True) + 0
+        test_view = test[0::2]
+
+        out_ref = f(ref_view)
+        out_test = f_compiled(test_view)
+        print(ref)
+        print(test)
+        self.assertEqual(ref, test)
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):
@@ -2766,7 +2785,6 @@ symbolic_aot_autograd_failures = {
     xfail('cholesky_inverse', ''),  # could not find kernel
     xfail('cholesky_solve', ''),  # could not find kernel
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
@@ -2782,17 +2800,13 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lu_factor_ex', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.slogdet', ''),  # aten._linalg_slogdet.default - couldn't find symbolic meta function/decom...
     xfail('linalg.solve', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomp...
     xfail('linalg.solve_ex', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/dec...
     xfail('linalg.tensorsolve', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.vander', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
-    xfail('logdet', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('lu_unpack', ''),  # aten.lu_unpack.default - couldn't find symbolic meta function/decomposition
-    xfail('masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
