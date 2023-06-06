@@ -8,7 +8,7 @@ from .. import functional as F
 
 from typing import Optional
 
-__all__ = ['orthogonal', 'spectral_norm']
+__all__ = ['orthogonal', 'spectral_norm', 'weight_norm']
 
 
 def _is_orthogonal(Q, eps=None):
@@ -288,7 +288,7 @@ def orthogonal(module: Module,
 class _WeightNorm(Module):
     def __init__(
         self,
-        dim: int = 0,
+        dim: Optional[int] = 0,
     ) -> None:
         super().__init__()
         if dim is None:
@@ -299,9 +299,8 @@ class _WeightNorm(Module):
         return torch._weight_norm(weight_v, weight_g, self.dim)
 
     def right_inverse(self, weight):
-        # TODO: is the .data necessary?
-        weight_g = torch.norm_except_dim(weight, 2, self.dim).data
-        weight_v = weight.data
+        weight_g = torch.norm_except_dim(weight, 2, self.dim)
+        weight_v = weight
 
         return weight_g, weight_v
 
@@ -335,19 +334,20 @@ def weight_norm(module: Module, name: str = 'weight', dim: int = 0):
 
         >>> m = weight_norm(nn.Linear(20, 40), name='weight')
         >>> m
-        Linear(in_features=20, out_features=40, bias=True)
+        ParametrizedLinear(
+          in_features=20, out_features=40, bias=True
+          (parametrizations): ModuleDict(
+            (weight): ParametrizationList(
+              (0): _WeightNorm()
+            )
+          )
+        )
         >>> m.parametrizations.weight.original0.size()
         torch.Size([40, 1])
         >>> m.parametrizations.weight.original1.size()
         torch.Size([40, 20])
 
     """
-    weight = getattr(module, name, None)
-    if not isinstance(weight, Tensor):
-        raise ValueError(
-            "Module '{}' has no parameter or buffer with name '{}'".format(module, name)
-        )
-
     _weight_norm = _WeightNorm(dim)
     parametrize.register_parametrization(module, name, _weight_norm, unsafe=True)
 
