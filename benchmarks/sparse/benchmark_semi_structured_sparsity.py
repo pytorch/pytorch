@@ -5,7 +5,7 @@ from tqdm import tqdm
 import pandas as pd
 import argparse
 from torch.sparse import to_semi_structured_sparse
-from torch.sparse.semi_structured.utils import gen_two_four_sparse_mask
+from torch.sparse.semi_structured import gen_semi_structured_sparse_mask
 
 
 torch.set_printoptions(
@@ -31,7 +31,7 @@ class Model(nn.Module):
 
 
 def test_linear(m, k, n, dtype, contiguous, backend):
-    mask = gen_two_four_sparse_mask(
+    mask = gen_semi_structured_sparse_mask(
         m, k, dtype=dtype
     )
     sparse_weight = torch.rand(m, k).to(dtype).cuda() * mask
@@ -73,7 +73,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
 
 
 def test_tensor(m, k, n, dtype, contiguous, backend):
-    A = gen_two_four_sparse_mask(m, k, dtype=dtype)
+    A = gen_semi_structured_sparse_mask(m, k, dtype=dtype)
     B = torch.zeros(k, n).to(dtype).cuda()
     bias = torch.rand(n).to(dtype).cuda()
 
