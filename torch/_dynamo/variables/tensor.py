@@ -434,7 +434,8 @@ class TensorVariable(VariableTracker):
             if (
                 not config.capture_dynamic_output_shape_ops
                 and has_bool_key(key)
-                and isinstance(value, TensorVariable) and value.requires_grad
+                and isinstance(value, TensorVariable)
+                and value.requires_grad
             ):
                 unimplemented(
                     "boolean masking setitem backwards requires dynamic shapes"
