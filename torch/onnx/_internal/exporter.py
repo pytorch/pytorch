@@ -33,7 +33,7 @@ from torch.onnx._internal.fx import decomposition_table, registration
 if TYPE_CHECKING:
     import onnx
 
-    from torch.onnx._internal.fx import function_dispatcher
+    from torch.onnx._internal.fx import dispatcher
 
 
 _DEFAULT_OPSET_VERSION: Final[int] = 18
@@ -106,7 +106,7 @@ class ResolvedExportOptions(ExportOptions):
     onnx_registry: registration.OnnxRegistry
     """The ONNX registry used to register ATen operators to ONNX functions."""
 
-    onnx_dispatcher: function_dispatcher.OnnxDispatcher
+    onnx_dispatcher: dispatcher.OnnxDispatcher
     """The ONNX dispatcher used to dispatch ATen operators to ONNX functions."""
 
     fx_tracer: FXGraphExtractor
@@ -172,12 +172,15 @@ class ResolvedExportOptions(ExportOptions):
             )
 
             # TODO(titaiwang, bowbao): Better way to annotate `onnxscript` types in diagnostics.
-            from torch.onnx._internal.fx import function_dispatcher
+            from torch.onnx._internal.fx import dispatcher
 
-            self.onnx_dispatcher = function_dispatcher.OnnxDispatcher(
-                self.onnx_registry, self.opset_version
-            )
             self.op_level_debug = resolve(options.op_level_debug, False)
+            self.onnx_dispatcher = dispatcher.OnnxDispatcher(
+                self.onnx_registry,
+                self.diagnostic_context,
+                self.opset_version,
+                self.op_level_debug,
+            )
 
             for key in dir(options):
                 if not key.startswith("_"):  # skip private attributes
@@ -404,79 +407,6 @@ class FXGraphExtractor(abc.ABC):
         self.input_adapter: io_adapter.InputAdapter = io_adapter.InputAdapter()
         self.output_adapter: io_adapter.OutputAdapter = io_adapter.OutputAdapter()
 
-    @_beartype.beartype
-    def _export_fx_to_onnx(
-        self,
-        options: ResolvedExportOptions,
-        fx_module: torch.fx.GraphModule,
-        fx_module_args: Sequence[Any],
-    ) -> ExportOutput:
-        # TODO: Import here to prevent circular dependency
-        from torch.onnx._internal.fx import analysis, passes
-
-        diagnostic_context = options.diagnostic_context
-
-        # Apply decomposition table to the input graph.
-        module = passes.Decompose(
-            diagnostic_context,
-            fx_module,
-            options.decomposition_table,
-            enable_dynamic_axes=options.dynamic_shapes,
-        ).run(*fx_module_args)
-
-        # ONNX does not support views and mutations.
-        # Functionalize to get a semantically equivalent graph without mutations.
-        module = passes.Functionalize(
-            diagnostic_context, module, enable_dynamic_axes=options.dynamic_shapes
-        ).run(*fx_module_args)
-        # Input mutations are detected and distilled after `Functionalize` pass.
-        # Remove them since ONNX inference does not need them.
-        module = passes.RemoveInputMutation(diagnostic_context, module).run(
-            *fx_module_args
-        )
-
-        # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
-        # The pass added nodes with static shape into original node metadata:
-        # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
-        if options.op_level_debug:
-            module = passes.ShapeInferenceWithFakeTensor(
-                diagnostic_context, module
-            ).run(*fx_module_args)
-
-        # We want to pass list of ints and floats to TorchScript graph correctly
-        # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
-        # receive FakeTensor and results runtime error. In addition, TorchScript-based
-        # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
-        # with FakeTensorMode.
-        with torch.utils._mode_utils.no_dispatch():
-            analysis.UnsupportedFxNodesAnalysis(diagnostic_context, module).analyze(
-                infra.levels.ERROR
-            )
-
-            onnxscript_graph = passes.export_fx_to_onnxscript(
-                diagnostic_context, module, options
-            )
-            # ONNX does not support None inputs. During graph building, all None inputs
-            # are removed. Here we register this step to input adapter.
-            self.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
-
-            # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
-            # Dynamo doesn't support non-tensor inputs.
-            self.input_adapter.append_step(io_adapter.RemoveNonTensorInputStep())
-
-            # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
-            # tensor, etc), we flatten the collection and register each element as output.
-            self.output_adapter.append_step(io_adapter.FlattenOutputStep())
-
-        # Export TorchScript graph to ONNX ModelProto.
-        onnx_model = onnxscript_graph.to_model_proto(options.opset_version)
-        return torch.onnx.ExportOutput(
-            onnx_model,
-            self.input_adapter,
-            self.output_adapter,
-            options.diagnostic_context,
-        )
-
     @abc.abstractmethod
     def generate_fx(
         self,
@@ -513,6 +443,13 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
+        # Initialize the ONNX Script graph
+        from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+            graph_building as onnxscript_graph_builder,
+        )
+
+        self.onnxscript_graph = onnxscript_graph_builder.TorchScriptGraph()
+
     def export(self) -> ExportOutput:
         graph_module = self.options.fx_tracer.generate_fx(
             self.options, self.model, self.model_args, self.model_kwargs
@@ -522,12 +459,32 @@ class Exporter:
             *self.model_args, **self.model_kwargs
         )
 
-        # Export FX graph to ONNX ModelProto.
-        #
-        # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
-        # to _export.
-        return self.options.fx_tracer._export_fx_to_onnx(
-            self.options, graph_module, updated_model_args
+        # TODO: Design the passes API
+        graph_module = pre_export_passes(self.options, graph_module, updated_model_args)
+
+        # TODO: Fix FakeTensorMode limitation asap
+        # We want to pass list of ints and floats to TorchScript graph correctly
+        # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
+        # receive FakeTensor and results runtime error. In addition, TorchScript-based
+        # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
+        # with FakeTensorMode.
+        with torch.utils._mode_utils.no_dispatch():
+            # node_fixed_shape is only used on op_level_debug purpose.
+            for node in graph_module.graph.nodes:
+                # Dispatch to ONNX op through OpSchema. The input argument dtypes are compared to
+                # function signature in OpSchema, and find the best matched overload.
+                # TODO(titaiwang): diagnostic rules.
+                self.options.onnx_dispatcher.dispatch(
+                    graph_module, self.onnxscript_graph, node=node
+                )
+
+        # Export TorchScript graph to ONNX ModelProto.
+        onnx_model = self.onnxscript_graph.to_model_proto(self.options.opset_version)
+        return torch.onnx.ExportOutput(
+            onnx_model,
+            self.options.fx_tracer.input_adapter,
+            self.options.fx_tracer.output_adapter,
+            self.options.diagnostic_context,
         )
 
     @property
@@ -659,6 +616,60 @@ def dynamo_export(
         raise OnnxExporterError(
             resolved_export_options.diagnostic_context, message
         ) from e
+
+
+@_beartype.beartype
+def pre_export_passes(
+    options: ResolvedExportOptions,
+    fx_module: torch.fx.GraphModule,
+    fx_module_args: Sequence[Any],
+):
+    # TODO: Import here to prevent circular dependency
+    from torch.onnx._internal.fx import analysis, passes
+
+    diagnostic_context = options.diagnostic_context
+
+    # Apply decomposition table to the input graph.
+    module = passes.Decompose(
+        diagnostic_context,
+        fx_module,
+        options.decomposition_table,
+        enable_dynamic_axes=options.dynamic_shapes,
+    ).run(*fx_module_args)
+
+    # ONNX does not support views and mutations.
+    # Functionalize to get a semantically equivalent graph without mutations.
+    module = passes.Functionalize(
+        diagnostic_context, module, enable_dynamic_axes=options.dynamic_shapes
+    ).run(*fx_module_args)
+    # Input mutations are detected and distilled after `Functionalize` pass.
+    # Remove them since ONNX inference does not need them.
+    module = passes.RemoveInputMutation(diagnostic_context, module).run(*fx_module_args)
+
+    # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
+    # The pass added nodes with static shape into original node metadata:
+    # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat
+    if options.op_level_debug:
+        module = passes.ShapeInferenceWithFakeTensor(diagnostic_context, module).run(
+            *fx_module_args
+        )
+
+    analysis.UnsupportedFxNodesAnalysis(
+        diagnostic_context, module, options.onnx_dispatcher
+    ).analyze(infra.levels.ERROR)
+
+    # ONNX does not support None inputs. During graph building, all None inputs
+    # are removed. Here we register this step to input adapter.
+    options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNoneInputStep())
+
+    # NOTE: temp workaround for https://github.com/pytorch/pytorch/issues/99534
+    # Dynamo doesn't support non-tensor inputs.
+    options.fx_tracer.input_adapter.append_step(io_adapter.RemoveNonTensorInputStep())
+
+    # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
+    # tensor, etc), we flatten the collection and register each element as output.
+    options.fx_tracer.output_adapter.append_step(io_adapter.FlattenOutputStep())
+    return module
 
 
 __all__ = [
