@@ -3,7 +3,6 @@ from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value,
                         _default_to_fused_or_foreach, _differentiable_doc, _foreach_doc, _maximize_doc)
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 from typing import List, Optional
 
 __all__ = ["Adagrad", "adagrad"]
@@ -321,7 +320,7 @@ def _multi_tensor_adagrad(
     if len(params) == 0:
         return
 
-    grouped_tensorlists = _group_tensors_by_device_and_dtype([params, grads, state_sums, state_steps])
+    grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype([params, grads, state_sums, state_steps])
     for device_params, device_grads, device_state_sums, device_state_steps in grouped_tensorlists.values():
 
         if maximize:

@@ -11,7 +11,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
+from torch._dynamo.utils import get_fake_value, get_real_value
 from torch._dynamo.variables import SymNodeVariable
 from torch._dynamo.variables.user_defined import ProcessGroupVariable
 from torch._guards import GuardsCheckpointState, Source
@@ -351,7 +351,7 @@ class TorchVariable(VariableTracker):
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_function",
-                        torch_np._helpers.ndarrays_to_tensors,
+                        torch.detach,
                         *proxy_args_kwargs(args, {}),
                     ),
                     example_value=None,
