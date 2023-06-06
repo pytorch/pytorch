@@ -2231,7 +2231,7 @@ class CppKernelProxy(CppKernel):
             def is_bf16_load_or_constant(node: torch.fx.Node):
                 if node.target not in ["load", "constant"]:
                     return False
-                assert len(_node.args) == 3
+                assert len(node.args) == 3
                 # If the node is constant, the last arg is dtype
                 load_dtype = (
                     V.graph.get_dtype(node.args[1])
@@ -2243,7 +2243,7 @@ class CppKernelProxy(CppKernel):
             def is_bf16_store(node: torch.fx.Node):
                 if node.target != "store":
                     return False
-                _, store_var, _, _, _ = _node.args
+                _, store_var, _, _, _ = node.args
                 store_dtype = V.graph.get_dtype(store_var)
                 return store_dtype == torch.bfloat16
 
