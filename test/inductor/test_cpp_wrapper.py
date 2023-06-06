@@ -252,6 +252,11 @@ if RUN_CUDA:
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
+        BaseTest(
+            "test_convolution1",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
     ]:
         make_test_case(item.name, item.device, item.tests)
 
