@@ -56,6 +56,9 @@ TESTED_OPS: frozenset[str] = frozenset(
     [
         "atan",
         "atan2",
+        # "atleast_1d",  # How to support list input?
+        # "atleast_2d",  # How to support list input?
+        # "atleast_3d",  # How to support list input?
         "broadcast_to",
         "ceil",
         "expand",
