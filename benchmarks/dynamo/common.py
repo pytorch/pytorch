@@ -20,6 +20,7 @@ from typing import Any, NamedTuple
 from unittest.mock import MagicMock
 
 import numpy as np
+np.int = int
 import pandas as pd
 import psutil
 import torch
@@ -1379,6 +1380,13 @@ class BenchmarkRunner:
                 fields.insert(3, tag)
 
             dynamo_stats = get_dynamo_stats()
+            # TODO
+            print("Graph breaks:")
+            for k, v in torch._dynamo.utils.counters['graph_break'].items(): print(f"{k}:\n  {v}")
+            print("Unimplemented:")
+            for k, v in torch._dynamo.utils.counters['graph_break'].items(): print(f"{k}:\n  {v}")
+            # breakpoint() # TODO
+
             dynamo_stats.subtract(dynamo_start_stats)
             for k, v in dynamo_stats.items():
                 headers.append(k)

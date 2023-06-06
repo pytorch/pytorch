@@ -2166,6 +2166,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
             func.get_function(), "_torchdynamo_disable", False
         ):
+            # breakpoint() # TODO not hit for resnet18
             unimplemented(
                 f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
