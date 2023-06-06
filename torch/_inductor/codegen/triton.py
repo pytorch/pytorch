@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Any, Dict, Iterable, List, Set
+from typing import Dict, Iterable, List, Set
 
 import sympy
 
@@ -450,14 +450,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def ceil(x):
         return f"tl.math.ceil({x})"
-
-
-@dataclasses.dataclass
-class SymbolicCallArg:
-    inner: Any
-
-    def __str__(self):
-        return str(self.inner)
 
 
 @dataclasses.dataclass
@@ -1728,24 +1720,7 @@ class TritonKernel(Kernel):
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = tree.numel
             else:
-                expr = f"{name}_{tree.prefix}numel"
-                # TODO(voz): Tragic. This should at the very least be a util to slapp on declare and ending.
-                # The real fix here is to revisit our cross language calling convention.
-                if expr not in wrapper.kenel_numel_expr:
-                    wrapper.kenel_numel_expr.add(expr)
-                    wrapper.writeline(
-                        f"{wrapper.declare}{expr} = {pexpr(tree.numel)}{wrapper.ending}"
-                    )
-                else:
-                    wrapper.writeline(f"{expr} = {pexpr(tree.numel)}{wrapper.ending}")
-                # We can get symbolic expressions here, like s0*64
-                # It is fine to have them here, but we need to handle them correctly as their own type
-                # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
-                # scalars as well.
-                # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
-                # constant now, need type info. I agree, this needs type info, and while this is not true type info
-                # it suffices as a type hint for the purposes of producing the correct code for this type.
-                expr = SymbolicCallArg(expr)
+                expr = wrapper.generate_numel_expr(name, tree)
 
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
