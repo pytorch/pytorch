@@ -252,7 +252,7 @@ class HigherOrderOperator(OperatorBase):
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
     def __str__(self):
-        return f"torch.ops.{self.name()}"
+        return f"{self.name()}"
 
     def name(self):
         return self._name
