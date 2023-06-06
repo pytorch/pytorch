@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo
 )
 
-from torch._dynamo import disable
+from torch._dynamo import disable as disable_dynamo
 
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_device_type import largeTensorTest
@@ -197,7 +197,7 @@ class TestOptim(TestCase):
     # This allows us to continue running actual logic of the optimizer
     # tests in dynamo without tracing this test code which has a lot of unsupported
     # behavior
-    @disable(recursive=False)
+    @disable_dynamo(recursive=False)
     def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
         weight = Parameter(weight)
         bias = Parameter(bias)
@@ -209,7 +209,7 @@ class TestOptim(TestCase):
         # because it currently is not defined in the local environmet. Unable to repro
         # anywhere else however and this is test code that we don't need to spend
         # time getting dynamo to trace unless the issue repros in real models.
-        @disable(recursive=False)
+        @disable_dynamo(recursive=False)
         def fn_base(optimizer, weight, bias):
             optimizer.zero_grad()
             i = input_cuda if weight.is_cuda else input
