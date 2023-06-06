@@ -237,8 +237,15 @@ def _rebuild_sparse_tensor(layout, data):
         data (tuple): The tensor's sparse storage representation.
     """
     if layout == torch.sparse_coo:
-        indices, values, size = data
+        if len(data) == 3:
+            # For BC:
+            indices, values, size = data
+            is_coalesced = None
+        else:
+            indices, values, size, is_coalesced = data
         result = torch.sparse_coo_tensor(indices, values, size, check_invariants=False)
+        if is_coalesced is not None:
+            result._coalesced_(is_coalesced)
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -590,6 +597,19 @@ def annotate(ret, **kwargs):
         return fun
 
     return dec
+
+
+def render_call(fn, args, kwargs):
+    str_fn = torch.overrides.resolve_name(fn)
+    if str_fn is None:
+        str_fn = str(fn)
+
+    str_args: List[str] = []
+    with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
+        str_args.extend(repr(a) for a in args)
+        str_args.extend(f"{k}={repr(v)}" for k, v in kwargs.items())
+        r = f"{str_fn}({', '.join(str_args)})"
+    return r
 
 
 # NOTE [ Python Traceback Reference Cycle Problem ]
