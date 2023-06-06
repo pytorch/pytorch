@@ -234,7 +234,6 @@ def get_sequence_length(model_cls, model_name):
 def generate_inputs_for_model(
     model_cls, model, model_name, bs, device, include_loss_args=False
 ):
-
     # TODO - Check if following values are representative
     num_choices = 3
     num_visual_features = 42

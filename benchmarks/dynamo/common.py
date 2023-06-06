@@ -1263,10 +1263,7 @@ class BenchmarkRunner:
                     continue  # bad benchmark implementation
 
     def deepcopy_model(self, model):
-        try:
-            return copy.deepcopy(model)
-        except TypeError:
-            return model
+        return copy.deepcopy(model)
 
     def validate_model(self, model, example_inputs):
         """
