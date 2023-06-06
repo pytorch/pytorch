@@ -207,29 +207,34 @@ def deserialize_metadata(metadata) -> Dict[str, str]:
     return ret
 
 
-
 def serialize_operator(target) -> str:
     if isinstance(target, str):
         return target
-    elif target in _SYM_INT_OPS or target in _SYM_BOOL_OPS:
-        return f"{target.__module__}.{target.__name__}"
-    elif isinstance(target, torch._ops.HigherOrderOperator):
-        return target.__name__
-    else:
-        return str(target)
+    return f"{target.__module__}.{target.__name__}"
 
 
 def deserialize_operator(serialized_target: str):
-    target = torch.ops
+    module = None
+    if serialized_target.startswith("_operator"):
+        module = operator
+        serialized_target = serialized_target.removeprefix("_operator.")
+    elif serialized_target.startswith("torch.nn"):
+        module = torch.nn
+        serialized_target = serialized_target.removeprefix("torch.nn.")
+    elif serialized_target.startswith("torch._ops"):
+        module = torch.ops
+        serialized_target = serialized_target.removeprefix("torch._ops.")
+    elif serialized_target.startswith("torch"):
+        module = torch
+        serialized_target = serialized_target.removeprefix("torch.")
+    else:
+        return serialized_target
+    
+    assert module is not None
+    target = module
     for name in serialized_target.split("."):
         if not hasattr(target, name):
-            log.warning(f"Could not find operator {serialized_target}. Returning fake operator.")  # noqa: G004
-
-            # Create a random fake placeholder op
-            def fake_op(x):
-                return x
-            fake_op.__name__ = serialized_target
-            return fake_op
+            return serialized_target
         else:
             target = getattr(target, name)
     return target
@@ -688,8 +693,18 @@ class GraphModuleDeserializer:
         # Nodes: convert to call_function nodes.
         for serialized_node in serialized_graph.nodes:
             try:
-                if serialized_node.target.startswith("_operator"):
-                    target = getattr(operator, serialized_node.target.split(".")[1])
+                target = deserialize_operator(serialized_node.target)
+                if isinstance(target, str):
+                    # Create a dummy fake op if the target does not exist
+                    # because we cannot create a call_function node w/o a
+                    # callable target
+                    log.warning(f"Could not find operator {target}. Returning fake operator.")  # noqa: G004
+                    def fake_op(x):
+                        return x
+                    fake_op.__name__ = target
+                    target = fake_op
+
+                if target.__module__ == "_operator":
                     name = serialized_node.outputs[0].value.as_name
                     args = self.deserialize_sym_op_inputs(serialized_node.inputs)
 
@@ -906,6 +921,8 @@ def _dict_to_dataclass(cls, data):
             setattr(obj, name, new_field_obj)
         return obj
     elif isinstance(data, list):
+        if len(data) == 0:
+            return data
         d_type = typing.get_args(cls)[0]
         return [
             _dict_to_dataclass(d_type, d)
