@@ -1385,7 +1385,15 @@ class FakeTensorMode(TorchDispatchMode):
             # It's OK to try the fallback for built-in ops (e.g. aten, prims)
             # because we control and test these but the fallback leads to unexpected behavior
             # in user-defined custom ops
-            return func.namespace in {"debugprims", "prims", "aten", "xla", "vision", "torchtext", "torchaudio"}
+            return func.namespace in {
+                "debugprims",
+                "prims",
+                "aten",
+                "xla",
+                "vision",
+                "torchtext",
+                "torchaudio",
+            }
 
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
