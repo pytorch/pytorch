@@ -40,7 +40,7 @@ class TestSerialize(TestCase):
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-7]
-        self.assertEqual(node.target, "aten.var_mean.correction")
+        self.assertEqual(node.target, "torch._ops.aten.var_mean.correction")
         # aten::native_layer_norm returns 3 tensnors
         self.assertEqual(len(node.outputs), 2)
 
@@ -65,7 +65,7 @@ class TestSerialize(TestCase):
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "aten.split.Tensor")
+        self.assertEqual(node.target, "torch._ops.aten.split.Tensor")
         self.assertEqual(len(node.outputs), 1)
         # Input looks like:
         # tensor([[0, 1],
@@ -108,7 +108,7 @@ class TestSerialize(TestCase):
 
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "aten.var_mean.correction")
+        self.assertEqual(node.target, "torch._ops.aten.var_mean.correction")
         self.assertEqual(len(node.outputs), 2)
 
         # check the names are unique
@@ -133,7 +133,7 @@ class TestSerialize(TestCase):
         serialized, _ = ExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[-1]
-        self.assertEqual(node.target, "aten.searchsorted.Tensor")
+        self.assertEqual(node.target, "torch._ops.aten.searchsorted.Tensor")
         self.assertEqual(len(node.inputs), 6)
         self.assertEqual(node.inputs[2].arg.as_bool, False)
         self.assertEqual(node.inputs[3].arg.as_bool, True)
