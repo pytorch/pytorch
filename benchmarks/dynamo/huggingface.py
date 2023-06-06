@@ -175,6 +175,10 @@ SKIP_FOR_CPU = {
     "OPTForCausalLM",  # OOMs
 }
 
+ONLY_EVAL_MODE = {
+    "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
+}
+
 
 def get_module_cls_by_model_name(model_cls_name):
     _module_by_model_name = {
@@ -429,6 +433,8 @@ class HuggingfaceRunner(BenchmarkRunner):
         model_cls, config = self._get_model_cls_and_config(model_name)
         model = self._download_model(model_name)
         model = model.to(device, dtype=dtype)
+        if self.args.enable_activation_checkpointing:
+            model.gradient_checkpointing_enable()
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
@@ -454,7 +460,11 @@ class HuggingfaceRunner(BenchmarkRunner):
             if "drop" in attr and isinstance(getattr(config, attr), float):
                 setattr(config, attr, 1e-30)
 
-        if is_training and not use_eval_mode:
+        if (
+            is_training
+            and not use_eval_mode
+            and not (self.args.accuracy and model_name in ONLY_EVAL_MODE)
+        ):
             model.train()
         else:
             model.eval()

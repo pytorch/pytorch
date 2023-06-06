@@ -1,7 +1,3 @@
-aten::__ilshift__.Scalar
-aten::__ilshift__.Tensor
-aten::__irshift__.Scalar
-aten::__irshift__.Tensor
 aten::__lshift__.Scalar
 aten::__lshift__.Scalar_out
 aten::__lshift__.Tensor
@@ -1162,8 +1158,6 @@ aten::slow_conv_transpose2d
 aten::slow_conv_transpose2d.out
 aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
-aten::smooth_l1_loss
-aten::smooth_l1_loss.out
 aten::softmax.int_out
 aten::sort
 aten::sort.stable
