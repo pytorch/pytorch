@@ -146,7 +146,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
       });
     } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
       AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "random_from_to_range_calc", [&] {
-        if (std::is_same<scalar_t, bool>::value) {
+        if constexpr (std::is_same_v<scalar_t, bool>) {
           to_inc = static_cast<int64_t>(true);
         } else {
           to_inc = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
