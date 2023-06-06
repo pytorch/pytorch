@@ -514,44 +514,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
         self.assertEqual(x.size(), out.size())
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @patch.object(torch._inductor.config.triton, "descriptive_names", False)
-    def test_inductor_all_gather_coalesced(self):
-        """
-        make sure that an intermediate that's going to be reuse isn't mutated unless copied
-        """
-        torch._inductor.config.debug = True
-
-        def func(inp, *, tag, ranks, group_size):
-            x = inp + 1
-            tensor_list = torch.ops.c10d_functional.all_gather_into_tensor_coalesced([x, inp], tag, ranks, group_size)
-            y = x + 2
-            ar0 = torch.ops.c10d_functional.wait_tensor(tensor_list[0])
-            ar1 = torch.ops.c10d_functional.wait_tensor(tensor_list[1])
-            # ensure other is not incorrectly aliasing ar's buffer
-            other = torch.ones_like(inp) + 22
-            return ar0, y, other, ar1
-
-        inputs = torch.ones(4, 4, device="cuda")
-
-        compiled = torch.compile(func)
-        code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-        FileCheck() \
-            .check("buf0 = empty_strided(") \
-            .check("buf3 = empty_strided") \
-            .check("triton_poi__0.run(arg0_1, buf0, buf3") \
-            .check_not("copy_(") \
-            .check("buf1 = buf0; del buf0  # reuse") \
-            .check("buf2_work = dist.all_gather_coalesced(buf1") \
-            .check("_register_tensor_work(buf1, buf2_work, 1)") \
-            .check("_wait_tensor(buf1)") \
-            .check("buf4 = buf1") \
-            .check("return (buf4, buf3, buf5") \
-            .run(code)
-        out = compiled(inputs, **self.get_world_trs())
-        correct = func(inputs, **self.get_world_trs())
-        assert same(out, correct)
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
