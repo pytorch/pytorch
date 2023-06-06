@@ -21,4 +21,4 @@ function install_timm() {
 }
 
 install_huggingface
-install_timm
+# install_timm
