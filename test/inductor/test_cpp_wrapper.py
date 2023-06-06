@@ -7,6 +7,7 @@ import torch._dynamo
 from torch._inductor import config
 from torch.testing._internal.common_utils import (
     IS_MACOS,
+    slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -16,11 +17,23 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 try:
     try:
-        from . import test_cpu_repro, test_mkldnn_pattern_matcher, test_torchinductor
+        from . import (
+            test_cpu_repro,
+            test_foreach,
+            test_mkldnn_pattern_matcher,
+            test_pattern_matcher,
+            test_select_algorithm,
+            test_torchinductor,
+            test_torchinductor_dynamic_shapes,
+        )
     except ImportError:
         import test_cpu_repro
+        import test_foreach
         import test_mkldnn_pattern_matcher
+        import test_pattern_matcher
+        import test_select_algorithm
         import test_torchinductor
+        import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -43,11 +56,33 @@ class TestCppWrapper(TorchTestCase):
     device = "cpu"
 
 
+class DynamicShapesCppWrapperCpuTests(TorchTestCase):
+    device = "cpu"
+
+
 class TestCudaWrapper(TorchTestCase):
     device = "cuda"
 
 
-def make_test_case(name, device, tests, condition=True):
+class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
+    device = "cuda"
+
+
+# conv2d will fallback for dynamic shapes; the fallback path is not yet supported
+test_failures_cpp_wrapper = {
+    "test_conv2d_unary_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_conv2d_binary_inplace_fusion_failed_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_conv2d_binary_inplace_fusion_pass_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+}
+
+
+def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
     test_name = f"{name}_{device}" if device else name
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
@@ -57,8 +92,11 @@ def make_test_case(name, device, tests, condition=True):
         try:
             func = getattr(tests, test_name)
             assert callable(func), "not a callable"
-            code = test_torchinductor.run_and_get_cpp_code(func)
-            self.assertEqual("load_inline" in code, True)
+            func = slowTest(func) if slow else func
+            code = test_torchinductor.run_and_get_cpp_code(
+                func, *func_inputs if func_inputs else []
+            )
+            self.assertEqual("CppWrapperCodeCache" in code, True)
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -66,7 +104,7 @@ def make_test_case(name, device, tests, condition=True):
     fn.__name__ = test_name
     if condition:
         setattr(
-            CppWrapperTemplate if device != "cuda" else CudaWrapperTemplate,
+            CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate,
             test_name,
             fn,
         )
@@ -79,6 +117,8 @@ if RUN_CPU:
         device: str = "cpu"
         tests: TorchTestCase = test_torchinductor.CpuTests()
         condition: bool = True
+        slow: bool = False
+        func_inputs: list = None
 
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
@@ -86,6 +126,33 @@ if RUN_CPU:
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
+        BaseTest(
+            "test_conv2d_binary_inplace_fusion_failed",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch._C.has_mkldnn,
+            func_inputs=[
+                ["op_convolution_pointwise_binary.call"],
+                ["op_convolution_pointwise_binary_.call"],
+            ],
+        ),
+        BaseTest(
+            "test_conv2d_binary_inplace_fusion_pass",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch._C.has_mkldnn,
+            func_inputs=[
+                ["op_convolution_pointwise_binary_.call"],
+                ["op_convolution_pointwise_binary.call"],
+            ],
+        ),
+        BaseTest(
+            "test_conv2d_unary",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch._C.has_mkldnn,
+            slow=True,
+        ),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
@@ -111,9 +178,27 @@ if RUN_CPU:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
     ]:
-        make_test_case(item.name, item.device, item.tests, item.condition)
+        make_test_case(
+            item.name,
+            item.device,
+            item.tests,
+            item.condition,
+            item.slow,
+            item.func_inputs,
+        )
 
     test_torchinductor.copy_tests(CppWrapperTemplate, TestCppWrapper, "cpp_wrapper")
+
+    DynamicShapesCppWrapperTemplate = (
+        test_torchinductor_dynamic_shapes.make_dynamic_cls(CppWrapperTemplate)
+    )
+
+    test_torchinductor.copy_tests(
+        DynamicShapesCppWrapperTemplate,
+        DynamicShapesCppWrapperCpuTests,
+        "cpp_wrapper",
+        test_failures_cpp_wrapper,
+    )
 
 if RUN_CUDA:
 
@@ -141,16 +226,51 @@ if RUN_CUDA:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_scalar_input"),
+        BaseTest("test_scaled_dot_product_efficient_attention"),
         BaseTest("test_sort"),
         BaseTest("test_silu"),  # single input, single output
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
+        BaseTest(
+            "test_foreach_cpp_wrapper",
+            device=None,
+            tests=test_foreach.ForeachTests(),
+        ),  # test foreach
+        BaseTest(
+            "test_cat_slice_cat",
+            device=None,
+            tests=test_pattern_matcher.TestPaternMatcher(),
+        ),
+        BaseTest(
+            "test_addmm",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_linear_relu",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_convolution1",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
     ]:
         make_test_case(item.name, item.device, item.tests)
 
     test_torchinductor.copy_tests(CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper")
 
+    DynamicShapesCudaWrapperTemplate = (
+        test_torchinductor_dynamic_shapes.make_dynamic_cls(CudaWrapperTemplate)
+    )
+
+    test_torchinductor.copy_tests(
+        DynamicShapesCudaWrapperTemplate,
+        DynamicShapesCudaWrapperCudaTests,
+        "cuda_wrapper",
+    )
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

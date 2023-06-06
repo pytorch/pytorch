@@ -89,6 +89,38 @@ class TestMkldnn(TestCase):
                                        "Cannot access data pointer of Tensor that doesn't have storage",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
+    def test_conversion_byte_char(self):
+        int8_types = [torch.int8, torch.uint8]
+        for int8_type in int8_types:
+            low = -100 if int8_type is torch.int8 else 0
+            high = 100
+            for cpu_tensor in [torch.randint(
+                               low=low,
+                               high=high,
+                               size=(1, 2, 3, 4),
+                               dtype=torch.int64,
+                               device=torch.device('cpu')),
+                               torch.randint(
+                               low=low,
+                               high=high,
+                               size=(1, 2, 3, 4, 5),
+                               dtype=torch.int64,
+                               device=torch.device('cpu'))[:, :, :, :, :]]:
+
+                cpu_tensor = cpu_tensor.to(dtype=int8_type)
+                mkldnn_tensor = cpu_tensor.to_mkldnn(int8_type)
+                self.assertEqual(mkldnn_tensor.dtype, int8_type)
+                cpu_tensor_1 = mkldnn_tensor.to_dense()
+                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                self.assertEqual(cpu_tensor, cpu_tensor_1)
+                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
+                self.assertEqual(mkldnn_tensor.size(), cpu_tensor.size())
+                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
+                self.assertRaisesRegex(RuntimeError,
+                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       lambda: mkldnn_tensor.data_ptr() != 0)
+
     def test_copy(self):
         x = torch.randn(4, 5, dtype=torch.float32)
         mkldnn_x = x.to_mkldnn()
