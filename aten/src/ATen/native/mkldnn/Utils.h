@@ -69,14 +69,21 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 #endif // AT_MKLDNN_ENABLED()
 };
 
+#if AT_MKLDNN_ENABLED()
 inline bool mkldnn_bf16_device_check() {
-  return cpuinfo_initialize() && ((cpuinfo_has_x86_avx512bw()
-     && cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq()) || (cpuinfo_has_arm_bf16()));
+  return ideep::has_bf16_type_support() || (cpuinfo_initialize() && cpuinfo_has_arm_bf16());
 }
-
 inline bool mkldnn_fp16_device_check() {
-  return cpuinfo_initialize() && cpuinfo_has_x86_avx512fp16();
+  return ideep::has_fp16_type_support();
 }
+#else
+inline bool mkldnn_bf16_device_check() {
+  return false;
+}
+inline bool mkldnn_fp16_device_check() {
+  return false;
+}
+#endif
 
 inline void mkldnn_check_low_precision(ScalarType input_t, std::string name){
   if (input_t == ScalarType::BFloat16) {
