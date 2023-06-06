@@ -52,7 +52,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(2, 2, 3)
 
-        ep = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6]).add_runtime_assertions()
+        ep = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6])
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -83,7 +83,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
+        ep = export(M(), (x, y), constraints=constraints)
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -114,7 +114,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
+        ep = export(M(), (x, y), constraints=constraints)
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -152,7 +152,7 @@ class TestPasses(TestCase):
             dynamic_dim(y, 1) <= 6,
         ]
 
-        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
+        ep = export(M(), (x, y), constraints=constraints)
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -236,7 +236,7 @@ class TestPasses(TestCase):
 
         x = torch.tensor([2])
         mod = M()
-        ep = export(mod, (x,)).add_runtime_assertions()
+        ep = export(mod, (x,))
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -263,7 +263,7 @@ class TestPasses(TestCase):
         x = torch.tensor([2, 1, 2, 3, 5, 0])
 
         mod = M()
-        ep = export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2]).add_runtime_assertions()
+        ep = export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2])
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -303,7 +303,7 @@ class TestPasses(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        ep = export(mod, (torch.tensor(True), x, y)).add_runtime_assertions()
+        ep = export(mod, (torch.tensor(True), x, y))
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
             ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
@@ -321,7 +321,6 @@ class TestPasses(TestCase):
         exported = torch._export.export(
             m, (x, y), constraints=[dynamic_dim(x, 1) == dynamic_dim(y, 1)]
         )
-        exported = exported.add_runtime_assertions()
 
         x = torch.rand(3, 5)
         y = torch.rand(3, 6)

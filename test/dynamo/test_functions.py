@@ -996,6 +996,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @requires_numpy_pytorch_interop
     @make_test
+    def test_numpy_size(x):
+        a = x.numpy()
+        return a.size
+
+    @requires_numpy_pytorch_interop
+    @make_test
     def test_numpy_attributes(x):
         a = x.numpy()
         return (
