@@ -780,10 +780,19 @@ class GraphModuleDeserializer:
 
     def deserialize_input(self, inp: Argument) -> Any:
         value = inp.value
-        if inp.type == "as_none":
+        typ_ = inp.type
+        if typ_ == "as_none":
             # None should converted as None, but is encoded as bool in serialized
             # Convert serialized object to torch equivalent
             return None
+        elif typ_ == "as_scalar_type":
+            return _SERIALIZE_TO_TORCH_DTYPE[value]
+        elif typ_ == "as_memory_format":
+            return _SERIALIZE_TO_TORCH_MEMORY_FORMAT[value]
+        elif typ_ == "as_layout":
+            return _SERIALIZE_TO_TORCH_LAYOUT[value]
+        elif isinstance(value, Device):
+            return deserialize_device(value)
         elif isinstance(value, TensorArgument):
             return self.serialized_name_to_node[value.name]
         elif isinstance(value, (int, float, bool)):
@@ -792,14 +801,6 @@ class GraphModuleDeserializer:
             return str(value)
         elif isinstance(value, (SymIntArgument, SymBoolArgument)):
             return self.deserialize_sym_argument(value)
-        elif isinstance(value, ScalarType):
-            return _SERIALIZE_TO_TORCH_DTYPE[value]
-        elif isinstance(value, MemoryFormat):
-            return _SERIALIZE_TO_TORCH_MEMORY_FORMAT[value]
-        elif isinstance(value, Layout):
-            return _SERIALIZE_TO_TORCH_LAYOUT[value]
-        elif isinstance(value, Device):
-            return deserialize_device(value)
         elif isinstance(value, list):
             if len(value) == 0:
                 return []
