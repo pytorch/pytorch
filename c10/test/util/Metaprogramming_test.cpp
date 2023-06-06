@@ -163,7 +163,7 @@ namespace test_tuple_map {
 TEST(MetaprogrammingTest, TupleMap_simple) {
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
-      [](int32_t a) -> int16_t { return a + 1; });
+      [](int32_t a) -> int16_t { return static_cast<int16_t>(a + 1); });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
           value);
@@ -175,7 +175,7 @@ TEST(MetaprogrammingTest, TupleMap_simple) {
 TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
-      [](int64_t a) -> int16_t { return a + 1; });
+      [](int64_t a) -> int16_t { return static_cast<int16_t>(a + 1); });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
           value);
@@ -187,7 +187,7 @@ TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
 TEST(MetaprogrammingTest, TupleMap_mapperTakesConstRef) {
   auto result = tuple_map(
       std::tuple<int32_t, int32_t, int32_t>(3, 4, 5),
-      [](const int32_t& a) -> int16_t { return a + 1; });
+      [](const int32_t& a) -> int16_t { return static_cast<int16_t>(a + 1); });
   static_assert(
       std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::
           value);
