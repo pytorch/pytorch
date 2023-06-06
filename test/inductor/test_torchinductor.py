@@ -2633,6 +2633,19 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    def test_repeat_interleave(self):
+        def fn(x):
+            return (
+                x.repeat_interleave(2),
+                x.repeat_interleave(3, dim=0),
+                x.repeat_interleave(x.size(1), dim=1),
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 2, 4, 8]),),
+        )
+
     def test_embedding(self):
         m = torch.nn.Sequential(
             torch.nn.Embedding(10, 4, padding_idx=0),
@@ -5062,6 +5075,12 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    def test_issue102546(self):
+        def fn(x):
+            return x.mean(0)
+
+        self.common(fn, [torch.rand(())])
+
     def test_avg_pool2d_backward(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -6223,6 +6242,26 @@ class CommonTemplate:
                 opt_fn = torch._dynamo.optimize("inductor")(fn)
                 same(fn(*args, 256), opt_fn(*args, 256))
 
+    def test_cumsum_pattern_matcher_issue(self):
+        def fn(input_ids) -> torch.Tensor:
+            input_shape = input_ids.size()
+            input_ids = input_ids.view(-1, input_shape[-1])
+            batch_size, seq_length = input_shape
+            past_key_values_length = 0
+            mask_seq_length = past_key_values_length + seq_length
+            attention_mask = torch.ones(batch_size, mask_seq_length)
+            attention_mask = attention_mask.long()
+            return torch.cumsum(attention_mask, dim=1)
+
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.randn(2, 2)
+                opt = torch._dynamo.optimize("inductor")(fn)
+                res = opt(x)
+                ref = fn(x)
+                self.assertEqual(res, ref, atol=0, rtol=0)
+
     def test_slice(self):
         def fn(a, b):
             return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
@@ -6266,6 +6305,27 @@ class CommonTemplate:
             return x < y
 
         self.common(fn, (torch.randn(26),))
+
+    @skipIfRocm
+    def test_scaled_dot_product_efficient_attention(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        def fn(q, k, v, compute_log_sumexp):
+            return aten._scaled_dot_product_efficient_attention(
+                q, k, v, compute_log_sumexp
+            )
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                False,
+            ),
+            check_lowp=False,
+        )
 
 
 @dataclasses.dataclass
