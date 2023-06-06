@@ -217,19 +217,19 @@ def deserialize_operator(serialized_target: str):
     module = None
     if serialized_target.startswith("_operator"):
         module = operator
-        serialized_target = serialized_target.removeprefix("_operator.")
+        serialized_target = serialized_target.removeprefix("_operator.")  # type: ignore[attr-defined]
     elif serialized_target.startswith("torch.nn"):
         module = torch.nn
-        serialized_target = serialized_target.removeprefix("torch.nn.")
+        serialized_target = serialized_target.removeprefix("torch.nn.")  # type: ignore[attr-defined]
     elif serialized_target.startswith("torch._ops"):
         module = torch.ops
-        serialized_target = serialized_target.removeprefix("torch._ops.")
+        serialized_target = serialized_target.removeprefix("torch._ops.")  # type: ignore[attr-defined]
     elif serialized_target.startswith("torch"):
         module = torch
-        serialized_target = serialized_target.removeprefix("torch.")
+        serialized_target = serialized_target.removeprefix("torch.")  # type: ignore[attr-defined]
     else:
         return serialized_target
-    
+
     assert module is not None
     target = module
     for name in serialized_target.split("."):
@@ -699,6 +699,7 @@ class GraphModuleDeserializer:
                     # because we cannot create a call_function node w/o a
                     # callable target
                     log.warning(f"Could not find operator {target}. Returning fake operator.")  # noqa: G004
+
                     def fake_op(x):
                         return x
                     fake_op.__name__ = target
