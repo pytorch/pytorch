@@ -143,6 +143,7 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-py3-clang7-asan)
     ANACONDA_PYTHON_VERSION=3.9
