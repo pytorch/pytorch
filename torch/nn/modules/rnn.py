@@ -722,6 +722,7 @@ class LSTM(RNNBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__('LSTM', *args, **kwargs)
+        self.forward_op = _VF.lstm
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
@@ -830,11 +831,12 @@ class LSTM(RNNBase):
                 hx = self.permute_hidden(hx, sorted_indices)
 
         if batch_sizes is None:
-            result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
-                              self.dropout, self.training, self.bidirectional, self.batch_first)
+            result = self.forward_op(input, hx, self._flat_weights, self.bias, self.num_layers,
+                                     self.dropout, self.training, self.bidirectional, self.batch_first)
+
         else:
-            result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
-                              self.num_layers, self.dropout, self.training, self.bidirectional)
+            result = self.forward_op(input, batch_sizes, hx, self._flat_weights, self.bias,
+                                     self.num_layers, self.dropout, self.training, self.bidirectional)
         output = result[0]
         hidden = result[1:]
         # xxx: isinstance check needs to be in conditional for TorchScript to compile

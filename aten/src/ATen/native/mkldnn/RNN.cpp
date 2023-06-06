@@ -9,6 +9,7 @@
 #include <c10/core/GradMode.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -266,12 +267,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   auto weight_ih = _shuffle_weight(w0, rnn.mode);
   auto weight_hh = _shuffle_weight(w1, rnn.mode);
 
+  // TODO: bias is not packed
   auto bias = has_biases
       ? _shuffle_bias(w2, w3, rnn.mode)
-      : at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight_ih.options());
+      : at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight_ih.options().layout(at::Layout::Strided));
 
   // per layer input size
   int64_t input_size = input.size(2);
+  ideep::tensor w1_, w2_;
   auto x = get_mkldnn_tensor(
       input,
       rnn.src_layer_desc(input_size, get_mkldnn_dtype(input)));
@@ -287,9 +290,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
       hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_)));
   auto cy = get_mkldnn_tensor(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_)));
-  auto w1_ = get_mkldnn_tensor(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
-  auto w2_ = get_mkldnn_tensor(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
-
+  w1_ = weight_ih.is_mkldnn() ? itensor_from_tensor(weight_ih) : get_mkldnn_tensor(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
+  w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : get_mkldnn_tensor(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
   if (at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
     auto pd = ideep::lstm_forward_training::prepare(
@@ -504,8 +506,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
       auto layer_cx = cx[index];
       auto reverse = (direction > 0);
       auto outputs = at::mkldnn_rnn_layer(layer_input, layer_weights[0], layer_weights[1],
-                                        has_biases ? layer_weights[2] : at::zeros(layer_weights[0].sizes(), layer_weights[0].options()),
-          has_biases ? layer_weights[3] : at::zeros(layer_weights[1].sizes(), layer_weights[1].options()), layer_hx,
+                                        has_biases ? layer_weights[2] : at::zeros(layer_weights[0].sizes(), layer_weights[0].options().layout(at::Layout::Strided)),
+          has_biases ? layer_weights[3] : at::zeros(layer_weights[1].sizes(), layer_weights[1].options().layout(at::Layout::Strided)), layer_hx,
           layer_cx, reverse, batch_sizes, mode, hidden_size, num_layers, has_biases, bidirectional, batch_first, train);
       layer_output[direction] = std::get<0>(outputs);
       layer_hy[index] = std::get<1>(outputs);
@@ -556,12 +558,10 @@ std::pair<Tensor, hidden_type> mkldnn_impl(
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
-
   auto mkldnn_output = mkldnn_rnn(
       input, params, has_biases ? 4 : 2,
       hx, cx, static_cast<int>(mode), hidden_size, num_layers, has_biases, batch_first, dropout_p,
       train, bidirectional, /*batch_sizes*/{});
-
   return {std::get<0>(mkldnn_output),
           pack_hidden<hidden_type>(std::get<1>(mkldnn_output), std::get<2>(mkldnn_output))};
 }
@@ -579,6 +579,26 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
 }
 
 REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
+
+
+std::tuple<Tensor, Tensor, Tensor> lstm_mkldnn_inductor(const Tensor& input, TensorList hx, TensorList params, bool has_biases,
+    int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+  Tensor output, hy, cy;
+  lstm_mkldnn(output, hy, cy, input, hx, params, has_biases, num_layers, dropout_p, train, bidirectional, batch_first);
+  return std::make_tuple(output, hy, cy);
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_lstm"),
+      TORCH_FN(lstm_mkldnn_inductor));
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_lstm"),
+      TORCH_FN(lstm_mkldnn_inductor));
+}
 
 } // namespace at::native
 
