@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Tuple, Type
+from typing import Any, Callable, List, Optional, Type
 
 import torch
 import torch.distributed as dist
@@ -25,7 +25,7 @@ if dist.is_available():
     from torch.distributed.distributed_c10d import _get_default_group, ReduceOp
     from torch.distributed.utils import (
         _alloc_storage,
-        _apply_to_tensors,
+        _cast_forward_inputs,
         _free_storage,
         _sync_module_states,
         _to_kwargs,
@@ -119,24 +119,6 @@ def _setup_mixed_precision_params(mixed_precision_config, root_module):
             # _fp_param will point to the full precision param so it can be switched
             # back to at the end of forward / backward.
             param._fp_param = param.data
-
-
-def _cast_forward_inputs(
-    input_dtype: Optional[torch.dtype],
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Casts input args and kwargs to the given input_dtype. Note that only
-    floating point tensors are cast.
-    """
-
-    def cast_fn(x: torch.Tensor) -> torch.Tensor:
-        if not torch.is_floating_point(x) or x.dtype == input_dtype:
-            return x
-        return x.to(input_dtype)
-
-    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
 
 def _tree_flatten_with_rref(output):
