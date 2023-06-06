@@ -56,7 +56,7 @@ CppFunction::~CppFunction() = default;
 Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
   , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
-  , dispatch_key_(k.value_or(CatchAll) == CatchAll) ? c10::nullopt : k)
+  , dispatch_key_(k.value_or(CatchAll) == CatchAll ? c10::nullopt : k)
   , file_(file)
   , line_(line)
   {
