@@ -2300,7 +2300,7 @@ class CppKernelProxy(CppKernel):
                 elif _node.target == "to_dtype" and _node.args[-1] in [torch.bfloat16]:
                     (ops, x, _) = _node.args
                     # to_bf16 + store_bf16, after legalization, it should be converted to
-                    # to_bf16 + to_bf16 + store_bf16(befor), ranther than to_fp32 + to_bf16 + store_bf16.
+                    # to_bf16 + to_bf16 + store_bf16(before condition), rather than to_fp32 + to_bf16 + store_bf16.
                     to_store_bf16 = all(is_bf16_store(user) for user in _node.users)
                     # The legalization always loads the BF16 tensor as FP32 for computation and converts
                     # back to BF16 after the computation. Hence, there should be no computation w/ BF16.
