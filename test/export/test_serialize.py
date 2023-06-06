@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
-@unittest.skip("serializing constraints failing")
 class TestSerialize(TestCase):
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):

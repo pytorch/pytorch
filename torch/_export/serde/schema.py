@@ -122,6 +122,8 @@ class Argument(_Union):
     as_device: Device
     as_bool: bool
     as_bools: List[bool]
+    as_sym_bool: SymBoolArgument
+    as_sym_bools: List[SymBoolArgument]
 
 
 @dataclass
@@ -150,6 +152,7 @@ class Graph:
     nodes: List[Node]
     tensor_values: Dict[str, TensorValue]
     sym_int_values: Dict[str, SymInt]
+    sym_bool_values: Dict[str, SymBool]
 
 
 @dataclass
