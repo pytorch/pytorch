@@ -194,6 +194,10 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
+    # Note: disable dynamo on this function
+    # This allows us to continue running actual logic of the optimizer
+    # tests in dynamo without tracing this test code which has a lot of unsupported
+    # behavior
     @disable(recursive=False)
     def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
         weight = Parameter(weight)
@@ -201,6 +205,11 @@ class TestOptim(TestCase):
         with torch.no_grad():
             input = input.clone().detach().requires_grad_()
 
+        # Note: Disable dynamo on this function
+        # This avoids a bug where input_cuda is not detected in the environment
+        # because it currently is not defined in the local environmet. Unable to repro
+        # anywhere else however and this is test code that we don't need to spend
+        # time getting dynamo to trace unless the issue repros in real models.
         @disable(recursive=False)
         def fn_base(optimizer, weight, bias):
             optimizer.zero_grad()
