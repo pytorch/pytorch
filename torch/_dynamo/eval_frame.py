@@ -1274,6 +1274,9 @@ class TorchPatcher:
                 opt.step = disable(opt.step)
 
             opt.zero_grad = disable(opt.zero_grad)
+            opt.state_dict = disable(opt.state_dict)
+            opt.load_state_dict = disable(opt.load_state_dict)
+            opt.add_param_group = disable(opt.add_param_group)
 
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook

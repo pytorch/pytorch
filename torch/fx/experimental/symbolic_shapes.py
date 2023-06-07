@@ -55,6 +55,7 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
+    "is_concrete_bool",
 ]
 
 # These are modules that contain generic code for interacting with ShapeEnv
@@ -159,6 +160,23 @@ def is_concrete_int(a: Union[int, SymInt]):
         return True
 
     if isinstance(a.node.expr, sympy.core.numbers.Integer):
+        return True
+
+    return False
+
+def is_concrete_bool(a: Union[bool, SymBool]):
+    r""" Utility to check if underlying object
+    in SymBool is concrete value. Also returns
+    true if integer is passed in.
+    Args:
+        a (SymBool or bool): Object to test if it bool
+    """
+    assert isinstance(a, (SymBool, bool))
+
+    if isinstance(a, bool):
+        return True
+
+    if isinstance(a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)):
         return True
 
     return False
