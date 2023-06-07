@@ -321,6 +321,17 @@ class CPUReproTests(TestCase):
             if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                 dtypes.append(torch.bfloat16)
             for dtype in dtypes:
+                print("#" * 50, " running lstm")
+                print("input_size: ", input_size)
+                print("hidden_size: ", hidden_size)
+                print("num_layers: ", num_layers)
+                print("bidirectional: ", bidirectional)
+                print("bias: ", bias)
+                print("empty_state: ", empty_state)
+                print("batch_first: ", batch_first)
+                print("batch_size: ", batch_size)
+                print("seq_len: ", seq_len)
+                print("dtype: ", dtype)
                 num_directions = 2 if bidirectional else 1
 
                 if batch_first:
