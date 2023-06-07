@@ -382,6 +382,7 @@ class AutogradFunctionVariable(VariableTracker):
                         self.fn_cls.backward.__func__,
                         variables.UserDefinedClassVariable(self.fn_cls),
                     )
+                    args = [backward.obj] + args
                 else:
                     unimplemented(
                         f"backward is a non-function or method: {self.fn_cls.backward}"
@@ -397,6 +398,7 @@ class AutogradFunctionVariable(VariableTracker):
                     self.fn_cls.forward.__func__,
                     variables.UserDefinedClassVariable(self.fn_cls),
                 )
+                args = [forward.obj] + args
             else:
                 unimplemented(
                     f"forward is a non-function or method: {self.fn_cls.forward}"
