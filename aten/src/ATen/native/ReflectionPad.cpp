@@ -77,7 +77,10 @@ TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
 TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  int64_t dim_w = input.dim() - 1;
+  int64_t dim_w = 1;
+  if (input.ndimension() == 3) {
+    dim_w++;
+  }
 
   /* sizes */
   auto pad_l = padding[0];
