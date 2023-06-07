@@ -176,13 +176,13 @@ def _safe_copy_out(
 
     # Checks safe cast
     if exact_dtype:
-        torch._check(
+        utils.check(
             copy_from.dtype == copy_to.dtype,
             lambda: f"Expected out tensor to have dtype {copy_from.dtype} "
             f"but got {copy_to.dtype} instead",
         )
     else:
-        torch._check(
+        utils.check(
             utils.can_safe_cast_to(cast_from=copy_from.dtype, cast_to=copy_to.dtype),
             lambda: f"Attempting to cast from {copy_from.dtype} to out tensor with dtype {copy_to.dtype}, "
             "but this can't be cast because it is not safe!",
@@ -255,9 +255,10 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
-                    torch._check_type(
+                    utils.check(
                         len(out) == len(result),
                         lambda: f"expected tuple of {len(result)} elements but got {len(out)}",
+                        TypeError,
                     )
                     for r, o in zip(result, out):
                         # These two operations are done in-place
