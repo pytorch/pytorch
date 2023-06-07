@@ -1,13 +1,20 @@
 ![PyTorch Logo](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/pytorch-logo-dark.png)
 
---------------------------------------------------------------------------------
-#### _Read this in other languages:
+---
+#### _اقرأ هذا بلغات أخرى:_
 
 <kbd>[<img title="English" alt="English" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/us.svg" width="30">](../README.md)</kbd>
 <kbd>[<img title="Português" alt="Português" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/br.svg" width="30">](README_pt.md)</kbd>
 <kbd>[<img title="عربى" alt="عربى" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/sa.svg" width="30">](README_ar.md)</kbd>
 <kbd>[<img title="Türkçe" alt="Türkçe" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/tr.svg" width="30">](README_tr.md)</kbd>
 <kbd>[<img title="Deutsch" alt="Deutsch" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/de.svg" width="30">](README_de.md)</kbd>
+
+**لا يتم تحديث هذه الترجمة تلقائيًا. لم يتم إجراء التغييرات على [README.md](../README.md) هنا.**
+
+ينتمي هذا المستند إلى [هذا الإصدار](https://github.com/atalman/pytorch/blob/93b27acd035cbfadeae96759db523594b6e6ee92/README.md).
+آخر تحديث:18/5/2023
+
+---
 
 مكتبة PyTorch:
 هي حزمة برمجية في لغة Python توفر ميزتين على مستوى عالٍ:
@@ -21,8 +28,8 @@
 
 <!-- toc -->
 
-- [المزيد عن PyTorch](#المزيد-عن-PyTorch)
-  - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات GPU](#مكتبة-tensor)
+- [المزيد عن PyTorch](#المزيد-عن-pytorch)
+  - [مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات GPU](#مكتبة-tensor-جاهزة-للعمل-على-وحدة-معالجة-الرسوميات-gpu)
   - [شبكات عصبية ديناميكية: نظام تلقائي للتفاضل يعتمد على التسجيل بواسطة الشريط](#شبكات-عصبية-ديناميكية)
   - [بايثون في المقام الأول](#بايثون-في-المقام-الأول)
   - [التجارب الحتمية](#التجارب-الحتمية)
@@ -54,17 +61,15 @@
 ## المزيد عن PyTorch
 
 على المستوى التفصيلي، تعد PyTorch مكتبة تتكون من العناصر التالية:
-
 | العنصر | الوصف |
-
 | ---- | --- |
-| [**torch**](https://pytorch.org/docs/stable/torch.html) | GPU مع دعم قوي لوحدات المعالجة الرسومية ،NumPy  مكتبة تينسور مشابهة لـ  |
-| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | torch مع عمليات التينسور القابلة للتفاضل في بيئة (tape) مكتبة تفاضل تلقائية قائمة على الشريط |
-| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | PyTorch لإنشاء نماذج قابلة للتسلسل والتحسين من رمز (TorchScript) مجموعة تراكيب  |
+| [**torch**](https://pytorch.org/docs/stable/torch.html) | مع دعم قوي لوحدة المعالجة الرسومية Numpy مكتبة تينسور مثل |
+| [**torch.autograd**](https://pytorch.org/docs/stable/autograd.html) | torch القابلة للتفاضل في Tensor مكتبة تفاضل تلقائية قائمة على الأشرطة تدعم جميع عمليات |
+| [**torch.jit**](https://pytorch.org/docs/stable/jit.html) | PyTorch لإنشاء نماذج قابلة للتسلسل والتحسين من رمز TorchScript مجموعة تراكيب |
 | [**torch.nn**](https://pytorch.org/docs/stable/nn.html) | مصممة لتوفير أقصى قدر من المرونة autograd مكتبة شبكات عصبية متكاملة بشكل عميق مع |
+| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Hogwild  لتحميل البيانات وتدريب torch  مع مشاركة ذاكرة سحرية لتوزيع التينسورات في multiprocessing مكتبة من نظام|
+| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | ووظائف أخرى للراحة والاستخدام الملائم DataLoader هي |
 
-| [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Hogwild وهي مفيدة لتحميل البيانات وتدريب torch ولكن مع مشاركة ذاكرة سحرية لتوزيع التينسورات في multiprocessing من نظام Python تعد مكتبة |
-| [**torch.utils**](https://pytorch.org/docs/stable/data.html) | ووظائف أخرى للراحة والاستخدام الملائم (DataLoader) تحميل البيانات |
 
 عادةً يتم استخدام PyTorch إما كـ:
 
@@ -73,7 +78,7 @@
 
 مزيد من التفصيل:
 
-### مكتبة Tensor
+### مكتبة Tensor جاهزة للعمل على وحدة معالجة الرسوميات GPU
 
 إذا كنت تستخدم NumPy ، فهذا يعني أنك استخدمت Tensors (المعروف أيضًا باسم ndarray).
 
@@ -88,144 +93,142 @@
 
 تمتلك PyTorch طريقة فريدة لبناء الشبكات العصبية: استخدام مسجل شرائط وإعادة تشغيله.
 
-Most frameworks such as TensorFlow, Theano, Caffe, and CNTK have a static view of the world.
-One has to build a neural network and reuse the same structure again and again.
-Changing the way the network behaves means that one has to start from scratch.
+معظم أطر العمل مثل TensorFlow و Theano و Caffe و CNTK لديها رؤية ثابتة للعالم.
+يتعين على المرء بناء شبكة عصبية وإعادة استخدام نفس البنية مرارًا وتكرارًا.
+يعني تغيير الطريقة التي تتصرف بها الشبكة أن على المرء أن يبدأ من نقطة الصفر.
 
-With PyTorch, we use a technique called reverse-mode auto-differentiation, which allows you to
-change the way your network behaves arbitrarily with zero lag or overhead. Our inspiration comes
-from several research papers on this topic, as well as current and past work such as
+باستخدام PyTorch ، نستخدم تقنية تسمى التمايز التلقائي للوضع العكسي ، والتي تتيح لك بذلك
+تغيير الطريقة التي تتصرف بها شبكتك بشكل تعسفي بدون أي تأخير أو زيادة في النفقات. يأتي إلهامنا
+من عدة أوراق بحثية حول هذا الموضوع ، بالإضافة إلى الأعمال الحالية والسابقة مثل
 [torch-autograd](https://github.com/twitter/torch-autograd),
 [autograd](https://github.com/HIPS/autograd),
-[Chainer](https://chainer.org), etc.
+[Chainer](https://chainer.org), إلخ.
 
-While this technique is not unique to PyTorch, it's one of the fastest implementations of it to date.
-You get the best of speed and flexibility for your crazy research.
+على الرغم من أن هذه التقنية ليست فريدة من نوعها في PyTorch ، إلا أنها واحدة من أسرع تطبيقاتها حتى الآن.
+سوف تحصل على أفضل سرعة ومرونة لبحثك المجنون.
 
 ![Dynamic graph](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/dynamic_graph.gif)
 
 ### بايثون في المقام الأول
 
-PyTorch is not a Python binding into a monolithic C++ framework.
-It is built to be deeply integrated into Python.
-You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
-You can write your new neural network layers in Python itself, using your favorite libraries
-and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
-Our goal is to not reinvent the wheel where appropriate.
+هذه المكتبة ليست ارتباطًا بلغة Python في إطار عمل C ++ أحادي.
+تم تصميمه ليتم دمجه بعمق في Python.
+يمكنك استخدامه بشكل طبيعي كما تستخدم [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) إلخ.
+يمكنك كتابة طبقات الشبكة العصبية الجديدة في Python نفسها ، باستخدام مكتباتك المفضلة
+واستخدام حزم مثل [Cython](https://cython.org/) و [Numba](http://numba.pydata.org/).
+هدفنا هو عدم إعادة اختراع العجلة عند الاقتضاء.
 
 ### التجارب الحتمية
 
-PyTorch is designed to be intuitive, linear in thought, and easy to use.
-When you execute a line of code, it gets executed. There isn't an asynchronous view of the world.
-When you drop into a debugger or receive error messages and stack traces, understanding them is straightforward.
-The stack trace points to exactly where your code was defined.
-We hope you never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
+تم تصميم PyTorch ليكون بديهيًا وخطيًا في التفكير وسهل الاستخدام.
+عند تنفيذ سطر من التعليمات البرمجية ، يتم تنفيذه. لا توجد رؤية غير متزامنة للعالم.
+عندما تسقط في مصحح أخطاء أو تتلقى رسائل خطأ وتتبعات مكدسة ، يكون فهمها أمرًا سهلاً.
+يشير stack trace إلى المكان الذي تم فيه تعريف التعليمات البرمجية الخاصة بك بالضبط.
+نأمل ألا تقضي ساعات في تصحيح أخطاء التعليمات البرمجية الخاصة بك أبدًا بسبب آثار ال stack traces أو محركات التنفيذ غير المتزامنة وغير الشفافة.
 
 ### سريع وخفيف
 
-PyTorch has minimal framework overhead. We integrate acceleration libraries
-such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) to maximize speed.
-At the core, its CPU and GPU Tensor and neural network backends
-are mature and have been tested for years.
+مكتبتنا لديها الحد الأدنى من حمل الإطار. نقوم بدمج مكتبات التسريع
+مثل [Intel MKL](https://software.intel.com/mkl) و ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl) لتعظيم السرعة.
+في جوهرها ، خلفية وحدة المعالجة المركزية ووحدة معالجة الرسومات (GPU) والشبكة العصبية 
+ناضجة وتم اختبارها لسنوات.
 
-Hence, PyTorch is quite fast — whether you run small or large neural networks.
-
-The memory usage in PyTorch is extremely efficient compared to Torch or some of the alternatives.
-We've written custom memory allocators for the GPU to make sure that
-your deep learning models are maximally memory efficient.
-This enables you to train bigger deep learning models than before.
+وبالتالي ، فإن PyTorch سريع جدًا - سواء كنت تدير شبكات عصبية صغيرة أو كبيرة.
+استخدام الذاكرة في PyTorch فعال للغاية مقارنة بـ Torch أو بعض البدائل.
+لقد كتبنا مخصصات ذاكرة مخصصة لوحدة معالجة الرسومات للتأكد من ذلك 
+تعد نماذج التعلم العميق الخاصة بك فعالة إلى أقصى حد في استخدام الذاكرة.
+يمكّنك هذا من تدريب نماذج التعلم العميق بشكل أكبر من ذي قبل.
 
 ### سهولة في التوسع
 
-Writing new neural network modules, or interfacing with PyTorch's Tensor API was designed to be straightforward
-and with minimal abstractions.
+تم تصميم كتابة وحدات شبكة عصبية جديدة ، أو التفاعل مع Tensor API من PyTorch ليكون مباشرًا
+وبأقل قدر من التجريد.
 
-You can write new neural network layers in Python using the torch API
+يمكنك كتابة طبقات شبكة عصبية جديدة في Python باستخدام واجهة برمجة تطبيقات torch
 [or your favorite NumPy-based libraries such as SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
-If you want to write your layers in C/C++, we provide a convenient extension API that is efficient and with minimal boilerplate.
-No wrapper code needs to be written. You can see [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
+إذا كنت ترغب في كتابة طبقاتك في C / C ++ ، فنحن نوفر واجهة برمجة تطبيقات تمديد ملائمة تتسم بالكفاءة وبأقل قدر ممكن من النماذج المعيارية. 
+لا يلزم كتابة أي رمز مجمّع. يمكنك مشاهدة [برنامج تعليمي هنا](https://pytorch.org/tutorials/advanced/cpp_extension.html) و [مثال هنا](https://github.com/pytorch/extension-cpp).
 
 
 ## التثبيت
 
 ### الملفات التنفيذية
-Commands to install binaries via Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
+توجد أوامر لتثبيت الثنائيات عبر Conda أو عجلات الأنابيب على موقعنا الإلكتروني: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
 
 #### منصات NVIDA Jeston
 
 
-Python wheels for NVIDIA's Jetson Nano, Jetson TX1/TX2, Jetson Xavier NX/AGX, and Jetson AGX Orin are provided [here](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) and the L4T container is published [here](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
-
-They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv) and [@ptrblck](https://github.com/ptrblck) are maintaining them.
-
+تتوفر عجلات Python لـ Jetson Nano من NVIDIA و Jetson TX1 / TX2 و Jetson Xavier NX / AGX و Jetson AGX Orin [هنا](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) وتم نشر حاوية L4T [هنا](https: //catalog.ngc .nvidia.com / orgs / nvidia / حاويات / l4t-pytorch)
+إنها تتطلب JetPack 4.2 وما فوق ، ويقوم [@ dusty-nv](https://github.com/dusty-nv) و [ptrblck](https://github.com/ptrblck) بالحفاظ عليها.
 
 ### من المصدر
 
 #### المتطلبات الأساسية
-If you are installing from source, you will need:
-- Python 3.8 or later (for Linux, Python 3.8.1+ is needed)
-- A C++17 compatible compiler, such as clang
+إذا كنت تقوم بالتثبيت من المصدر ، فستحتاج إلى:
+- نسخة Python 3.8 أو أحدث (لنظام التشغيل Linux ، يلزم استخدام Python 3.8.1+)
+- مترجم متوافق مع C ++ 17 ، مثل clang
 
-We highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
+نوصي بشدة بتثبيت بيئة [Anaconda](https://www.anaconda.com/distribution/#download-section). ستحصل على مكتبة BLAS عالية الجودة (MKL) وستحصل على إصدارات تبعية خاضعة للرقابة بغض النظر عن توزيعات Linux الخاصة بك. 
+إذا كنت تريد التحويل البرمجي باستخدام دعم CUDA ، فقم بتثبيت ما يلي (لاحظ أن CUDA غير مدعوم على macOS)
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 11.0 وما فوق
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 وما فوق
+- [Compiler](https://gist.github.com/ax3l/9489132) متوافق مع CUDA
 
-If you want to compile with CUDA support, install the following (note that CUDA is not supported on macOS)
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 11.0 or above
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
-- [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
+ملاحظة: يمكنك الرجوع إلى [مصفوفة دعم cuDNN](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) لإصدارات cuDNN مع مختلف CUDA و CUDA driver و NVIDIA المعدات.
 
-Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardware
+إذا كنت ترغب في تعطيل دعم CUDA ، فقم بتصدير متغير البيئة `USE_CUDA = 0`.
+يمكن العثور على متغيرات البيئة المفيدة الأخرى في "setup.py".
 
-If you want to disable CUDA support, export the environment variable `USE_CUDA=0`.
-Other potentially useful environment variables may be found in `setup.py`.
+إذا كنت تقوم بالتصميم لمنصات Jetson من NVIDIA (Jetson Nano، TX1، TX2، AGX Xavier) ، فإن تعليمات تثبيت PyTorch لـ Jetson Nano [متوفرة هنا](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
-If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xavier), Instructions to install PyTorch for Jetson Nano are [available here](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
+إذا كنت تريد التحويل البرمجي باستخدام دعم ROCm ، فقم بتثبيت
 
-If you want to compile with ROCm support, install
-- [AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 and above installation
-- ROCm is currently supported only for Linux systems.
+- هذا[AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 وما فوق التثبيت
+- لكن ROCm مدعوم حاليًا لأنظمة Linux فقط.
 
-If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
-Other potentially useful environment variables may be found in `setup.py`.
+إذا كنت تريد تعطيل دعم ROCm ، فقم بتصدير متغير البيئة `USE_ROCM = 0`.
+يمكن العثور على متغيرات البيئة المفيدة الأخرى في "setup.py".
 
 #### تثبيت التبعيات أو الاعتماديات
 
-**Common**
+**عام**
 
 ```bash
 conda install cmake ninja
-# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
+# قم بتشغيل هذا الأمر من دليل PyTorch بعد استنساخ الكود المصدري باستخدام قسم "Get the PyTorch Source" أدناه
 pip install -r requirements.txt
 ```
 
-**On Linux**
+**على Linux**
 
 ```bash
 conda install mkl mkl-include
-# CUDA only: Add LAPACK support for the GPU if needed
-conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
+# فقط CUDA: أضف دعم LAPACK لوحدة معالجة الرسومات إذا لزم الأمر
+conda install -c pytorch magma-cuda110
+# أو magma-cuda * الذي يتطابق مع إصدار CUDA الخاص بك من https://anaconda.org/pytorch/repo
 
-# (optional) If using torch.compile with inductor/triton, install the matching version of triton
-# Run from the pytorch directory after cloning
-make triton
+# (اختياري) إذا كنت تستخدم torch.compile مع محث / triton ، فقم بتثبيت الإصدار المطابق من triton
+# تشغيل من دليل pytorch بعد الاستنساخ
+اصنع triton
 ```
 
-**On MacOS**
+**على MacOS**
 
 ```bash
-# Add this package on intel x86 processor machines only
+# أضف هذه الحزمة على أجهزة معالجات intel x86 فقط 
 conda install mkl mkl-include
-# Add these packages if torch.distributed is needed
+# أضف هذه الحزم إذا كانت هناك حاجة إلى torch.distributed 
 conda install pkg-config libuv
 ```
 
-**On Windows**
+**على Windows**
 
 ```bash
 conda install mkl mkl-include
-# Add these packages if torch.distributed is needed.
-# Distributed package support on Windows is a prototype feature and is subject to changes.
+# أضف هذه الحزم إذا كانت هناك حاجة إلى torch.distributed.
+# دعم الحزمة الموزعة على Windows هي ميزة نموذج أولي وتخضع للتغييرات.
 conda install -c conda-forge libuv=1.39
 ```
 
@@ -233,27 +236,28 @@ conda install -c conda-forge libuv=1.39
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
-# if you are updating an existing checkout
+# إذا كنت تقوم بتحديث الخروج الحالي
 git submodule sync
 git submodule update --init --recursive
 ```
 
 #### تثبيت PyTorch
-**On Linux**
+**على Linux**
 
-If you're compiling for AMD ROCm then first run this command:
+إذا كنت تقوم بالتجميع لـ AMD ROCm ، فقم أولاً بتشغيل هذا الأمر:
 ```bash
-# Only run this if you're compiling for ROCm
+# قم بتشغيل هذا فقط إذا كنت تقوم بالتجميع لـ ROCm
 python tools/amd_build/build_amd.py
 ```
 
-Install PyTorch
+قم بتثبيت PyTorch
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py develop
 ```
 
-> _Aside:_ If you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
+> _Aside:_ 
+> إذا كنت تستخدم [Anaconda] (https://www.anaconda.com/distribution/#download-section) ، فقد تواجه خطأ ناتجًا عن الرابط:
 >
 > ```plaintext
 > build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
@@ -261,71 +265,69 @@ python setup.py develop
 > error: command 'g++' failed with exit status 1
 > ```
 >
-> This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
-
-**On macOS**
+> يحدث هذا بسبب `ld` من بيئة Conda التي تقوم بتظليل النظام` ld`. يجب عليك استخدام إصدار أحدث من Python يعمل على حل هذه المشكلة. إصدار Python الموصى به هو 3.8.1+.
+**على macOS**
 
 ```bash
 python3 setup.py develop
 ```
 
-**On Windows**
+**على Windows**
 
-Choose Correct Visual Studio Version.
+اختر إصدار Visual Studio الصحيح.
 
-PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
-Professional, or Community Editions. You can also install the build tools from
-https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
-come with Visual Studio Code by default.
+يستخدم PyTorch CI Visual C ++ BuildTools ، والذي يأتي مع Visual Studio Enterprise ،
+طبعات احترافية أو مجتمعية. يمكنك أيضًا تثبيت أدوات البناء من
+https://visualstudio.microsoft.com/visual-cpp-build-tools/. أدوات البناء * لا *
+تأتي مع Visual Studio Code افتراضيًا.
 
-If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
+إذا كنت ترغب في إنشاء كود python قديم ، يرجى الرجوع إلى [البناء على الكود القديم و CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and -cuda)
 
-**CPU-only builds**
+**لبناء CPU فقط**
 
-In this mode PyTorch computations will run on your CPU, not your GPU
+في هذا الوضع ، سيتم تشغيل حسابات PyTorch على وحدة المعالجة المركزية الخاصة بك ، وليس على وحدة معالجة الرسومات الخاصة بك
 
 ```cmd
 conda activate
 python setup.py develop
 ```
 
-Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
+ملاحظة حول OpenMP: تطبيق OpenMP المطلوب هو Intel OpenMP (iomp). للارتباط بـ iomp ، ستحتاج إلى تنزيل المكتبة يدويًا وإعداد بيئة المبنى عن طريق تعديل `CMAKE_INCLUDE_PATH` و` LIB`. التعليمات [هنا](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) هي مثال على إعداد كل من MKL و Intel OpenMP. بدون هذه التكوينات لـ CMake ، سيتم استخدام وقت تشغيل Microsoft Visual C OpenMP (vcomp).
 
-**CUDA based build**
+**بناء على أساس CUDA**
 
-In this mode PyTorch computations will leverage your GPU via CUDA for faster number crunching
+في هذا الوضع ، ستستفيد حسابات PyTorch من وحدة معالجة الرسومات الخاصة بك عبر CUDA لسحق الأرقام بشكل أسرع إن
+[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) 
+مطلوب لبناء Pytorch مع CUDA.
+كما أن NVTX هو جزء من CUDA التوزيعي ، حيث يطلق عليه "Nsight Compute". لتثبيته على CUDA مثبت بالفعل ، قم بتشغيل تثبيت CUDA مرة أخرى وتحقق من مربع الاختيار المقابل.
+تأكد من تثبيت CUDA مع Nsight Compute بعد Visual Studio.
 
-[NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) is needed to build Pytorch with CUDA.
-NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto an already installed CUDA run CUDA installation once again and check the corresponding checkbox.
-Make sure that CUDA with Nsight Compute is installed after Visual Studio.
+حاليًا ، يتم دعم VS 2017/2019 و Ninja كمنشئ لـ CMake. إذا تم اكتشاف "ninja.exe" في "PATH" ، فسيتم استخدام Ninja كمولد افتراضي ، وإلا فسيستخدم VS 2017/2019.
+ولكن <br/> إذا تم تحديد Ninja كمنشئ ، فسيتم تحديد أحدث MSVC باعتباره سلسلة الأدوات الأساسية.
 
-Currently, VS 2017 / 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017 / 2019.
-<br/> If Ninja is selected as the generator, the latest MSVC will get selected as the underlying toolchain.
+مكتبات إضافية مثل [Magma](https://developer.nvidia.com/magma) و [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN) و [Sccache](https://github.com/mozilla/sccache) غالبًا ما تكون مطلوبة. يرجى الرجوع إلى [install-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) لتثبيتها.  
 
-Additional libraries such as
-[Magma](https://developer.nvidia.com/magma), [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN), and [Sccache](https://github.com/mozilla/sccache) are often needed. Please refer to the [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) to install them.
+إن[Magma](https://developer.nvidia.com/magma) و [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN) و [Sccache](https://github.com/mozilla/sccache) غالبًا ما تكون مطلوبة. يرجى الرجوع إلى [installation-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) لتثبيتها.
 
-You can refer to the [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) script for some other environment variables configurations
-
+يمكنك الرجوع إلى البرنامج النصي [build_pytorch.bat](https://github.com/pytorch/pytorch/blob/main/.ci/pytorch/win-test-helpers/build_pytorch.bat) لبعض تكوينات متغيرات البيئة الأخرى
 
 ```cmd
 cmd
 
-:: Set the environment variables after you have downloaded and unzipped the mkl package,
-:: else CMake would throw an error as `Could NOT find OpenMP`.
-set CMAKE_INCLUDE_PATH={Your directory}\mkl\include
-set LIB={Your directory}\mkl\lib;%LIB%
+:: اضبط متغيرات البيئة بعد تنزيل حزمة mkl وفك ضغطها ،
+:: قد يتسبب في ظهور خطأ كـ "تعذر العثور على OpenMP".
+اضبط CMAKE_INCLUDE_PATH = {Your directory} \ mkl \ include
+تعيين LIB = {دليلك} \ mkl \ lib ؛٪ LIB٪
 
-:: Read the content in the previous section carefully before you proceed.
-:: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
-:: "Visual Studio 2019 Developer Command Prompt" will be run automatically.
-:: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
-set CMAKE_GENERATOR_TOOLSET_VERSION=14.27
-set DISTUTILS_USE_SDK=1
-for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,17^] -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
+:: اقرأ المحتوى في القسم السابق بعناية قبل المتابعة.
+:: [اختياري] إذا كنت تريد تجاوز مجموعة الأدوات الأساسية المستخدمة من قبل Ninja و Visual Studio مع CUDA ، يرجى تشغيل كتلة البرنامج النصي التالية.
+:: سيتم تشغيل "موجه أوامر المطور Visual Studio 2019" تلقائيًا.
+:: تأكد من حصولك على CMake> = 3.12 قبل القيام بذلك عند استخدام منشئضبط CMAKE_GENERATOR_TOOLSET_VERSION = 14.27
+ضبط DISTUTILS_USE_SDK = 1
+من أجل / f "usebackq tokens = *"٪ i in (`"٪ ProgramFiles (x86)٪ \ Microsoft Visual Studio \ Installer \ vswhere.exe "-إصدار [15 ^ ، 17 ^] -products * -آخر-خاصية التثبيتPath` ) اتصل بـ "٪ i \ VC \ Auxiliary \ Build \ vcvarsall.bat" x64 -vcvars_ver =٪ CMAKE_GENERATOR_TOOLSET_VERSION٪ 
 
-:: [Optional] If you want to override the CUDA host compiler
-set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
+:: [اختياري] إذا كنت تريد تجاوز مترجم مضيف CUDA
+قم بتعيين CUDAHOSTCXX = C: \ Program Files (x86) \ Microsoft Visual Studio \ 2019 \ Community \ VC \ Tools \ MSVC \ 14.27.29110 \ bin \ HostX64 \ x64 \ cl.exe
 
 python setup.py develop
 
@@ -333,135 +335,136 @@ python setup.py develop
 
 ##### ضبط خيارات البناء اختياري
 
-You can adjust the configuration of cmake variables optionally (without building first), by doing
-the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
-with such a step.
+يمكنك ضبط تكوين متغيرات cmake اختياريًا (بدون البناء أولاً) ، عن طريق القيام بذلك
+الأتى. على سبيل المثال ، يمكن ضبط الدلائل المكتشفة مسبقًا لـ CuDNN أو BLAS
+بهذه الخطوة.
 
-On Linux
+على Linux
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
-On macOS
+على macOS
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
-ccmake build  # or cmake-gui build
+ccmake build  
+# أو بناء cmake-gui
 ```
 
 ### صورة دوكر Docker Image
 
 #### استخدام صور مبنية مسبقًا
 
-You can also pull a pre-built docker image from Docker Hub and run with docker v19.03+
+يمكنك أيضًا سحب صورة عامل إرساء مسبقة الصنع من Docker Hub وتشغيلها باستخدام docker v19.03 +
 
 ```bash
 docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 ```
 
-Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
-for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
-should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
+يرجى ملاحظة أن PyTorch تستخدم ذاكرة مشتركة لمشاركة البيانات بين العمليات ، لذلك إذا تم استخدام المعالجة المتعددة للشعلة (على سبيل المثال
+بالنسبة إلى برامج تحميل البيانات متعددة مؤشرات الترابط) ، لا يكفي حجم مقطع الذاكرة المشتركة الافتراضي الذي تعمل به الحاوية ، وأنت
+يجب زيادة حجم الذاكرة المشتركة إما باستخدام خيارات سطر الأوامر `--ipc = host` أو` --shm-size` إلى `nvidia-docker run`.
 
 #### بناء الصورة بنفسك
 
-**NOTE:** Must be built with a docker version > 18.06
+**ملاحظة:** يجب أن تُبنى بإصدار عامل إرساء> 18.06
 
-The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
-You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
-unset to use the default.
+يتم توفير "Dockerfile" لإنشاء صور بدعم CUDA 11.1 و cuDNN v8.
+يمكنك تمرير `PYTHON_VERSION = x.y` لعمل متغير لتحديد إصدار Python الذي سيتم استخدامه بواسطة Miniconda ، أو اتركه
+غير مضبوط لاستخدام الافتراضي.
 
 ```bash
 make -f docker.Makefile
-# images are tagged as docker.io/${your_docker_username}/pytorch
+# تم وضع علامة على الصور كـ docker.io/${your_docker_username}/pytorch
 ```
 
-You can also pass the `CMAKE_VARS="..."` environment variable to specify additional CMake variables to be passed to CMake during the build.
-See [setup.py](../setup.py) for the list of available variables.
-
+يمكنك أيضًا تمرير متغير البيئة `CMAKE_VARS =" ... "` لتحديد متغيرات CMake الإضافية ليتم تمريرها إلى CMake أثناء الإنشاء.
+راجع [setup.py](../ setup.py) للحصول على قائمة بالمتغيرات المتاحة.
 ```bash
 CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
 ```
 
 ### إنشاء الوثائق
 
-To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
-readthedocs theme.
+لإنشاء وثائق بتنسيقات مختلفة ، ستحتاج إلى [Sphinx] (http://www.sphinx-doc.org) و
+موضوع readthedocs.
 
 ```bash
 cd docs/
 pip install -r requirements.txt
 ```
-You can then build the documentation by running `make <format>` from the
-`docs/` folder. Run `make` to get a list of all available output formats.
+يمكنك بعد ذلك إنشاء التوثيق عن طريق تشغيل `make <format>` من ملف
+مجلد مستندات / `. قم بتشغيل `make` للحصول على قائمة بجميع تنسيقات الإخراج المتاحة.
+إذا حصلت على خطأ katex ، قم بتشغيل `npm install katex`. إذا استمرت ، حاول
+تثبيت npm -g katex`
 
-If you get a katex error run `npm install katex`.  If it persists, try
-`npm install -g katex`
 
-> Note: if you installed `nodejs` with a different package manager (e.g.,
-`conda`) then `npm` will probably install a version of `katex` that is not
-compatible with your version of `nodejs` and doc builds will fail.
-A combination of versions that is known to work is `node@6.13.1` and
-`katex@0.13.18`. To install the latter with `npm` you can run
-```npm install -g katex@0.13.18```
+ملاحظة: إذا قمت بتثبيت "nodejs" مع مدير حزم مختلف (على سبيل المثال conda)
+ثم من المحتمل أن يقوم "npm" بتثبيت إصدار من "katex" ليس كذلك
+متوافق مع إصدارك من `nodejs` وستفشل إصدارات doc.
+مجموعة من الإصدارات المعروفة للعمل هي `node @ 6.13.1` و
+كاتكس @ 0.13.18`. لتثبيت الأخير مع "npm" يمكنك تشغيل
+`` تثبيت npm -g katex @ 0.13.18 ''
 
 ### الإصدارات السابقة
 
-Installation instructions and binaries for previous PyTorch versions may be found
-on [our website](https://pytorch.org/previous-versions).
-
+ 
+يمكن العثور على تعليمات التثبيت والثنائيات لإصدارات PyTorch السابقة
+على [موقعنا](https://pytorch.org/previous-versions).
 
 ## البدء بالاستخدام
 
-Three-pointers to get you started:
-- [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
-- [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
-- [The API Reference](https://pytorch.org/docs/)
-- [Glossary](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
-
+ثلاث مؤشرات لتبدأ بها:
+- [دروس: ابدأ بفهم واستخدام PyTorch](https://pytorch.org/tutorials/)
+- [أمثلة: سهولة فهم كود PyTorch عبر جميع المجالات](https://github.com/pytorch/examples)
+- [مرجع واجهة برمجة التطبيقات](https://pytorch.org/docs/)
+- [المسرد](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
+- 
 ## موارد
 
 * [PyTorch.org](https://pytorch.org/)
-* [PyTorch Tutorials](https://pytorch.org/tutorials/)
-* [PyTorch Examples](https://github.com/pytorch/examples)
-* [PyTorch Models](https://pytorch.org/hub/)
-* [Intro to Deep Learning with PyTorch from Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
-* [Intro to Machine Learning with PyTorch from Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
-* [Deep Neural Networks with PyTorch from Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
+* [دروس PyTorch](https://pytorch.org/tutorials/)
+* [أمثلة PyTorch](https://github.com/pytorch/examples)
+* [نماذج PyTorch](https://pytorch.org/hub/)
+* [مقدمة عن التعلم العميق باستخدام PyTorch من Udacity](https://www.udacity.com/course/deep-learning-pytorch--ud188)
+* [مقدمة عن التعلم الآلي باستخدام PyTorch من Udacity](https://www.udacity.com/course/intro-to-machine-learning-nanodegree--nd229)
+* [الشبكات العصبية العميقة مع PyTorch من Coursera](https://www.coursera.org/learn/deep-neural-networks-with-pytorch)
 * [PyTorch Twitter](https://twitter.com/PyTorch)
-* [PyTorch Blog](https://pytorch.org/blog/)
+* [مدونة PyTorch](https://pytorch.org/blog/)
 * [PyTorch YouTube](https://www.youtube.com/channel/UCWXI5YeOsh03QvJ59PMaXFw)
 
 ## التواصل
-* Forums: Discuss implementations, research, etc. https://discuss.pytorch.org
-* GitHub Issues: Bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* Newsletter: No-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
-* Facebook Page: Important announcements about PyTorch. https://www.facebook.com/pytorch
-* For brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
+
+* المنتديات: ناقش عمليات التنفيذ والبحث وما إلى ذلك https://discuss.pytorch.org
+* مشكلات GitHub: تقارير الأخطاء وطلبات الميزات ومشكلات التثبيت و RFCs والأفكار وما إلى ذلك.
+* اما Slack: يستضيف [PyTorch Slack](https://pytorch.slack.com/) جمهورًا أساسيًا من مستخدمي ومطوري PyTorch المعتدلين وذوي الخبرة للدردشة العامة والمناقشات عبر الإنترنت والتعاون وما إلى ذلك. إذا كنت مبتدئًا تبحث عن help ، الوسيط الأساسي هو [منتديات PyTorch](https://discuss.pytorch.org). إذا كنت بحاجة إلى دعوة Slack ، فيرجى ملء هذا النموذج: https://goo.gl/forms/PP1AGvNHpSaJP8to1
+* النشرة الإخبارية: No-No-No-No-No-No-No-No-ضجيج ، وهي رسالة إخبارية أحادية الاتجاه تحتوي على إعلانات مهمة حول PyTorch. يمكنك التسجيل هنا: https://eepurl.com/cbG0rv
+* صفحة الفيسبوك: إعلانات مهمة حول PyTorch. https://www.facebook.com/pytorch
+* للحصول على إرشادات العلامة التجارية ، يرجى زيارة موقعنا على الويب على [pytorch.org](https://pytorch.org/) 
 
 ## الإصدارات والمساهمة
 
-Typically, PyTorch has three major releases a year. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+عادةً ما تصدر PyTorch ثلاثة إصدارات رئيسية سنويًا. يُرجى إخبارنا إذا واجهتك خطأ عن طريق [تقديم مشكلة](https://github.com/pytorch/pytorch/issues).
 
-We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
+نحن نقدر جميع المساهمات. إذا كنت تخطط للمساهمة في إصلاحات الأخطاء ، فالرجاء القيام بذلك دون أي مناقشة أخرى.
 
-If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
-Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
+إذا كنت تخطط للمساهمة بميزات جديدة أو وظائف أدوات مساعدة أو ملحقات للجوهر ، فيرجى أولاً فتح مشكلة ومناقشة الميزة معنا.
+قد يؤدي إرسال العلاقات العامة دون مناقشة إلى رفض العلاقات العامة لأننا قد نأخذ جوهر في اتجاه مختلف عما قد تكون على دراية به.
 
-To learn more about making a contribution to Pytorch, please see our [Contribution page](../CONTRIBUTING.md). For more information about PyTorch releases, see [Release page](../RELEASE.md).
+لمعرفة المزيد حول تقديم مساهمة إلى Pytorch ، يرجى الاطلاع على [صفحة المساهمة](../ CONTRIBUTING.md). لمزيد من المعلومات حول إصدارات PyTorch ، راجع [صفحة الإصدار](../ RELEASE.md).
 
 ## الفريق
 
-PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
+إن PyTorch هو مشروع يحركه المجتمع مع العديد من المهندسين والباحثين الماهرين الذين يساهمون فيه.
 
-PyTorch is currently maintained by [Soumith Chintala](http://soumith.ch), [Gregory Chanan](https://github.com/gchanan), [Dmytro Dzhulgakov](https://github.com/dzhulgakov), [Edward Yang](https://github.com/ezyang), and [Nikita Shulga](https://github.com/malfet) with major contributions coming from hundreds of talented individuals in various forms and means.
-A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
+تتم صيانة PyTorch حاليًا بواسطة [Soumith Chintala](http://soumith.ch) و [Gregory Chanan](https://github.com/gchanan) و [Dmytro Dzhulgakov](https://github.com/dzhulgakov) و [إدوارد يانغ](https://github.com/ezyang) و [نيكيتا شولجا](https://github.com/malfet) مع مساهمات كبيرة من مئات الأفراد الموهوبين بأشكال ووسائل مختلفة.
+قائمة غير شاملة ولكن متنامية تحتاج إلى ذكر: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
 
-Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
+ملاحظة: هذا المشروع ليس له علاقة بـ [hughperkins/pytorch](https://github.com/hughperkins/pytorch) بنفس الاسم. هو مساهم قيم في مجتمع Torch وساعد في العديد من الأشياء Torch و PyTorch.
 
 ## الترخيص
 
-PyTorch has a BSD-style license, as found in the [LICENSE](../LICENSE) file.
+تمتلك PyTorch ترخيصًا على طراز BSD ، كما هو موجود في ملف [LICENSE](../ LICENSE).
