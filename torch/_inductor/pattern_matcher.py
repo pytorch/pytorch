@@ -795,8 +795,7 @@ def is_mutation_op(node):
         if _mutation_op_re.search(node.target):
             return True
     if "out" in node.kwargs:
-        if node.kwargs["out"] in node.all_input_nodes:
-            return True
+        return True
     return False
 
 
