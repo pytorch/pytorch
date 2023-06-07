@@ -28,7 +28,6 @@ import torch._dynamo
 import torch._dynamo.utils
 import torch.distributed
 from scipy.stats import gmean, ttest_ind
-from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
@@ -235,6 +234,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "hf_T5_base",  # accuracy
     "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
+    "AlbertForQuestionAnswering",  # accuracy
     "crossvit_9_240",  # fails to run on timm 0.8.22 with cudagraphs, mempools
     "deit_base_distilled_patch16_224",  # fails to run in timm 0.8.22, cudagraphs
     "mobilevit_s",
@@ -249,8 +249,6 @@ CI_SKIP[CI("inductor", training=True)] = [
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
-    "cm3leon_generate",  # Could not validate constraint UnspecConstraint
-    "hf_T5_generate",  # Could not validate constraint UnspecConstraint
     "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
 ]
 
@@ -1264,11 +1262,14 @@ class BenchmarkRunner:
                 except NotImplementedError:
                     continue  # bad benchmark implementation
 
+    def deepcopy_model(self, model):
+        return copy.deepcopy(model)
+
     def validate_model(self, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
-        model = copy.deepcopy(model)
+        model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1283,7 +1284,7 @@ class BenchmarkRunner:
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
-        model = copy.deepcopy(model)
+        model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
         if self.args.float32:
             model, example_inputs = cast_to_fp32(model, example_inputs)
@@ -1387,7 +1388,7 @@ class BenchmarkRunner:
             return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         def deepcopy_and_maybe_ddp(model):
-            model = copy.deepcopy(model)
+            model = self.deepcopy_model(model)
             if self.args.ddp:
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
@@ -1437,6 +1438,7 @@ class BenchmarkRunner:
                     if isinstance(e, torch.cuda.OutOfMemoryError)
                     else "eager_1st_run_fail"
                 )
+                log.exception(e)
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             # Rerun native pytorch
@@ -1481,8 +1483,6 @@ class BenchmarkRunner:
             correct_rerun_result = None
 
             # Run with Dynamo
-            # Sometime CI fails with random triton compilation failure which will be skipped for now
-            # TODO: revisit this after switching to new Triton runtime
             reset_rng_state()
             torch._dynamo.reset()
             try:
@@ -1492,30 +1492,15 @@ class BenchmarkRunner:
                 new_result = optimized_model_iter_fn(model_copy, example_inputs)
             except Exception as e:
                 log.exception(e)
-                if (
-                    self.args.ci
-                    and isinstance(e, BackendCompilerFailed)
-                    and (
-                        "Internal Triton PTX codegen error" in str(e)
-                        or "cubin" in str(e)
-                    )
-                ):
-                    accuracy_status = "pass_due_to_skip"
-                    return record_status(
-                        accuracy_status, dynamo_start_stats=start_stats
-                    )
-                else:
-                    print(
-                        "TorchDynamo optimized model failed to run because of following error"
-                    )
-                    accuracy_status = (
-                        "OOM"
-                        if isinstance(e, torch.cuda.OutOfMemoryError)
-                        else "fail_to_run"
-                    )
-                    return record_status(
-                        accuracy_status, dynamo_start_stats=start_stats
-                    )
+                print(
+                    "TorchDynamo optimized model failed to run because of following error"
+                )
+                accuracy_status = (
+                    "OOM"
+                    if isinstance(e, torch.cuda.OutOfMemoryError)
+                    else "fail_to_run"
+                )
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             if name in self.skip_accuracy_check_as_eager_non_deterministic:
                 return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
@@ -1542,6 +1527,89 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
+
+    def check_tolerance(
+        self, name, model, example_inputs, optimize_ctx, base_device="cpu"
+    ):
+        """
+        Checks tolerance based on https://pytorch.org/docs/stable/generated/torch.allclose.html.
+        """
+        tolerance_status = "pass"
+        if name in self.skip_accuracy_checks_large_models_dashboard:
+            tolerance_status = "pass_due_to_skip"
+            return tolerance_status
+        # Cast the model to float16/float32 as necessary
+        model, example_inputs = self.maybe_cast(model, example_inputs)
+
+        with self.pick_grad(name, self.args.training):
+            # Get results of native pytorch
+            reset_rng_state()
+            model_copy = copy.deepcopy(model)
+            model_copy = model_copy.to(base_device)
+            example_inputs_copy = copy.deepcopy(example_inputs)
+            example_inputs_copy = tree_map(
+                lambda x: x.to(base_device), example_inputs_copy
+            )
+            self.init_optimizer(name, base_device, model_copy.parameters())
+            correct_result = self.run_n_iterations(model_copy, example_inputs_copy)
+
+            # Run with Dynamo
+            # Sometime CI fails with random triton compilation failure which will be skipped for now
+            # TODO: revisit this after switching to new Triton runtime
+            reset_rng_state()
+            torch._dynamo.reset()
+            try:
+                self.init_optimizer(name, current_device, model.parameters())
+                optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
+                new_result = optimized_model_iter_fn(model, example_inputs)
+            except Exception as e:
+                log.exception(e)
+                if (
+                    self.args.ci
+                    and isinstance(e, BackendCompilerFailed)
+                    and (
+                        "Internal Triton PTX codegen error" in str(e)
+                        or "cubin" in str(e)
+                    )
+                ):
+                    return "pass_due_to_skip"
+                else:
+                    print(
+                        "TorchDynamo optimized model failed to run because of following error"
+                    )
+                    return "fail_to_run"
+
+            def dump_max_mean_values(tol, ref, res):
+                if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
+                    for refi, resi in zip(ref, res):
+                        dump_max_mean_values(tol, refi, resi)
+                elif isinstance(ref, dict):
+                    for k in ref.keys():
+                        dump_max_mean_values(tol, ref[k], res[k])
+                elif isinstance(ref, torch.Tensor):
+                    res = res.to(base_device)
+                    t = torch.abs(ref - res) / (1 + torch.abs(ref))
+                    tol.append(t.flatten().to(torch.float32))
+                return tol
+
+            tol = []
+            dump_max_mean_values(tol, correct_result, new_result)
+            tol = torch.cat(tol)
+            tol = torch.tensor(tol)
+            max = torch.max(tol)
+            mean = torch.mean(tol)
+            div = torch.std(tol)
+            headers = ["dev", "name", "batch_size", "max", "mean", "std"]
+            fields = [
+                current_device,
+                current_name,
+                current_batch_size,
+                max.item(),
+                mean.item(),
+                div.item(),
+            ]
+            output_csv(output_filename, headers, fields)
+        return tolerance_status
 
     def run_performance_test(
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
@@ -1655,6 +1723,9 @@ class BenchmarkRunner:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment, tag
             )
+            print(status)
+        elif self.args.tolerance:
+            status = self.check_tolerance(name, model, example_inputs, optimize_ctx)
             print(status)
         elif self.args.performance:
             status = self.run_performance_test(
@@ -2025,6 +2096,11 @@ def parse_args(args=None):
         want to verify the numerical correctness of graidents. But that may
         cause time measurement not accurate""",
     )
+    parser.add_argument(
+        "--enable-activation-checkpointing",
+        action="store_true",
+        help="Enables activation checkpointing for HF models",
+    )
     parser.add_argument("--timing", action="store_true", help="Emits phase timing")
 
     parser.add_argument(
@@ -2139,7 +2215,11 @@ def parse_args(args=None):
     mode_group.add_argument(
         "--performance", action="store_true", help="Measures performance speedup"
     )
-
+    mode_group.add_argument(
+        "--tolerance",
+        action="store_true",
+        help="extracts the tolerance for each model with small batch size and eval mode",
+    )
     run_mode_group = parser.add_mutually_exclusive_group(required=True)
     run_mode_group.add_argument(
         "--training",
@@ -2256,8 +2336,8 @@ def run(runner, args, original_dir=None):
                 args.batch_size = 8
 
         # Remove sources of randomness
-        if runner.suite_name != "timm_models":
-            # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
+        if runner.suite_name not in ("timm_models", "huggingface"):
+            # TODO - Using train mode for timm_models and HF models. Move to train mode for Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
         if args.only is not None and args.only not in {
@@ -2267,9 +2347,15 @@ def run(runner, args, original_dir=None):
             "pytorch_unet",
             "Super_SloMo",
             "vgg16",
+            # https://github.com/pytorch/pytorch/issues/96724
+            "Wav2Vec2ForCTC",
+            "Wav2Vec2ForPreTraining",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
+        if args.only in {"hf_T5_generate"}:
+            # See https://github.com/pytorch/pytorch/issues/102814
+            torch._dynamo.config.assume_static_by_default = False
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -2449,6 +2535,8 @@ def run(runner, args, original_dir=None):
         experiment = speedup_experiment
         if args.accuracy:
             output_filename = f"accuracy_{args.backend}.csv"
+        elif args.tolerance:
+            output_filename = f"tolerance_{args.backend}.csv"
         else:
             output_filename = f"speedup_{args.backend}.csv"
     elif args.recompile_profiler:

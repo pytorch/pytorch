@@ -702,6 +702,19 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     @staticmethod
     def get_state_dict_type(module: nn.Module) -> StateDictSettings:
+        """
+        Get the state_dict_type and the corresponding configurations
+        for the FSDP modules rooted at ``module``. The target module
+        does not have to be an FSDP module.
+
+        Returns:
+            A ``StateDictSettings`` containing the state_dict_type and
+            state_dict / optim_state_dict configs that are currently set.
+
+        Raises:
+            ``AssertionError`` if the ``StateDictSettings`` for different
+            FSDP submodules differ.
+        """
         state_dict_settings: Optional[StateDictSettings] = None
         for submodule in FullyShardedDataParallel.fsdp_modules(module):
             if state_dict_settings is None:
@@ -749,8 +762,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Args:
             module (torch.nn.Module): Root module.
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
-            state_dict_config (Optional[StateDictConfig]): the configuration for the
-                target ``state_dict_type``.
+            state_dict_config (Optional[StateDictConfig]): the model ``state_dict``
+                configuration for the target ``state_dict_type``.
+            optim_state_dict_config (Optional[OptimStateDictConfig]): the optimizer
+               ``state_dict`` configuration for the target ``state_dict_type``.
         """
         prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
             module,
