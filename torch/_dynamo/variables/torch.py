@@ -10,7 +10,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
-from torch._dynamo.variables import SymNodeVariable
+from torch._dynamo.variables import SymNodeVariable, UserFunctionVariable
 from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
 
@@ -496,6 +496,10 @@ class TorchVariable(VariableTracker):
             return TorchVariable(torch.add, **options).call_function(
                 tx, [args[0], result], {}
             )
+        elif self.value == torch.nn.init._calculate_correct_fan:
+            return UserFunctionVariable(
+                torch.nn.init._calculate_correct_fan, **options
+            ).call_function(tx, args, {})
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
