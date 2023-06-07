@@ -276,6 +276,7 @@ def _multi_tensor_sgd(params: List[Tensor],
                       maximize: bool,
                       has_sparse_grad: bool):
 
+    print(f"Shunting: call _multi_tensor_sgd {len(params)}") # TODO
     if len(params) == 0:
         return
 
