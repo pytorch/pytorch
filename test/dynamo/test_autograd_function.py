@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import itertools
 import math
 
 import torch
