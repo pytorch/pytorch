@@ -2652,6 +2652,54 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
     return out, hidden_out
 
 
+def get_tensor_state(tensors, func):
+    return {func(t) for t in tensors}
+
+
+def flatten_params(params):
+    flat_params = []
+    for param in params:
+        for item in param:
+            flat_params.append(item)
+    return flat_params
+
+
+def use_mkldnn(input, hx, params):
+    if not torch._C.has_mkldnn:
+        return False
+    
+    tensors = [input] + hx + flatten_params(params)
+    devices = get_tensor_state(tensors, lambda x: x.device)
+    if len(devices) != 1:
+        return False
+
+    dtypes = get_tensor_state(tensors, lambda x: x.dtype)
+    if len(dtypes) != 1:
+        return False
+
+    device = devices.pop()
+    dtype = dtypes.pop()
+    if device != torch.device("cpu"):
+        return False
+    if dtype not in [torch.float, torch.bfloat16]:
+        return False
+
+    has_projections = hx[0].size(2) != hx[1].size(2)
+    if has_projections:
+        return False
+
+    return True
+
+
+def select_one_layer_lstm_function(input, hx, params):
+    # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
+    # will expand over the seq_len dim    
+    if use_mkldnn(input, hx, params):
+        return mkldnn_one_layer_lstm
+    else:
+        return one_layer_lstm
+
+
 @register_decomposition(aten.lstm.input)
 @aten.lstm.input.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.lstm.input.py_impl(DispatchKey.Autograd)
@@ -2669,10 +2717,7 @@ def lstm_impl(
     assert len(hx) == 2, "lstm expects two hidden states"
     params = gather_params(params, has_biases, hx[0].size(2) != hx[1].size(2))
     hidden = list(zip(hx[0], hx[1]))
-
-    # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
-    # will expand over the seq_len dim
-    layer_fn = mkldnn_one_layer_lstm if torch._C.has_mkldnn else one_layer_lstm
+    layer_fn = select_one_layer_lstm_function(input, hx, params)
     out, final_hiddens = _rnn_helper(
         input,
         hidden,
