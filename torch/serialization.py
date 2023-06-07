@@ -795,7 +795,7 @@ def load(
             match the :attr:`pickle_module` used to serialize file)
         weights_only: Indicates whether unpickler should be restricted to
             loading only tensors, primitive types and dictionaries
-        mmap: Indicates whether the file-object should be mmaped rather than loading the entire file to memory.
+        mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             This option has an effect if the object was saved with `torch.save(_use_new_zipfile_serialization=True)`
             which is the default behavior for `torch.save`.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
