@@ -40,6 +40,9 @@ operators:
     include_all_overloads: false
     is_root_operator: true
     is_used_for_training: true
+    et_kernel_metadata:
+      - v1/6;0,1,2,3|6;0,1,2,3|6;0,1,2,3
+      - v1/3;0,1,2,3|3;0,1,2,3|3;0,1,2,3
   aten::addmm.out:
     debug_info:
     - functions.yaml
