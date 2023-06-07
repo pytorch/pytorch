@@ -2668,7 +2668,7 @@ def use_mkldnn(input, hx, params):
     if not torch._C.has_mkldnn:
         return False
 
-    tensors = [input] + hx + flatten_params(params)
+    tensors = [input] + list(hx) + flatten_params(params)
     devices = get_tensor_state(tensors, lambda x: x.device)
     if len(devices) != 1:
         return False
