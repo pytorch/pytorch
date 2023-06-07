@@ -1205,9 +1205,6 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         if byteorderdata not in [b'little', b'big']:
             raise ValueError('Unknown endianness type: ' + byteorderdata.decode())
 
-    if mmap and (byteorderdata is not None) and (byteorderdata.decode() != sys.byteorder):
-        raise RuntimeError('mmap is not supported with byteswapping')
-
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
         if mmap:
