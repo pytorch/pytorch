@@ -151,7 +151,7 @@ def cudagraphs_inner(model, inputs, copy_outputs=True, copy_inputs=True):
     if copy_inputs:
         static_inputs = [torch.zeros_like(x) for x in inputs]
     else:
-        static_inputs = [x for x in inputs]
+        static_inputs = list(inputs)
 
     # warmup
     torch.cuda.synchronize()
