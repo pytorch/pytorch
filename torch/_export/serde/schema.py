@@ -10,10 +10,23 @@ class _Union:
     @classmethod
     def create(cls, **kwargs):
         assert len(kwargs) == 1
-        return cls(**{**{field.name: None for field in fields(cls)}, **kwargs})
+        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})
 
     def __post_init__(self):
-        assert sum(1 for field in fields(self) if getattr(self, field.name) is not None) == 1
+        assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1
+
+    @property
+    def value(self):
+        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)
+        assert val is not None
+        return val
+
+    @property
+    def type(self):
+        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)
+        assert val_type is not None
+        return val_type
+
 
 class ScalarType(Enum):
     UNKNOWN = 0
@@ -64,6 +77,12 @@ class SymInt(_Union):
 
 
 @dataclass
+class SymBool(_Union):
+    as_symbol: str
+    as_bool: bool
+
+
+@dataclass
 class TensorMeta:
     dtype: ScalarType
     sizes: List[SymInt]
@@ -78,6 +97,12 @@ class TensorMeta:
 class SymIntArgument(_Union):
     as_name: str
     as_int: int
+
+
+@dataclass
+class SymBoolArgument(_Union):
+    as_name: str
+    as_bool: bool
 
 
 @dataclass
@@ -104,6 +129,8 @@ class Argument(_Union):
     as_device: Device
     as_bool: bool
     as_bools: List[bool]
+    as_sym_bool: SymBoolArgument
+    as_sym_bools: List[SymBoolArgument]
 
 
 @dataclass
@@ -113,14 +140,8 @@ class NamedArgument:
 
 
 @dataclass
-class Operator:
-    name: str
-    version: Optional[int]
-
-
-@dataclass
 class Node:
-    target: Operator
+    target: str
     inputs: List[NamedArgument]
     outputs: List[Argument]
     metadata: Dict[str, str]
@@ -138,12 +159,13 @@ class Graph:
     nodes: List[Node]
     tensor_values: Dict[str, TensorValue]
     sym_int_values: Dict[str, SymInt]
+    sym_bool_values: Dict[str, SymBool]
 
 
 @dataclass
 class BackwardSignature:
     gradients_to_parameters: Dict[str, str]
-    gradients_to_userInputs: Dict[str, str]
+    gradients_to_user_inputs: Dict[str, str]
     loss_output: str
 
 
@@ -154,15 +176,24 @@ class GraphSignature:
     user_inputs: List[str]
     user_outputs: List[str]
     buffers_to_mutate: Dict[str, str]
+    backward_signature: Optional[BackwardSignature]
+
+
+@dataclass
+class CallSpec:
     in_spec: str
     out_spec: str
-    backward_signature: Optional[BackwardSignature]
 
 
 @dataclass
 class GraphModule:
     graph: Graph
-    buffers: Dict[str, TensorMeta]
-    parameters: Dict[str, TensorMeta]
-    metadata: Dict[str, str]
     signature: GraphSignature
+    call_spec: CallSpec
+
+
+# TODO(angelayi) to add symbol to hint
+@dataclass
+class ExportedProgram:
+    graph_module: GraphModule
+    opset_version: Dict[str, int]
