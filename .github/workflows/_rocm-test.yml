@@ -63,10 +63,17 @@ jobs:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
 
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: ./.github/actions/calculate-docker-image
+        with:
+          docker-image-name: ${{ inputs.docker-image }}
+          xla: ${{ contains(inputs.build-environment, 'xla') }}
+
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ inputs.docker-image }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Start monitoring script
         id: monitor-script
