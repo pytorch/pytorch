@@ -222,8 +222,15 @@ class TestExport(TestCase):
             return x + 4
 
         inp_for_f = torch.tensor(5)
-        with self.assertRaisesRegex(torchdynamo.exc.UserError, "The index 0 to make dynamic is out of bounds"):
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Cannot mark 0-dimension tensors to be dynamic"):
             constraints = [dynamic_dim(inp_for_f, 0)]
+
+        inp_for_f_mul_dim = torch.ones(5, 5)
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError,
+            "Expected the dimension passed to dynamic_dim to be in the range \\[0:1\\]"
+        ):
+            constraints = [dynamic_dim(inp_for_f_mul_dim, 2)]
 
         inp_for_g = 4
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"):

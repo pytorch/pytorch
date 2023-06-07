@@ -73,11 +73,17 @@ def dynamic_dim(t: torch.Tensor, index: int):
             f"Expected tensor as input to dynamic_dim but got {type(t)}"
         )
 
+    if t.dim() < 1:
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "Cannot mark 0-dimension tensors to be dynamic"
+        )
+
     if index >= t.dim():
         raise UserError(
             UserErrorType.INVALID_INPUT,
-            f"The index {index} to make dynamic is out of bounds"
-            f" for the tensor which has {t.dim()} dimensions.",
+            f"Expected the dimension passed to dynamic_dim to be in the range [0:{t.dim()-1}]"
+            f" but got {index}, which is out of bounds for the given tensor."
         )
 
     return Constraint(
@@ -216,6 +222,7 @@ def export(
                 export_graph_signature,
                 flat_args,
             )
+            assert orig_out_spec is not None
             exported_program = ExportedProgram(
                 gm,
                 gm.graph,
