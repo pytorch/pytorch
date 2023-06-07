@@ -508,9 +508,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ODictGetItemSource(self.source, index),
         )(
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
-        ).add_options(
-            key, self
-        )
+        ).add_options(key, self)
 
 
 class ProcessGroupVariable(UserDefinedObjectVariable):
