@@ -143,6 +143,12 @@ class OptimizedModule(torch.nn.Module):
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._forward(*args, **kwargs)
 
+    def __dir__(self):
+        orig_mod_attrs = self._orig_mod.__dir__()
+        return orig_mod_attrs + [
+            attr for attr in super().__dir__() if attr not in orig_mod_attrs
+        ]
+
 
 def remove_from_cache(f):
     """
@@ -1268,6 +1274,9 @@ class TorchPatcher:
                 opt.step = disable(opt.step)
 
             opt.zero_grad = disable(opt.zero_grad)
+            opt.state_dict = disable(opt.state_dict)
+            opt.load_state_dict = disable(opt.load_state_dict)
+            opt.add_param_group = disable(opt.add_param_group)
 
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook

@@ -78,13 +78,6 @@ def cache_dir():
     return cache_dir
 
 
-@functools.lru_cache(None)
-def cubin_cache_dir():
-    cubin_dir = os.path.join(cache_dir(), "cubin")
-    os.makedirs(cubin_dir, exist_ok=True)
-    return cubin_dir
-
-
 def cpp_wrapper_cache_dir(name):
     cu_str = (
         "cpu"
@@ -290,14 +283,14 @@ def compiled_fx_graph_hash(fx_args: List[Any]):
     return "f" + hashed_fx_args.decode("utf-8").lower()
 
 
-def get_path(basename, ext):
+def get_path(basename: str, extension: str):
     subdir = os.path.join(cache_dir(), basename[1:3])
-    path = os.path.join(subdir, f"{basename}.{ext}")
+    path = os.path.join(subdir, f"{basename}.{extension}")
     return basename, subdir, path
 
 
-def write(content, key, ext):
-    basename, subdir, path = get_path(key, ext)
+def write(content: Union[str, bytes], key: str, extension: str):
+    basename, subdir, path = get_path(key, extension)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
@@ -306,17 +299,16 @@ def write(content, key, ext):
 
 
 def write_atomic(path: str, content: Union[str, bytes]):
+    # Write into temporary file first to avoid conflicts between threads
+    # Avoid using a named temporary file, as those have restricted permissions
     assert isinstance(
         content, (str, bytes)
     ), "Only strings and byte arrays can be saved in the cache"
-    # Write into temporary file first to avoid conflicts between threads
-    # Avoid using a named temporary file, as those have restricted permissions
     path = pathlib.Path(path)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     write_mode = "w" if isinstance(content, str) else "wb"
     with tmp_path.open(write_mode) as f:
         f.write(content)
-
     tmp_path.rename(path)
 
 
@@ -752,16 +744,9 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        from filelock import FileLock
-
-        cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
-        params["cubin_path"] = cubin_path
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            cls.cache[key] = params
-            with open(cubin_path, "wb") as f:
-                f.write(cubin)
+        _, path = write(cubin, repr(cubin), "cubin")
+        params["cubin_path"] = path
+        cls.cache[key] = params
 
     @classmethod
     def get(cls, key):
