@@ -129,6 +129,7 @@ def set_logs(
     ddp_graphs: bool = False,
     graph: bool = False,
     graph_code: bool = False,
+    graph_breaks: bool = False,
     guards: bool = False,
     recompiles: bool = False,
     output_code: bool = False,
@@ -206,6 +207,10 @@ def set_logs(
 
         graph_code (:class:`bool`):
             Whether to emit the python source of the graph captured by TorchDynamo.
+            Default: ``False``
+
+        graph_breaks (:class:`bool`):
+            Whether to emit the graph breaks encountered by TorchDynamo.
             Default: ``False``
 
         guards (:class:`bool`):
@@ -315,6 +320,7 @@ def set_logs(
         ddp_graphs=ddp_graphs,
         graph=graph,
         graph_code=graph_code,
+        graph_breaks=graph_breaks,
         guards=guards,
         recompiles=recompiles,
         output_code=output_code,

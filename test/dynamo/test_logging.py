@@ -203,7 +203,6 @@ class LoggingTests(LoggingTestCase):
     @make_logging_test(all=logging.DEBUG, dynamo=logging.INFO)
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
-        state = torch._logging._internal.log_state
 
         dynamo_qname = registry.log_alias_to_log_qname["dynamo"]
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
@@ -214,6 +213,17 @@ class LoggingTests(LoggingTestCase):
             else:
                 self.assertEqual(logger.level, logging.DEBUG)
 
+    @make_logging_test(graph_breaks=True)
+    def test_graph_breaks(self, records):
+        @torch._dynamo.optimize("inductor")
+        def fn(x):
+            torch._dynamo.graph_break()
+            return x + 1
+
+        fn(torch.ones(1))
+
+        self.assertEqual(len(records), 1)
+
 
 # single record tests
 exclusions = {
@@ -222,6 +232,7 @@ exclusions = {
     "schedule",
     "aot_graphs",
     "recompiles",
+    "graph_breaks",
     "ddp_graphs",
     "perf_hints",
     "not_implemented",
