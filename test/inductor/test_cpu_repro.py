@@ -1025,6 +1025,21 @@ class CPUReproTests(TestCase):
         if codecache.valid_vec_isa_list():
             assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_memory_copy_with_fusion(self):
+        def fn(x):
+            res = x.relu()
+            x.copy_(res)
+            return (res,)
+
+        x = torch.randn((100, 100), dtype=torch.bfloat16)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.cpp_to_dtype_count == 2
+        if codecache.valid_vec_isa_list():
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )

@@ -58,6 +58,9 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
 
+    def _helper_sqrt(self, expr):
+        return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
