@@ -72,7 +72,7 @@ def clip_grad_norm_(
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
     for ((device, _), ([grads], _)) in grouped_grads.items():  # type: ignore[assignment]
-        if (foreach is None or foreach) and _has_foreach_support(grads, device=device):
+        if (foreach is None or foreach) and _has_foreach_support(grads, device=device):  # type: ignore[arg-type]
             torch._foreach_mul_(grads, clip_coef_clamped.to(device))  # type: ignore[call-overload]
         elif foreach:
             raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
