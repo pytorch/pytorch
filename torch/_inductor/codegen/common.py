@@ -206,14 +206,14 @@ class ExprPrinter(Printer):
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
-        base = self._print(base)
         # NB: Remember this is sizevar computation!  You don't typically
         # expect to have to do floating point computation including exponents
         # in sizevar compute.  Instead of adding support for floating
         # point pow, you should make upstream retranslate the Sympy expression
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
-            return f"math.sqrt({base})"
+            return self._helper_sqrt(base)
+        base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
         if exp > 0:
@@ -251,6 +251,9 @@ class PythonPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         return f"({x} // {div})"
+
+    def _helper_sqrt(self, expr):
+        return f"math.sqrt({self._print(expr)})"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
