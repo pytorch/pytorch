@@ -2667,7 +2667,7 @@ def flatten_params(params):
 def use_mkldnn(input, hx, params):
     if not torch._C.has_mkldnn:
         return False
-    
+
     tensors = [input] + hx + flatten_params(params)
     devices = get_tensor_state(tensors, lambda x: x.device)
     if len(devices) != 1:
@@ -2684,6 +2684,10 @@ def use_mkldnn(input, hx, params):
     if dtype not in [torch.float, torch.bfloat16]:
         return False
 
+    # TODO: check why params require_grad == True
+    if input.requires_grad:
+        return False
+
     has_projections = hx[0].size(2) != hx[1].size(2)
     if has_projections:
         return False
@@ -2693,7 +2697,7 @@ def use_mkldnn(input, hx, params):
 
 def select_one_layer_lstm_function(input, hx, params):
     # mkldnn_one_layer_lstm does not depend on seq_len while one_layer_lstm
-    # will expand over the seq_len dim    
+    # will expand over the seq_len dim
     if use_mkldnn(input, hx, params):
         return mkldnn_one_layer_lstm
     else:
