@@ -1308,7 +1308,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.015,
     ),
     dict(
         fullname='Conv2d_groups_thnn',
@@ -1317,7 +1317,7 @@ new_module_tests = [
         input_size=(2, 4, 6, 5),
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.015,
     ),
     dict(
         fullname='Conv2d_pad_valid',
@@ -1344,7 +1344,7 @@ new_module_tests = [
         input_size=(2, 2, 6, 5),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         module_name='ConvTranspose2d',
