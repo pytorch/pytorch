@@ -618,10 +618,15 @@ class SkipFilesVariable(VariableTracker):
             or len(args) == 1
             and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
         ):
+            if len(args) == 0:
+                args = dict(kwargs) if kwargs else None
+            else:
+                args = args[0]
+
             return BuiltinVariable.call_dict_helper(
                 tx,
                 collections.OrderedDict,
-                None if len(args) == 0 else args[0],
+                args,
                 **options,
             )
         elif (

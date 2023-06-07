@@ -414,6 +414,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_ordered_dict_kwargs(x):
+        z = collections.OrderedDict(sample=torch.ones(10))
+        return z
+
+    @make_test
     def test_float(x):
         y = float(1.2)
         y += float("1.2")
