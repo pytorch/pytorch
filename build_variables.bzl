@@ -175,6 +175,7 @@ core_trainer_sources = [
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
     "torch/csrc/jit/serialization/type_name_uniquer.cpp",
+    "torch/csrc/profiler/unwind/unwind.cpp",
 ]
 
 torch_mobile_core = [
@@ -403,7 +404,6 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/tensorexpr/types.cpp",
     "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
-    "torch/csrc/profiler/unwind/unwind.cpp",
     "torch/csrc/profiler/combined_traceback.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/cpp_stacktraces.cpp",
