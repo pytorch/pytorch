@@ -37,14 +37,14 @@
   - [سهولة في التوسع](#سهولة-في-التوسع)
 - [التثبيت](#التثبيت)
   - [الملفات التنفيذية](#الملفات-التنفيذية)
-    - [منصات NVIDIA Jetson](#منصات-NVIDA-Jeston)
+    - [منصات NVIDIA Jetson](#منصات-nvidia-jetson)
   - [من المصدر](#من-المصدر)
     - [المتطلبات الأساسية](#المتطلبات-الأساسية)
     - [تثبيت التبعيات أو الاعتماديات](#تثبيت-التبعيات-أو-الاعتماديات)
     - [الحصول على مصدر PyTorch](#الحصول-على-مصدر-PyTorch)
     - [تثبيت PyTorch](#تثبيت-PyTorch)
       - [ضبط خيارات البناء (اختياري)](#ضبط-خيارات-البناء-اختياري)
-  - [صورة دوكر (Docker Image)](#صورة-دوكر-Docker-Image)
+  - [صورة دوكر (Docker Image)](#صورة-دوكر-docker-image)
     - [استخدام صور مبنية مسبقًا](#استخدام-صور-مبنية-مسبقًا)
     - [بناء الصورة بنفسك](#بناء-الصورة-بنفسك)
   - [إنشاء الوثائق](#إنشاء-الوثائق)
@@ -129,7 +129,7 @@
 ### سريع وخفيف
 
 مكتبتنا لديها الحد الأدنى من حمل الإطار. نقوم بدمج مكتبات التسريع
-مثل [Intel MKL](https://software.intel.com/mkl) و ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl) لتعظيم السرعة.
+مثل [Intel MKL](https://software.intel.com/mkl) و [cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl) لتعظيم السرعة.
 في جوهرها ، خلفية وحدة المعالجة المركزية ووحدة معالجة الرسومات (GPU) والشبكة العصبية 
 ناضجة وتم اختبارها لسنوات.
 
@@ -145,7 +145,7 @@
 وبأقل قدر من التجريد.
 
 يمكنك كتابة طبقات شبكة عصبية جديدة في Python باستخدام واجهة برمجة تطبيقات torch
-[or your favorite NumPy-based libraries such as SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
+[أو مكتبات NumPy المفضلة لديك مثل SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
 إذا كنت ترغب في كتابة طبقاتك في C / C ++ ، فنحن نوفر واجهة برمجة تطبيقات تمديد ملائمة تتسم بالكفاءة وبأقل قدر ممكن من النماذج المعيارية. 
 لا يلزم كتابة أي رمز مجمّع. يمكنك مشاهدة [برنامج تعليمي هنا](https://pytorch.org/tutorials/advanced/cpp_extension.html) و [مثال هنا](https://github.com/pytorch/extension-cpp).
@@ -160,8 +160,8 @@
 #### منصات NVIDA Jeston
 
 
-تتوفر عجلات Python لـ Jetson Nano من NVIDIA و Jetson TX1 / TX2 و Jetson Xavier NX / AGX و Jetson AGX Orin [هنا](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) وتم نشر حاوية L4T [هنا](https: //catalog.ngc .nvidia.com / orgs / nvidia / حاويات / l4t-pytorch)
-إنها تتطلب JetPack 4.2 وما فوق ، ويقوم [@ dusty-nv](https://github.com/dusty-nv) و [ptrblck](https://github.com/ptrblck) بالحفاظ عليها.
+تتوفر عجلات Python لـ Jetson Nano من NVIDIA و Jetson TX1 / TX2 و Jetson Xavier NX / AGX و Jetson AGX Orin [هنا](https://forums.developer.nvidia.com/t/pytorch-for-jetson-version-1-10-now-available/72048) وتم نشر حاوية L4T [هنا](https://catalog.ngc.nvidia.com/orgs/nvidia/containers/l4t-pytorch)
+إنها تتطلب JetPack 4.2 وما فوق ، ويقوم [@dusty-nv](https://github.com/dusty-nv) و [ptrblck](https://github.com/ptrblck) بالحفاظ عليها.
 
 ### من المصدر
 
@@ -185,7 +185,7 @@
 
 إذا كنت تريد التحويل البرمجي باستخدام دعم ROCm ، فقم بتثبيت
 
-- هذا[AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 وما فوق التثبيت
+- [AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 وما فوق 
 - لكن ROCm مدعوم حاليًا لأنظمة Linux فقط.
 
 إذا كنت تريد تعطيل دعم ROCm ، فقم بتصدير متغير البيئة `USE_ROCM = 0`.
@@ -197,7 +197,7 @@
 
 ```bash
 conda install cmake ninja
-# قم بتشغيل هذا الأمر من دليل PyTorch بعد استنساخ الكود المصدري باستخدام قسم "Get the PyTorch Source" أدناه
+# Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
 pip install -r requirements.txt
 ```
 
@@ -205,21 +205,20 @@ pip install -r requirements.txt
 
 ```bash
 conda install mkl mkl-include
-# فقط CUDA: أضف دعم LAPACK لوحدة معالجة الرسومات إذا لزم الأمر
-conda install -c pytorch magma-cuda110
-# أو magma-cuda * الذي يتطابق مع إصدار CUDA الخاص بك من https://anaconda.org/pytorch/repo
+# CUDA only: Add LAPACK support for the GPU if needed
+conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
 
-# (اختياري) إذا كنت تستخدم torch.compile مع محث / triton ، فقم بتثبيت الإصدار المطابق من triton
-# تشغيل من دليل pytorch بعد الاستنساخ
-اصنع triton
+# (optional) If using torch.compile with inductor/triton, install the matching version of triton
+# Run from the pytorch directory after cloning
+make triton
 ```
 
 **على MacOS**
 
 ```bash
-# أضف هذه الحزمة على أجهزة معالجات intel x86 فقط 
+# Add this package on intel x86 processor machines only
 conda install mkl mkl-include
-# أضف هذه الحزم إذا كانت هناك حاجة إلى torch.distributed 
+# Add these packages if torch.distributed is needed
 conda install pkg-config libuv
 ```
 
@@ -227,8 +226,8 @@ conda install pkg-config libuv
 
 ```bash
 conda install mkl mkl-include
-# أضف هذه الحزم إذا كانت هناك حاجة إلى torch.distributed.
-# دعم الحزمة الموزعة على Windows هي ميزة نموذج أولي وتخضع للتغييرات.
+# Add these packages if torch.distributed is needed.
+# Distributed package support on Windows is a prototype feature and is subject to changes.
 conda install -c conda-forge libuv=1.39
 ```
 
@@ -236,7 +235,7 @@ conda install -c conda-forge libuv=1.39
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
-# إذا كنت تقوم بتحديث الخروج الحالي
+# if you are updating an existing checkout
 git submodule sync
 git submodule update --init --recursive
 ```
@@ -246,7 +245,7 @@ git submodule update --init --recursive
 
 إذا كنت تقوم بالتجميع لـ AMD ROCm ، فقم أولاً بتشغيل هذا الأمر:
 ```bash
-# قم بتشغيل هذا فقط إذا كنت تقوم بالتجميع لـ ROCm
+# Only run this if you're compiling for ROCm
 python tools/amd_build/build_amd.py
 ```
 
@@ -256,8 +255,7 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py develop
 ```
 
-> _Aside:_ 
-> إذا كنت تستخدم [Anaconda] (https://www.anaconda.com/distribution/#download-section) ، فقد تواجه خطأ ناتجًا عن الرابط:
+> _Aside:_ If you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
 >
 > ```plaintext
 > build/temp.linux-x86_64-3.7/torch/csrc/stub.o: file not recognized: file format not recognized
@@ -265,7 +263,7 @@ python setup.py develop
 > error: command 'g++' failed with exit status 1
 > ```
 >
-> يحدث هذا بسبب `ld` من بيئة Conda التي تقوم بتظليل النظام` ld`. يجب عليك استخدام إصدار أحدث من Python يعمل على حل هذه المشكلة. إصدار Python الموصى به هو 3.8.1+.
+> This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
 **على macOS**
 
 ```bash
@@ -276,22 +274,20 @@ python3 setup.py develop
 
 اختر إصدار Visual Studio الصحيح.
 
-يستخدم PyTorch CI Visual C ++ BuildTools ، والذي يأتي مع Visual Studio Enterprise ،
-طبعات احترافية أو مجتمعية. يمكنك أيضًا تثبيت أدوات البناء من
-https://visualstudio.microsoft.com/visual-cpp-build-tools/. أدوات البناء * لا *
+يقوم PyTorch CI باستخدام  Visual C++ BuildTools التي تأتي مع Visual Studio Enterprise طبعات احترافية أو مجتمعية. 
+يمكنك أيضًا تثبيت أدوات البناء من https://visualstudio.microsoft.com/visual-cpp-build-tools/. أدوات البناء *لا*
 تأتي مع Visual Studio Code افتراضيًا.
 
-إذا كنت ترغب في إنشاء كود python قديم ، يرجى الرجوع إلى [البناء على الكود القديم و CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and -cuda)
+إذا كنت ترغب في إنشاء كود بيثون قديم ، يرجى الرجوع إلى [البناء على الكود القديم و CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and -cuda)
 
 **لبناء CPU فقط**
-
+ 
 في هذا الوضع ، سيتم تشغيل حسابات PyTorch على وحدة المعالجة المركزية الخاصة بك ، وليس على وحدة معالجة الرسومات الخاصة بك
 
 ```cmd
 conda activate
 python setup.py develop
 ```
-
 ملاحظة حول OpenMP: تطبيق OpenMP المطلوب هو Intel OpenMP (iomp). للارتباط بـ iomp ، ستحتاج إلى تنزيل المكتبة يدويًا وإعداد بيئة المبنى عن طريق تعديل `CMAKE_INCLUDE_PATH` و` LIB`. التعليمات [هنا](https://github.com/pytorch/pytorch/blob/main/docs/source/notes/windows.rst#building-from-source) هي مثال على إعداد كل من MKL و Intel OpenMP. بدون هذه التكوينات لـ CMake ، سيتم استخدام وقت تشغيل Microsoft Visual C OpenMP (vcomp).
 
 **بناء على أساس CUDA**
@@ -314,24 +310,26 @@ python setup.py develop
 ```cmd
 cmd
 
-:: اضبط متغيرات البيئة بعد تنزيل حزمة mkl وفك ضغطها ،
-:: قد يتسبب في ظهور خطأ كـ "تعذر العثور على OpenMP".
-اضبط CMAKE_INCLUDE_PATH = {Your directory} \ mkl \ include
-تعيين LIB = {دليلك} \ mkl \ lib ؛٪ LIB٪
+:: Set the environment variables after you have downloaded and unzipped the mkl package,
+:: else CMake would throw an error as `Could NOT find OpenMP`.
+set CMAKE_INCLUDE_PATH={Your directory}\mkl\include
+set LIB={Your directory}\mkl\lib;%LIB%
 
-:: اقرأ المحتوى في القسم السابق بعناية قبل المتابعة.
-:: [اختياري] إذا كنت تريد تجاوز مجموعة الأدوات الأساسية المستخدمة من قبل Ninja و Visual Studio مع CUDA ، يرجى تشغيل كتلة البرنامج النصي التالية.
-:: سيتم تشغيل "موجه أوامر المطور Visual Studio 2019" تلقائيًا.
-:: تأكد من حصولك على CMake> = 3.12 قبل القيام بذلك عند استخدام منشئضبط CMAKE_GENERATOR_TOOLSET_VERSION = 14.27
-ضبط DISTUTILS_USE_SDK = 1
-من أجل / f "usebackq tokens = *"٪ i in (`"٪ ProgramFiles (x86)٪ \ Microsoft Visual Studio \ Installer \ vswhere.exe "-إصدار [15 ^ ، 17 ^] -products * -آخر-خاصية التثبيتPath` ) اتصل بـ "٪ i \ VC \ Auxiliary \ Build \ vcvarsall.bat" x64 -vcvars_ver =٪ CMAKE_GENERATOR_TOOLSET_VERSION٪ 
+:: Read the content in the previous section carefully before you proceed.
+:: [Optional] If you want to override the underlying toolset used by Ninja and Visual Studio with CUDA, please run the following script block.
+:: "Visual Studio 2019 Developer Command Prompt" will be run automatically.
+:: Make sure you have CMake >= 3.12 before you do this when you use the Visual Studio generator.
+set CMAKE_GENERATOR_TOOLSET_VERSION=14.27
+set DISTUTILS_USE_SDK=1
+for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,17^] -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
 
-:: [اختياري] إذا كنت تريد تجاوز مترجم مضيف CUDA
-قم بتعيين CUDAHOSTCXX = C: \ Program Files (x86) \ Microsoft Visual Studio \ 2019 \ Community \ VC \ Tools \ MSVC \ 14.27.29110 \ bin \ HostX64 \ x64 \ cl.exe
+:: [Optional] If you want to override the CUDA host compiler
+set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.27.29110\bin\HostX64\x64\cl.exe
 
 python setup.py develop
 
 ```
+
 
 ##### ضبط خيارات البناء اختياري
 
@@ -350,8 +348,7 @@ ccmake build  # or cmake-gui build
 ```bash
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
-ccmake build  
-# أو بناء cmake-gui
+ccmake build  # or cmake-gui build
 ```
 
 ### صورة دوكر Docker Image
@@ -454,7 +451,7 @@ pip install -r requirements.txt
 إذا كنت تخطط للمساهمة بميزات جديدة أو وظائف أدوات مساعدة أو ملحقات للجوهر ، فيرجى أولاً فتح مشكلة ومناقشة الميزة معنا.
 قد يؤدي إرسال العلاقات العامة دون مناقشة إلى رفض العلاقات العامة لأننا قد نأخذ جوهر في اتجاه مختلف عما قد تكون على دراية به.
 
-لمعرفة المزيد حول تقديم مساهمة إلى Pytorch ، يرجى الاطلاع على [صفحة المساهمة](../ CONTRIBUTING.md). لمزيد من المعلومات حول إصدارات PyTorch ، راجع [صفحة الإصدار](../ RELEASE.md).
+لمعرفة المزيد حول تقديم مساهمة إلى Pytorch ، يرجى الاطلاع على [صفحة المساهمة](CONTRIBUTING.md). لمزيد من المعلومات حول إصدارات PyTorch ، راجع [صفحة الإصدار](ELEASE.md).
 
 ## الفريق
 
@@ -467,4 +464,4 @@ pip install -r requirements.txt
 
 ## الترخيص
 
-تمتلك PyTorch ترخيصًا على طراز BSD ، كما هو موجود في ملف [LICENSE](../ LICENSE).
+تمتلك PyTorch ترخيصًا على طراز BSD ، كما هو موجود في ملف [LICENSE](LICENSE).
