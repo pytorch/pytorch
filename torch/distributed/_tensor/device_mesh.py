@@ -5,7 +5,6 @@ from typing import List, Optional, TYPE_CHECKING, Union
 import torch
 import torch.distributed._functional_collectives as funcol
 
-from torch.distributed._tensor._utils import _get_device_handle
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     all_gather,
@@ -48,6 +47,16 @@ class _MeshEnv(object):
 
 
 mesh_resources: _MeshEnv = _MeshEnv()
+
+
+def _get_device_handle(device_type: str = "cuda"):
+    """
+    Get the module corresponding to the device_type which is cuda or cuda-like device.
+    For example, when the device_type is cuda, the module `torch.cuda` is returned.
+    Return None when device_type is cpu or there is no corresponding module,
+    otherwise return the corresponding module.
+    """
+    return getattr(torch, device_type, None) if device_type != "cpu" else None
 
 
 class DeviceMesh(object):

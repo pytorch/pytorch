@@ -7,8 +7,7 @@ import torch
 import torch.distributed as dist
 
 from torch import Tensor
-from torch.distributed._tensor._utils import _get_device_handle
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.device_mesh import DeviceMesh, _get_device_handle
 from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 
 
