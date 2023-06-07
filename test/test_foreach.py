@@ -921,8 +921,6 @@ class TestForeach(TestCase):
     def test_outplace_forward_mode_AD(self, device, dtype, op):
         if not op.supports_forward_ad:
             self.skipTest("forward AD not supported")
-        if op.name == "_foreach_zero":
-            self.skipTest("`_foreach_zero` not implemented")
 
         def check_sample_eligibility(op, sample, dtype):
             if op.name == "_foreach_sub" and (
