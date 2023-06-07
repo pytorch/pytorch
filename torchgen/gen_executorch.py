@@ -11,7 +11,7 @@ import yaml
 from torchgen import dest
 from torchgen.api import cpp as aten_cpp
 from torchgen.api.types import CppSignature, CppSignatureGroup, CType, NamedCType
-from torchgen.context import method_with_native_function
+from torchgen.context import method_with_native_function, with_native_function_and_index
 from torchgen.executorch.api import et_cpp
 from torchgen.executorch.api.custom_ops import (
     ComputeNativeFunctionStub,
@@ -238,6 +238,7 @@ def gen_unboxing(
     )
 
 
+@with_native_function_and_index  # type: ignore[arg-type]
 def compute_native_function_declaration(
     g: Union[NativeFunctionsGroup, NativeFunction], kernel_index: ETKernelIndex
 ) -> List[str]:
@@ -411,7 +412,7 @@ def gen_headers(
         ns_grouped_kernels = get_ns_grouped_kernels(
             native_functions=native_functions,
             kernel_index=kernel_index,
-            native_function_decl_gen=compute_native_function_declaration,
+            native_function_decl_gen=compute_native_function_declaration,  # type: ignore[arg-type]
         )
         cpu_fm.write(
             "NativeFunctions.h",
