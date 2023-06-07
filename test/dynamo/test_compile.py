@@ -70,29 +70,3 @@ class InPlaceCompilationTests(unittest.TestCase):
             torch.jit.save(scripted_model, os.path.join(tmpdirname, "model.pt"))
             loaded_model = torch.jit.load(os.path.join(tmpdirname, "model.pt"))
             loaded_model(torch.randn(1, 10))
-
-class TestAoTInductorInPython(unittest.TestCase):
-    def test_save(self):
-        class Net(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc = torch.nn.Linear(64, 10)
-
-            def forward(self, x, y):
-                return self.fc(torch.sin(x) + torch.cos(y))
-            
-        x = torch.randn((32, 64), device="cuda")
-        y = torch.randn((32, 64), device="cuda")
-
-
-        with torch.no_grad():
-            from torch.fx.experimental.proxy_tensor import make_fx
-            module = make_fx(Net().cuda())(x, y)
-            lib_path = torch._inductor.aot_compile(module, [x, y])
-
-
-    
-    def test_load(self):
-        import ctypes
-        lib = ctypes.CDLL('./libaot_inductor_output.so')
-        # Get the model out somehow
