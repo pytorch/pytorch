@@ -1235,9 +1235,7 @@ class BuiltinVariable(VariableTracker):
             and isinstance(right, NNModuleVariable)
             and op in supported_const_comparison_ops
         ):
-            self.push(
-                ConstantVariable(supported_const_comparison_ops[op](object(), right))
-            )
+            self.push(ConstantVariable(op(left, right)))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():
