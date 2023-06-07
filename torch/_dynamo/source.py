@@ -402,7 +402,7 @@ class ODictGetItemSource(Source):
         index_inst = (
             self.index.reconstruct(codegen)
             if isinstance(self.index, Source)
-            else codegen.create_load_const(self.index)
+            else [codegen.create_load_const(self.index)]
         )
         return [
             codegen._create_load_const(collections.OrderedDict.__getitem__),
