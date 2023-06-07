@@ -15,12 +15,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build:
-    name: cuda12.1-py3.10-gcc7-sm86-periodic-dynamo-benchmarks
+  linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build:
+    name: cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-sm86
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-sm86
+      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
@@ -38,11 +38,11 @@ jobs:
           { config: "dynamic_aot_eager_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-test:
-    name: cuda12.1-py3.10-gcc7-sm86-periodic-dynamo-benchmarks
+  linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-test:
+    name: cuda12.1-py3.10-gcc9-sm86-periodic-dynamo-benchmarks
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build
+    needs: linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc7-sm86
-      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc7-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
+      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-sm86
+      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
