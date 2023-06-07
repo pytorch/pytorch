@@ -454,8 +454,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
-        # FIXME (there should ideally be 4 graph breaks but now we just ignore side effects in branch)
-        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(len(backend.graphs), 4)
         self.assertEqual(res, eager)
 
     def test_wrap_subgraph_name_is_valid(self):
