@@ -1226,7 +1226,7 @@ def get_fake_value(node, tx):
 
     def fake_wrapper(e):
         if isinstance(e, torch.Tensor):
-            assert isinstance(e, FakeTensor)
+            assert isinstance(e, FakeTensor) or isinstance(e, torch.distributed._tensor.DTensor)
         return e
 
     def visit(n: torch.fx.Node):

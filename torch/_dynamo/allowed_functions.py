@@ -179,6 +179,7 @@ def _allowed_function_ids():
         ):
             return
         torch_object_ids[id(module)] = module.__name__
+        # print(f">>>>> _find_torch_objects: {module.__name__}")
         for name, obj in list(module.__dict__.items()):
             if id(obj) not in torch_object_ids:
                 # Dynamo allows all builtins into the graph and does not attempt
