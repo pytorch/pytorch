@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
@@ -40,7 +41,12 @@ DifferentiableViewMeta::DifferentiableViewMeta(
       backward_info_(std::move(backward_info)),
       forward_info_(std::move(forward_info)),
       shared_view_info_(shared_view_info),
-      creation_meta_(creation_meta) {
+      creation_meta_(creation_meta),
+      creation_traceback_(
+        AnomalyMode::is_enabled()
+        ? torch::CapturedTraceback::gather(/*python*/true, /*script*/false, /*cpp*/false)
+        : nullptr
+      ) {
   is_view_ = true;
   if (backward_info_.has_value()) {
     self_impl->set_version_counter(
@@ -58,6 +64,14 @@ DifferentiableViewMeta::DifferentiableViewMeta(
         "Shared view info require forward view info to be empty")
   }
 }
+
+void DifferentiableViewMeta::set_creation_meta(CreationMeta new_creation_meta) {
+  TORCH_CHECK(
+      has_bw_view(), "creation_meta can only exist for backward views.");
+  creation_meta_ = new_creation_meta;
+  creation_traceback_ = torch::CapturedTraceback::gather(/*python*/true, /*script*/false, /*cpp*/false);
+}
+
 
 // Chain this view info with the new view op between base and tensor
 ViewInfo ViewInfo::chain(
@@ -836,6 +850,27 @@ void handle_view_on_rebase(
           " cloning the output of the custom Function.");
     } else {
       TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
+    }
+
+    auto* tb = diff_view_meta->get_creation_traceback().get();
+    if (tb) {
+      std::ostringstream oss;
+      torch::SymbolizedTracebacks st = torch::symbolize({tb});
+      const std::vector<uint64_t>& traceback = st.tracebacks[0];
+      for (uint64_t idx : traceback) {
+        const unwind::Frame& frame = st.all_frames[idx];
+        oss << "  File \"" << frame.filename << "\", line " << frame.lineno << ", in " << frame.funcname << "\n";
+      }
+      msg = c10::str(
+        msg,
+        " This view was allocated at:\n", oss.str()
+      );
+    } else {
+      msg = c10::str(
+        msg,
+        " To find out where this view was allocated, run your entire forward region under"
+        " anomaly mode (torch.autograd.detect_anomaly(check_nan=False))."
+      );
     }
 
     TORCH_CHECK(false, msg);
