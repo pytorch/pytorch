@@ -1112,9 +1112,9 @@ class SubgraphTracer(fx.Tracer):
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        ## If the kind is call_function and there is no
-        ## nn_module_stack - then update the seq_id
-        ## First check if the node requires_grad
+        # If the kind is call_function and there is no
+        # nn_module_stack - then update the seq_id
+        # First check if the node requires_grad
         inc_seq_id = False
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = (rv.node.name, target)

@@ -133,7 +133,7 @@ callback_set = False
 prev_stack = ""
 
 
-def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int=0):
+def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int = 0):
     def iter_graph(roots):
         if not roots:
             return
@@ -174,7 +174,7 @@ def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int=0):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
-            if stack_ != prev_stack:
+            if stack_ != prev_stack and max_seq_id >= 0:
                 fx_traceback.set_bwd_seq_id(max_seq_id)
                 prev_stack = stack_
             meta = fx_traceback.get_current_meta()
@@ -187,7 +187,7 @@ def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int=0):
         def posthook(grad_input, grad_output):
             fx_traceback.set_stack_trace(special_stack_)
 
-            print(f"Post-hook called")
+            print("Post-hook called")
         return posthook
 
     print(f"Setting up BWD w/ max seq_id {max_seq_id}")
@@ -1266,8 +1266,7 @@ def create_joint(
                 needed_tangents.append(tangent)
 
         setup_stacktrace_preservation_hooks(
-                [out.grad_fn for out in needed_outs],
-                aot_config.max_seq_id)
+            [out.grad_fn for out in needed_outs], aot_config.max_seq_id)
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
@@ -3556,6 +3555,8 @@ def aot_function(
         if cached_res is None:
             flat_fn, out_spec = create_tree_flattened_fn(fn, args, kwargs)
 
+            print(f"Calling create_aot_dispatch fn {fn}- no max fwd_seq_id set")
+
             compiled_fn = create_aot_dispatcher_function(
                 flat_fn,
                 flat_args,
@@ -3595,7 +3596,8 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
-    print(f"Calling aot_module")
+    print("Calling aot_module")
+
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
         return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
@@ -3725,9 +3727,10 @@ def aot_module_simplified(
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         is_export=False,
         no_tangents=False,
-        max_seq_id=mod_count-1
+        max_seq_id=mod_count - 1
     )
 
+    print(f"Calling create_aot_dispatch Max seq_id {aot_config.max_seq_id}")
     compiled_fn = create_aot_dispatcher_function(
         functional_call,
         full_args,
@@ -4047,7 +4050,7 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
-        max_seq_id=mod_count-1
+        max_seq_id=mod_count - 1
     )
 
     fx_g, meta = create_aot_dispatcher_function(
