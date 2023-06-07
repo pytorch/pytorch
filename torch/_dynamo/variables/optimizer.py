@@ -100,14 +100,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
             )
             guards.add(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
             for k, v in value.items():
-                v_source = GetItemSource(p_state_source, k)
                 if isinstance(v, torch.Tensor):
                     guards.add(
                         GetItemSource(p_state_source, k).make_guard(
                             GuardBuilder.TENSOR_MATCH
                         )
                     )
-                elif isinstance(v, (bool, int, float, str)):
+                elif v is None or isinstance(v, (bool, int, float, str)):
                     guards.add(
                         GetItemSource(p_state_source, k).make_guard(
                             GuardBuilder.CONSTANT_MATCH
@@ -147,5 +146,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 tensor_vars = ListVariable(
                     [self.wrap_tensor(tx, t) for t in py_arg],
                     mutable_local=MutableLocal(),
+                    recursively_contains={}
                 )
-                arg.call_method(tx, "extend", (tensor_vars,), {})
+                tx.replace_all(arg, tensor_vars)
