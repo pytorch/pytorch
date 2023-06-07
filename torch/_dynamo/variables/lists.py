@@ -7,7 +7,11 @@ import torch
 import torch.fx
 
 from .. import config, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_instruction,
+    create_load_global,
+)
 from ..exc import unimplemented
 from ..source import GetItemSource
 from ..utils import check_constant_args, namedtuple_fields
@@ -24,6 +28,7 @@ class BaseListVariable(VariableTracker):
             slice: SliceVariable,
             torch.Size: SizeVariable,
             tuple: TupleVariable,
+            set: SetVariable,
         }[obj]
 
     def __init__(
@@ -641,3 +646,45 @@ class ListIteratorVariable(VariableTracker):
 
 class TupleIteratorVariable(ListIteratorVariable):
     pass
+
+
+class SetVariable(CommonListMethodsVariable):
+    def python_type(self):
+        return list
+
+    def reconstruct(self, codegen):
+        import sys
+
+        if sys.version_info >= (3, 11):
+            codegen.foreach(self.items)
+            return [create_instruction("BUILD_SET", arg=len(self.items))]
+        else:
+            create_load_global("set", True)
+            codegen.foreach(self.items)
+            return [create_instruction("CALL_FUNCTION", arg=len(self.items))]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if name == "add" and args:
+            assert not kwargs
+            item = args[0]
+            items = set(self.items)
+            items.add(item)
+            result = SetVariable(
+                list(items),
+                mutable_local=self.mutable_local,
+                regen_guards=False,
+                **options,
+            )
+            return tx.replace_all(self, result)
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+    def getitem_const(self, arg: VariableTracker):
+        raise RuntimeError("Illegal to getitem on a set")

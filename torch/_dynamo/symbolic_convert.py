@@ -82,6 +82,7 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -1257,6 +1258,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
+    def BUILD_SET(self, inst):
+        items = self.popn(inst.argval)
+        options = VariableTracker.propagate(items)
+        self.push(SetVariable(items, mutable_local=MutableLocal(), **options))
+
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
         options = VariableTracker.propagate(seqs)
@@ -1338,6 +1344,34 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 items,
                 obj.user_cls,
                 **VariableTracker.propagate([obj, k, v]),
+            ),
+        )
+
+    def SET_ADD(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, SetVariable)
+        assert obj.mutable_local
+        # only copy if the new obj contains other mutables
+        new_rec_contains = obj.recursively_contains
+        if v.recursively_contains or v.mutable_local:
+            new_rec_contains = obj.recursively_contains.union(v.recursively_contains)
+
+            if v.mutable_local:
+                new_rec_contains.add(v.mutable_local)
+
+        nitems = set(obj.items)
+        nitems.add(v)
+        obj.items = list(nitems)
+        self.replace_all(
+            obj,
+            SetVariable(
+                obj.items,
+                mutable_local=obj.mutable_local,
+                recursively_contains=new_rec_contains,
+                regen_guards=False,
+                **VariableTracker.propagate([obj, v]),
             ),
         )
 

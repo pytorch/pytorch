@@ -5596,6 +5596,17 @@ def ___make_guard_fn():
         opt_out = opt_model(x)
         self.assertTrue(same(orig_out, opt_out))
 
+    def test_simple_set_usage(self):
+        def foo(x, y):
+            setty = {x, y}
+            return setty.pop() * setty.pop()
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter, nopython=True)(foo)
+        x = torch.randn(10, 10)
+        y = torch.randn(10, 10)
+        foo(x, y)
+        self.assertEqual(counter.frame_count, 1)
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
