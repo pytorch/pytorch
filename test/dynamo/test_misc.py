@@ -5353,6 +5353,16 @@ def fn():
         self.assertTrue(s == s2)
         self.assertTrue(s != s3)
 
+    def test_inline_dict_function(self):
+        def _result_type_dict(dtype):
+            return {bool: torch.float32}[dtype]
+
+        @torch.compile
+        def f():
+            return torch.ones(3, dtype=_result_type_dict(bool))
+
+        self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
+
     def test_add_sizes(self):
         def func(x):
             y = x.size()
