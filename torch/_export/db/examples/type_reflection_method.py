@@ -11,12 +11,13 @@ class A:
 
 @export_case(
     example_inputs=(torch.ones(3, 4),),
-    tags={"python.standard-library"},
+    tags={"python.builtin"},
     support_level=SupportLevel.NOT_SUPPORTED_YET,
 )
-def custom_object_type(x):
+def type_reflection_method(x):
     """
-    type() calls on custom objects are not allowed due to its overly dynamic nature.
+    type() calls on custom objects followed by method calls are not allowed
+    due to its overly dynamic nature.
     """
     a = A()
     return type(a).func(x)
