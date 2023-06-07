@@ -130,9 +130,10 @@ def preserve_rng_state():
 
 # Set up hooks so that during backward the fx's stack_trace is properly set
 callback_set = False
+prev_stack = ""
 
 
-def setup_stacktrace_preservation_hooks(roots: List):
+def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int=0):
     def iter_graph(roots):
         if not roots:
             return
@@ -161,9 +162,10 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
         return callback
 
-    def get_prehook(stack_):
+    def get_prehook(stack_, op_name):
         def prehook(grad_output):
             global callback_set
+            global prev_stack
 
             if not callback_set:
                 torch.autograd.variable.Variable._execution_engine.queue_callback(
@@ -172,6 +174,12 @@ def setup_stacktrace_preservation_hooks(roots: List):
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
+            if stack_ != prev_stack:
+                fx_traceback.set_bwd_seq_id(max_seq_id)
+                prev_stack = stack_
+            meta = fx_traceback.get_current_meta()
+            print(f"Pre-hook for {op_name} called stack {stack_}")
+            print(f"Pre-hook max seq id {max_seq_id}")
 
         return prehook
 
@@ -179,11 +187,14 @@ def setup_stacktrace_preservation_hooks(roots: List):
         def posthook(grad_input, grad_output):
             fx_traceback.set_stack_trace(special_stack_)
 
+            print(f"Post-hook called")
         return posthook
 
+    print(f"Setting up BWD w/ max seq_id {max_seq_id}")
     for node in iter_graph(roots):
         forward_node_stack = node.metadata.get("traceback_", [])
-        node.register_prehook(get_prehook(forward_node_stack))
+        forward_node_module_info = str(node.name)
+        node.register_prehook(get_prehook(forward_node_stack, forward_node_module_info))
 
         special_stack = forward_node_stack.copy()
         special_stack.append(
@@ -1253,7 +1264,9 @@ def create_joint(
                 )
                 needed_tangents.append(tangent)
 
-        setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
+        setup_stacktrace_preservation_hooks(
+                [out.grad_fn for out in needed_outs],
+                aot_config.max_seq_id)
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
@@ -3581,6 +3594,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
+    print(f"Calling aot_module")
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
         return torch.func.functional_call(mod, params_and_buffers, args, kwargs)
@@ -3689,6 +3703,14 @@ def aot_module_simplified(
             dynamic_shapes = x.fake_mode.shape_env is not None
             break
 
+    mod_count = 0
+    if isinstance(mod, torch.fx.GraphModule):
+        for node in mod.graph.nodes:
+            if node.op in ("call_function", "call_method", "call_module"):
+                mod_count += 1
+
+    print(f"AOT creating dispatcher for module w/ max fwd ops {mod_count} ")
+
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
@@ -3702,6 +3724,7 @@ def aot_module_simplified(
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         is_export=False,
         no_tangents=False,
+        max_seq_id=mod_count-1
     )
 
     compiled_fn = create_aot_dispatcher_function(
@@ -3997,6 +4020,13 @@ def _aot_export_function(
     flat_fn, out_spec = create_tree_flattened_fn(func, args)
     flat_args, in_spec = pytree.tree_flatten(args)
 
+    mod_count = 0
+    if isinstance(mod, torch.fx.GraphModule):
+        for node in mod.graph.nodes:
+            if node.op in ("call_function", "call_method", "call_module"):
+                mod_count += 1
+
+    print(f"AOT creating dispatcher for module w/ max fwd ops {mod_count} ")
     # The export use case doesn't care about several bits of AOTConfig
     # (1) compilers (we just export the graph)
     # (2) partitioners (export is only full graph, user can partition themselves)
@@ -4016,6 +4046,7 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
+        max_seq_id=mod_count-1
     )
 
     fx_g, meta = create_aot_dispatcher_function(

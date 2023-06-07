@@ -9,6 +9,7 @@ __all__ = ['preserve_node_meta', 'has_preserved_node_meta',
 
 current_meta: Dict[str, Any] = {}
 should_preserve_node_meta = False
+bwd_seq_id = -1
 
 
 @compatibility(is_backward_compatible=False)
@@ -30,6 +31,21 @@ def set_stack_trace(stack : List[str]):
 
     if should_preserve_node_meta and stack:
         current_meta["stack_trace"] = "".join(stack)
+
+@compatibility(is_backward_compatible=False)
+def set_bwd_seq_id(max_fwd_seq_id):
+    global current_meta
+    global bwd_seq_id
+
+    if should_preserve_node_meta:
+        # 1st bwd op is set to seq id of last fwd op
+        # Then count down to 0
+        if bwd_seq_id == -1:
+            bwd_seq_id = max_fwd_seq_id
+        assert bwd_seq_id >= 0, f"Unexpected bwd seq id {bwd_seq_id}"
+        current_meta["seq_id"] = bwd_seq_id
+        print(f"FX setting Bwd seq_id to {bwd_seq_id}")
+        bwd_seq_id = bwd_seq_id - 1
 
 
 @compatibility(is_backward_compatible=False)
