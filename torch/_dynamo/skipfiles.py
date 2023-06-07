@@ -8,6 +8,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import glob
 import importlib
 import inspect
 import linecache
@@ -133,6 +134,10 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
 }
 
+# TODO (zhxchen17) Make exportdb importable here.
+FILENAME_ALLOWLIST |= set(
+    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
+)
 
 SKIP_DIRS_RE = None
 
