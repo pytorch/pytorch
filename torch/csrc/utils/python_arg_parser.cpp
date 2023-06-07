@@ -724,6 +724,7 @@ static bool is_int_or_symint(PyObject* obj) {
   // which may have side effects if obj is a symint node
   // so we do `is_symint` check first
   // TODO: maybe we should be using checkLong here?
+
   return torch::is_symint(py::handle(obj)) || THPUtils_checkIndex(obj);
 }
 
@@ -740,6 +741,13 @@ static bool is_int_or_symint_list(
     if (is_int_or_symint(item.ptr())) {
       return true;
     }
+
+    // NOTE: In dynamo, allow fake tensor as int
+    if (is_dynamo_compiling && THPVariable_Check(item.ptr()) &&
+        THPVariable_Unpack(item.ptr()).sizes().empty()) {
+      return true;
+    }
+
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
     bool r =
@@ -750,6 +758,7 @@ static bool is_int_or_symint_list(
     }
     return r;
   }
+
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
   return broadcast_size > 0 && is_int_or_symint(obj);

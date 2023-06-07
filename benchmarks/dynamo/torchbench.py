@@ -274,6 +274,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         batch_size=None,
         part=None,
     ):
+        if self.args.enable_activation_checkpointing:
+            raise NotImplementedError(
+                "Activation checkpointing not implemented for Torchbench models"
+            )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes

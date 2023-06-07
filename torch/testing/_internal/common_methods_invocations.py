@@ -10163,8 +10163,7 @@ op_db: List[OpInfo] = [
     OpInfo('clamp',
            aliases=('clip',),
            ref=_clamp_numpy,
-           dtypes=all_types_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16, torch.half),
            sample_inputs_func=sample_inputs_clamp,
            reference_inputs_func=partial(reference_inputs_elementwise_ternary, sample_inputs_func=sample_inputs_clamp),
            assert_autodiffed=True,
@@ -12277,6 +12276,9 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
+                   toleranceOverride({torch.float16: tol(atol=5e-2, rtol=5e-2), }),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'),
+               DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06),
                                      torch.complex64: tol(atol=1.3e-04, rtol=1.3e-05)}),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
@@ -12545,8 +12547,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardswish,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.half),
            supports_gradgrad=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12755,8 +12756,7 @@ op_db: List[OpInfo] = [
            aten_name="leaky_relu",
            aten_backward_name='leaky_relu_backward',
            sample_inputs_func=sample_inputs_leaky_relu,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            inplace_variant=lambda x, negative_slope=0.01:
                torch.nn.functional.leaky_relu(x, negative_slope, inplace=True),
            supports_autograd=True,
@@ -13089,10 +13089,7 @@ op_db: List[OpInfo] = [
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            sample_inputs_func=sample_inputs_glu,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfROCM=floating_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -13101,8 +13098,7 @@ op_db: List[OpInfo] = [
         aten_backward_name='elu_backward',
         ref=lambda x, alpha=1.0, inplace=False:
             np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x) - 1)),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -13130,8 +13126,7 @@ op_db: List[OpInfo] = [
         ref=lambda x, weight:
             np.maximum(0., x) + np.minimum(0., x) *
             (weight if x.ndim == 1 else weight.reshape([weight.size if i == 1 else 1 for i in range(0, x.ndim)])),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -13153,8 +13148,7 @@ op_db: List[OpInfo] = [
         'nn.functional.celu',
         ref=lambda x, alpha=1.0, inplace=False:
             np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x / alpha) - 1)),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -13220,8 +13214,7 @@ op_db: List[OpInfo] = [
             1.0507009873554804934193349852946 * (
                 np.maximum(0., x) + np.minimum(0., 1.6732632423543772848170429916717 * (np.exp(x) - 1))
             ),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=True,  # depends on 'elu'
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -13276,8 +13269,7 @@ op_db: List[OpInfo] = [
         'nn.functional.silu',
         aten_backward_name='silu_backward',
         ref=lambda x, inplace=False: x / (1 + np.exp(-x)),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=True,
         supports_autograd=True,
         supports_fwgrad_bwgrad=True,
@@ -13346,8 +13338,7 @@ op_db: List[OpInfo] = [
         'nn.functional.hardsigmoid',
         aten_backward_name='hardsigmoid_backward',
         ref=reference_hardsigmoid,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=False,
@@ -13398,8 +13389,7 @@ op_db: List[OpInfo] = [
         'nn.functional.mish',
         aten_backward_name='mish_backward',
         ref=lambda x: x * np.tanh(reference_softplus(x)),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -13409,7 +13399,7 @@ op_db: List[OpInfo] = [
         inplace_variant=partial(torch.nn.functional.mish, inplace=True),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 'TestUnaryUfuncs', device_type='cuda',), ],
+                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 'TestUnaryUfuncs',), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.softsign',
@@ -13741,8 +13731,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('nn.functional.softshrink',
                    aten_name="softshrink",
                    aten_backward_name='softshrink_backward',
-                   dtypes=floating_types_and(torch.bfloat16),
-                   dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+                   dtypes=floating_types_and(torch.bfloat16, torch.float16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    assert_autodiffed=False,
@@ -13751,8 +13740,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('nn.functional.hardshrink',
                    aten_name="hardshrink",
                    aten_backward_name='hardshrink_backward',
-                   dtypes=floating_types_and(torch.bfloat16,),
-                   dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+                   dtypes=floating_types_and(torch.bfloat16, torch.float16),
                    assert_autodiffed=True,
                    sample_inputs_func=sample_inputs_hardshrink,
                    supports_forward_ad=True,
@@ -13778,8 +13766,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.half),
            supports_gradgrad=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -16461,6 +16448,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_renorm,
            error_inputs_func=error_inputs_renorm,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # RuntimeError: Difference from float64 is larger with decomposition
                # linalg_vector_norm.default than original on output 0.
@@ -17585,8 +17574,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs={'beta': 3, 'threshold': .2}),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         decorators=(
             DecorateInfo(
                 toleranceOverride

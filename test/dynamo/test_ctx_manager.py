@@ -677,7 +677,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 4)
             self.assertEqual(cnts.op_count, 4)
 
-    def test_graph_break_inlining(self):
+    def test_graph_break_inlining_grad(self):
         def gn(z):
             with torch.no_grad():
                 torch._dynamo.graph_break()
@@ -697,6 +697,33 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, y, z).sum().backward()
 
         self.assertEqual(cnts.frame_count, 2)
+
+    def _graph_break_inlining_autocast_test_helper(self, device):
+        def gn(x, y):
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                z = torch.mm(x, y)
+                torch._dynamo.graph_break()
+                return torch.sin(z)
+
+        def fn(x, y):
+            z = torch.mm(x, y)
+            z = z + gn(x, y)
+            return z
+
+        x = torch.rand(3, 3).to(device)
+        y = torch.rand(3, 3).to(device)
+        opt_fn = torch.compile(backend="eager")(fn)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    def test_graph_break_inlining_autocast(self):
+        for device in ["cuda", "cpu"]:
+            if device == "cuda" and not (
+                torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            ):
+                continue
+            self._graph_break_inlining_autocast_test_helper(device)
 
 
 if __name__ == "__main__":

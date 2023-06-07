@@ -419,7 +419,10 @@ class TestTransformers(NNTestCase):
             encoder_layer = get_a_test_layer(activation=activation,
                                              batch_first=batch_first)
 
-            model = nn.TransformerEncoder(encoder_layer, 1).to(device)
+            model = nn.TransformerEncoder(
+                encoder_layer, 1, enable_nested_tensor=enable_nested_tensor
+            ).to(device)
+
             if not training:
                 model = model.eval()
 
@@ -465,9 +468,6 @@ class TestTransformers(NNTestCase):
             mask[0, 1] = 1
             mask[1, 3] = 1
             mask[1, 4] = 1
-            # If mask is not left aligned
-            # We disable nested tensor
-            model.enable_nested_tensor = enable_nested_tensor
             result = model(encoder_input, src_key_padding_mask=mask)
             ref_output = perm_fn(torch.tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
                                                 [2.428811, 0.021445, -0.601912, -0.084252]],
@@ -731,6 +731,15 @@ class TestTransformers(NNTestCase):
             out = transformer_encoder(src=x, src_key_padding_mask=None)
 
         self.assertEqual(out.is_nested, True)
+
+    def test_script_encoder_subclass(self, device):
+        class MyCustomLayer(nn.TransformerEncoderLayer):
+            pass
+
+        encoder = nn.TransformerEncoder(
+            MyCustomLayer(d_model=256, nhead=8), num_layers=6
+        ).to(device=device)
+        torch.jit.script(encoder)
 
     @onlyCUDA
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")

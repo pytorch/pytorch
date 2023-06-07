@@ -1480,7 +1480,7 @@ class TestMemoryProfilerE2E(TestCase):
 
             # We generally don't care about tiny allocations during memory
             # profiling and they add a lot of noise to the unit test.
-            if size >= 512
+            if size > 512
         ]
 
         self.assertExpectedInline(

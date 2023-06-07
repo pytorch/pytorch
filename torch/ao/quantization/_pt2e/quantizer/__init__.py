@@ -1,18 +1,28 @@
 from .qnnpack_quantizer import QNNPackQuantizer
 from .quantizer import (
+    DerivedQuantizationSpec,
     EdgeOrNode,
     OperatorConfig,
-    Quantizer,
-    QuantizationSpec,
+    FixedQParamsQuantizationSpec,
     QuantizationAnnotation,
+    QuantizationSpec,
+    QuantizationSpecBase,
+    Quantizer,
     SharedQuantizationSpec,
 )
 
+from .composable_quantizer import ComposableQuantizer
+
 __all__ = [
+    "ComposableQuantizer",
     "EdgeOrNode",
+    "OperatorConfig",
     "Quantizer",
-    "QuantizationSpec",
     "QNNPackQuantizer",
-    "QuantizationAnnotation",
+    "QuantizationSpecBase",
+    "QuantizationSpec",
+    "FixedQParamsQuantizationSpec",
     "SharedQuantizationSpec",
+    "DerivedQuantizationSpec",
+    "QuantizationAnnotation",
 ]

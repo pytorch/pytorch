@@ -8,7 +8,6 @@ import torch._prims_common as utils
 import torch._refs as refs
 from torch._decomp import register_decomposition
 from torch._prims_common import (
-    check,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     NumberType,
     ShapeType,
@@ -89,7 +88,7 @@ def alpha_dropout(
     if not training:
         return self
 
-    utils.check(
+    torch._check(
         p <= 1 and p >= 0,
         lambda: f"dropout probability has to be between 0 and 1, but got, {p}",
     )
@@ -125,7 +124,7 @@ def inplace_wrapper(fn):
     @wraps(fn)
     def _fn(a, *args, inplace=False, **kwargs):
         if inplace:
-            check(
+            torch._check(
                 "out" not in kwargs,
                 lambda: "Cannot set inplace=True and pass out= at the same time",
             )
@@ -184,7 +183,7 @@ def dropout(
     if not training:
         return a
 
-    utils.check(
+    torch._check(
         p <= 1 and p >= 0,
         lambda: f"dropout probability has to be between 0 and 1, but got, {p}",
     )
@@ -223,15 +222,15 @@ def elu(
 
     # nb. This should be factored out into a can_cast aux function
     python_type = utils.dtype_to_type(a.dtype)
-    check(
+    torch._check(
         utils.is_weakly_lesser_type(type(input_scale), python_type),
         lambda: f"input_scale argument of type {type(input_scale)} cannot be safely cast to type {python_type}!",
     )
-    check(
+    torch._check(
         utils.is_weakly_lesser_type(type(scale), python_type),
         lambda: f"scale argument of type {type(scale)} cannot be safely cast to type {python_type}!",
     )
-    check(
+    torch._check(
         utils.is_weakly_lesser_type(type(alpha), python_type),
         lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
     )
@@ -267,14 +266,14 @@ def group_norm(
     """
     Reference implementation of :func:`torch.nn.functional.group_norm`.
     """
-    utils.check(
+    torch._check(
         input.ndim >= 2,
         lambda: f"Expected at least 2 dimensions for input tensor but received {input.ndim}",
     )
 
     batch_size = input.shape[0]
     num_channels = input.shape[1]
-    utils.check(
+    torch._check(
         num_channels % num_groups == 0,
         lambda: "Expected number of channels in input to be divisible by num_groups, "
         + f"but got input of shape {input.shape} and num_groups = {num_groups}",
@@ -385,7 +384,7 @@ def softmax(
     # deprecated.  For PrimTorch, it's fine to drop support for deprecated
     # behavior because it requires explicit opt in.  This error is to inform
     # users how to update their calls.
-    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
+    torch._check(dim is not None, lambda: "implicit dim not supported, use dim=X")
     return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
@@ -400,7 +399,7 @@ def softmin(
     # deprecated.  For PrimTorch, it's fine to drop support for deprecated
     # behavior because it requires explicit opt in.  This error is to inform
     # users how to update their calls.
-    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
+    torch._check(dim is not None, lambda: "implicit dim not supported, use dim=X")
     return torch.softmax(a=-a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
@@ -460,7 +459,7 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     # softshrink(x) = x - lambd if x > lambd
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
-    check(
+    torch._check(
         lambd >= 0,
         lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
     )
@@ -488,9 +487,9 @@ def _reduction_int_to_str(reduction: int) -> str:
 
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
     if reduction == "sum":
-        return refs.sum(loss)
+        return torch.sum(loss)
     elif reduction == "mean":
-        return refs.mean(loss)
+        return torch.mean(loss)
     else:  # reduction == "none"
         return loss
 
@@ -587,7 +586,7 @@ def log_softmax(
     # deprecated.  For PrimTorch, it's fine to drop support for deprecated
     # behavior because it requires explicit opt in.  This error is to inform
     # users how to update their calls.
-    check(dim is not None, lambda: "implicit dim not supported, use dim=X")
+    torch._check(dim is not None, lambda: "implicit dim not supported, use dim=X")
     return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
@@ -599,7 +598,6 @@ def margin_ranking_loss(
     margin: float = 0.0,
     reduction: str = "mean",
 ) -> TensorLikeType:
-    # Formula of loss (implementation gets confusing with all the refs.foo)
     # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
@@ -611,14 +609,14 @@ def margin_ranking_loss(
             )
         )
     _check_reduction_value(reduction)
-    neg_target = refs.neg(target)
-    input_diff = refs.sub(input1, input2)
-    mul_target_input = refs.mul(neg_target, input_diff)
-    add_margin = refs.add(mul_target_input, margin)
-    loss = refs.maximum(add_margin, 0)
+    loss = torch.clamp_min(-target * (input1 - input2) + margin, 0)
     return _apply_loss_reduction(loss, reduction)
 
 
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 def mse_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -643,14 +641,13 @@ def hinge_embedding_loss(
     margin: float = 1.0,
     reduction: str = "mean",
 ) -> TensorLikeType:
-    # Formula of loss (implementation gets confusing with all the refs.foo)
     # loss_without_reduction = input if y == 1
     #                        = max(0, margin - input) if y == -1
     _check_reduction_value(reduction)
-    margin_clamp = refs.maximum(refs.sub(margin, input), 0)
-    output_margin = refs.where(refs.ne(target, 1), margin_clamp, 0)
-    output_self = refs.where(refs.ne(target, -1), input, 0)
-    loss = refs.add(output_margin, output_self)
+    margin_clamp = torch.clamp_min(margin - input, 0)
+    output_margin = torch.where(target != 1, margin_clamp, 0)
+    output_self = torch.where(target != -1, input, 0)
+    loss = output_margin + output_self
     return _apply_loss_reduction(loss, reduction)
 
 
@@ -661,12 +658,12 @@ def _nll_loss_nd(
     reduction: str,
     ignore_index: int,
 ) -> TensorLikeType:
-    utils.check(
+    torch._check(
         input.ndim > 0 and input.ndim <= 3,
         lambda: f"Expected input dimension to be either [1, 2, 3] but received {input.ndim}.",
     )
 
-    utils.check(
+    torch._check(
         (input.ndim == 1) or (input.shape[0] == target.shape[0]),
         lambda: f"Expected input batch size {input.shape[0]} to match target batch size {target.shape[0]}.",
     )
@@ -686,7 +683,7 @@ def _nll_loss_nd(
         (flat_target >= 0), (flat_target < num_classes)
     )
     class_check = torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask))
-    utils.check(
+    torch._check(
         isinstance(target, FakeTensor) or bool(class_check.item()),
         lambda: "A target class is out-of-bounds and not the ignore index.",
     )
@@ -751,7 +748,7 @@ def nll_loss(
     """
     Reference implementation of torch.nn.functional.nll_loss
     """
-    utils.check(
+    torch._check(
         input.ndim > 0,
         lambda: f"Expected input tensor to have 1 or more dimensions (got {input.ndim})",
     )
@@ -789,9 +786,13 @@ def nll_loss(
     # For ndim > 3, we reshape the input and target to 3-D case.
     # Input (N batch-size, C classes, k-dimensions)
     # Target (N batch-size, k-dimensions)
-    utils.check(
+    torch._check(
         input.ndim > 0 and target.ndim > 0 and target.shape[1:] == input.shape[2:],
-        lambda: f"Expected target shape {out_size} but got {target.shape}",
+        lambda: (
+            "Expected input and target to both have ndim > 0 and "
+            "target.shape[1:] == input.shape[2:], but got "
+            f"target.shape {target.shape} and input.shape {input.shape}"
+        ),
     )
 
     batch_size = input.shape[0]
@@ -830,7 +831,7 @@ def huber_loss(
     if type(reduction) is int:
         reduction = _reduction_int_to_str(reduction)
     _check_reduction_value(reduction)  # type: ignore[arg-type]
-    check(
+    torch._check(
         delta > 0,
         lambda: "huber_loss does not support non-positive values for delta.",
     )
@@ -853,7 +854,7 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
         raise RuntimeError(
             "Expected a tensor input for an elementwise unary operation!"
         )
-    return refs.sub(a, refs.tanh(a))
+    return a - torch.tanh(a)
 
 
 @register_decomposition(aten.threshold)
@@ -931,7 +932,7 @@ def _triplet_margin_with_distance_loss(
     a_dim = anchor.ndim
     p_dim = positive.ndim
     n_dim = negative.ndim
-    check(
+    torch._check(
         a_dim == p_dim and p_dim == n_dim,
         lambda: (
             f"The anchor, positive, and negative tensors are expected to have "
@@ -1068,25 +1069,25 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.prelu
     """
-    check(
+    torch._check(
         isinstance(a, TensorLike),
         lambda: f"prelu: Expected `a` to be tensor, but got: {type(a)}",
     )
-    check(
+    torch._check(
         isinstance(weight, TensorLike),
         lambda: f"prelu: Expected `weight` to be tensor, but got: {type(weight)}",
     )
 
     if weight.numel() != 1:
-        check(a.ndim > 0, lambda: "Not allow zero-dim input tensor.")
+        torch._check(a.ndim > 0, lambda: "Not allow zero-dim input tensor.")
         channel_size = a.shape[1] if a.ndim >= 2 else 1
-        check(
+        torch._check(
             weight.numel() == channel_size,
             lambda: f"Mismatch of parameter numbers and input channel size. Found parameter numbers ="
             f" {weight.numel()} and channel size = {channel_size}.",
         )
 
-    check(
+    torch._check(
         weight.ndim == 0 or weight.ndim == 1,
         lambda: f"prelu: Expected `weight` to be a scalar or 1D tensor, but got: "
         f"ndim = {weight.ndim}",
@@ -1098,7 +1099,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
             weight, a.shape, tuple() if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
         )
 
-    return refs.where(a > 0, a, a * weight)
+    return torch.where(a > 0, a, a * weight)
 
 
 @register_decomposition(aten.relu6)
@@ -1114,7 +1115,7 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     # See https://github.com/pytorch/pytorch/pull/81142#discussion_r918220126
     # It may be better to use clamp here, but we use hardtanh to replicate
     # the behavior of the existing implementation
-    return refs.nn.functional.hardtanh(a, 0, 6)
+    return torch.nn.functional.hardtanh(a, 0, 6)
 
 
 @register_decomposition(aten.glu)
@@ -1125,7 +1126,7 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 )
 def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
     dim = utils.canonicalize_dims(a.ndim, dim)
-    check(
+    torch._check(
         a.shape[dim] % 2 == 0,
         lambda: f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}",
     )
@@ -1153,8 +1154,8 @@ def pairwise_distance(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
-    check(a.ndim == 2, lambda: f"pdist only supports 2D tensors, got: {a.ndim}D")
-    check(p >= 0, lambda: "pdist only supports non-negative p values")
+    torch._check(a.ndim == 2, lambda: f"pdist only supports 2D tensors, got: {a.ndim}D")
+    torch._check(p >= 0, lambda: "pdist only supports non-negative p values")
     # For p == 2 we can use an efficient implementation, but other values of p
     # require creating a much bigger tensor for an intermediate step
     if p == 2:

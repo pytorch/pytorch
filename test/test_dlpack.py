@@ -148,6 +148,9 @@ class TestTorchDlPack(TestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     def test_dlpack_convert_default_stream(self, device):
+        # tests run on non-default stream, so _sleep call
+        # below will run on a non-default stream, causing
+        # default stream to wait due to inserted syncs
         torch.cuda.default_stream().synchronize()
         # run _sleep call on a non-default stream, causing
         # default stream to wait due to inserted syncs

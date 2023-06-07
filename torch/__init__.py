@@ -35,7 +35,7 @@ if _running_with_deploy():
 else:
     from .torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
 import builtins
 
 __all__ = [
@@ -936,8 +936,8 @@ def is_warn_always_enabled():
 # These error checking functions must be kept consistent with their C++
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
-def _check_with(error_type, cond, message):
-    if not isinstance(cond, builtins.bool):
+def _check_with(error_type, cond: builtins.bool, message: Callable[[], str]):
+    if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
     if cond:
@@ -1692,6 +1692,21 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
 
 # Register MPS specific decomps
 torch.backends.mps._init()
+
+if not _running_with_deploy():
+    class _TritonLibrary(object):
+        lib = torch.library.Library("triton", "DEF")
+        ops_table: Dict[Tuple[str, str], Callable] = {}
+
+        @classmethod
+        def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):
+            if (op_key, dispatch_key) not in cls.ops_table:
+                cls.lib.define(full_schema)
+                cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
+                cls.ops_table[(op_key, dispatch_key)] = op_impl
+
+            return cls.ops_table[(op_key, dispatch_key)]
+
 
 from . import _logging
 _logging._init_logs()

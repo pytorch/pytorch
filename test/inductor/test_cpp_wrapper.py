@@ -7,6 +7,7 @@ import torch._dynamo
 from torch._inductor import config
 from torch.testing._internal.common_utils import (
     IS_MACOS,
+    slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -20,6 +21,8 @@ try:
             test_cpu_repro,
             test_foreach,
             test_mkldnn_pattern_matcher,
+            test_pattern_matcher,
+            test_select_algorithm,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
@@ -27,6 +30,8 @@ try:
         import test_cpu_repro
         import test_foreach
         import test_mkldnn_pattern_matcher
+        import test_pattern_matcher
+        import test_select_algorithm
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
@@ -63,7 +68,21 @@ class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
     device = "cuda"
 
 
-def make_test_case(name, device, tests, condition=True):
+# conv2d will fallback for dynamic shapes; the fallback path is not yet supported
+test_failures_cpp_wrapper = {
+    "test_conv2d_unary_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_conv2d_binary_inplace_fusion_failed_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    "test_conv2d_binary_inplace_fusion_pass_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+}
+
+
+def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
     test_name = f"{name}_{device}" if device else name
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
@@ -73,8 +92,11 @@ def make_test_case(name, device, tests, condition=True):
         try:
             func = getattr(tests, test_name)
             assert callable(func), "not a callable"
-            code = test_torchinductor.run_and_get_cpp_code(func)
-            self.assertEqual("load_inline" in code, True)
+            func = slowTest(func) if slow else func
+            code = test_torchinductor.run_and_get_cpp_code(
+                func, *func_inputs if func_inputs else []
+            )
+            self.assertEqual("CppWrapperCodeCache" in code, True)
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -95,6 +117,8 @@ if RUN_CPU:
         device: str = "cpu"
         tests: TorchTestCase = test_torchinductor.CpuTests()
         condition: bool = True
+        slow: bool = False
+        func_inputs: list = None
 
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
@@ -102,6 +126,33 @@ if RUN_CPU:
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
         BaseTest("test_cat"),  # alias
+        BaseTest(
+            "test_conv2d_binary_inplace_fusion_failed",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch._C.has_mkldnn,
+            func_inputs=[
+                ["op_convolution_pointwise_binary.call"],
+                ["op_convolution_pointwise_binary_.call"],
+            ],
+        ),
+        BaseTest(
+            "test_conv2d_binary_inplace_fusion_pass",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch._C.has_mkldnn,
+            func_inputs=[
+                ["op_convolution_pointwise_binary_.call"],
+                ["op_convolution_pointwise_binary.call"],
+            ],
+        ),
+        BaseTest(
+            "test_conv2d_unary",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch._C.has_mkldnn,
+            slow=True,
+        ),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
@@ -127,7 +178,14 @@ if RUN_CPU:
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
     ]:
-        make_test_case(item.name, item.device, item.tests, item.condition)
+        make_test_case(
+            item.name,
+            item.device,
+            item.tests,
+            item.condition,
+            item.slow,
+            item.func_inputs,
+        )
 
     test_torchinductor.copy_tests(CppWrapperTemplate, TestCppWrapper, "cpp_wrapper")
 
@@ -139,6 +197,7 @@ if RUN_CPU:
         DynamicShapesCppWrapperTemplate,
         DynamicShapesCppWrapperCpuTests,
         "cpp_wrapper",
+        test_failures_cpp_wrapper,
     )
 
 if RUN_CUDA:
@@ -160,13 +219,14 @@ if RUN_CUDA:
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_linear1"),
-        # BaseTest("test_linear2"),
+        BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_scalar_input"),
+        BaseTest("test_scaled_dot_product_efficient_attention"),
         BaseTest("test_sort"),
         BaseTest("test_silu"),  # single input, single output
         BaseTest("test_sum_dtype"),  # float64
@@ -177,6 +237,26 @@ if RUN_CUDA:
             device=None,
             tests=test_foreach.ForeachTests(),
         ),  # test foreach
+        BaseTest(
+            "test_cat_slice_cat",
+            device=None,
+            tests=test_pattern_matcher.TestPaternMatcher(),
+        ),
+        BaseTest(
+            "test_addmm",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_linear_relu",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_convolution1",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
     ]:
         make_test_case(item.name, item.device, item.tests)
 
