@@ -22,14 +22,14 @@ function install_timm() {
   pip_uninstall torchvision
 }
 
-install_huggingface
-install_timm
-
 if [ -n "${CONDA_CMAKE}" ]; then
   # Keep the current cmake and numpy version here, so we can reinstall them later
   CMAKE_VERSION=$(get_conda_version cmake)
   NUMPY_VERSION=$(get_conda_version numpy)
 fi
+
+install_huggingface
+install_timm
 
 if [ -n "${CONDA_CMAKE}" ]; then
   # TODO: This is to make sure that the same cmake and numpy version from install conda
