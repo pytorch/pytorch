@@ -604,9 +604,24 @@ class TestSplitCatFxPasses(TestCase):
             split_items = [torch.squeeze(s, 1) for s in items]
             return torch.stack(split_items)
 
+        def split_squeeze_stack_callmethod(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [s.squeeze(1) for s in items]
+            return torch.stack(split_items)
+
+        def split_squeeze_stack_callmethod_none_dim(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [s.squeeze() for s in items]
+            return torch.stack(split_items)
+
         def split_squeeze_stack_kwarg1(x):
             items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, dim=1) for s in items]
+            return torch.stack(split_items)
+
+        def split_squeeze_stack_kwarg1_callmethod(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [s.squeeze(dim=1) for s in items]
             return torch.stack(split_items)
 
         def split_squeeze_multi_squeeze_users(x):
@@ -643,7 +658,11 @@ class TestSplitCatFxPasses(TestCase):
         ]
         for fn, split_squeeze_replaced in [
             (split_squeeze_stack, 1),
+            (split_squeeze_stack_callmethod, 1),
+            # TODO handle none dim
+            (split_squeeze_stack_callmethod_none_dim, 0),
             (split_squeeze_stack_kwarg1, 1),
+            (split_squeeze_stack_kwarg1_callmethod, 1),
             (split_squeeze_multi_squeeze_users, 1),
             (split_size_not_1, 0),
             (dim_mismatch, 0),
@@ -678,6 +697,11 @@ class TestSplitCatFxPasses(TestCase):
             return torch.stack(torch.unbind(x, dim=1), 0)
 
         def split_squeeze_stack(x):
+            items = list(torch.split(x, 1, dim=1))
+            split_items = [torch.squeeze(s, 1) for s in items]
+            return torch.stack(split_items, 1)
+
+        def split_squeeze_stack_callmethod(x):
             items = list(torch.split(x, 1, dim=1))
             split_items = [torch.squeeze(s, 1) for s in items]
             return torch.stack(split_items, 1)
@@ -769,6 +793,7 @@ class TestSplitCatFxPasses(TestCase):
             (unbind_stack_argspec2, 0, 1, 0, 1, 31),
             (dim_mismatch, 0, 1, 0, 1, 31),
             (split_squeeze_stack, 0, 1, 0, 1, 31),
+            (split_squeeze_stack_callmethod, 0, 1, 0, 1, 31),
             (other_users, 0, 0, 0, 0, 0),
             (other_users_2, 0, 0, 0, 0, 0),
             (unbind_cat_addn_args, 0, 1, 1, 1, 31),

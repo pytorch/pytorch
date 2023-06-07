@@ -201,6 +201,9 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_cauchy_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_scaled_dot_product_efficient_attention_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
     "test_dropout_deterministic_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),

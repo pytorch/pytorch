@@ -470,7 +470,7 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
     LOG(ERROR) << exceptionMsg;
     C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleException");
 
-    if (errorHandling == TearDown) {
+    if (SHOULD_TEAR_DOWN(errorHandling)) {
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
       LOG(ERROR) << tearDownMsg;
@@ -884,11 +884,13 @@ void ProcessGroupNCCL::workCleanupLoop() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
-        // Abort work and corresponding communicators
-        work.abort();
-        // PG level abort, which would abort all other communicators on this
-        // rank
-        abort();
+        if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
+          // Abort work and corresponding communicators
+          work.abort();
+          // PG level abort, which would abort all other communicators on this
+          // rank
+          abort();
+        }
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
           try {
