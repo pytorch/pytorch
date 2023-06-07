@@ -11,7 +11,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
+from torch._dynamo.utils import get_fake_value, get_real_value
 from torch._dynamo.variables import SymNodeVariable
 from torch._dynamo.variables.user_defined import ProcessGroupVariable
 from torch._guards import GuardsCheckpointState, Source
@@ -351,7 +351,7 @@ class TorchVariable(VariableTracker):
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_function",
-                        torch_np._helpers.ndarrays_to_tensors,
+                        torch.detach,
                         *proxy_args_kwargs(args, {}),
                     ),
                     example_value=None,
@@ -1002,7 +1002,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             # explosion problem.
 
             graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
-            prev_side_effects = tx.output.side_effects.clone()
 
             def speculate_branch(branch):
                 # NB: 0 is predicate
@@ -1029,22 +1028,12 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             true_nn_modules = state_after_true_branch.output.nn_modules
             true_cmp = get_comparable_state(state_after_true_branch)
 
-            if prev_side_effects != true_cmp.output.side_effects:
-                unimplemented(
-                    "True branch in cond has side effects, which is not allowed in export"
-                )
-
             (false_r, false_graph, false_lifted_freevars) = speculate_branch(False)
 
             state_after_false_branch = tx.copy_graphstate()
             false_guards = state_after_false_branch.output.guards
             false_nn_modules = state_after_false_branch.output.nn_modules
             false_cmp = get_comparable_state(state_after_false_branch)
-
-            if prev_side_effects != true_cmp.output.side_effects:
-                unimplemented(
-                    "False branch in cond has side effects, which is not allowed in export"
-                )
 
             true_tracked_fakes = true_cmp.output.tracked_fakes
             false_tracked_fakes = false_cmp.output.tracked_fakes
@@ -1152,11 +1141,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             body_guards = state_after_body.output.guards
             body_nn_modules = state_after_body.output.nn_modules
             body_cmp = get_comparable_state(state_after_body)
-
-            if prev_side_effects != body_cmp.output.side_effects:
-                unimplemented(
-                    "Body of map operator has side effects, which is not supported in export"
-                )
 
             # We don't support side effects inside a map loop body for simplicity.
             parent_cmp = get_comparable_state(checkpoint)
