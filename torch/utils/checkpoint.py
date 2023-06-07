@@ -759,8 +759,13 @@ class _CheckpointFrame:
         self.unpack_error_cb = unpack_error_cb
         self.x_metadatas = []
         self.forward_completed = False
+        self.ignore_saved_mismatch = False
 
     def check_recomputed_tensors_match(self, gid):
+        if self.ignore_saved_mismatch:
+            # TODO: we can probably make this check stricter by checking that
+            #       the metadata of the first tensors still match.
+            return
         # NOTE [ Error handling for checkpoint ]
         #
         # At a high level, we need to check that the tensors saved
@@ -774,7 +779,6 @@ class _CheckpointFrame:
         #    anyway because there aren't enough weak_holders. But we
         #    do want to have a nice error. See the _recomputation_hook
         #    for details.
-
         if not len(self.weak_holders) == self.recomp_counter[gid]:
             # 2. During recompute, fewer tensors were saved
             #
@@ -886,7 +890,7 @@ Operations executed during recomputation:
 --------------------------------------------------------------------------------
 """
 
-class CheckpointError(Exception):
+class CheckpointError(RuntimeError):
     pass
 
 
@@ -922,9 +926,16 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
             total_len = len(capture_logs.logs)
             for i, (log, tb) in enumerate(zip(capture_logs.logs, capture_logs.tbs)):
                 out += f"{log}   ({i + 1} of {total_len} in {label})\n\n"
-                # HACK: hardcoding the number of frames to skip, can we
-                #       do better?
-                out += "\n".join([f"{line['filename']}:{line['line']}:{line['name']}" for line in tb[6:]])
+                found_torch_dispatch = False
+                for line in tb:
+                    # Start printing stack trace only after __torch_dispatch__ is found
+                    is_torch_dispatch = line['name'] == '__torch_dispatch__'
+                    if not found_torch_dispatch and not is_torch_dispatch:
+                        continue
+                    elif is_torch_dispatch:
+                        found_torch_dispatch = True
+                        continue
+                    out += f"{line['filename']}:{line['line']}:{line['name']}\n"
                 out += "\n\n"
             return out
         assert capture_logs_fwd.logs is not None
@@ -970,9 +981,14 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             target_frame.recomp_counter[gid] += 1
 
             if recomp_idx >= len(target_frame.weak_holders):
+                assert not target_frame.early_stop
                 if not target_frame.forward_completed:
                     # We run into this case when early stop is not enabled and do
                     # grad within checkpoint.
+                    # We need to set this flag, so we don't error out later when
+                    # we check if the number of tensors saved during forward and
+                    # recomputation match.
+                    target_frame.ignore_saved_mismatch = True
                     return x.detach()
                 raise CheckpointError(
                     "torch.utils.checkpoint: trying to save more tensors during "

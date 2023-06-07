@@ -5553,7 +5553,7 @@ for shape in [(1,), ()]:
         self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
 
     def test_checkpointing_without_reentrant_custom_function_works(self):
-        msg = "torch.utils.checkpoint: unpack is being triggered for a tensor that was either"
+        msg = "Unpack is being triggered for a tensor that was already unpacked once"
 
         class MyFunc(torch.autograd.Function):
             @staticmethod
@@ -5637,6 +5637,62 @@ for shape in [(1,), ()]:
             "please pass in use_reentrant=True or use_reentrant=False explicitly",
             str(w[0].message)
         )
+
+    def test_checkpoint_detects_non_determinism(self):
+        def save_3_tensors(x):
+            out = x.sin().exp()
+            out = out.sin()
+            return out
+
+        def save_2_tensors(x):
+            return x.sin().exp()
+
+        def save_2_tensors_alt(x):
+            return x.sin() * torch.tensor([1., 2.])
+
+        def get_non_det_fn(orig_fn, recompute_fn):
+            counter = [0]
+
+            def fn(x):
+                if counter[0] == 0:
+                    counter[0] += 1
+                    return orig_fn(x)
+                else:
+                    return recompute_fn(x)
+            return fn
+
+        a = torch.randn(1, requires_grad=True)
+
+        # Save fewer tensors during recompute
+        fn = get_non_det_fn(orig_fn=save_3_tensors, recompute_fn=save_2_tensors)
+        with self.assertRaisesRegex(RuntimeError, "A different number of tensors was saved"):
+            out = checkpoint(fn, a, use_reentrant=False)
+            out.backward()
+
+        # Save more tensors during recompute
+        fn = get_non_det_fn(orig_fn=save_2_tensors, recompute_fn=save_3_tensors)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            with self.assertRaisesRegex(RuntimeError, "trying to save more tensors during recomputation"):
+                out = checkpoint(fn, a, use_reentrant=False)
+                out.backward()
+
+        fn = get_non_det_fn(orig_fn=save_2_tensors, recompute_fn=save_3_tensors)
+        # If early stopping is enabled, we would not raise (the results would be correct anyway)
+        out = checkpoint(fn, a, use_reentrant=False)
+        out.backward()
+
+        # Save the same number of tensors but the shape is different
+        fn = get_non_det_fn(orig_fn=save_2_tensors, recompute_fn=save_2_tensors_alt)
+        with self.assertRaisesRegex(RuntimeError, "tensors have different metadata"):
+            out = checkpoint(fn, a, use_reentrant=False)
+            out.backward()
+
+        # Get the debug message if debug=True
+        fn = get_non_det_fn(orig_fn=save_2_tensors, recompute_fn=save_2_tensors_alt)
+
+        with self.assertRaisesRegex(RuntimeError, "You are seeing this error because you passed `debug=True` to checkpoint"):
+            out = checkpoint(fn, a, use_reentrant=False, debug=True)
+            out.backward()
 
     def test_access_saved_tensor_twice_without_recomputation_works(self):
         count = [0]
