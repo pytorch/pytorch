@@ -744,6 +744,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (x, y))
         self.run_test(model, (), {"x": x, "y": y}, input_names=("x", "y"))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logit(self):
+        class Logit(torch.nn.Module):
+            def __init__(self, eps):
+                super(Logit, self).__init__()
+                self.eps = eps
+
+            def forward(self, x):
+                return x.logit(self.eps)
+
+        model = Logit(eps=1e-6)
+        self.run_test(model, torch.randn(1, 3, 640, 640))
+
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_mixed_optional(self):

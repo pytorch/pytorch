@@ -237,8 +237,15 @@ def _rebuild_sparse_tensor(layout, data):
         data (tuple): The tensor's sparse storage representation.
     """
     if layout == torch.sparse_coo:
-        indices, values, size = data
+        if len(data) == 3:
+            # For BC:
+            indices, values, size = data
+            is_coalesced = None
+        else:
+            indices, values, size, is_coalesced = data
         result = torch.sparse_coo_tensor(indices, values, size, check_invariants=False)
+        if is_coalesced is not None:
+            result._coalesced_(is_coalesced)
         _sparse_tensors_to_validate.append(result)
         return result
 

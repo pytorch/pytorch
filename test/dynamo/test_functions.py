@@ -437,6 +437,18 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_get_autocast_gpu_dtype(x):
+        dtype = torch.get_autocast_gpu_dtype()
+        return x.type(dtype)
+
+    @make_test
+    def test_is_complex(x):
+        if torch.is_complex(x):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_device(x):
         if not x.is_cuda:
             return x + 1
@@ -993,6 +1005,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return torch.tensor(True)
         else:
             return torch.tensor(False)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_size(x):
+        a = x.numpy()
+        return a.size
 
     @requires_numpy_pytorch_interop
     @make_test
