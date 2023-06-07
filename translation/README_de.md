@@ -1,13 +1,19 @@
 ![PyTorch Logo](https://github.com/pytorch/pytorch/blob/main/docs/source/_static/img/pytorch-logo-dark.png)
 
---------------------------------------------------------------------------------
-#### _Read this in other languages:_
-
+---
+#### _Lesen Sie dies in weiteren Sprachen:_
 <kbd>[<img title="English" alt="English" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/us.svg" width="30">](../README.md)</kbd>
 <kbd>[<img title="Português" alt="Português" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/br.svg" width="30">](README_pt.md)</kbd>
 <kbd>[<img title="عربى" alt="عربى" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/sa.svg" width="30">](README_ar.md)</kbd>
 <kbd>[<img title="Türkçe" alt="Türkçe" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/tr.svg" width="30">](README_tr.md)</kbd>
 <kbd>[<img title="Deutsch" alt="Deutsch" src="https://cdn.staticaly.com/gh/hjnilsson/country-flags/master/svg/de.svg" width="30">](README_de.md)</kbd>
+
+**Diese Übersetzung wird nicht automatisch aktualisiert. Änderungen in der [README.md](../README.md) werden hier nicht vorgenommen.**
+
+Dieses Dokument gehört zu [diese Version](https://github.com/atalman/pytorch/blob/93b27acd035cbfadeae96759db523594b6e6ee92/README.md).
+Zuletzt aktualisiert: 18/05/2023.
+
+---
 
 PyTorch ist ein Python-Paket, das zwei Funktionen auf hohem Niveau bietet:
 - Tensor-Berechnungen (wie NumPy) mit starker GPU-Beschleunigung
@@ -24,28 +30,28 @@ Unseren Stammzustand (Signale für die kontinuierliche Integration) finden Sie u
   - [Dynamische neuronale Netze: Bandgestütztes Autograd](#dynamische-neuronale-netze-bandgestütztes-autograd)
   - [Python zuerst](#python-zuerst)
   - [Zwingende Erlebnisse](#zwingende-erlebnisse)
-  - [Fast and Lean](#fast-and-lean)
-  - [Extensions Without Pain](#extensions-without-pain)
-- [Installation](#installation)
+  - [Schnell und schlank](#schnell-und-schlank)
+  - [Verlängerungen ohne Schmerzen](#verlängerungen-ohne-schmerzen)
+- [Einrichtung](#einrichtung)
   - [Binaries](#binaries)
-    - [NVIDIA Jetson Platforms](#nvidia-jetson-platforms)
-  - [From Source](#from-source)
-    - [Prerequisites](#prerequisites)
-    - [Install Dependencies](#install-dependencies)
-    - [Get the PyTorch Source](#get-the-pytorch-source)
-    - [Install PyTorch](#install-pytorch)
-      - [Adjust Build Options (Optional)](#adjust-build-options-optional)
+    - [NVIDIA Jetson Plattformen](#nvidia-jetson-plattformen)
+  - [Von der Quelle](#von-der-quelle)
+    - [Voraussetzungen](#voraussetzungen)
+    - [Abhängigkeiten installieren](#abhängigkeiten-installieren)
+    - [Die PyTorch-Quelle abrufen](#die-pytorch-quelle-abrufen)
+    - [PyTorch installieren](#pytorch-installieren)
+      - [Build-Optionen anpassen (optional)](#build-optionen-anpassen-optional)
   - [Docker Image](#docker-image)
-    - [Using pre-built images](#using-pre-built-images)
-    - [Building the image yourself](#building-the-image-yourself)
-  - [Building the Documentation](#building-the-documentation)
-  - [Previous Versions](#previous-versions)
-- [Getting Started](#getting-started)
-- [Resources](#resources)
-- [Communication](#communication)
-- [Releases and Contributing](#releases-and-contributing)
-- [The Team](#the-team)
-- [License](#license)
+    - [Vorgefertigte Bilder verwenden](#vorgefertigte-bilder-verwenden)
+    - [Das Bild selbst erstellen](#das-bild-selbst-erstellen)
+  - [Erstellung der Dokumentationn](#erstellung-der-dokumentation)
+  - [Vorherige Versionen](#vorherige-versionen)
+- [Einstieg in das Thema](#einstieg-in-das-thema)
+- [Ressourcen](#ressourcen)
+- [Kommunikation](#kommunikation)
+- [Freisetzung und Beitrag](#freisetzung-und-beitrag)
+- [Das Team](#das-team)
+- [Lizenz](#lizenz)
 
 <!-- tocstop -->
 
@@ -196,7 +202,7 @@ conda install cmake ninja
 pip install -r requirements.txt
 ```
 
-**Bei Linux**
+**Unter Linux**
 
 ```bash
 conda install mkl mkl-include
@@ -208,7 +214,7 @@ conda install -c pytorch magma-cuda110 # oder das magma-cuda*, das Ihrer CUDA-Ve
 make triton
 ```
 
-**Bei MacOS**
+**Unter MacOS**
 
 ```bash
 # Fügen Sie dieses Paket nur auf Maschinen mit intel x86-Prozessoren hinzu.
@@ -217,7 +223,7 @@ conda install mkl mkl-include
 conda install pkg-config libuv
 ```
 
-**Bei Windows**
+**Unter Windows**
 
 ```bash
 conda install mkl mkl-include
@@ -236,7 +242,7 @@ git submodule update --init --rekursiv
 ```
 
 #### PyTorch installieren
-**Bei Linux**
+**Unter Linux**
 
 Wenn Sie für AMD ROCm kompilieren, führen Sie zuerst diesen Befehl aus:
 ```bash
@@ -266,7 +272,7 @@ python setup.py entwickeln
 python3 setup.py entwickeln
 ```
 
-**Bei Windows**
+**Unter Windows**
 
 Wählen Sie die korrekte Visual Studio-Version.
 
@@ -460,4 +466,4 @@ Hinweis: Dieses Projekt hat nichts mit [hughperkins/pytorch](https://github.com/
 
 ## Lizenz
 
-PyTorch hat eine BSD-ähnliche Lizenz, wie sie in der Datei [LICENSE](../LICENSE) zu finden ist.
+PyTorch hat eine BSD-ähnliche Lizenz, wie sie in der Datei [LIZENZ](../LICENSE) zu finden ist.
