@@ -10,7 +10,11 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
-from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    skipIfRocm,
+    TEST_CUDA_GRAPH,
+    TEST_WITH_ROCM,
+)
 
 
 def composed(*decs):
@@ -202,5 +206,12 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_CUDA_GRAPH:
+        if __name__ == "__main__":
+            import sys
+
+            sys.exit(0)
+        raise unittest.SkipTest("cuda graph test is skipped")
 
     run_tests()
