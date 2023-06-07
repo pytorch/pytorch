@@ -982,6 +982,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             ), str(
                 type(args[1])
             )  # true_fn
+
             assert isinstance(
                 args[2], (UserFunctionVariable, NestedUserFunctionVariable)
             ), str(
@@ -1002,7 +1003,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             # explosion problem.
 
             graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
-            prev_side_effects = tx.output.side_effects.clone()
 
             def speculate_branch(branch):
                 # NB: 0 is predicate
@@ -1029,22 +1029,12 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             true_nn_modules = state_after_true_branch.output.nn_modules
             true_cmp = get_comparable_state(state_after_true_branch)
 
-            if prev_side_effects != true_cmp.output.side_effects:
-                unimplemented(
-                    "True branch in cond has side effects, which is not allowed in export"
-                )
-
             (false_r, false_graph, false_lifted_freevars) = speculate_branch(False)
 
             state_after_false_branch = tx.copy_graphstate()
             false_guards = state_after_false_branch.output.guards
             false_nn_modules = state_after_false_branch.output.nn_modules
             false_cmp = get_comparable_state(state_after_false_branch)
-
-            if prev_side_effects != true_cmp.output.side_effects:
-                unimplemented(
-                    "False branch in cond has side effects, which is not allowed in export"
-                )
 
             true_tracked_fakes = true_cmp.output.tracked_fakes
             false_tracked_fakes = false_cmp.output.tracked_fakes
@@ -1126,7 +1116,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 )
 
             checkpoint = tx.copy_graphstate()
-            prev_side_effects = tx.output.side_effects.clone()
             # To get the example output from map() we will need to prodive at least one sample to
             # the loop body. In our case we will always use xs[0], and our map() won't support zero
             # sized tensor during tracing.
@@ -1152,11 +1141,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             body_guards = state_after_body.output.guards
             body_nn_modules = state_after_body.output.nn_modules
             body_cmp = get_comparable_state(state_after_body)
-
-            if prev_side_effects != body_cmp.output.side_effects:
-                unimplemented(
-                    "Body of map operator has side effects, which is not supported in export"
-                )
 
             # We don't support side effects inside a map loop body for simplicity.
             parent_cmp = get_comparable_state(checkpoint)

@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Any, Dict, Iterable, List, Set
+from typing import Dict, Iterable, List, Set
 
 import sympy
 
@@ -57,6 +57,9 @@ class TritonPrinter(PythonPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
+
+    def _helper_sqrt(self, expr):
+        return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
 
 
 texpr = TritonPrinter().doprint
@@ -125,6 +128,10 @@ class TritonOverrides(OpOverrides):
             # that produces 0's for negative values
             return f"{x}.to(tl.int8).to(tl.uint8)"
         return f"{x}.to({triton_compute_type(dtype)})"
+
+    @staticmethod
+    def to_dtype_bitcast(x, dtype: torch.dtype):
+        return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
 
     @staticmethod
     def constant_val(val):
@@ -450,14 +457,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def ceil(x):
         return f"tl.math.ceil({x})"
-
-
-@dataclasses.dataclass
-class SymbolicCallArg:
-    inner: Any
-
-    def __str__(self):
-        return str(self.inner)
 
 
 @dataclasses.dataclass
@@ -1728,24 +1727,7 @@ class TritonKernel(Kernel):
             if isinstance(tree.numel, (sympy.Integer, sympy.Symbol)):
                 expr = tree.numel
             else:
-                expr = f"{name}_{tree.prefix}numel"
-                # TODO(voz): Tragic. This should at the very least be a util to slapp on declare and ending.
-                # The real fix here is to revisit our cross language calling convention.
-                if expr not in wrapper.kenel_numel_expr:
-                    wrapper.kenel_numel_expr.add(expr)
-                    wrapper.writeline(
-                        f"{wrapper.declare}{expr} = {pexpr(tree.numel)}{wrapper.ending}"
-                    )
-                else:
-                    wrapper.writeline(f"{expr} = {pexpr(tree.numel)}{wrapper.ending}")
-                # We can get symbolic expressions here, like s0*64
-                # It is fine to have them here, but we need to handle them correctly as their own type
-                # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
-                # scalars as well.
-                # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
-                # constant now, need type info. I agree, this needs type info, and while this is not true type info
-                # it suffices as a type hint for the purposes of producing the correct code for this type.
-                expr = SymbolicCallArg(expr)
+                expr = wrapper.generate_numel_expr(name, tree)
 
             if tree.prefix != "r" or self.inside_reduction:
                 call_args.append(expr)
@@ -2181,7 +2163,6 @@ class TritonScheduling:
             src_code = src_code.replace("#pragma CMT", "#")
 
             basename, _, kernel_path = get_code_path(src_code, "py", extra="")
-            wrapper.kernel_to_hash[kernel_name] = basename
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
