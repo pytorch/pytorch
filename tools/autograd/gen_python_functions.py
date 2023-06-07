@@ -67,7 +67,8 @@ from torchgen.model import (
     Type,
     Variant,
 )
-from torchgen.utils import FileManager, split_name_params, YamlLoader
+from torchgen.utils import FileManager, split_name_params
+from torchgen.yaml_utils import YamlLoader
 
 from .gen_trace_type import should_trace
 
@@ -360,7 +361,9 @@ def gen(
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
+                "".join(
+                    [f'\n.value("{tag}", at::Tag::{tag})' for tag in sorted(valid_tags)]
+                )
             )
         }
 

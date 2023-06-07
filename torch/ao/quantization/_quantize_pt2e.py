@@ -2,7 +2,10 @@ from torch.fx import GraphModule
 
 from ._pt2e.prepare import prepare
 from ._pt2e._propagate_annotation import propagate_annotation
-from ._pt2e.qat_utils import _fuse_conv_bn_qat
+from ._pt2e.qat_utils import (
+    _fuse_conv_bn_qat,
+    _fold_conv_bn_qat,
+)
 from ._pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
@@ -21,7 +24,7 @@ def prepare_pt2e(
     qconfig_mapping: QConfigMapping,
     example_inputs: Tuple[Any, ...],
     backend_config: BackendConfig,
-):
+) -> GraphModule:
     node_name_to_scope = _get_node_name_to_scope(model)
 
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
@@ -47,7 +50,7 @@ def prepare_pt2e(
 def prepare_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
-):
+) -> GraphModule:
     node_name_to_scope = _get_node_name_to_scope(model)
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
     # to be quantized before fusion
@@ -57,16 +60,13 @@ def prepare_pt2e_quantizer(
     quantizer.validate(model)
     propagate_annotation(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
-    # TODO: remove hack when we have better support for pattern matching
-    # move around the observer for addmm
-    _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
 # TODO: update this to prepare_qat_pt2e
 def prepare_qat_pt2e_quantizer(
     model: GraphModule,
     quantizer: Quantizer,
-):
+) -> GraphModule:
     node_name_to_scope = _get_node_name_to_scope(model)
     quantizer.annotate(model)
     quantizer.validate(model)
@@ -83,5 +83,7 @@ def prepare_qat_pt2e_quantizer(
 
 def convert_pt2e(
     model: GraphModule
-):
-    return _convert_to_reference_decomposed_fx(model)
+) -> GraphModule:
+    model = _convert_to_reference_decomposed_fx(model)
+    model = _fold_conv_bn_qat(model)
+    return model

@@ -220,6 +220,10 @@ at::Tensor logcumsumexp_backward(
     const at::Tensor& self,
     at::Tensor result,
     int64_t dim);
+at::Tensor logcumsumexp_jvp(
+    const at::Tensor& self_p,
+    const at::Tensor& self_t,
+    int64_t dim);
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
 at::Tensor unsqueeze_to(const at::Tensor& self, c10::SymIntArrayRef sym_sizes);
 at::Tensor unsqueeze_to(
@@ -296,6 +300,12 @@ at::Tensor sparse_sparse_matmul_backward(
 at::Tensor renorm_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
+    const at::Scalar& p,
+    int64_t dim,
+    const at::Scalar& maxnorm);
+at::Tensor renorm_jvp(
+    const at::Tensor& self_p,
+    const at::Tensor& self_t,
     const at::Scalar& p,
     int64_t dim,
     const at::Scalar& maxnorm);
@@ -1026,6 +1036,32 @@ Tensor to_sparse_backward(
     const Tensor& grad,
     const c10::Layout self_layout,
     const c10::OptionalArrayRef<c10::SymInt>& self_blocksize);
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor>
+mkldnn_rnn_layer_differentiable_backward(
+    const Tensor& input,
+    const Tensor& weight0,
+    const Tensor& weight1,
+    const Tensor& weight2,
+    const Tensor& weight3,
+    const Tensor& hx_,
+    const Tensor& cx_tmp,
+    const Tensor& output,
+    const Tensor& hy_,
+    const Tensor& cy_,
+    const c10::optional<Tensor>& grad_output_r_opt,
+    const c10::optional<Tensor>& grad_hy_r_opt,
+    const c10::optional<Tensor>& grad_cy_r_opt,
+    bool reverse,
+    int64_t mode,
+    int64_t hidden_size,
+    int64_t num_layers,
+    bool has_biases,
+    bool train,
+    bool bidirectional,
+    at::IntArrayRef batch_sizes,
+    bool batch_first,
+    const at::Tensor& workspace);
 
 } // namespace details
 } // namespace generated

@@ -41,6 +41,7 @@ from torch.distributed.fsdp._init_utils import (
     _get_default_comm_hook,
     _init_buffer_state,
     _init_core_state,
+    _init_device_handle,
     _init_ignored_module_states,
     _init_param_handle_from_module,
     _init_prefetching_state,
@@ -216,7 +217,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
-        process_group: Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]
+        process_group (Optional[Union[ProcessGroup, Tuple[ProcessGroup, ProcessGroup]]]):
             This is the process group used for collective communications and
             the one over which the model is sharded. For hybrid sharding strategies such as
             ``ShardingStrategy.HYBRID_SHARD`` users can
@@ -384,11 +385,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         forward_prefetch: bool = False,
         limit_all_gathers: bool = False,
         use_orig_params: bool = False,
-        ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
+        ignored_states: Union[
+            Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+        ] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        _init_ignored_module_states(self, module, ignored_modules, ignored_parameters)
+        _init_ignored_module_states(self, module, ignored_modules, ignored_states)
+        _init_device_handle(self, module, self._ignored_params, device_id)
 
         # Add module annotations for Dynamo support (see function for details)
         _annotate_modules_for_dynamo(module, self._ignored_modules, use_orig_params)
@@ -698,6 +702,19 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     @staticmethod
     def get_state_dict_type(module: nn.Module) -> StateDictSettings:
+        """
+        Get the state_dict_type and the corresponding configurations
+        for the FSDP modules rooted at ``module``. The target module
+        does not have to be an FSDP module.
+
+        Returns:
+            A ``StateDictSettings`` containing the state_dict_type and
+            state_dict / optim_state_dict configs that are currently set.
+
+        Raises:
+            ``AssertionError`` if the ``StateDictSettings`` for different
+            FSDP submodules differ.
+        """
         state_dict_settings: Optional[StateDictSettings] = None
         for submodule in FullyShardedDataParallel.fsdp_modules(module):
             if state_dict_settings is None:
@@ -745,19 +762,18 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Args:
             module (torch.nn.Module): Root module.
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
-            state_dict_config (Optional[StateDictConfig]): the configuration for the
-                target ``state_dict_type``.
+            state_dict_config (Optional[StateDictConfig]): the model ``state_dict``
+                configuration for the target ``state_dict_type``.
+            optim_state_dict_config (Optional[OptimStateDictConfig]): the optimizer
+               ``state_dict`` configuration for the target ``state_dict_type``.
         """
-        try:
-            prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
-                module,
-                state_dict_type,
-                state_dict_config,
-                optim_state_dict_config,
-            )
-            yield
-        except Exception as e:
-            raise e
+        prev_state_dict_settings = FullyShardedDataParallel.set_state_dict_type(
+            module,
+            state_dict_type,
+            state_dict_config,
+            optim_state_dict_config,
+        )
+        yield
         FullyShardedDataParallel.set_state_dict_type(
             module,
             prev_state_dict_settings.state_dict_type,
@@ -899,7 +915,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         context = (
             self._deregister_orig_params_ctx()
             if self._use_orig_params
-            else contextlib.suppress()
+            else contextlib.nullcontext()
         )
         with context:
             return super()._apply(*args, **kwargs)
@@ -1458,9 +1474,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 corresponding to the unflattened parameters and holding the
                 sharded optimizer state.
             model (torch.nn.Module):
-                Refer to :meth:``shard_full_optim_state_dict``.
+                Refer to :meth:`shard_full_optim_state_dict`.
             optim (torch.optim.Optimizer): Optimizer for ``model`` 's
-            parameters.
+                parameters.
 
         Returns:
             Refer to :meth:`shard_full_optim_state_dict`.
@@ -1785,7 +1801,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to ``:meth:optim_state_dict`` except
+        The functionality is identical to :meth:`optim_state_dict` except
         for the different arguments.
 
         Args:
@@ -1916,7 +1932,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Dict[str, Any]:
         """
         This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to ``:meth:optim_state_dict_to_load``
+        The functionality is identical to :meth:`optim_state_dict_to_load`
         except for the different arguments.
 
         Args:

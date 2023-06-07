@@ -8,6 +8,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import glob
 import importlib
 import inspect
 import linecache
@@ -31,7 +32,6 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
-import torch.ao.quantization._pt2e.qat_utils
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
@@ -122,12 +122,22 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 
 # Do trace through match and replace patterns used in PT2E QAT
 # Note: These patterns are comprised of torch ops and for internal use only.
 # They are exported to aten graphs before being passed to the FX subgraph rewriter.
-FILENAME_ALLOWLIST |= {torch.ao.quantization._pt2e.qat_utils.__file__}
+# TODO: find a better way to express this path without having to import
+# `torch.ao.quantization._pt2e`, which interferes with memory profiling
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
+    _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
+}
 
+# TODO (zhxchen17) Make exportdb importable here.
+FILENAME_ALLOWLIST |= set(
+    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
+)
 
 SKIP_DIRS_RE = None
 

@@ -28,7 +28,7 @@ void setDynamicLayerFrontBackKeysIncluded(bool included) {
 DynamicLayer::DynamicLayer(
     TransformType transform_type,
     int64_t layerId,
-    optional<int64_t> batchSize,
+    optional<c10::SymInt> batchSize,
     optional<RandomnessType> randomness,
     optional<bool> prev_grad_mode,
     optional<bool> prev_fwd_grad_mode,
@@ -42,7 +42,7 @@ DynamicLayer::DynamicLayer(
   }
   switch (transform_type) {
     case TransformType::Vmap:
-      interpreter_ = Interpreter::Vmap(layerId, batchSize.value(), randomness.value());
+      interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value());
       break;
     case TransformType::Grad:
       interpreter_ = Interpreter::Grad(layerId, prev_grad_mode.value());
@@ -66,7 +66,7 @@ int64_t DynamicLayer::layerId() const {
   return interpreter_.level();
 }
 
-int64_t DynamicLayer::batchSize() const {
+c10::SymInt DynamicLayer::batchSize() const {
   return VmapInterpreterPtr(&interpreter_).batchSize();
 }
 
@@ -245,7 +245,7 @@ int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
 
 int64_t initAndPushDynamicLayer(
     TransformType transform_type,
-    optional<int64_t> batch_size,
+    optional<c10::SymInt> batch_size,
     optional<RandomnessType> randomness,
     optional<bool> prev_grad_mode,
     optional<bool> prev_fwd_grad_mode,
@@ -467,20 +467,21 @@ restoreLocalDispatchKeySetRAII(const c10::impl::LocalDispatchKeySet& key_set) {
 
 // right now grad_special_case as a bool is sufficient because this is the only special case for grad. If we need to add
 // more special cases, it's more scalable to add an enum to know which op we're looking at without looking at the schema
-void dynamicLayerBack(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case) {
-  auto& layer = dynamicLayerStackAccessor().back();
-  auto restore_guard = restoreLocalDispatchKeySetRAII(layer.interpreter().getSavedLocalDispatchKeySet());
+static void dynamicLayerBack(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case) {
+  auto restore_guard = restoreLocalDispatchKeySetRAII(
+      dynamicLayerStackAccessor().back().interpreter().getSavedLocalDispatchKeySet());
   WithoutTop guard;
 
-  layer.interpreter().sendToNextInterpreter(op, stack, grad_special_case);
+  // WithoutTop stores the popped DynamicLayer object.
+  guard.layer_.interpreter().sendToNextInterpreter(op, stack, grad_special_case);
 }
 
 // used for functions that have aliasing operations but should be treated like they're out of place (i.e. lift_fresh)
-void dynamicLayerBackGradSpecialCase(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void dynamicLayerBackGradSpecialCase(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   return dynamicLayerBack(op, stack, true);
 }
 
-void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   return dynamicLayerBack(op, stack, false);
 }
 

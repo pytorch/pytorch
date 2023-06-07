@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
@@ -1579,7 +1580,7 @@ void _linalg_check_errors(
 // Without it, this function can lead to composite compliance problems, which
 // may lead to bugs in functorch, where a Tensor Subclass that doesn't
 // require grad may wrap a Tensor subclass that requires grad.
-bool _may_require_fw_or_bw_grad(const Tensor& input) {
+static bool _may_require_fw_or_bw_grad(const Tensor& input) {
   return ((at::GradMode::is_enabled() && input.requires_grad())
           || input._fw_grad(/*level */ 0).defined()
           || isTensorSubclassLike(input));
@@ -1800,7 +1801,7 @@ Tensor& linalg_cholesky_out(const Tensor& A, bool upper, Tensor& L) {
 
 DEFINE_DISPATCH(cholesky_inverse_stub);
 
-Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& input, bool upper) {
+static Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& input, bool upper) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT(input.size(-1) == input.size(-2));
 
@@ -2460,7 +2461,7 @@ DEFINE_DISPATCH(orgqr_stub);
 
   For further details, please see the LAPACK/MAGMA documentation.
 */
-Tensor& householder_product_out_helper(const Tensor& input, const Tensor& tau, Tensor& result) {
+static Tensor& householder_product_out_helper(const Tensor& input, const Tensor& tau, Tensor& result) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT(input.size(-2) >= input.size(-1));
   TORCH_INTERNAL_ASSERT(input.size(-1) >= tau.size(-1));
@@ -2579,7 +2580,7 @@ Tensor orgqr(const Tensor& input, const Tensor& tau) {
 
 DEFINE_DISPATCH(ormqr_stub);
 
-void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tensor& other, const Tensor& result, bool left, bool transpose) {
+static void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tensor& other, const Tensor& result, bool left, bool transpose) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other.dim() >= 2);
 
@@ -2848,7 +2849,7 @@ static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, con
 
 DEFINE_DISPATCH(linalg_eig_stub);
 
-std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
+static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
   // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
   // therefore we create all intermediate tensors on CPU
   auto options = input.options().device(at::kCPU);
@@ -4011,9 +4012,9 @@ Tensor linalg_solve_triangular(
   return out;
 }
 
-Tensor linalg_vander(
+Tensor linalg_vander_symint(
     const Tensor& x,
-    c10::optional<int64_t> N) {
+    c10::optional<c10::SymInt> N) {
   auto t = x.scalar_type();
   TORCH_CHECK(t == ScalarType::Float ||
               t == ScalarType::Double ||
@@ -4023,16 +4024,16 @@ Tensor linalg_vander(
               "linalg.vander supports floating point, complex, and integer tensors, but got ", t);
   const auto x_ = x.dim() == 0 ? x.unsqueeze(-1) : x;
 
-  auto shape = x_.sizes().vec();
+  auto shape = x_.sym_sizes().vec();
   const auto n = N.value_or(shape.back());
   TORCH_CHECK(n > 1, "N must be greater than 1.");
 
   // Append cumprod of the oher 0...n-1 powers
   shape.push_back(n - 1);
-  auto result = at::cumprod(x_.unsqueeze(-1).expand(shape), -1);
+  auto result = at::cumprod(x_.unsqueeze(-1).expand_symint(shape), -1);
   // The row of ones
   shape.back() = 1LL;
-  auto ones =  result.new_ones(shape);
+  auto ones =  result.new_ones_symint(shape);
   return at::cat({std::move(ones), std::move(result)}, /*dim=*/ -1);
 }
 }}  // namespace at::native

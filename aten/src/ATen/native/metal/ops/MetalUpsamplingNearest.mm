@@ -18,11 +18,10 @@ namespace metal {
 Tensor upsample_nearest2d_vec(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
-    c10::optional<ArrayRef<double>> scale_factors,
-    bool round_with_scale_factor) {
+    c10::optional<ArrayRef<double>> scale_factors) {
   TORCH_CHECK(input.is_metal());
   auto osize =
-      upsample::compute_output_size(input.sizes(), output_size, scale_factors, round_with_scale_factor);
+      upsample::compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = upsample::get_scale_value(scale_factors, 0);
   auto scale_w = upsample::get_scale_value(scale_factors, 1);
   int64_t output_height = osize[0];

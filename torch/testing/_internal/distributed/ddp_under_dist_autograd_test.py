@@ -251,7 +251,7 @@ class Trainer:
             else:
                 input_batches = batches
 
-        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.suppress():
+        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.nullcontext():
             for b in input_batches:
                 with dist_autograd.context() as context_id:
                     output = self.hybrid_module.forward(b)

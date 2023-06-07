@@ -1,21 +1,14 @@
 import operator
 import typing
 from contextlib import nullcontext
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from functorch.experimental import control_flow
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._export.pass_infra.node_metadata import NodeMetadata
+from torch._export.pass_infra.proxy_value import ProxyValue
 from torch._subclasses import FakeTensor, UnsupportedFakeTensorException
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import traceback as fx_traceback
@@ -25,9 +18,6 @@ from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
 
-from torch._export.pass_infra.proxy_value import ProxyValue
-from torch._export.pass_infra.node_metadata import NodeMetadata
-
 
 __all__ = ["ExportPassBase"]
 
@@ -35,28 +25,11 @@ __all__ = ["ExportPassBase"]
 Argument = Any
 Value = Any
 Fn = Callable[..., Any]
+PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
 
 class ExportPassBaseError(RuntimeError):
     pass
-
-
-def make_inline_interpreter(
-    parent: Type[torch.fx.Interpreter],
-) -> Type[torch.fx.Interpreter]:
-    class InlineInterpreter(parent):  # type: ignore[valid-type, misc]
-        def call_function(self, target, args, kwargs):
-            if target == torch.ops.cond:
-                pred, true, false, params = args
-                return InlineInterpreter(true).run(*params)
-            elif target == torch.ops.map:
-                f, xs, *params = args
-                sample_out = InlineInterpreter(f).run(xs[0], *params)
-                return sample_out.new_empty([xs.shape[0], *sample_out.shape])
-            else:
-                return super().call_function(target, args, kwargs)
-
-    return typing.cast(Type[torch.fx.Interpreter], InlineInterpreter)
 
 
 class ExportTracer(PythonKeyTracer):
@@ -102,7 +75,7 @@ class ExportTracer(PythonKeyTracer):
         # propagate the fake tensor or sym nodes
         def make_val(
             x: Argument,
-        ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, None]:
+        ) -> Union[FakeTensor, torch.SymInt, torch.SymFloat, torch.SymBool, int, None]:
             if isinstance(x, FakeTensor):
                 return x
             elif isinstance(x, torch.Tensor):
@@ -122,7 +95,7 @@ class ExportTracer(PythonKeyTracer):
                     )
                     fake_tensor = None
                 return fake_tensor
-            elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            elif isinstance(x, (torch.SymInt, torch.SymFloat, torch.SymBool, int)):
                 return x
             else:
                 return None
@@ -156,14 +129,6 @@ class ExportPassBase(PassBase):
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
     """
-
-    def get_valid_dialects(self) -> List[Type]:
-        """
-        Returns a list of valid dialects (operator namespace modules) that this
-        pass can run under. Returning an empty list implies this pass can run in
-        any dialect.
-        """
-        return []
 
     class ExportInterpreter(fx.Interpreter):
         """
@@ -264,12 +229,11 @@ class ExportPassBase(PassBase):
         args: Tuple[Argument, ...],
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
-        interpreter: torch.fx.Interpreter,
     ) -> ProxyValue:
         args_data, kwargs_data = pytree.tree_map_only(
             ProxyValue, lambda x: x.data, (args, kwargs)
         )
-        res_data = getattr(interpreter, kind)(target, args_data, kwargs_data)
+        res_data = getattr(self.interpreter, kind)(target, args_data, kwargs_data)
         args_proxy, kwargs_proxy = pytree.tree_map_only(
             ProxyValue, lambda x: x.proxy, (args, kwargs)
         )
@@ -328,14 +292,7 @@ class ExportPassBase(PassBase):
         kwargs: Dict[str, Argument],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        op_dialect = getattr(torch.ops, str(op).split('.')[0])
-        valid_dialects = self.get_valid_dialects()
-        if len(valid_dialects) != 0 and op_dialect not in valid_dialects:
-            raise ExportPassBaseError(f"Expecting op of dialects: {valid_dialects}, got: {op}")
-
-        return self._fx(
-            "call_function", op, args, kwargs, meta, self.interpreter,
-        )
+        return self._fx("call_function", op, args, kwargs, meta)
 
     def call_sym(
         self,
@@ -343,7 +300,7 @@ class ExportPassBase(PassBase):
         args: Tuple[Argument, ...],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        return self._fx("call_function", target, args, {}, meta, self.interpreter)
+        return self._fx("call_function", target, args, {}, meta)
 
     def call_cond(
         self,
@@ -363,7 +320,6 @@ class ExportPassBase(PassBase):
             (pred, true_branch.graph_module, false_branch.graph_module, inputs),
             {},
             meta,
-            make_inline_interpreter(self.interpreter)(),
         )
 
     def call_map(
@@ -381,18 +337,15 @@ class ExportPassBase(PassBase):
             (f_branch.graph_module, xs, *args),
             {},
             meta,
-            make_inline_interpreter(self.interpreter)(),
         )
 
     def call_getitem(
         self, value: ProxyValue, key: int, meta: NodeMetadata
     ) -> ProxyValue:
-        return self._fx(
-            "call_function", operator.getitem, (value, key), {}, meta, self.interpreter
-        )
+        return self._fx("call_function", operator.getitem, (value, key), {}, meta)
 
     def output(self, results: List[Argument], meta: NodeMetadata) -> ProxyValue:
-        return self._fx("output", "output", (results,), {}, meta, self.interpreter)
+        return self._fx("output", "output", (results,), {}, meta)
 
     def call_submodule(
         self, graph_module: fx.GraphModule, inputs: Tuple[Argument, ...]
@@ -407,7 +360,6 @@ class ExportPassBase(PassBase):
         with fx_traceback.preserve_node_meta():
             interpreter.run(*inputs_data)
 
-        # TODO(angelayi): Update this with the exported graph module class
         new_graph_module = torch.fx.GraphModule(self.tracer.root, self.tracer.graph)
 
         self.tracer = prev_tracer
@@ -444,10 +396,4 @@ class ExportPassBase(PassBase):
         with fake_tensor_mode, dispatcher_mode:  # type: ignore[assignment, union-attr]
             result = self.call_submodule(graph_module, tuple(inputs))
 
-        # TODO(angelayi): Update this with what we decide to do for metadata in
-        # the exported graph module
-        # new_graph_module = result.graph_module
-        # new_graph_module.in_spec = graph_module.in_spec
-        # new_graph_module.out_spec = graph_module.out_spec
-        # new_graph_module.args = graph_module.args
         return result

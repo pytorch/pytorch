@@ -282,7 +282,7 @@ QuantFusionInfo getObservedQParamOpFusionInfo(
 
 } // namespace
 
-std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {
+static std::vector<QuantFusionInfo> quant_fusion_pattern_and_replacements() {
   // aten::conv1d
   std::string conv1d = R"(
 graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %padding, %dilation, %groups):
@@ -839,37 +839,25 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
       "aten::mean", {"%dim", "%keepdim", "%out"});
 
   auto upsample_nearest1d_vec = getInputTensorQParamOpFusionInfo(
-      "aten::upsample_nearest1d",
-      {"%output_size", "%scale_factors", "%round_with_scale_factor"});
+      "aten::upsample_nearest1d", {"%output_size", "%scale_factors"});
 
   auto upsample_nearest2d_vec = getInputTensorQParamOpFusionInfo(
-      "aten::upsample_nearest2d",
-      {"%output_size", "%scale_factors", "%round_with_scale_factor"});
+      "aten::upsample_nearest2d", {"%output_size", "%scale_factors"});
 
   auto upsample_nearest3d_vec = getInputTensorQParamOpFusionInfo(
-      "aten::upsample_nearest3d",
-      {"%output_size", "%scale_factors", "%round_with_scale_factor"});
+      "aten::upsample_nearest3d", {"%output_size", "%scale_factors"});
 
   auto upsample_linear1d_vec = getInputTensorQParamOpFusionInfo(
       "aten::upsample_linear1d",
-      {"%output_size",
-       "%align_corners",
-       "%scale_factors",
-       "%round_with_scale_factor"});
+      {"%output_size", "%align_corners", "%scale_factors"});
 
   auto upsample_bilinear2d_vec = getInputTensorQParamOpFusionInfo(
       "aten::upsample_bilinear2d",
-      {"%output_size",
-       "%align_corners",
-       "%scale_factors",
-       "%round_with_scale_factor"});
+      {"%output_size", "%align_corners", "%scale_factors"});
 
   auto upsample_trilinear3d_vec = getInputTensorQParamOpFusionInfo(
       "aten::upsample_trilinear3d",
-      {"%output_size",
-       "%align_corners",
-       "%scale_factors",
-       "%round_with_scale_factor"});
+      {"%output_size", "%align_corners", "%scale_factors"});
 
   auto upsample_nearest1d = getInputTensorQParamOpFusionInfo(
       "aten::upsample_nearest1d", {"%output_size", "%scales"});
@@ -1117,7 +1105,8 @@ graph(%packed_params, %a):
   };
 }
 
-std::vector<QuantFusionInfo> dynamic_quant_fusion_pattern_and_replacements() {
+static std::vector<QuantFusionInfo>
+dynamic_quant_fusion_pattern_and_replacements() {
   std::string linear_dynamic = R"(
 graph(%packed_params, %a, %reduce_range, %a_dtype):
         %a_scale : float, %a_zero_point : int = aten::_choose_qparams_per_tensor(%a, %reduce_range)
@@ -1154,7 +1143,7 @@ graph(%packed_params, %a):
   };
 }
 
-std::vector<QuantFusionInfo> linear_prepack_unpack_patterns() {
+static std::vector<QuantFusionInfo> linear_prepack_unpack_patterns() {
   std::string linear_with_quant = R"(
 graph(%a_dequant, %w_quant, %b):
         %w_dequant = aten::dequantize(%w_quant)
@@ -1190,7 +1179,7 @@ graph(%w, %a_dq, %b):
   };
 }
 
-std::vector<QuantFusionInfo> conv_prepack_unpack_patterns() {
+static std::vector<QuantFusionInfo> conv_prepack_unpack_patterns() {
   std::string conv1d_with_quant = R"(
 graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
         %w_dequant = aten::dequantize(%w_quant)
