@@ -1,7 +1,7 @@
 name: linux-aarch64-binary-build
 
 on:
-  workflow_call:
+  pull_request:
     inputs:
       build_name:
         required: true
