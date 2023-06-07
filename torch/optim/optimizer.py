@@ -76,6 +76,27 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
     return fused, foreach
 
 
+def _warn_step_no_param_with_grad(stacklevel=2):
+
+    def is_first_time():
+        if not hasattr(_warn_step_no_param_with_grad, 'has_warned'):
+            return True
+        else:
+            return not _warn_step_no_param_with_grad.__dict__['has_warned']
+
+    if is_first_time():
+        message = (
+            "None of the parameters had their gradients populated during optimizer.step(). "
+            "This could occur when the parameters that the optimizer was initialized "
+            "with have been swapped out of the model. For example, if calling "
+            "module.load_state_dict(assign=True)."
+        )
+        warnings.warn(message, UserWarning, stacklevel=stacklevel + 1)
+        _warn_step_no_param_with_grad.__dict__['has_warned'] = True
+
+def _reset_warn_step_no_param_with_grad():
+    _warn_step_no_param_with_grad.__dict__['has_warned'] = False
+
 # Common doc strings among optimizers
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use

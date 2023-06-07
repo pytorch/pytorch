@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _warn_step_no_param_with_grad)
 from torch._utils import is_compiling
 from typing import List, Optional
 
@@ -106,6 +106,7 @@ class ASGD(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
+        has_any_param_with_grad = False
         for group in self.param_groups:
             params_with_grad = []
             grads = []
@@ -115,6 +116,9 @@ class ASGD(Optimizer):
             state_steps = []
 
             self._init_group(group, params_with_grad, grads, mus, axs, etas, state_steps)
+
+            if len(params_with_grad) != 0:
+                has_any_param_with_grad = True
 
             asgd(
                 params_with_grad,
@@ -132,6 +136,9 @@ class ASGD(Optimizer):
                 maximize=group["maximize"],
                 differentiable=group["differentiable"],
             )
+
+        if not has_any_param_with_grad:
+            _warn_step_no_param_with_grad()
 
         return loss
 

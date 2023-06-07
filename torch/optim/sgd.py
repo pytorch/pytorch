@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, required, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _warn_step_no_param_with_grad)
 from typing import List, Optional
 
 __all__ = ['SGD', 'sgd']
@@ -65,12 +65,16 @@ class SGD(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
+        has_any_param_with_grad = False
         for group in self.param_groups:
             params_with_grad = []
             d_p_list = []
             momentum_buffer_list = []
 
             has_sparse_grad = self._init_group(group, params_with_grad, d_p_list, momentum_buffer_list)
+
+            if len(params_with_grad) != 0:
+                has_any_param_with_grad = True
 
             sgd(params_with_grad,
                 d_p_list,
@@ -88,6 +92,9 @@ class SGD(Optimizer):
             for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
                 state = self.state[p]
                 state['momentum_buffer'] = momentum_buffer
+
+        if not has_any_param_with_grad:
+            _warn_step_no_param_with_grad()
 
         return loss
 

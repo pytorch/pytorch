@@ -2593,22 +2593,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 return self.bn(self.fc1(input))
 
         net = MyModule()
-        state_dict = net.state_dict()
+        state_dict = net.state_dict(keep_vars=True)
 
         with torch.device('meta'):
             net_meta = MyModule()
 
-        with self.assertWarnsRegex(
-            expected_warning=UserWarning,
-            expected_regex="If using ``load_state_dict`` with ``assign=True``, "
-            "please make sure to initialize the optimizer or",
-        ):
-            net_meta.load_state_dict(state_dict, assign=True)
+        net_meta.load_state_dict(state_dict, assign=True)
 
         # Make sure parameters and persistent buffers were assigned
-        net_meta_state_dict = net_meta.state_dict()
+        net_meta_state_dict = net_meta.state_dict(keep_vars=True)
         for key in state_dict.keys():
-            self.assertTrue(state_dict[key].data_ptr() == net_meta_state_dict[key].data_ptr())
+            if isinstance(state_dict[key], torch.nn.Parameter):
+                self.assertTrue(state_dict[key].data_ptr() == net_meta_state_dict[key].data_ptr())
+            else:
+                self.assertTrue(state_dict[key] is net_meta_state_dict[key])
 
         # Make sure that ordering of parameters and buffers is preserved
         net_named_parameters = net.named_parameters()

@@ -1607,6 +1607,42 @@ class TestOptim(TestCase):
             opt.step(closure)
             self.assertEqual(old_param, param)
 
+    def test_step_warns_once_for_no_grads(self):
+        # not including LBFGS since it creates a zero-ed tensor in _gather_flat_grad
+        # if p.grad is None
+        optimizers = [
+            optim.Adadelta,
+            optim.AdamW,
+            optim.Adam,
+            optim.RAdam,
+            optim.NAdam,
+            optim.Adagrad,
+            optim.Adamax,
+            optim.RMSprop,
+            optim.SGD,
+            optim.SparseAdam,
+            optim.ASGD,
+        ]
+
+        class DummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(5, 3)
+
+            def forward(self, input):
+                return self.fc1(input)
+
+        for optimizer in optimizers:
+            m = DummyModel()
+            opt = optimizer(m.parameters(), lr=0.001)
+            new_state_dict = deepcopy(m.state_dict())
+            m.load_state_dict(new_state_dict, assign=True)
+            inp = torch.randn(4, 5)
+            out = m(inp)
+            out.sum().backward()
+            with self.assertWarnsRegex(UserWarning, "None of the parameters"):
+                opt.step()
+            optim._reset_warn_step_no_param_with_grad()
 
     def test_fused_optimizer_does_not_step_if_foundinf(self):
         if not torch.cuda.is_available():

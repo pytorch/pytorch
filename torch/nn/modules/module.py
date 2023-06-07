@@ -1897,9 +1897,8 @@ class Module:
         Subclasses can achieve class-specific backward compatible loading using
         the version number at `local_metadata.get("version", None)`.
         Additionally, :attr:`local_metadata` can also contain the key
-        `assign_to_params_buffers` that indicates whether keys that are meta
-        tensors in the module should be assigned their corresponding tensor
-        in the state_dict.
+        `assign_to_params_buffers` that indicates whether keys should be
+        assigned their corresponding tensor in the state_dict.
 
         .. note::
             :attr:`state_dict` is not the same object as the input
@@ -1961,11 +1960,10 @@ class Module:
                     with torch.no_grad():
                         if assign_to_params_buffers:
                             # Shape checks are already done above
-                            is_persistent_buffer = name in persistent_buffers
-                            if is_persistent_buffer:
-                                self.__setattr__(name, input_param)
+                            if isinstance(param, torch.nn.Parameter):
+                                setattr(self, name, torch.nn.Parameter(input_param))
                             else:
-                                self.__setattr__(name, torch.nn.Parameter(input_param))
+                                setattr(self, name, input_param)
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
@@ -2009,7 +2007,9 @@ class Module:
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
             assign (bool, optional): whether to assign items in the state
             dictionary to their corresponding keys in the module instead
-            of copying them inplace into the module's parameters and buffers.
+            of copying them inplace into the module's current parameters and buffers.
+            Warning: if ``assign=True`` is set, the optimizer must be created after
+            the call to ``module.load_state_dict()``.
             Default: ``False``
 
         Returns:
@@ -2022,11 +2022,6 @@ class Module:
             exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
             ``RuntimeError``.
         """
-        if assign:
-            warnings.warn("If using ``load_state_dict`` with ``assign=True``, "
-                          "please make sure to initialize the optimizer or anything that"
-                          "references module parameters and persistent buffers after"
-                          "``load_state_dict``.")
         if not isinstance(state_dict, Mapping):
             raise TypeError("Expected state_dict to be dict-like, got {}.".format(type(state_dict)))
 

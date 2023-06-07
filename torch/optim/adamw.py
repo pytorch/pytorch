@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
                         _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
-                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach)
+                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach, _warn_step_no_param_with_grad)
 from typing import List, Optional
 
 __all__ = ["AdamW", "adamw"]
@@ -148,6 +148,7 @@ class AdamW(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
+        has_any_param_with_grad = False
         for group in self.param_groups:
             params_with_grad = []
             grads = []
@@ -168,6 +169,9 @@ class AdamW(Optimizer):
                 max_exp_avg_sqs,
                 state_steps,
             )
+
+            if len(params_with_grad) != 0:
+                has_any_param_with_grad = True
 
             adamw(
                 params_with_grad,
@@ -190,6 +194,9 @@ class AdamW(Optimizer):
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
             )
+
+        if not has_any_param_with_grad:
+            _warn_step_no_param_with_grad()
 
         return loss
 

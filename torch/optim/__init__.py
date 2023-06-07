@@ -16,7 +16,7 @@ from .sgd import SGD
 from .radam import RAdam
 from .rprop import Rprop
 from .rmsprop import RMSprop
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _reset_warn_step_no_param_with_grad
 from .nadam import NAdam
 from .lbfgs import LBFGS
 from . import lr_scheduler
