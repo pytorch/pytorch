@@ -1291,6 +1291,25 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+
+    def test_bool_call(self):
+        const_fn = torch._dynamo.optimize(nopython=True)(lambda: torch.ops.aten.Bool(5))
+        const_fn()
+        tensor_fn0 = torch._dynamo.optimize(nopython=True)(
+            lambda: torch.ops.aten.Bool(torch.tensor(5))
+        )
+        tensor_fn0()
+        tensor_fn11 = torch._dynamo.optimize(nopython=True)(
+            lambda: torch.ops.aten.Bool(torch.tensor([[5]]))
+        )
+        tensor_fn11()
+        tensor_fn12 = torch._dynamo.optimize(nopython=True)(
+            lambda: torch.ops.aten.Bool(torch.tensor([[5, 6]]))
+        )
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            tensor_fn12()
+
+
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
         func_args_map = {

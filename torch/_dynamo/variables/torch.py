@@ -528,6 +528,14 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1, "Expected one arg (pg)"
             assert isinstance(args[0], ProcessGroupVariable)
             return ConstantVariable(self.value(args[0].as_python_constant()))
+        elif self.value == torch.ops.aten.Bool and len(args) == 1:
+            arg = args[0]
+            if isinstance(arg, ConstantVariable):
+                return ConstantVariable(self.value(arg.as_python_constant()))
+            elif isinstance(arg, TensorVariable):
+                if all(isinstance(dim, int) and dim == 1 for dim in arg.size):
+                    return ConstantVariable(self.value(arg.get_real_value().item()))
+            unimplemented(f"{self.value} called on unexpected arg: {arg}")
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -595,6 +603,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
                 if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")
+
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
