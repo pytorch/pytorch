@@ -1640,6 +1640,11 @@ def meta_complex(real, imag):
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
 
 
+@register_meta(aten.view.dtype)
+def view_dtype(self, dtype):
+    return utils.clone_preserve_strides(self).to(dtype)
+
+
 @register_meta(aten.vdot.default)
 def vdot(self, other):
     if not self.is_complex:
