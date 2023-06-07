@@ -316,16 +316,14 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     elif isinstance(group, dt.DeviceMesh):
         assert group.ndim == 1, "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         # TODO: it should run collective in the whole mesh instead of dim 0
-        rankset = group._dim_group_ranks[0]
+        tag, rankset = group._dim_group_infos[0]
         group_size = len(rankset)
-        tag = tag or group._dim_group_tags[0]
     elif isinstance(group, tuple):
         if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
             dmesh = group[0]
             dim = group[1]
-            rankset = dmesh._dim_group_ranks[dim]
+            tag, rankset = dmesh._dim_group_infos[dim]
             group_size = len(rankset)
-            tag = tag or dmesh._dim_group_tags[dim]
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
