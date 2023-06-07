@@ -4,6 +4,14 @@ from typing import List, Optional, Union
 
 __all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
 
+# TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
+# renamed-backend name for `privateuse1`, but the func will cause a
+# graph break in inductor test, so we use the global variable named
+# `_privateuse1_backend_name`. Once we solve the graph break, we need
+# to remove the variable and use the func named
+# `torch._C._get_privateuse1_backend_name()` instead.
+_privateuse1_backend_name = "privateuseone"
+
 def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     rename_privateuse1_backend(backend_name) -> None
@@ -77,7 +85,9 @@ def rename_privateuse1_backend(backend_name: str) -> None:
         # to implement torch.ones.
         >>> a = torch.ones(2, device="foo")
         """
-    return _rename_privateuse1_backend(backend_name)
+    _rename_privateuse1_backend(backend_name)
+    global _privateuse1_backend_name
+    _privateuse1_backend_name = backend_name
 
 
 def _check_register_once(module, attr):
@@ -85,7 +95,7 @@ def _check_register_once(module, attr):
         raise RuntimeError(f"The custom device module of {module} has already been registered with {attr}")
 
 
-def _normalization_device(custom_backend_name: str, device: Optional[Union[int, torch.device]] = None) -> int:
+def _normalization_device(custom_backend_name: str, device: Optional[Union[int, str, torch.device]] = None) -> int:
     def _get_current_device_index():
         _get_device_index = "current_device"
         if hasattr(torch, custom_backend_name) and \
@@ -96,8 +106,14 @@ def _normalization_device(custom_backend_name: str, device: Optional[Union[int, 
             return 0
 
     if device is None:
-        device_idx = _get_current_device_index()
-    elif isinstance(device, torch.device):
+        return _get_current_device_index()
+    # if isinstance(device, str), this means that the parameter passed in is in the string format "foo:0"
+    # convert str object to torch.device object, and then process it uniformly
+    elif isinstance(device, str):
+        device = torch.device(device)
+
+    # variable devcie can only be torch.device type or int type
+    if isinstance(device, torch.device):
         if device.type != custom_backend_name:
             raise RuntimeError(f"Invalid device, must be {custom_backend_name} device")
         elif device.index is None:

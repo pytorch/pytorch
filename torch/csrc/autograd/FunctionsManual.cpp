@@ -1523,6 +1523,54 @@ Tensor renorm_backward(
   return at::where(norm > maxnorm, grad_norm.to(grad.scalar_type()), grad);
 }
 
+Tensor renorm_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    const Scalar& p,
+    int64_t dim,
+    const Scalar& maxnorm) {
+  auto self_sizes = self_p.sizes();
+  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
+
+  at::DimVector reduce_dims(self_sizes.size());
+  std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
+  reduce_dims.erase(reduce_dims.begin() + dim);
+
+  // For cuda half, calculate norm in float precision then cast
+  // normalization factor to half
+  auto dtype = self_p.scalar_type();
+  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
+  Tensor norm = [&self_p, &p, &reduce_dims, acc_type, dtype]() {
+    if (acc_type != dtype) {
+      return at::linalg_vector_norm(
+          self_p,
+          p.toDouble(),
+          reduce_dims,
+          /*keepdim=*/true,
+          /*dtype=*/acc_type);
+    } else {
+      return at::linalg_vector_norm(
+          self_p,
+          p.toDouble(),
+          reduce_dims,
+          /*keepdim=*/true);
+    }
+  }();
+
+  auto double_maxnorm = maxnorm.toDouble();
+  auto invnorm = (norm + 1e-7).reciprocal();
+  auto factor = invnorm * double_maxnorm;
+
+  return where(
+      norm > double_maxnorm,
+      factor *
+          (self_t -
+           self_p * invnorm *
+               norm_jvp(
+                   self_p, self_t, p, norm, reduce_dims, /*keepdim=*/true)),
+      self_t);
+}
+
 Tensor repeat_backward(
     Tensor grad,
     c10::SymIntArrayRef repeats,
@@ -1925,8 +1973,8 @@ Tensor pinv_jvp(const Tensor& A, const Tensor& pinvA, const Tensor& dA) {
 
 Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
   at::NoTF32Guard disable_tf32;
-  auto m = A.size(-2);
-  auto n = A.size(-1);
+  auto m = A.sym_size(-2);
+  auto n = A.sym_size(-1);
   auto pinvAh = pinvA.mH();
   auto gradh = grad.mH();
   // optimization to produce matrices of the smallest dimension
@@ -6244,8 +6292,8 @@ Tensor linalg_lu_backward(
 
   // L.shape == (..., m, k)
   // U.shape == (..., k, n)
-  auto m = L.size(-2);
-  auto n = U.size(-1);
+  auto m = L.sym_size(-2);
+  auto n = U.sym_size(-1);
   auto k = std::min(m, n);
 
   if (m == n) {
@@ -6273,10 +6321,10 @@ Tensor linalg_lu_backward(
     // A1_grad = P L^{-H} [U1_grad + (L^H L_grad o 1_L - U_grad U^H o 1_U)
     // U1^{-H}) U^{-H}] A2_grad = P L^{-H}  U2_grad
     const auto get_U1 = [n, k](const Tensor& U) {
-      return n == k ? U : U.narrow(-1, 0, k);
+      return n == k ? U : U.narrow_symint(-1, 0, k);
     };
     const auto get_U2 = [n, k](const Tensor& U) {
-      return U.narrow(-1, k, n - k);
+      return U.narrow_symint(-1, k, n - k);
     };
 
     auto A_grad = L_grad.defined() ? L.mH().matmul(L_grad) : Tensor{};
@@ -6315,10 +6363,10 @@ Tensor linalg_lu_backward(
     // 1_L)]U^{-H} A2_grad = P  L2_grad U^{-H}
 
     const auto get_L1 = [m, k](const Tensor& L) {
-      return m == k ? L : L.narrow(-2, 0, k);
+      return m == k ? L : L.narrow_symint(-2, 0, k);
     };
     const auto get_L2 = [m, k](const Tensor& L) {
-      return L.narrow(-2, k, m - k);
+      return L.narrow_symint(-2, k, m - k);
     };
 
     auto A_grad = U_grad.defined() ? U_grad.matmul(U.mH()) : Tensor{};
@@ -6365,11 +6413,11 @@ Tensor lu_factor_ex_backward(
 
   // L.shape == (..., m, k)
   // U.shape == (..., k, n)
-  const auto m = LU.size(-2);
-  const auto n = LU.size(-1);
+  const auto m = LU.sym_size(-2);
+  const auto n = LU.sym_size(-1);
   const auto k = std::min(m, n);
-  const auto L_grad = grad.narrow(-1, 0, k);
-  const auto U_grad = grad.narrow(-2, 0, k);
+  const auto L_grad = grad.narrow_symint(-1, 0, k);
+  const auto U_grad = grad.narrow_symint(-2, 0, k);
   return linalg_lu_backward(
       /*L_grad=*/L_grad, /*U_grad=*/U_grad, P, L, U, pivot);
 }
