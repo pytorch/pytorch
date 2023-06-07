@@ -36,7 +36,7 @@ namespace jit {
 // %n =
 // prim::GetAttr[name="{prefix}.name1{...}.name(n-1)._packed_params"][%self]
 //
-void hoistConvPackedParams(
+static void hoistConvPackedParams(
     Module& rootModule,
     Node* getConvPackedParamsNode,
     const std::string& prefix,
