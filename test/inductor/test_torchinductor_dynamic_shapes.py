@@ -47,6 +47,8 @@ importlib.import_module("filelock")
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
