@@ -49,7 +49,11 @@ from torch.distributed.fsdp.api import (
 )
 from torch.distributed.utils import _replace_by_prefix
 
-from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
+from ._fsdp_extensions import (
+    _ext_chunk_tensor,
+    _ext_post_unflatten_transform,
+    _ext_pre_load_state_dict_transform,
+)
 from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
 
 
@@ -586,10 +590,10 @@ def _sharded_pre_load_state_dict_hook(
             "are flattened and sharded."
         )
 
-    tensors_to_flatten: List[torch.Tensor] = []
-    shared_param_fqns = [
-        fqn for fqn, _, _ in _shared_param_name_infos(module, fsdp_state)
-    ]
+    fqn_to_param_ext = {
+        t[0]: t[1]
+        for t in zip(handle.flat_param._fqns, handle.flat_param._param_extensions)
+    }
     loaded_shapes: List[torch.Size] = []
     device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
@@ -634,6 +638,10 @@ def _sharded_pre_load_state_dict_hook(
                 tensor, local_tensor, group=fsdp_state.process_group
             )
         tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
+        if fqn_to_param_ext.get(fqn) is not None:
+            ext = fqn_to_param_ext.get(fqn)
+            tensor = _ext_post_unflatten_transform(tensor, ext)
+
         state_dict[fqn_from_global_root] = tensor
 
     _enter_unshard_params_ctx(module, fsdp_state, writeback=True)
