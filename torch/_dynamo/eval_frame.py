@@ -7,7 +7,6 @@ import functools
 import inspect
 import logging
 import os
-import re
 import sys
 import textwrap
 import threading
@@ -145,7 +144,10 @@ class OptimizedModule(torch.nn.Module):
         return self._forward(*args, **kwargs)
 
     def __dir__(self):
-        return self._orig_mod.__dir__()
+        orig_mod_attrs = self._orig_mod.__dir__()
+        return orig_mod_attrs + [
+            attr for attr in super().__dir__() if attr not in orig_mod_attrs
+        ]
 
 
 def remove_from_cache(f):
@@ -986,14 +988,13 @@ def export(
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
+    # NB: This is mostly hitting the cache; Dynamo already converted these
+    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
     assert graph_captured_result is not None
     flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
-
-    # NB: This is mostly hitting the cache; Dynamo already converted these
-    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
 
     if aten_graph:
         memo: Dict[torch.Tensor, torch.Tensor] = {}
@@ -1058,14 +1059,6 @@ def export(
         if constraints
         else []
     )
-
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        # Inline constraints added by users correspond to unbacked symbols in shape_env,
-        new_graph.meta["inline_constraints"] = {
-            k: (v.lower, v.upper)
-            for k, v in shape_env.var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
@@ -1280,13 +1273,10 @@ class TorchPatcher:
             if opt in excluded_opts:
                 opt.step = disable(opt.step)
 
-            opt._cuda_graph_capture_health_check = disable(
-                opt._cuda_graph_capture_health_check
-            )
             opt.zero_grad = disable(opt.zero_grad)
-
-            if hasattr(opt, "_init_group"):
-                opt._init_group = disable(opt._init_group)
+            opt.state_dict = disable(opt.state_dict)
+            opt.load_state_dict = disable(opt.load_state_dict)
+            opt.add_param_group = disable(opt.add_param_group)
 
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
