@@ -1567,8 +1567,6 @@ inplace_symbolic_tensor_failures = {
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
     # decomp not implemented
     xfail('unique', ''),
-    # in-place has a different signature than out-of-place
-    xfail('uniform', ''),
 }
 
 # Copies inputs to inplace operations to avoid inplace modifications
