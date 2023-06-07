@@ -744,7 +744,7 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        _, path = write(cubin, repr(cubin), "cubin")
+        _, path = write(cubin, code_hash(repr(cubin)), "cubin")
         params["cubin_path"] = path
         cls.cache[key] = params
 
