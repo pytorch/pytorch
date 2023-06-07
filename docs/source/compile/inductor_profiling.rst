@@ -1,3 +1,5 @@
+.. _torchinductor-gpu-profiling:
+
 TorchInductor GPU Profiling
 ===========================
 
