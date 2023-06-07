@@ -125,7 +125,13 @@ def get_expr_range(expr, vars_ranges: dict):
                 for k, v in vars_ranges.items()
             },
         )
-        return ValueRanges(min_val, max_val)
+        # min_value may be greater than max_value, such as ModularIndexing(513*i2 + i3 + 262400, 512, 513),
+        # with vars_ranges is {i2: ValueRanges(lower=0, upper=256), i3: ValueRanges(lower=0, upper=513)}.
+        return (
+            ValueRanges(min_val, max_val)
+            if max_val < min_val
+            else ValueRanges(-math.inf, math.inf)
+        )
     else:
         # bail on optimizing, have not run into this yet
         return ValueRanges(-math.inf, math.inf)
