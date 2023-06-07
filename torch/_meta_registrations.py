@@ -1640,7 +1640,7 @@ def meta_complex(real, imag):
 
 @register_meta(aten.view.dtype)
 def view_dtype(self, dtype):
-    return self.new_empty(self.size(), dtype=dtype)
+    return utils.clone_preserve_strides(self).to(dtype)
 
 
 @register_meta(aten.vdot.default)
