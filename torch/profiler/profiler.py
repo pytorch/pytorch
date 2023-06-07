@@ -105,6 +105,7 @@ class _KinetoProfile:
         self.profiler = prof.profile(
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
+            use_mtia=(ProfilerActivity.MTIA in self.activities),
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,

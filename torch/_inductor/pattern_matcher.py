@@ -794,9 +794,7 @@ def is_mutation_op(node):
     elif node.op == "call_method":
         if _mutation_op_re.search(node.target):
             return True
-    if "out" in node.kwargs:
-        return True
-    return False
+    return node.kwargs.get("out") is not None
 
 
 def get_mutation_region_id(graph, node):

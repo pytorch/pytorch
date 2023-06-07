@@ -8835,8 +8835,10 @@
     CPU, CUDA: linalg_solve_triangular
     MPS: linalg_solve_triangular_mps
 
-- func: linalg_vander(Tensor x, *, int? N=None) -> Tensor
+- func: linalg_vander(Tensor x, *, SymInt? N=None) -> Tensor
   python_module: linalg
+  dispatch:
+    CompositeImplicitAutograd: linalg_vander_symint
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
