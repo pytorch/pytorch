@@ -3,12 +3,7 @@ import copy
 import math
 import operator
 import traceback
-<<<<<<< HEAD
 from collections import OrderedDict
-=======
-from collections import defaultdict
-from dataclasses import dataclass
->>>>>>> a626513608e (Turn on add_runtime_assertion by default)
 from functools import partial
 from typing import Dict, List, NamedTuple
 
