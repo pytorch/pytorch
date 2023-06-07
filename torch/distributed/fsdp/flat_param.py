@@ -1287,11 +1287,21 @@ class FlatParamHandle:
             padded_unsharded_flat_param.numel() == expected_numel,
             f"Expects {expected_numel} numel but got {padded_unsharded_flat_param.numel()}",
         )
-        dist.all_gather_into_tensor(
-            padded_unsharded_flat_param,
-            sharded_flat_param,
-            self.process_group,
-        )
+        if sharded_flat_param.is_cpu:
+            tensor_list = list(
+                torch.chunk(
+                    padded_unsharded_flat_param, dist.get_world_size(self.process_group)
+                )
+            )
+            work = dist.all_gather(
+                tensor_list, sharded_flat_param, group=self.process_group
+            )
+        else:
+            dist.all_gather_into_tensor(
+                padded_unsharded_flat_param,
+                sharded_flat_param,
+                self.process_group,
+            )
         return padded_unsharded_flat_param
 
     def _use_unsharded_flat_param(
