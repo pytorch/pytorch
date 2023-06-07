@@ -55,5 +55,8 @@ def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
 
 
 def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.cuda.Stream) -> None:
+    # FIXME record_stream doesn't work with non-cuda tensors
+    if not tensor.is_cuda:
+        return
     with no_dispatch():
         tensor.record_stream(cast(torch._C.Stream, stream))
