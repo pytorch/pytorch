@@ -203,6 +203,7 @@ def export(
                 export_graph_signature,
                 flat_args,
             )
+            assert orig_out_spec is not None
             exported_program = ExportedProgram(
                 gm,
                 gm.graph,
