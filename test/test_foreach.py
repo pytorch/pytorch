@@ -922,29 +922,6 @@ class TestForeach(TestCase):
         if not op.supports_forward_ad:
             self.skipTest("forward AD not supported")
 
-        def check_sample_eligibility(op, sample, dtype):
-            if op.name == "_foreach_sub" and (
-                # ScalarList having a bool or Scalar of bool
-                (
-                    isinstance(sample.args[0], list)
-                    and any(isinstance(a, bool) for a in sample.args[0])
-                ) or isinstance(sample.args[0], bool)
-            ):
-                return False, _BOOL_SUB_ERR_MSG
-            rhs_arg_has_complex_number = sample.args and ((
-                isinstance(sample.args[0], list)
-                and any(isinstance(a, complex) for a in sample.args[0])
-            ) or (
-                isinstance(sample.args[0], complex)
-            ))
-            if op.name in ("_foreach_clamp_max", "_foreach_clamp_min") and rhs_arg_has_complex_number:
-                return False, "clamp is not supported for complex types"
-            # Wit this the result will be complex128, so skip.
-            if rhs_arg_has_complex_number and dtype == torch.float64:
-                return False, ""
-
-            return True, ""
-
         # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
         value_range = {"low": 0.5, "high": 1.0} if dtype == torch.float64 else {}
         for sample in op.sample_inputs(
@@ -958,7 +935,7 @@ class TestForeach(TestCase):
                 kwargs = {"alpha": sample.kwargs["alpha"]} if "alpha" in sample.kwargs else {}
                 return op.method_variant(tensorlist, *sample.args, **kwargs)
 
-            working_sample, err_msg_pattern = check_sample_eligibility(op, sample, dtype)
+            working_sample, err_msg_pattern = check_forward_mode_AD_sample(op, sample, dtype, False)
             if not working_sample:
                 if not err_msg_pattern:
                     # lhs of float64 and rhs of complex.
@@ -992,36 +969,6 @@ class TestForeach(TestCase):
         if not op.supports_forward_ad:
             self.skipTest("forward AD not supported")
 
-        # note(crcrpar): The combinations below are failing in its forward path,
-        # which is before forward-mode AD happens. This function gates the combinations where
-        # - subtraction with Scalar/ScalarList of boolean value:
-        # - combinations where the in-place op in questions tries to write out complex result
-        #   into float storage (= `self`)
-        def check_sample_eligibility(op, sample, dtype):
-            if (
-                op.name == "_foreach_sub"
-                and (
-                    (isinstance(sample.args[0], list) and any(isinstance(a, bool) for a in sample.args[0]))
-                    or isinstance(sample.args[0], bool)
-                )
-            ):
-                return False, _BOOL_SUB_ERR_MSG
-            rhs_arg_has_complex_number = sample.args and ((
-                isinstance(sample.args[0], list)
-                and any(isinstance(a, complex) for a in sample.args[0])
-            ) or (
-                isinstance(sample.args[0], complex)
-            ))
-            if dtype == torch.float64 and rhs_arg_has_complex_number:
-                if op.name in ("_foreach_add", "_foreach_sub", "_foreach_mul", "_foreach_div"):
-                    return False, "result type ComplexDouble can't be cast to the desired output type Double"
-                if op.name in ("_foreach_clamp_max", "_foreach_clamp_min"):
-                    return False, "clamp is not supported for complex types"
-                if op.name == "_foreach_pow":
-                    return False, "Found dtype Double but expected ComplexDouble"
-
-            return True, ""
-
         for sample in op.sample_inputs(
             device, dtype, requires_grad=True, num_input_tensors=[5], same_size=True,
         ):
@@ -1032,7 +979,7 @@ class TestForeach(TestCase):
                 op.inplace_variant(tuple(t.clone() for t in tensorlist), *sample.args, **kwargs)
                 return tensorlist
 
-            working_sample, err_msg_pattern = check_sample_eligibility(op, sample, dtype)
+            working_sample, err_msg_pattern = check_forward_mode_AD_sample(op, sample, dtype, True)
             if not working_sample:
                 with self.assertRaisesRegex(RuntimeError, re.escape(err_msg_pattern)):
                     gradcheck(
@@ -1082,6 +1029,38 @@ class TestForeach(TestCase):
                 self.assertEquals(l2[i], list2[index])
                 self.assertEquals(l3[i], list3[index])
         self.assertEquals(num_tensors_seen, 2 * num_tensors_per_list)
+
+
+# TODO(crcrpar): Hide this inside torch/testing/_internal.
+# would end up adding another layer to `foreach_inputs_sample_func.__call__`
+# so that we can use this function as something like the first argument of `filter` function.
+# Even after moving this function to testing, I personally think it'd be better to check the error message.
+def check_forward_mode_AD_sample(op, sample, dtype, is_inplace):
+    if (
+        op.name == "_foreach_sub"
+        and (
+            (isinstance(sample.args[0], list) and any(isinstance(a, bool) for a in sample.args[0]))
+            or isinstance(sample.args[0], bool)
+        )
+    ):
+        return False, _BOOL_SUB_ERR_MSG
+    rhs_arg_has_complex_number = sample.args and ((
+        isinstance(sample.args[0], list)
+        and any(isinstance(a, complex) for a in sample.args[0])
+    ) or (
+        isinstance(sample.args[0], complex)
+    ))
+    if rhs_arg_has_complex_number and dtype == torch.float64:
+        if op.name in ("_foreach_clamp_max", "_foreach_clamp_min"):
+            return False, "clamp is not supported for complex types"
+        if not is_inplace:
+            return False, ""
+        else:
+            if op.name == "_foreach_pow":
+                return False, "Found dtype Double but expected ComplexDouble"
+            if op.name in ("_foreach_add", "_foreach_sub", "_foreach_mul", "_foreach_div"):
+                return False, "result type ComplexDouble can't be cast to the desired output type Double"
+    return True, ""
 
 
 instantiate_device_type_tests(TestForeach, globals())
