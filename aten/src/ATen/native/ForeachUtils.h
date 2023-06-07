@@ -41,10 +41,19 @@ TORCH_API void check_foreach_api_restrictions(
   TORCH_CHECK(
       tensors.size() == scalars.size(),
       "Tensor list must have same number of elements as scalar list.");
+}
 
-TORCH_API void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
+TORCH_API void check_foreach_api_restrictions(
+    TensorList tensors1,
+    TensorList tensors2) {
   TORCH_CHECK(!tensors1.empty(), "Tensor list must have at least one tensor.");
+  TORCH_CHECK(!tensors2.empty(), "Tensor list must have at least one tensor.");
+  TORCH_CHECK(
+      tensors1.size() == tensors2.size(),
       "Tensor lists must have the same number of tensors, got ",
+      tensors1.size(),
+      " and ",
+      tensors2.size());
 }
 
 TORCH_API void check_foreach_api_restrictions(
@@ -71,8 +80,12 @@ TORCH_API void check_foreach_api_restrictions(
 TORCH_API void check_foreach_api_restrictions(
     TensorList tensors1,
     TensorList tensors2,
+    TensorList tensors3,
     ArrayRef<Scalar> scalars) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
+  TORCH_CHECK(
+      tensors1.size() == scalars.size(),
+      "Tensor list must have same number of elements as scalar list, got ",
       tensors1.size(),
       " and ",
       scalars.size());
@@ -187,7 +200,7 @@ TORCH_API std::vector<c10::Scalar> convert_tensor_to_scalar_list(
   return scalarList;
 }
 
-bool can_use_fast_route(
+TORCH_API bool can_use_fast_route(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
     bool does_op_promote_integer_inputs_to_float = false) {
@@ -195,7 +208,7 @@ bool can_use_fast_route(
       tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }
 
-bool can_use_fast_route(
+TORCH_API bool can_use_fast_route(
     TensorList tensors1,
     TensorList tensors2,
     bool does_op_promote_integer_inputs_to_float = false) {
