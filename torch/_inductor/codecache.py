@@ -24,7 +24,7 @@ from ctypes import cdll
 from functools import partial
 from threading import Thread
 from time import sleep, time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Union
 
 import torch
 
@@ -72,13 +72,6 @@ def cache_dir():
         cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
-
-
-@functools.lru_cache(None)
-def cubin_cache_dir():
-    cubin_dir = os.path.join(cache_dir(), "cubin")
-    os.makedirs(cubin_dir, exist_ok=True)
-    return cubin_dir
 
 
 def cpp_wrapper_cache_dir(name):
@@ -256,28 +249,30 @@ def code_hash(code):
     )
 
 
-def get_code_path(source_code, ext, extra):
+def get_code_path(source_code: Union[str, bytes], ext: str, extra: str, binary=False):
+    if binary:
+        source_code = repr(source_code)
     basename = code_hash(source_code + extra)
     subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{ext}")
     return extra + basename, subdir, path
 
 
-def write(source_code, ext, extra=""):
-    basename, subdir, path = get_code_path(source_code, ext, extra)
+def write(source_code: Union[str, bytes], ext: str, extra="", binary=False):
+    basename, subdir, path = get_code_path(source_code, ext, extra, binary)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
-        write_atomic(path, source_code)
+        write_atomic(path, source_code, binary)
     return basename, path
 
 
-def write_atomic(path: str, source_code: str):
+def write_atomic(path: str, source_code: Union[str, bytes], binary=False):
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
     path = pathlib.Path(path)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
-    with tmp_path.open("w") as f:
+    with tmp_path.open("wb" if binary else "w") as f:
         f.write(source_code)
 
     tmp_path.rename(path)
@@ -630,16 +625,9 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        from filelock import FileLock
-
-        cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
-        params["cubin_path"] = cubin_path
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            cls.cache[key] = params
-            with open(cubin_path, "wb") as f:
-                f.write(cubin)
+        _, path = write(cubin, "cubin", "", binary=True)
+        params["cubin_path"] = path
+        cls.cache[key] = params
 
     @classmethod
     def get(cls, key):
