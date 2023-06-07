@@ -231,7 +231,7 @@ def _fx_args_to_torch_args(
                 )
         elif isinstance(arg, Sequence):
             wrapped_args.append(_fx_args_to_torch_args(arg))
-        elif isinstance(arg, (int, float, torch.dtype)):
+        elif isinstance(arg, (int, float, torch.dtype)) or arg is None:
             wrapped_args.append(arg)
         else:
             raise ValueError(

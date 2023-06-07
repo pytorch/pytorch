@@ -167,6 +167,77 @@ class TestLayoutOptim(TestCase):
     def test_training_acc(self):
         self.verify_accuracy_for_train(Model2Conv)
 
+    def test_mutate_view(self):
+        """
+        The GraphModule passed to GraphLowering init method is like:
+        https://gist.github.com/shunting314/07228313fd017e2267101ff32edc6d64
+
+        It shows that we will call copy_ to update the argument in the end. This
+        guarantees the correctnesss.
+        """
+
+        @torch.compile
+        def f(x):
+            y = x.view(3, 2)
+            y.mul_(2)
+
+        x = torch.ones(2, 3).cuda()
+        f(x)
+        self.assertTrue(torch.equal(x, torch.ones(2, 3).cuda() * 2))
+
+    def test_mutate_base(self):
+        """
+        The GraphModule passed to GraphLowering init method is like:
+        https://gist.github.com/shunting314/fd60fe11d1f844c6db76aba7b06811bc
+
+        It shows that the output of the graph is the mul node which contains
+        the update we applied to the base tensor.
+        """
+
+        @torch.compile
+        def f(x):
+            y = x.view(3, 2)
+            x.mul_(2)
+            return y
+
+        x = torch.ones(2, 3).cuda()
+        y = f(x)
+        self.assertTrue(torch.equal(y, torch.ones(3, 2).cuda() * 2))
+
+    def test_mutate_base_for_conv_output(self):
+        class Model(nn.Module):
+            def __init__(self, manual_graph_break=False):
+                super().__init__()
+                self.conv = nn.Conv2d(3, 512, kernel_size=3, stride=2, bias=False)
+
+            def forward(self, x):
+                x = self.conv(x)
+                y = x.view(-1)
+                x.mul_(2)
+                return y
+
+            def get_example_inputs(self):
+                return (torch.rand(2, 3, 16, 16),)
+
+        self.verify_accuracy_for_infer(Model)
+
+    def test_mutate_view_for_conv_output(self):
+        class Model(nn.Module):
+            def __init__(self, manual_graph_break=False):
+                super().__init__()
+                self.conv = nn.Conv2d(3, 512, kernel_size=3, stride=2, bias=False)
+
+            def forward(self, x):
+                x = self.conv(x)
+                y = x.view(-1)
+                y.mul_(2)
+                return x
+
+            def get_example_inputs(self):
+                return (torch.rand(2, 3, 16, 16),)
+
+        self.verify_accuracy_for_infer(Model)
+
 
 if __name__ == "__main__":
     if HAS_CUDA and not TEST_WITH_ROCM:
