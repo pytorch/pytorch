@@ -205,7 +205,6 @@ class TorchVariable(VariableTracker):
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
-        constant_args = True
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value in config.constant_functions:
