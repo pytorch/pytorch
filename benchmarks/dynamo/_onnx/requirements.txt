@@ -1,0 +1,6 @@
+flatbuffers
+coloredlogs
+beartype
+numpy==1.21.6
+# Install pycocotools that otherwise fails in 'build repos' step.
+pycocotools

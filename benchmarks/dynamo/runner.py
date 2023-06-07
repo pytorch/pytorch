@@ -91,6 +91,8 @@ TABLE = {
         "inductor_max_autotune_no_cudagraphs": (
             "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
         ),
+        "onnx": "--inference -n5 --onnx",  # TODO: Increase number after '-n' to increase perf test reliability.
+        "dynamo-onnx": "--inference -n5 --dynamo-onnx",  # TODO: Same with '-n'
     },
 }
 
