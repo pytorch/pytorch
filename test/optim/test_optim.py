@@ -1640,7 +1640,8 @@ class TestOptim(TestCase):
             inp = torch.randn(4, 5)
             out = m(inp)
             out.sum().backward()
-            with self.assertWarnsRegex(UserWarning, "None of the parameters"):
+            with self.assertWarnsRegex(UserWarning,
+                                       "None of the parameters had their gradients populated during optimizer.step"):
                 opt.step()
             optim._reset_warn_step_no_param_with_grad()
 

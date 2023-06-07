@@ -79,10 +79,8 @@ def _default_to_fused_or_foreach(params: List[torch.Tensor],
 def _warn_step_no_param_with_grad(stacklevel=2):
 
     def is_first_time():
-        if not hasattr(_warn_step_no_param_with_grad, 'has_warned'):
-            return True
-        else:
-            return not _warn_step_no_param_with_grad.__dict__['has_warned']
+        return (not hasattr(_warn_step_no_param_with_grad, 'has_warned') or
+                not _warn_step_no_param_with_grad.__dict__['has_warned'])
 
     if is_first_time():
         message = (
