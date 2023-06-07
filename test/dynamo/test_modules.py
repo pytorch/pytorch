@@ -1868,9 +1868,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
-    
+
     def test_no_graphbreak_builtin_equal(self):
-   
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1890,7 +1889,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                     else:
                         output = F.relu(output)
                 return output
-
 
         x = torch.randn(10, 10)
 
