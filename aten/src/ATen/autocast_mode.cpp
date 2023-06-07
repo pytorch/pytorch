@@ -248,7 +248,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL_CUDA(rnn_tanh_cell, lower_precision_fp)
   KERNEL_CUDA(rnn_relu_cell, lower_precision_fp)
   KERNEL_CUDA(_scaled_dot_product_flash_attention, lower_precision_fp)
-  KERNEL_CUDA(scaled_dot_product_attention, lower_precision_fp)
+  KERNEL_CUDA(_scaled_dot_product_efficient_attention, lower_precision_fp)
 
   // fp32
   KERNEL_CUDA(acos, fp32)
