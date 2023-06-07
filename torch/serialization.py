@@ -745,7 +745,7 @@ def load(
     pickle_module: Any = None,
     *,
     weights_only: bool = False,
-    _mmap: bool = False,
+    mmap: bool = None,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -855,6 +855,10 @@ def load(
         if pickle_module is None:
             pickle_module = pickle
 
+    # make flipping default BC-compatible
+    if mmap is None:
+        mmap = False
+
     _check_dill_version(pickle_module)
 
     if 'encoding' not in pickle_load_args.keys():
@@ -874,7 +878,7 @@ def load(
                                   " silence this warning)", UserWarning)
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
-                if _mmap:
+                if mmap:
                     if not isinstance(f, str):
                         raise ValueError("f must be a string filename in order to use mmap argument")
                     size = os.path.getsize(f)

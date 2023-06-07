@@ -3450,8 +3450,8 @@ class TestSerialization(TestCase, SerializationMixin):
         with TemporaryFileName() as f:
             state_dict = DummyModel().state_dict()
             torch.save(state_dict, f)
-            result = torch.load(f, _mmap=True, weights_only=weights_only)
-            result_non_mmap = torch.load(f, _mmap=False, weights_only=weights_only)
+            result = torch.load(f, mmap=True, weights_only=weights_only)
+            result_non_mmap = torch.load(f, mmap=False, weights_only=weights_only)
 
         model_mmap_state_dict = DummyModel()
         model_mmap_state_dict.load_state_dict(result)
@@ -3459,6 +3459,30 @@ class TestSerialization(TestCase, SerializationMixin):
         model_non_mmap_state_dict.load_state_dict(result_non_mmap)
         input = torch.randn(4, 3)
         self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_serialization_mmap_loading_with_map_location(self):
+        class DummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(3, 1024)
+                self.fc2 = torch.nn.Linear(1024, 5)
+
+            def forward(self, input):
+                return self.fc2(self.fc1(input))
+
+        # make sure mmap where tensors' location tags are not CPU does not crash
+        # zipfile will first be mmap-ed on CPU and storages are extracted using
+        # overall_storage[start_offset:end_offset] before running
+        # _{device}_deserialize, which moves the storage to device
+        with TemporaryFileName() as f:
+            with torch.device('cuda'):
+                m = DummyModel()
+            state_dict = m.state_dict()
+            torch.save(state_dict, f)
+            result = torch.load(f, mmap=True)
+            for k, v in result.items():
+                self.assertTrue(v.is_cuda)
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
