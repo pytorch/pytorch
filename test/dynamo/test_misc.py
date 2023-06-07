@@ -5363,6 +5363,18 @@ def fn():
 
         self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
 
+    def test_inline_dict_function(self):
+        @torch.compile
+        def fn(d, x, y):
+            if d[x] is torch.float32:
+                return y.cos()
+            else:
+                return y.sin()
+
+        dd = {bool: torch.float32, int: torch.int64}
+        self.assertEqual(fn(dd, bool, torch.ones(4)), torch.ones(4).cos())
+        self.assertEqual(fn(dd, int, torch.ones(4)), torch.ones(4).sin())
+
     def test_add_sizes(self):
         def func(x):
             y = x.size()
