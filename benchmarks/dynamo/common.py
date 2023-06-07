@@ -1927,7 +1927,7 @@ class BenchmarkRunner:
                 current_onnx_compiler == "torchscript"
                 or current_onnx_compiler == "dynamo"
             ):
-                from benchmarks.dynamo._onnx import patch
+                from _onnx import patch
 
                 (
                     correct_result,
