@@ -439,7 +439,7 @@ pip install -r requirements.txt
 * المنتديات: ناقش عمليات التنفيذ والبحث وما إلى ذلك https://discuss.pytorch.org
 * مشكلات GitHub: تقارير الأخطاء وطلبات الميزات ومشكلات التثبيت و RFCs والأفكار وما إلى ذلك.
 * اما Slack: يستضيف [PyTorch Slack](https://pytorch.slack.com/) جمهورًا أساسيًا من مستخدمي ومطوري PyTorch المعتدلين وذوي الخبرة للدردشة العامة والمناقشات عبر الإنترنت والتعاون وما إلى ذلك. إذا كنت مبتدئًا تبحث عن help ، الوسيط الأساسي هو [منتديات PyTorch](https://discuss.pytorch.org). إذا كنت بحاجة إلى دعوة Slack ، فيرجى ملء هذا النموذج: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* النشرة الإخبارية: No-No-No-No-No-No-No-No-ضجيج ، وهي رسالة إخبارية أحادية الاتجاه تحتوي على إعلانات مهمة حول PyTorch. يمكنك التسجيل هنا: https://eepurl.com/cbG0rv
+* النشرة الإخبارية: No-noise ، وهي رسالة إخبارية أحادية الاتجاه تحتوي على إعلانات مهمة حول PyTorch. يمكنك التسجيل هنا: https://eepurl.com/cbG0rv
 * صفحة الفيسبوك: إعلانات مهمة حول PyTorch. https://www.facebook.com/pytorch
 * للحصول على إرشادات العلامة التجارية ، يرجى زيارة موقعنا على الويب على [pytorch.org](https://pytorch.org/) 
 
