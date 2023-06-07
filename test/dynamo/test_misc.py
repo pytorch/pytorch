@@ -1306,7 +1306,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         tensor_fn12 = torch._dynamo.optimize(nopython=True)(
             lambda: torch.ops.aten.Bool(torch.tensor([[5, 6]]))
         )
-        with self.assertRaises(torch._dynamo.exc.Unsupported):
+        with self.assertRaises(RuntimeError):
             tensor_fn12()
 
 
