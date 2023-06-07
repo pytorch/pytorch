@@ -1060,6 +1060,17 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     supported_const_comparison_ops[op](object(), right.value), **options
                 )
             )
+        elif(
+            isinstance(left, NNModuleVariable)
+            and isinstance(right, NNModuleVariable)
+            and op in supported_const_comparison_ops
+        ):
+            self.push(
+                ConstantVariable(
+                    supported_const_comparison_ops[op](object(), right), **options
+                )
+            )
+            
         elif (
             left.is_python_constant()
             and right.is_python_constant()
