@@ -19,6 +19,7 @@ import sysconfig
 import tempfile
 import threading
 import types
+import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from copy import copy
@@ -28,7 +29,6 @@ from functools import partial
 from threading import Thread
 from time import sleep, time
 from typing import Any, Callable, Dict, List, Set, Union
-import weakref
 
 import torch
 
@@ -385,6 +385,7 @@ class CompiledFxGraph:
         else:
             return self.current_callable
 
+
 def _run_from_cache(compiled_graph: CompiledFxGraph, inputs):
     # We can't really serialize callables that may be C++/Triton/etc.,
     # so we serialize their disk cache location instead
@@ -396,7 +397,9 @@ def _run_from_cache(compiled_graph: CompiledFxGraph, inputs):
         compiled_graph.compiled_artifact = PyCodeCache.load_by_key_path(
             compiled_graph.cache_key,
             compiled_graph.artifact_path,
-            compiled_graph.cache_linemap if compiled_graph.cache_linemap is not None else (),
+            compiled_graph.cache_linemap
+            if compiled_graph.cache_linemap is not None
+            else (),
         ).call
 
     return compiled_graph.compiled_artifact(inputs)
