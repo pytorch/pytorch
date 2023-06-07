@@ -344,6 +344,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   c10::intrusive_ptr<Work> endCoalescing() override;
 
+  virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
+  initCoalescedWork(
+      const std::vector<c10::intrusive_ptr<Work>>& works,
+      int rank,
+      OpType opType);
+
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
@@ -490,12 +496,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType,
       const char* profilingTitle=nullptr,
       const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt);
-
-  virtual c10::intrusive_ptr<ProcessGroupNCCL::CoalescedWorkNCCL>
-  initCoalescedWork(
-      const std::vector<c10::intrusive_ptr<Work>>& works,
-      int rank,
-      OpType opType);
 
  private:
   // Helper that encapsulates work shared across all collective communication
