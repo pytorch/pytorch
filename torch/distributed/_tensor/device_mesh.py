@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import List, Optional, TYPE_CHECKING, Union
+from typing import List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -170,17 +170,17 @@ class DeviceMesh(object):
                     f"has mesh {other_mesh}!"
                 )
 
-        # group ranks/tags associated with each mesh dimension, each mesh dimension should
+        # group tag/ranks associated with each mesh dimension, each mesh dimension should
         # have one sub-group per rank
-        dim_group_ranks: List[List[int]] = []
-        dim_group_tags: List[str] = []
+        dim_group_infos: List[Tuple[str, List[int]]] = []
 
         if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size():
             # if the mesh is the same as world_pg, we just append the default
             # pg to the first dim groups, as new_group cannot have the exact
             # same ranks as world
-            dim_group_ranks.append(list(range(get_world_size())))
-            dim_group_tags.append(_get_group_tag(_get_default_group()))
+            dim_group_infos.append(
+                (_get_group_tag(_get_default_group()), list(range(get_world_size())))
+            )
         else:
             # create sub pgs base on the mesh argument specified
             for dim in range(self.mesh.ndim):
@@ -199,15 +199,15 @@ class DeviceMesh(object):
                     dim_group = new_group(ranks=subgroup_ranks)
                     # only add to dim_groups if the current rank in the subgroup
                     if self.get_rank() in subgroup_ranks:
-                        if len(dim_group_ranks) > dim:
+                        if len(dim_group_infos) > dim:
                             raise RuntimeError(
                                 f"Each device mesh dimension should get only one process group, but got {self.get_rank} "
                                 f"in {subgroup_ranks}!"
                             )
-                        dim_group_ranks.append(subgroup_ranks)
-                        dim_group_tags.append(_get_group_tag(dim_group))
-        self._dim_group_ranks = dim_group_ranks
-        self._dim_group_tags = dim_group_tags
+                        dim_group_infos.append(
+                            (_get_group_tag(dim_group), subgroup_ranks)
+                        )
+        self._dim_group_infos = dim_group_infos
 
     def __enter__(self) -> "DeviceMesh":
         # set this mesh as the current mesh in mesh env
@@ -235,19 +235,15 @@ class DeviceMesh(object):
     def get_dim_groups(
         self, mesh_dim: Optional[int] = None
     ) -> Union[ProcessGroup, List[ProcessGroup]]:
-        if not hasattr(self, "_dim_group_ranks"):
+        if not hasattr(self, "_dim_group_infos"):
             raise RuntimeError("DeviceMesh process groups not initialized!")
         if mesh_dim is not None:
-            return _find_pg_by_ranks_and_tag(
-                self._dim_group_tags[mesh_dim], self._dim_group_ranks[mesh_dim]
-            )
+            return _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
         else:
             dim_groups = []
             for mesh_dim in range(self.mesh.ndim):
                 dim_groups.append(
-                    _find_pg_by_ranks_and_tag(
-                        self._dim_group_tags[mesh_dim], self._dim_group_ranks[mesh_dim]
-                    )
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
                 )
             return dim_groups
 

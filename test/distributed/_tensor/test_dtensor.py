@@ -326,8 +326,11 @@ class DTensorTest(DTensorTestBase):
         local_tensor = torch.randn(3, 3)
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
         print(sharded_tensor)
-        print(sharded_tensor.__getstate__())
+        # print(f"sharded state: {sharded_tensor.__getstate__()}")
         buffer = io.BytesIO()
+        # import pickle
+        # with open('st.pt', 'w') as f:
+        #     pickle.dumps(sharded_tensor, f)
         torch.save(sharded_tensor, buffer)
 
 
