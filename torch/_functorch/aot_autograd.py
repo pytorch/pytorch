@@ -1087,6 +1087,7 @@ class AOTConfig:
     aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
     inference_compiler: Optional[Callable] = None
     enable_log: bool = True
+    max_seq_id: int = -1
 
 # This function takes in a tensor t, and returns one of t, t.view(), or t.clone().
 # When tracing the joint forward + backward, for any inputs in the graph that are mutated,
