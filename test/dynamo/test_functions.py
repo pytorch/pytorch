@@ -437,6 +437,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_get_autocast_gpu_dtype(x):
+        dtype = torch.get_autocast_gpu_dtype()
+        return x.type(dtype)
+
+    @make_test
     def test_is_complex(x):
         if torch.is_complex(x):
             return x + 1
