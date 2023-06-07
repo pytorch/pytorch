@@ -16448,6 +16448,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_renorm,
            error_inputs_func=error_inputs_renorm,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            skips=(
                # RuntimeError: Difference from float64 is larger with decomposition
                # linalg_vector_norm.default than original on output 0.
