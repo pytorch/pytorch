@@ -372,7 +372,8 @@ class CompiledFxGraph:
 
     def get_current_callable(self):
         if self.current_callable is None:
-            # This prevents a circular reference that prevents GC of the CompiledFxGraph
+            # This prevents a circular reference that makes CompiledFxGraph
+            # get stuck without getting garbage collected
             return functools.partial(_run_from_cache, weakref.proxy(self))
         else:
             return self.current_callable
