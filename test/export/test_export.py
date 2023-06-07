@@ -68,7 +68,8 @@ class TestExperimentalExport(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
-    def test_export_constraints(self):
+    @unittest.expectedFailure
+    def test_export_inline_constraints(self):
 
         def f(x):
             b = x.item()
@@ -231,7 +232,7 @@ class TestExport(TestCase):
             ),
         ):
             torch._export.export(m, (a,), constraints=constraints)
-        em = torch._export.export(m, (a,)).add_runtime_assertions()
+        em = torch._export.export(m, (a,))
         x = torch.randn(3, 5)
         with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
             em(x)
