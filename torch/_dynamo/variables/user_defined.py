@@ -502,9 +502,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
 
+        index = key.source if key.source is not None else key.as_python_constant()
         return VariableBuilder(
             tx,
-            ODictGetItemSource(self.source, key.as_python_constant()),
+            ODictGetItemSource(self.source, index),
         )(
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
         ).add_options(

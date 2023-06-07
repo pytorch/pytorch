@@ -399,10 +399,15 @@ class ODictGetItemSource(Source):
         assert self.base is not None
 
     def reconstruct(self, codegen):
+        index_inst = (
+            self.index.reconstruct(codegen)
+            if isinstance(self.index, Source)
+            else codegen.create_load_const(self.index)
+        )
         return [
             codegen._create_load_const(collections.OrderedDict.__getitem__),
             *self.base.reconstruct(codegen),
-            codegen.create_load_const(self.index),
+            *index_inst,
             *create_call_function(2, True),
         ]
 
@@ -413,6 +418,8 @@ class ODictGetItemSource(Source):
         if isinstance(self.index, type):
             rep = f'__load_module("{self.index.__module__}").{self.index.__qualname__}'
             return f"___odict_getitem({self.base.name()}, {rep})"
+        elif isinstance(self.index, Source):
+            return f"___odict_getitem({self.base.name()}, {self.index.name()})"
         else:
             return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
