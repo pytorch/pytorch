@@ -279,6 +279,9 @@ class triton:
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
 
+    # max autotune gemm with cublasLt
+    autotune_cublasLt = True
+
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
