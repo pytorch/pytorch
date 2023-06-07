@@ -3094,17 +3094,18 @@ else:
         self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
 
     @onlyCPU
-    def test_bfloat16_float_copy(self, device):
+    @dtypes(torch.bfloat16, torch.half)
+    def test_reduced_type_float_copy(self, device, dtype):
         for shape in [(20, 7), (249, 137), (1029, 917), (1, 7, 19, 17), (3, 77, 1091)]:
             input = torch.randn(shape, dtype=torch.float, device=device)
-            out1 = input.to(torch.bfloat16)
-            self.assertEqual(input, out1, atol=0, rtol=1e-2, exact_dtype=False)
+            out1 = input.to(dtype=dtype)
+            self.assertEqual(input, out1, atol=None, rtol=None, exact_dtype=False)
             out2 = out1.to(torch.float)
             self.assertEqual(out2, out1, atol=0, rtol=0, exact_dtype=False)
 
             input_s = input[..., ::2, :]
-            out1 = input_s.to(torch.bfloat16)
-            self.assertEqual(input_s, out1, atol=0, rtol=1e-2, exact_dtype=False)
+            out1 = input_s.to(dtype=dtype)
+            self.assertEqual(input_s, out1, atol=None, rtol=None, exact_dtype=False)
             out2 = out1.to(torch.float)
             self.assertEqual(out2, out1, atol=0, rtol=0, exact_dtype=False)
 
