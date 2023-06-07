@@ -342,6 +342,12 @@ class TestPaternMatcher(TestCase):
             b = torch.add(x, a)
             return b
 
+        def fn5(x, y):
+            a = torch.sin(x)
+            torch.add(y, 1, out=x)
+            b = torch.add(x, a)
+            return b
+
         args = [
             torch.randn(5, 5, device="cuda"),
             torch.randn(5, 5, device="cuda"),
@@ -350,7 +356,7 @@ class TestPaternMatcher(TestCase):
         with unittest.mock.patch(
             "torch._inductor.fx_passes.pre_grad.pattern_matcher_passes", [test_pass]
         ):
-            for fn in (fn0, fn1, fn2, fn3, fn4):
+            for fn in (fn0, fn1, fn2, fn3, fn4, fn5):
                 counter = 0
                 expected = fn(*copy.deepcopy(args))
                 actual = torch.compile(fn)(*copy.deepcopy(args))
