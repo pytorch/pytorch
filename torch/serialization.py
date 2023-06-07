@@ -796,8 +796,10 @@ def load(
         weights_only: Indicates whether unpickler should be restricted to
             loading only tensors, primitive types and dictionaries
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
-            This option has an effect if the object was saved with `torch.save(_use_new_zipfile_serialization=True)`
-            which is the default behavior for `torch.save`.
+            Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
+            are moved to the location that they were tagged with when saving, or specified by `map_location`. This
+            second step is a no-op if the final location is CPU. When the `mmap` flag is set, instead of copying the
+            tensor storages from disk to CPU memory in the first step, f is mmaped.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
@@ -900,6 +902,10 @@ def load(
                              pickle_module,
                              overall_storage=overall_storage,
                              **pickle_load_args)
+        if mmap:
+            raise RuntimeError("mmap can only be used with files saved with ",
+                               "`torch.save(_use_new_zipfile_serialization=True), "
+                               "please torch.save your checkpoint with this option in order to use mmap.")
         if weights_only:
             try:
                 return _legacy_load(opened_file, map_location, _weights_only_unpickler, **pickle_load_args)
@@ -1196,7 +1202,6 @@ class StorageType():
 
 def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall_storage=None, **pickle_load_args):
     restore_location = _get_restore_location(map_location)
-    mmap = overall_storage is not None
 
     loaded_storages = {}
 
@@ -1210,7 +1215,7 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
-        if mmap:
+        if overall_storage is not None:
             storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset:storage_offset + numel]
         else:
