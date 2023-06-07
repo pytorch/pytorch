@@ -42,7 +42,8 @@ class SelectiveBuilder:
 
     # ExecuTorch only. A dictionary of kernel tag -> list of (list of input
     # dtypes for tensor-like input args).
-    et_kernel_metadata: Dict[str, List[List[str]]]
+    # This is from selective.yaml
+    et_kernel_metadata: Dict[str, List[str]]
 
     # A set of all the custom torch bind classes used by the selected models
     # Stored as a set internally to remove duplicates proactively, but written
@@ -107,8 +108,8 @@ class SelectiveBuilder:
         for k, v in kernel_metadata_dict.items():
             kernel_metadata[str(k)] = [str(dtype) for dtype in v]
 
-        # TODO(T149265497): Need to parse the et kernel metadata
-        et_kernel_metadata: Dict[str, List[List[str]]] = {}
+        et_kernel_metadata = data.get("et_kernel_metadata", {})
+        assert isinstance(et_kernel_metadata, dict)
 
         custom_classes = data.get("custom_classes", [])
         assert isinstance(custom_classes, Iterable)
@@ -229,6 +230,18 @@ class SelectiveBuilder:
             and dtype in self.kernel_metadata[kernel_tag]
         )
 
+    def is_et_kernel_selected(self, op_name: str, kernel_key: str) -> bool:
+        if op_name not in self.et_kernel_metadata:
+            return False
+        # Don't compare the version for now
+        tensor_metadata = kernel_key.split("/")[1]
+
+        for model_kernel_keys in self.et_kernel_metadata[op_name]:
+            if tensor_metadata == model_kernel_keys.split("/")[1]:
+                return True
+
+        return False
+
     def to_dict(self) -> Dict[str, object]:
         ret: Dict[str, object] = {
             "include_all_non_op_selectives": self.include_all_non_op_selectives,
@@ -276,7 +289,7 @@ def combine_selective_builders(
     operators = merge_operator_dicts(lhs.operators, rhs.operators)
     kernel_metadata = merge_kernel_metadata(lhs.kernel_metadata, rhs.kernel_metadata)
     # TODO(T149265497): Need to parse the et kernel metadata
-    et_kernel_metadata: Dict[str, List[List[str]]] = {}
+    et_kernel_metadata: Dict[str, List[str]] = {}
     include_all_non_op_selectives = (
         lhs.include_all_non_op_selectives or rhs.include_all_non_op_selectives
     )
