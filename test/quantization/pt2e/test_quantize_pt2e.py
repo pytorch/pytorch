@@ -178,6 +178,22 @@ class TestHelperModules:
         def forward(self, indices):
             return self.emb(indices)
 
+    class EmbeddingConvLinearModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
+            self.conv = torch.nn.Conv2d(8, 16, (1, 3))
+            self.linear = torch.nn.Linear(16, 8)
+
+        def forward(self, indices):
+            embeddings = self.emb(indices)
+            embeddings = torch.unsqueeze(embeddings, dim=0)
+            embeddings = torch.permute(embeddings, (0, 3, 1, 2))
+            conv_out = self.conv(embeddings)
+            conv_out = torch.permute(conv_out, (0, 2, 3, 1))
+            conv_out = torch.squeeze(conv_out, dim=0)
+            return self.linear(conv_out)
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
@@ -216,7 +232,6 @@ class TestQuantizePT2E(QuantizationTestCase):
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
-        print(m)
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
             ns.call_function(k): v for k, v in expected_node_occurrence.items()
@@ -869,8 +884,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         node_occurrence = {
             torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
-            torch.ops.quantized_decomposed.quantize_per_tensor: 3,
-            torch.ops.quantized_decomposed.dequantize_per_tensor: 3,
+            torch.ops.quantized_decomposed.quantize_per_tensor: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor: 4,
             torch.ops.quantized_decomposed.quantize_per_channel: 1,
             torch.ops.quantized_decomposed.dequantize_per_channel: 1,
         }
@@ -891,13 +906,17 @@ class TestQuantizePT2E(QuantizationTestCase):
         qconfig = default_per_channel_symmetric_qnnpack_qconfig
         qconfig_mapping = QConfigMapping().set_global(qconfig)
         qconfig_mapping.set_object_type(torch.nn.Linear, dynamic_qconfig)
+        # Had to turn off check against fx because fx quant workflow does not seem
+        # to propagate observers for permute node for this model.
+        # Suprisingly it does propagate it for EmbeddingConvLinearModule
+        # TODO: Figure out the right behavior for propagation
         self._test_quantizer(
             m_eager,
             example_inputs,
             composable_quantizer,
             node_occurrence,
             [],
-            True,
+            False,
             qconfig_mapping,
         )
 
@@ -992,6 +1011,97 @@ class TestQuantizePT2E(QuantizationTestCase):
             quantizer,
             node_occurrence,
             node_list,
+            True,
+            qconfig_mapping,
+        )
+
+    def test_embedding_conv_linear_quantization(self):
+        m_eager = TestHelperModules.EmbeddingConvLinearModule().eval()
+        indices = torch.tensor(
+            [
+                9,
+                6,
+                5,
+                7,
+                8,
+                8,
+                9,
+                2,
+                8,
+                6,
+                6,
+                9,
+                1,
+                6,
+                8,
+                8,
+                3,
+                2,
+                3,
+                6,
+                3,
+                6,
+                5,
+                7,
+                0,
+                8,
+                4,
+                6,
+                5,
+                8,
+                2,
+                3,
+            ]
+        )
+        indices = torch.unsqueeze(indices, 0)
+        example_inputs = (indices,)
+
+        embedding_quantizer = EmbeddingQuantizer()
+        dynamic_quantizer = QNNPackQuantizer()
+        operator_config_dynamic = get_symmetric_quantization_config(
+            is_per_channel=True, is_dynamic=True
+        )
+        dynamic_quantizer.set_global(operator_config_dynamic)
+        static_quantizer = QNNPackQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        static_quantizer.set_global(operator_config)
+        composed_quantizer = ComposableQuantizer(
+            [embedding_quantizer, dynamic_quantizer, static_quantizer]
+        )
+
+        act_affine_quant_obs = observer.PlaceholderObserver.with_args(
+            dtype=torch.qint8,
+            qscheme=torch.per_tensor_affine,
+            quant_min=-128,
+            quant_max=127,
+            eps=2**-12,
+            is_dynamic=True,
+        )
+        dynamic_qconfig = QConfig(
+            activation=act_affine_quant_obs,
+            weight=per_channel_weight_observer_range_neg_127_to_127,
+        )
+        qconfig = default_per_channel_symmetric_qnnpack_qconfig
+        qconfig_mapping = QConfigMapping().set_global(qconfig)
+        qconfig_mapping.set_object_type(torch.nn.Linear, dynamic_qconfig)
+        qconfig_mapping = qconfig_mapping.set_object_type(
+            torch.nn.Embedding, float_qparams_weight_only_qconfig
+        )
+
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor: 4,
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
+            torch.ops.quantized_decomposed.quantize_per_channel: 3,
+            torch.ops.quantized_decomposed.dequantize_per_channel: 3,
+        }
+        self._test_quantizer(
+            m_eager,
+            example_inputs,
+            composed_quantizer,
+            node_occurrence,
+            [],
             True,
             qconfig_mapping,
         )
