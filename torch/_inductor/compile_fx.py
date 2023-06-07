@@ -368,8 +368,6 @@ def compile_fx_inner(
     return result
 
 
-@DebugContext.wrap
-@torch.utils._python_dispatch._disable_current_modes()
 def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
