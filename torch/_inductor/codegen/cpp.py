@@ -1468,15 +1468,29 @@ class CppVecKernel(CppKernel):
                 )
             else:
                 # Vertical reduction
-                store_line = f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
+                store_lines = [
+                    DeferredLine(
+                        name, f"{tmpvar_vec}.store({var} + {cexpr_index(index)});"
+                    )
+                ]
                 if out_dtype != dtype:
                     if out_dtype == torch.bfloat16 and dtype == torch.float:
-                        store_line = f"store_float_as_bf16({var} + {cexpr_index(index)}, {tmpvar_vec});"
+                        bf16_tmpvar_vec = f"bf16_{tmpvar_vec}"
+                        store_lines = [
+                            DeferredLine(
+                                name,
+                                f"auto {bf16_tmpvar_vec} = cvt_fp32_to_bf16({tmpvar_vec});",
+                            ),
+                            DeferredLine(
+                                name,
+                                f"{bf16_tmpvar_vec}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
+                            ),
+                        ]
                     else:
                         raise AssertionError(
                             f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
                         )
-                self.reduction_suffix.writeline(DeferredLine(name, store_line))
+                self.reduction_suffix.writelines(store_lines)
 
         self.cse.store_cache[name] = tmpvar
 
