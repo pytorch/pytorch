@@ -1527,6 +1527,7 @@ try:
 
             # Math module.
             math.ceil: lift(Z3Ops.ceil),
+            math.floor: lift(Z3Ops.floor),
 
             # Torch module.
             torch.sym_float: lift(Z3Ops.to_real),
@@ -1587,6 +1588,15 @@ try:
             else:
                 assert False, f"unsupported operation: {node.op}"
 
+    # Unwraps the result of 'func', given that it is of type 'Z3Node'.
+    # Note that it makes it so 'Z3Node.assertion' is ignored.
+    def _unwrap_Z3Node(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args):
+            r = func(*args)
+            return r.expr
+        return wrapper
+
     # Translates SymPy expressions into Z3 expressions.
     #
     # Traverses the SymPy AST recursively, translating from its leaves
@@ -1601,8 +1611,8 @@ try:
             "and_": z3.And,
             "or_": z3.Or,
             "not_": z3.Not,
-            "floor": Z3Ops.floor,
-            "ceil": Z3Ops.ceil,
+            "floor": _unwrap_Z3Node(Z3Ops.floor),
+            "ceil": _unwrap_Z3Node(Z3Ops.ceil),
         }
 
         def __init__(
