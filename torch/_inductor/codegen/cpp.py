@@ -2247,10 +2247,11 @@ class CppKernelProxy(CppKernel):
                 store_dtype = V.graph.get_dtype(store_var)
                 return store_dtype == torch.bfloat16
 
-            for node in sub_graph.nodes:
-                _node: torch.fx.Node = node
+            sub_graph_nodes = sub_graph.nodes
+            to_bf16_legalized_nodes = []
+            for _node in sub_graph_nodes:
                 if is_bf16_load_or_constant(_node):
-                    if is_bf16_mem_copy(node):
+                    if is_bf16_mem_copy(_node):
                         continue
                     ops = _node.args[0]
                     with sub_graph.inserting_after(_node):
@@ -2299,14 +2300,18 @@ class CppKernelProxy(CppKernel):
                         )
                 elif _node.target == "to_dtype" and _node.args[-1] in [torch.bfloat16]:
                     (ops, x, _) = _node.args
-                    # to_bf16 + store_bf16, after legalization, it should be converted to
-                    # to_bf16 + to_bf16 + store_bf16(before condition), rather than to_fp32 + to_bf16 + store_bf16.
-                    to_store_bf16 = all(is_bf16_store(user) for user in _node.users)
                     # The legalization always loads the BF16 tensor as FP32 for computation and converts
                     # back to BF16 after the computation. Hence, there should be no computation w/ BF16.
                     # Therefore, we update the to_dtype by replacing the bf16 dtype with fp32.
-                    if not to_store_bf16:
-                        _node.args = (ops, x, torch.float)
+                    _node.args = (ops, x, torch.float)
+                    # Save the legalized to_dtype node for the elimination(eliminate_to_dtype step):
+                    #  1) Eliminate the redundant to_dtype node if we have a pattern as follows:
+                    #     graph():
+                    #       %to_bf16_legalized = call_method[target=to_dtype](args = (%ops, %input, torch.float), kwargs = {})
+                    #       %to_dtype2 = call_method[target=to_dtype](args = (%ops, %to_bf16_legalized, torch.bfloat16), kwargs = {})
+                    # Regarding the first to_dtype, it is redundant because the second to_type also converts to the torch.bfloat16.
+                    # Hence, we remove the first to_type.
+                    to_bf16_legalized_nodes.append(_node)
                 else:
                     pass
 
@@ -2329,11 +2334,20 @@ class CppKernelProxy(CppKernel):
                     ]
                     for node_users in all_to_nodes_and_users:
                         for node, users in node_users.items():
-                            if all(usr.args[-1] == node.args[-1] for usr in users):
+                            if node in sub_graph.nodes and all(
+                                usr.args[-1] == node.args[-1] for usr in users
+                            ):
                                 val_node = node.all_input_nodes[-1]
                                 node.replace_all_uses_with(val_node)
                                 sub_graph.erase_node(node)
-
+                            if (
+                                node in sub_graph.nodes
+                                and node in to_bf16_legalized_nodes
+                                and all(usr.args[-1] == torch.bfloat16 for usr in users)
+                            ):
+                                val_node = node.all_input_nodes[-1]
+                                node.replace_all_uses_with(val_node)
+                                sub_graph.erase_node(node)
                     # For debug mode, the graph of LoopBody will attach a new GraphModule as
                     # owning_module for debugging while the release mode will not. The lint will
                     # check whether the graph has owning_module to decide if it needs to check
