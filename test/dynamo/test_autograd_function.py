@@ -261,7 +261,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         def f(x):
             return Shake.apply(x)
 
-        x = torch.rand(4, 4, 4, 4)
+        x = torch.randn(4, 4, 4, 4, requires_grad=True)
         opt_m = torch.compile(backend="eager")(f)
         opt_m(x)
 
