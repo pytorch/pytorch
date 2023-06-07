@@ -206,13 +206,13 @@ struct formatter<::addrinfo> {
         NI_MAXSERV,
         NI_NUMERICSERV);
     if (r != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
+      return fmt::format_to(ctx.out(), "?UNKNOWN?");
     }
 
     if (addr.ai_addr->sa_family == AF_INET) {
-      return format_to(ctx.out(), "{}:{}", host, port);
+      return fmt::format_to(ctx.out(), "{}:{}", host, port);
     } else {
-      return format_to(ctx.out(), "[{}]:{}", host, port);
+      return fmt::format_to(ctx.out(), "[{}]:{}", host, port);
     }
   }
 };
@@ -234,14 +234,14 @@ struct formatter<c10d::detail::SocketImpl> {
     ::socklen_t addr_len = sizeof(addr_s);
 
     if (::getsockname(socket.handle(), addr_ptr, &addr_len) != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
+      return fmt::format_to(ctx.out(), "?UNKNOWN?");
     }
 
     ::addrinfo addr{};
     addr.ai_addr = addr_ptr;
     addr.ai_addrlen = addr_len;
 
-    return format_to(ctx.out(), "{}", addr);
+    return fmt::format_to(ctx.out(), "{}", addr);
   }
 };
 
