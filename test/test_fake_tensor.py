@@ -13,6 +13,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorMode,
     FakeTensorConverter,
     DynamicOutputShapeException,
+    UnsupportedOperatorException,
 )
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
@@ -71,6 +72,21 @@ class FakeTensorTest(TestCase):
             y = mode.from_tensor(y, memoized_only=True)
             self.assertIs(y, None)
 
+    def test_custom_op_fallback(self):
+        from torch.library import Library, impl
+
+        test_lib = Library("my_test_op", "DEF")
+        test_lib.define('foo(Tensor self) -> Tensor')
+
+        @impl(test_lib, 'foo', 'CPU')
+        def foo_impl(self):
+            return self.cos()
+
+        x = torch.empty(2, 2, device="cpu")
+        with self.assertRaisesRegex(UnsupportedOperatorException, "my_test_op.foo.default"):
+            with FakeTensorMode(allow_fallback_kernels=True) as mode:
+                x = mode.from_tensor(x)
+                torch.ops.my_test_op.foo(x)
 
     def test_parameter_instantiation(self):
         with FakeTensorMode():
