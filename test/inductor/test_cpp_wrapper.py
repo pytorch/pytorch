@@ -240,6 +240,8 @@ if RUN_CUDA:
             device=None,
             tests=test_pattern_matcher.TestPaternMatcher(),
         ),
+        BaseTest("test_fft_real_input"),
+        BaseTest("test_fft_real_input_real_output"),
     ]:
         make_test_case(item.name, item.device, item.tests)
 

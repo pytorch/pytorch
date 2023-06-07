@@ -3250,12 +3250,6 @@ class FallbackKernel(ExternKernelAlloc):
         assert (
             not kernel._schema.is_mutable
         ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
-        assert all(
-            x.alias_info is None for x in kernel._schema.arguments
-        ), f"{kernel.__name__} with alias_info arguments is not supported with cpp_wrapper"
-        assert all(
-            x.alias_info is None for x in kernel._schema.returns
-        ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
         self.kernel = kernel._schema.name
         self.cpp_kernel_overlad_name = kernel._schema.overload_name
