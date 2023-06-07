@@ -26,6 +26,9 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo
 )
+
+from torch._dynamo import disable as disable_dynamo
+
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_device_type import largeTensorTest
 from typing import Dict, Any, Tuple
@@ -190,12 +193,23 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
+    # Note: disable dynamo on this function
+    # This allows us to continue running actual logic of the optimizer
+    # tests in dynamo without tracing this test code which has a lot of unsupported
+    # behavior
+    @disable_dynamo(recursive=False)
     def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
         weight = Parameter(weight)
         bias = Parameter(bias)
         with torch.no_grad():
             input = input.clone().detach().requires_grad_()
 
+        # Note: Disable dynamo on this function
+        # This avoids a bug where input_cuda is not detected in the environment
+        # because it currently is not defined in the local environmet. Unable to repro
+        # anywhere else however and this is test code that we don't need to spend
+        # time getting dynamo to trace unless the issue repros in real models.
+        @disable_dynamo(recursive=False)
         def fn_base(optimizer, weight, bias):
             optimizer.zero_grad()
             i = input_cuda if weight.is_cuda else input
@@ -219,7 +233,7 @@ class TestOptim(TestCase):
         state_dict = deepcopy(optimizer.state_dict())
         state_dict_c = deepcopy(optimizer.state_dict())
         optimizer_c.load_state_dict(state_dict_c)
-        # Run both optimizations in parallel
+        # Run both optimizers in parallel
         for _ in range(20):
             optimizer.step(fn)
             optimizer_c.step(fn_c)
@@ -1072,6 +1086,7 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
+    @skipIfTorchDynamo("Unsupported mutation of step")
     def test_adadelta(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 4e-3
@@ -1114,6 +1129,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
+    @skipIfTorchDynamo("Unsupported mutation of step")
     def test_adadelta_complex(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 2e-2
@@ -1322,6 +1338,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.RAdam(None, lr=1e-2, weight_decay=-1)
 
+    @skipIfTorchDynamo("Unsupported mutation of step")
     def test_rmsprop(self):
         for foreach in (False, True):
             self._test_basic_cases(
@@ -1782,7 +1799,9 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     )
 
 
+@skipIfTorchDynamo("Differentiable optimizers not supported")
 class TestDifferentiableOptimizer(TestCase):
+
     def test_sgd(self):
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1799,6 +1818,7 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
 
     def test_adam(self):
         state = {}
@@ -1824,6 +1844,7 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
 
     def test_rmsprop(self):
         state = {}
@@ -1857,6 +1878,7 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+
     def test_adadelta(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1878,6 +1900,7 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+
     def test_adagrad(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
@@ -1897,6 +1920,7 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
 
     def test_adamax(self):
         state = {}
@@ -1918,6 +1942,7 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
+
 
     @skipIfTorchDynamo("The inplace mu update fails with dynamo, "
                        "since this is only happening when differentiable is enabled, skipping for now")
@@ -1944,7 +1969,6 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-    @skipIfTorchDynamo()
     def test_rprop(self):
         state = {}
         p = torch.rand(10, requires_grad=True, dtype=torch.float64)
