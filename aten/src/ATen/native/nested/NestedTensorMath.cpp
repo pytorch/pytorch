@@ -893,11 +893,29 @@ Tensor _nested_view_from_jagged(
       x_offsets.dim() == 1,
       "Expected 1D input tensor for offsets.");
 
+  // Non-pointer version if we move to GPU metadata:
+  // auto nested_size = x_offsets.new_empty({x_offsets.size(0) - 1, 2},
+  //     x_offsets.options().dtype(kLong).device(kCPU));
+  // nested_size.select(1, 0).copy_(x_offsets.diff());
+  // nested_size.select(1, 1).fill_(x.size(1));
+
   // NB: Must be on CPU for now.
-  auto nested_size = x_offsets.new_empty({x_offsets.size(0) - 1, 2},
+  const auto B = x_offsets.size(0) - 1;
+  const auto D = x.size(1);
+  auto nested_size = x_offsets.new_empty(
+      {B, 2},
       x_offsets.options().dtype(kLong).device(kCPU));
-  nested_size.select(1, 0).copy_(x_offsets.diff());
-  nested_size.select(1, 1).fill_(x.size(1));
+  int64_t *nested_size_ptr = nested_size.data_ptr<int64_t>();
+  auto x_offsets_cpu = x_offsets.cpu();
+  int64_t *x_offsets_ptr = x_offsets_cpu.data_ptr<int64_t>();
+
+  auto prev_offset = x_offsets_ptr[0];
+  for (auto i : c10::irange(B)) {
+      auto offset = x_offsets_ptr[i+1];
+      nested_size_ptr[i*2] = offset - prev_offset;
+      nested_size_ptr[i*2+1] = D;
+      prev_offset = offset;
+  }
 
   return at::detail::make_tensor<NestedTensorImpl>(
     c10::TensorImpl::VIEW,
@@ -971,7 +989,20 @@ Tensor _nested_get_jagged_offsets(const Tensor& self) {
   _check_nested_is_jagged(self);
   auto nt_impl = get_nested_tensor_impl(self);
   auto nt_size = nt_impl->get_nested_sizes();
-  auto jagged_offsets = at::cat({nt_size.new_zeros({1}), nt_size.select(1, 0).cumsum(0)}, 0);
+
+  // Non-pointer version if we move to GPU metadata:
+  // auto jagged_offsets = at::cat({nt_size.new_zeros({1}), nt_size.select(1, 0).cumsum(0)}, 0);
+
+  const auto B = nt_size.size(0);
+  auto jagged_offsets = nt_size.new_empty({B + 1});
+  int64_t *jagged_offsets_ptr = jagged_offsets.data_ptr<int64_t>();
+  int64_t *nt_size_ptr = nt_size.data_ptr<int64_t>();
+  // TODO: Set first offset correctly!! Need to pull storage offset from buffer
+  jagged_offsets_ptr[0] = 0;
+  for (auto i : c10::irange(B)) {
+      jagged_offsets_ptr[i+1] = jagged_offsets_ptr[i] + nt_size_ptr[i*2];
+  }
+
   return jagged_offsets;
 }
 
