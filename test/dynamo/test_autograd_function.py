@@ -251,30 +251,18 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
     def test_classmethod(self):
         class Shake(torch.autograd.Function):
             @classmethod
-            def forward(cls, ctx, inp1, inp2):
-                return inp1 + inp2
+            def forward(cls, ctx, foo):
+                return foo + foo
 
-        class ShakeShakeBlock(torch.nn.Module):
-            def __init__(self, in_planes=4, out_planes=4):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_planes,
-                    out_planes,
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                    bias=False,
-                )
+            @classmethod
+            def backward(cls, ctx, grad_output):
+                return grad_output
 
-            def forward(self, x):
-                a, b = x, x
-                b = self.conv(b)
-                ab = Shake.apply(a, b)
-                return ab
+        def f(x):
+            return Shake.apply(x)
 
         x = torch.rand(4, 4, 4, 4)
-        m = ShakeShakeBlock()
-        opt_m = torch.compile(backend="eager")(m)
+        opt_m = torch.compile(backend="eager")(f)
         opt_m(x)
 
 
