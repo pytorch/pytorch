@@ -123,3 +123,13 @@ def compute_global_tensor_info(
         elif not isinstance(placement, (Replicate, _Partial)):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
     return tensor_shape, tensor_stride
+
+
+def _get_device_handle(device_type: str = "cuda"):
+    """
+    Get the module corresponding to the device_type which is cuda or cuda-like device.
+    For example, when the device_type is cuda, the module `torch.cuda` is returned.
+    Return None when device_type is cpu or there is no corresponding module,
+    otherwise return the corresponding module.
+    """
+    return getattr(torch, device_type, None) if device_type != "cpu" else None
