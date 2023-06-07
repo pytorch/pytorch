@@ -185,7 +185,7 @@ def _get_dt_pg(dt: DistributedTensor) -> c10d.ProcessGroup:
     mesh = dt.device_mesh
     assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
     dim_groups = mesh.get_dim_groups()
-    assert isinstance(dim_groups, List[dist.ProcessGroup])
+    assert isinstance(dim_groups, List[c10d.ProcessGroup])
     return dim_groups[0]
 
 
