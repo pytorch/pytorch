@@ -2,8 +2,7 @@ name: inductor-A100-perf-nightly
 
 on:
   schedule:
-    - cron: 0 7 * * 1,2,4,5,6
-    - cron: 0 7 * * 0,3
+    - cron: 0 7 * * *
   workflow_dispatch:
     inputs:
       training:
@@ -70,27 +69,12 @@ jobs:
           { config: "inductor_torchbench_perf", shard: 3, num_shards: 3, runner: "linux.gcp.a100.large" },
         ]}
 
-  linux-bionic-cuda11_8-py3_10-gcc7-inductor-test-5days-per-week:
+  linux-bionic-cuda11_8-py3_10-gcc7-inductor-test-nightly:
     name: cuda11.8-py3.10-gcc7-sm80
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_8-py3_10-gcc7-inductor-build
-    if: github.event.schedule == '0 7 * * 1,2,4,5,6'
+    if: github.event.schedule == '0 7 * * *'
     with:
-      # training only
-      build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80
-      dashboard-tag: training-true-inference-false-default-true-dynamic-true-cudagraphs-true
-      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.test-matrix }}
-      use-gha: anything-non-empty-to-use-gha
-      timeout-minutes: 720
-
-  linux-bionic-cuda11_8-py3_10-gcc7-inductor-test-2days-per-week:
-    name: cuda11.8-py3.10-gcc7-sm80
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_8-py3_10-gcc7-inductor-build
-    if: github.event.schedule == '0 7 * * 0,3'
-    with:
-      # training + inference
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80
       dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true
       docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc7-inductor-build.outputs.docker-image }}
