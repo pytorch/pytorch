@@ -69,6 +69,7 @@ constant_fold_functions = [
     torch.is_autocast_cache_enabled,
     torch.is_autocast_cpu_enabled,
     torch.is_autocast_enabled,
+    torch.is_complex,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
@@ -204,6 +205,7 @@ class TorchVariable(VariableTracker):
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
+        constant_args = True
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value in config.constant_functions:
