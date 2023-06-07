@@ -437,6 +437,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_is_complex(x):
+        if torch.is_complex(x):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_device(x):
         if not x.is_cuda:
             return x + 1

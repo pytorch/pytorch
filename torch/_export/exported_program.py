@@ -42,8 +42,8 @@ LeafValue = Union[
 # Information to maintain user calling/returning specs
 @dataclasses.dataclass
 class CallSpec:
-    in_spec: Optional[pytree.TreeSpec] = None
-    out_spec: Optional[pytree.TreeSpec] = None
+    in_spec: pytree.TreeSpec
+    out_spec: pytree.TreeSpec
 
 
 # Extra information for joint graphs
