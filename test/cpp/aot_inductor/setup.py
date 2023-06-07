@@ -1,12 +1,20 @@
-# setup.py
-from setuptools import setup
-from torch.utils.cpp_extension import BuildExtension, CppExtension
+from setuptools import setup, Extension
+import os
+import torch
+
+library_path = os.path.dirname(os.path.realpath(__file__))
+
+
+inductor_module = Extension(
+    'inductor_module', 
+    sources = ['inductor_module.cpp'],
+    library_dirs=[library_path], 
+    libraries=['aot_inductor_output'],
+    extra_compile_args=['-std=c++14']
+)
 
 setup(
     name='inductor_module',
-    ext_modules=[
-        CppExtension('inductor_module', ['inductor_module.cpp']),
-    ],
-    cmdclass={
-        'build_ext': BuildExtension
-    })
+    version='0.0.1',
+    ext_modules=[inductor_module]
+)
