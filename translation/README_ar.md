@@ -179,7 +179,7 @@
 ملاحظة: يمكنك الرجوع إلى [مصفوفة دعم cuDNN](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) لإصدارات cuDNN مع مختلف CUDA و CUDA driver و NVIDIA المعدات.
 
 إذا كنت ترغب في تعطيل دعم CUDA ، فقم بتصدير متغير البيئة `USE_CUDA = 0`.
-يمكن العثور على متغيرات البيئة المفيدة الأخرى في "setup.py".
+يمكن العثور على متغيرات البيئة المفيدة الأخرى في `setup.py`.
 
 إذا كنت تقوم بالتصميم لمنصات Jetson من NVIDIA (Jetson Nano، TX1، TX2، AGX Xavier) ، فإن تعليمات تثبيت PyTorch لـ Jetson Nano [متوفرة هنا](https://devtalk.nvidia.com/default/topic/1049071/jetson-nano/pytorch-for-jetson-nano/)
 
@@ -189,7 +189,7 @@
 - ROCm مدعوم حاليًا لأنظمة Linux فقط.
 
 إذا كنت تريد تعطيل دعم ROCm ، فقم بتصدير متغير البيئة `USE_ROCM = 0`.
-يمكن العثور على متغيرات البيئة المفيدة الأخرى في "setup.py".
+يمكن العثور على متغيرات البيئة المفيدة الأخرى `setup.py`.
 
 #### تثبيت التبعيات أو الاعتماديات
 
@@ -264,6 +264,7 @@ python setup.py develop
 > ```
 >
 > This is caused by `ld` from the Conda environment shadowing the system `ld`. You should use a newer version of Python that fixes this issue. The recommended Python version is 3.8.1+.
+
 **على macOS**
 
 ```bash
@@ -298,7 +299,7 @@ python setup.py develop
 كما أن NVTX هو جزء من CUDA التوزيعي ، حيث يطلق عليه "Nsight Compute". لتثبيته على CUDA مثبت بالفعل ، قم بتشغيل تثبيت CUDA مرة أخرى وتحقق من مربع الاختيار المقابل.
 تأكد من تثبيت CUDA مع Nsight Compute بعد Visual Studio.
 
-حاليًا ، يتم دعم VS 2017/2019 و Ninja كمنشئ لـ CMake. إذا تم اكتشاف "ninja.exe" في "PATH" ، فسيتم استخدام Ninja كمولد افتراضي ، وإلا فسيستخدم VS 2017/2019.
+حاليًا ، يتم دعم VS 2017/2019 و Ninja كمنشئ لـ CMake. إذا تم اكتشاف `ninja.exe` في `PATH` ، فسيتم استخدام Ninja كمولد افتراضي ، وإلا فسيستخدم VS 2017/2019.
 ولكن <br/> إذا تم تحديد Ninja كمنشئ ، فسيتم تحديد أحدث MSVC باعتباره سلسلة الأدوات الأساسية.
 
 مكتبات إضافية مثل [Magma](https://developer.nvidia.com/magma) و [oneDNN, a.k.a. MKLDNN or DNNL](https://github.com/oneapi-src/oneDNN) و [Sccache](https://github.com/mozilla/sccache) غالبًا ما تكون مطلوبة. يرجى الرجوع إلى [install-helper](https://github.com/pytorch/pytorch/tree/main/.ci/pytorch/win-test-helpers/installation-helpers) لتثبيتها.  
@@ -375,11 +376,12 @@ docker run --gpus all --rm -ti --ipc=host pytorch/pytorch:latest
 
 ```bash
 make -f docker.Makefile
-# تم وضع علامة على الصور كـ docker.io/${your_docker_username}/pytorch
+# images are tagged as docker.io/${your_docker_username}/pytorch
 ```
 
-يمكنك أيضًا تمرير متغير البيئة `CMAKE_VARS =" ... "` لتحديد متغيرات CMake الإضافية ليتم تمريرها إلى CMake أثناء الإنشاء.
-راجع [setup.py](../ setup.py) للحصول على قائمة بالمتغيرات المتاحة.
+You can also pass the `CMAKE_VARS="..."` environment variable to specify additional CMake variables to be passed to CMake during the build.
+See [setup.py](./setup.py) for the list of available variables.
+
 ```bash
 CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
 ```
@@ -399,12 +401,12 @@ pip install -r requirements.txt
 تثبيت npm -g katex`
 
 
-ملاحظة: إذا قمت بتثبيت "nodejs" مع مدير حزم مختلف (على سبيل المثال conda)
-ثم من المحتمل أن يقوم "npm" بتثبيت إصدار من "katex" ليس كذلك
+ملاحظة: إذا قمت بتثبيت `nodejs` مع مدير حزم مختلف (على سبيل المثال conda)
+ثم من المحتمل أن يقوم `npm` بتثبيت إصدار من `katex` ليس كذلك
 متوافق مع إصدارك من `nodejs` وستفشل إصدارات doc.
 مجموعة من الإصدارات المعروفة للعمل هي `node @ 6.13.1` و
-كاتكس @ 0.13.18`. لتثبيت الأخير مع "npm" يمكنك تشغيل
-`` تثبيت npm -g katex @ 0.13.18 ''
+كاتكس @ 0.13.18`. لتثبيت الأخير مع `npm` يمكنك تشغيل
+```npm install -g katex@0.13.18```
 
 ### الإصدارات السابقة
 
