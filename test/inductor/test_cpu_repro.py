@@ -730,6 +730,7 @@ class CPUReproTests(TestCase):
             "bitwise_right_shift",
             "bitwise_or",
             "bitwise_xor",
+            "to_dtype_bitcast",
         ]
         union = {*cpp_vec_op_list, *diff}
         self.assertTrue(
