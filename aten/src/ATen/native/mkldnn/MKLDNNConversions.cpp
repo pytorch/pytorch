@@ -435,13 +435,14 @@ std::vector<Tensor> mkldnn_reorder_lstm_weight(
       // LSTM based on BRGEMM kernel (on AVX512 and newest ISAs) will use blocked
       // format for weight of LSTM, which won't change when the input seq_lens
       // changes.
-      if (w1_.get_desc().is_rnn_packed()) {
+      // On AVX2, queried  weight will be plain format
+      if (w1_.get_desc().is_rnn_packed() || w1_.get_desc().is_plain()) {
         packed_w1 = layer_weights[0];
       } else {
         packed_w1 = new_with_itensor_mkldnn(std::move(w1_), optTypeMetaToScalarType(layer_weights[0].options().dtype_opt()), layer_weights[0].options().device_opt());
       }
 
-      if (w2_.get_desc().is_rnn_packed()) {
+      if (w2_.get_desc().is_rnn_packed() || w2_.get_desc().is_plain()) {
         packed_w2 = layer_weights[1];
       } else {
         packed_w2 = new_with_itensor_mkldnn(std::move(w2_), optTypeMetaToScalarType(layer_weights[1].options().dtype_opt()), layer_weights[1].options().device_opt());
