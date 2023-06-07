@@ -186,7 +186,7 @@
 إذا كنت تريد التحويل البرمجي باستخدام دعم ROCm ، فقم بتثبيت
 
 - [AMD ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation-Guide.html) 4.0 وما فوق 
-- لكن ROCm مدعوم حاليًا لأنظمة Linux فقط.
+- ROCm مدعوم حاليًا لأنظمة Linux فقط.
 
 إذا كنت تريد تعطيل دعم ROCm ، فقم بتصدير متغير البيئة `USE_ROCM = 0`.
 يمكن العثور على متغيرات البيئة المفيدة الأخرى في "setup.py".
@@ -278,7 +278,7 @@ python3 setup.py develop
 يمكنك أيضًا تثبيت أدوات البناء من https://visualstudio.microsoft.com/visual-cpp-build-tools/. أدوات البناء *لا*
 تأتي مع Visual Studio Code افتراضيًا.
 
-إذا كنت ترغب في إنشاء كود بيثون قديم ، يرجى الرجوع إلى [البناء على الكود القديم و CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and -cuda)
+إذا كنت ترغب في إنشاء كود بيثون قديم ، يرجى الرجوع إلى [البناء على الكود القديم و CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
 **لبناء CPU فقط**
  
@@ -386,7 +386,7 @@ CMAKE_VARS="BUILD_CAFFE2=ON BUILD_CAFFE2_OPS=ON" make -f docker.Makefile
 
 ### إنشاء الوثائق
 
-لإنشاء وثائق بتنسيقات مختلفة ، ستحتاج إلى [Sphinx] (http://www.sphinx-doc.org) و
+لإنشاء وثائق بتنسيقات مختلفة ، ستحتاج إلى [Sphinx](http://www.sphinx-doc.org) و
 موضوع readthedocs.
 
 ```bash
@@ -419,7 +419,7 @@ pip install -r requirements.txt
 - [أمثلة: سهولة فهم كود PyTorch عبر جميع المجالات](https://github.com/pytorch/examples)
 - [مرجع واجهة برمجة التطبيقات](https://pytorch.org/docs/)
 - [المسرد](https://github.com/pytorch/pytorch/blob/main/GLOSSARY.md)
-- 
+ 
 ## موارد
 
 * [PyTorch.org](https://pytorch.org/)
