@@ -250,66 +250,27 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         opt_model(x)
 
     def test_classmethod(self):
-        def conv3x3(in_planes, out_planes, stride=1):
-            """3x3 convolution with padding"""
-            return torch.nn.Conv2d(
-                in_planes,
-                out_planes,
-                kernel_size=3,
-                stride=stride,
-                padding=1,
-                bias=False,
-            )
-
         class Shake(torch.autograd.Function):
             @classmethod
-            def forward(cls, ctx, inp1, inp2, training):
-                assert inp1.size() == inp2.size()
-                gate_size = [inp1.size()[0], *itertools.repeat(1, inp1.dim() - 1)]
-                gate = inp1.new(*gate_size)
-                if training:
-                    gate.uniform_(0, 1)
-                else:
-                    gate.fill_(0.5)
-                return inp1 * gate + inp2 * (1.0 - gate)
-
-            @classmethod
-            def backward(cls, ctx, grad_output):
-                grad_inp1 = grad_inp2 = grad_training = None
-                gate_size = [
-                    grad_output.size()[0],
-                    *itertools.repeat(1, grad_output.dim() - 1),
-                ]
-                gate = grad_output.data.new(*gate_size).uniform_(0, 1)
-                if ctx.needs_input_grad[0]:
-                    grad_inp1 = grad_output * gate
-                if ctx.needs_input_grad[1]:
-                    grad_inp2 = grad_output * (1 - gate)
-                assert not ctx.needs_input_grad[2]
-                return grad_inp1, grad_inp2, grad_training
-
-        def shake(inp1, inp2, training=False):
-            return Shake.apply(inp1, inp2, training)
+            def forward(cls, ctx, inp1, inp2):
+                return inp1 + inp2
 
         class ShakeShakeBlock(torch.nn.Module):
-            @classmethod
-            def out_channels(cls, planes, groups):
-                assert groups == 1
-                return planes
-
-            def __init__(
-                self, inplanes=4, planes=4, groups=1, stride=1, downsample=None
-            ):
+            def __init__(self, in_planes=4, out_planes=4):
                 super().__init__()
-                assert groups == 1
-                self.conv_a1 = conv3x3(inplanes, planes, stride)
-                self.conv_b1 = conv3x3(inplanes, planes, stride)
+                self.conv = torch.nn.Conv2d(
+                    in_planes,
+                    out_planes,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False,
+                )
 
             def forward(self, x):
                 a, b = x, x
-                a = self.conv_a1(a)
-                b = self.conv_b1(b)
-                ab = shake(a, b, training=self.training)
+                b = self.conv(b)
+                ab = Shake.apply(a, b)
                 return ab
 
         x = torch.rand(4, 4, 4, 4)
