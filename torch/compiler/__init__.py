@@ -1,5 +1,4 @@
 import torch
-import torch._dynamo
 from typing import List
 
 __all__ = [
