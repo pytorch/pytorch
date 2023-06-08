@@ -11,14 +11,9 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-<<<<<<< HEAD
 from torch._dynamo.utils import get_fake_value, get_real_value
-from torch._dynamo.variables import SymNodeVariable
-from torch._dynamo.variables.user_defined import ProcessGroupVariable
-=======
-from torch._dynamo.utils import get_fake_value, get_real_value, torch_np
 from torch._dynamo.variables import SymNodeVariable, UserFunctionVariable
->>>>>>> fecd5f75277... Enable torch.nn.init._calculate_correct_fan in dynamo tracing
+from torch._dynamo.variables.user_defined import ProcessGroupVariable
 from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
 
