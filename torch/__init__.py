@@ -1715,11 +1715,11 @@ _deprecated_attrs = {
     "has_mkldnn": torch.backends.mkldnn.is_available,
 }
 def __getattr__(name):
-    func = _deprecated_attrs.get(name)
-    if func is not None:
+    v = _deprecated_attrs.get(name)
+    if v is not None:
         import warnings
-        warnings.warn(f"'{name}' is deprecated, please use '{func.__module__}.{func.__name__}()'")
-        return func()
+        warnings.warn(f"'{name}' is deprecated, please use '{v.__module__}.{v.__name__}()'")
+        return v()
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 from . import _logging
 _logging._init_logs()
