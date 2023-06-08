@@ -98,6 +98,8 @@ def export(
     f: Callable,
     args: Tuple[Any],
     constraints: Optional[List[Constraint]] = None,
+    *,
+    _add_runtime_assertions=True,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -201,6 +203,7 @@ def export(
                 export_graph_signature,
                 flat_args,
             )
+            assert orig_out_spec is not None
             exported_program = ExportedProgram(
                 gm,
                 gm.graph,
@@ -210,6 +213,10 @@ def export(
                 range_constraints,
                 equality_constraints,
             )
+
+            if _add_runtime_assertions:
+                exported_program = exported_program._add_runtime_assertions()
+
             return exported_program
 
         except (ConstraintViolationError, ValueRangeError) as e:
