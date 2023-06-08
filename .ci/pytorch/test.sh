@@ -248,6 +248,7 @@ test_dynamo_shard() {
       test_fx \
       test_package \
       test_legacy_vmap \
+      export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
     --shard "$1" "$NUM_TEST_SHARDS" \
