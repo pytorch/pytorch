@@ -102,6 +102,8 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
+<<<<<<< HEAD
+=======
   pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.1.0
     CUDNN_VERSION=8
@@ -131,6 +133,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
+>>>>>>> 00112454608 (add timm and huggingface to inductor docker images)
   pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc9)
     CUDA_VERSION=11.8.0
     CUDNN_VERSION=8

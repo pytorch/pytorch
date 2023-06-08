@@ -219,16 +219,13 @@ def _init_device_mesh(
     # TODO: Address cases when dist.get_world_size(pg) != dist.get_world_size(). This would capture
     #       what 1D DeviceMesh currently would not work for:
     #       1) HSDP Hybrid Sharding, 2) 2D FSDP + TP, 3) dist.new_group() cannot be expressed in 1D DeviceMesh.
-    if get_world_size(root_state.process_group) != get_world_size():
+    if root_state.process_group != dist.distributed_c10d._get_default_group():
         return None
-    # Temporarily skip DeviceMesh initialization when the backend is set to fake.
-    # TODO: Remove the condition once the issue of "Default PG backend: fake not supporting CUDA!" is resolved.
     if get_backend() == "fake" or not root_state.compute_device:
         return None
     device_type = root_state.compute_device.type
     mesh_tensor = torch.arange(get_world_size(root_state.process_group))
-    device_mesh = DeviceMesh(device_type, mesh_tensor, _init_process_groups=False)
-    device_mesh._dim_groups = [root_state.process_group]
+    device_mesh = DeviceMesh(device_type, mesh_tensor)
     return device_mesh
 
 

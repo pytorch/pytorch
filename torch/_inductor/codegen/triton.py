@@ -130,6 +130,10 @@ class TritonOverrides(OpOverrides):
         return f"{x}.to({triton_compute_type(dtype)})"
 
     @staticmethod
+    def to_dtype_bitcast(x, dtype: torch.dtype):
+        return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
+
+    @staticmethod
     def constant_val(val):
         return triton_constant(val)
 
