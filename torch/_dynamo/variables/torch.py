@@ -12,7 +12,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value, get_real_value
-from torch._dynamo.variables import SymNodeVariable
+from torch._dynamo.variables import SymNodeVariable, UserFunctionVariable
 from torch._dynamo.variables.user_defined import ProcessGroupVariable
 from torch._guards import GuardsCheckpointState, Source
 from torch.utils import _pytree as pytree
@@ -68,11 +68,13 @@ constant_fold_functions = [
     torch.device,
     torch.distributed.is_available,
     torch.finfo,
+    torch.get_autocast_gpu_dtype,
     torch.get_default_dtype,
     torch.iinfo,
     torch.is_autocast_cache_enabled,
     torch.is_autocast_cpu_enabled,
     torch.is_autocast_enabled,
+    torch.is_complex,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
@@ -182,6 +184,10 @@ class TorchVariable(VariableTracker):
 
     def __repr__(self):
         return f"TorchVariable({self.value})"
+
+    def call_hasattr(self, tx, name):
+        result = hasattr(self.value, name)
+        return variables.ConstantVariable(result).add_options(self)
 
     def unique_var_name(self):
         name = torch_get_name(self.value, f"allowed_fn_{id(self.value)}")
@@ -528,6 +534,10 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1, "Expected one arg (pg)"
             assert isinstance(args[0], ProcessGroupVariable)
             return ConstantVariable(self.value(args[0].as_python_constant()))
+        elif self.value == torch.nn.init._calculate_correct_fan:
+            return UserFunctionVariable(
+                torch.nn.init._calculate_correct_fan, **options
+            ).call_function(tx, args, {})
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(

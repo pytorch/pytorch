@@ -577,9 +577,9 @@ static PyObject* set_grad_enabled(
   auto r = parser.parse(args, kwargs, parsed_args);
 
   if (at::impl::torch_function_mode_enabled()) {
-    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+    auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch"));
     return handle_torch_function(
-        r, args, kwargs, torch_C_module, "torch._C", "_set_grad_enabled");
+        r, args, kwargs, torch_C_module, "torch", "set_grad_enabled");
   }
   auto grad_enabled = r.toBool(0);
   GradMode::set_enabled(grad_enabled);
