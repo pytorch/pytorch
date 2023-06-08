@@ -11,6 +11,7 @@ from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed._tensor.random import (
     _calc_shard_linear_idx,
     _get_rng_offset,
+    CudaRNGStatesTracker,
     get_rng_state,
     is_rng_supported_mesh,
     manual_seed,
@@ -262,6 +263,37 @@ class DistTensorRandomOpTest(DTensorTestBase):
                     self.assertEqual(local_tensor_gathered[slice_idx], local_tensor)
                 else:
                     self.assertNotEqual(local_tensor_gathered[slice_idx], local_tensor)
+
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_megatron_init(self):
+        size = [8, 5]
+        mesh = torch.arange(self.world_size).reshape(2, 2)
+        device_mesh = DeviceMesh(self.device_type, mesh)
+        # weight sharding (row-wise parallel)
+        placements = [Shard(0), Replicate()]
+        data_parallel_group_1 = [0, 1]
+        # default seed is same within a MP group, and same within a DP group
+        # unless `data_parallel_random_init` is True.
+        default_seed = 100
+        # Model Parallel seed is different within a MP group
+        model_parallel_seed = 10 * (1 if self.rank in data_parallel_group_1 else 2)
+        model_parallel_seed += default_seed
+        # use MP seed to init
+        torch.cuda.manual_seed(model_parallel_seed)
+        local_tensor = torch.empty(size).uniform_()
+        dtensor_1 = DTensor.from_local(local_tensor, device_mesh, placements)
+        dtensor_1 = dtensor_1.redistribute(device_mesh, [Replicate(), Replicate()])
+
+        rng_tracker = MegatronCudaRNGStatesTracker()
+        # How to pass in DP/MP groups information?
+        rng_tracker.manual_seed(device_mesh, default_seed, model_parallel_seed)
+        local_tensor = torch.empty(size)
+        dtensor_2 = DTensor.from_local(local_tensor, device_mesh, placements)
+        dtensor_2.uniform_()
+        dtensor_2 = dtensor_2.redistribute(device_mesh, [Replicate(), Replicate()])
+        self.assertEqual(dtensor_1.to_local(), dtensor_2.to_local())
 
 
 if __name__ == "__main__":

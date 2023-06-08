@@ -5,6 +5,7 @@ from typing import List, Optional, TYPE_CHECKING, Union
 import torch
 import torch.distributed._functional_collectives as funcol
 
+from torch.distributed._tensor.random import _default_tracker
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     all_gather,
@@ -135,11 +136,10 @@ class DeviceMesh(object):
                     f"{world_size} ranks and {num_gpus_per_host} cuda devices!"
                 )
             torch.cuda.set_device(get_rank() % num_gpus_per_host)
-        # TODO (xilunwu): to perform DTensor random ops, we need to ensure all ranks in mesh is initialized
-        # with the same random seed. The seed to use will be the current seed on rank 0. We store this seed
-        # as an attribute of device mesh for future use. However, the detail is still TBD how we gonna use
-        # this attribute, so we will implement this logic once we figure out the answer.
-        self._seed = torch.initial_seed()
+
+        if self.device_type == "cuda":
+            # synchronize ranks' CUDA RNG state if necessary
+            _default_tracker.sync_rng_state()
 
         # calculate the coordinates of the current global rank on the mesh
         rank_coords = (self.mesh == get_rank()).nonzero()

@@ -17,6 +17,7 @@ from torch.distributed._tensor.op_schema import (
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.random import (
+    _default_tracker,
     _get_rng_offset,
     is_rng_supported_mesh,
     set_post_op_offset,
@@ -25,6 +26,16 @@ from torch.distributed._tensor.random import (
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
+
+def is_random_op(op):
+    aten = torch.ops.aten
+    random_ops = [
+        aten.native_dropout.default,
+        aten.normal_.default,
+        aten.uniform_.default,
+    ]
+    return op in random_ops
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
@@ -219,29 +230,16 @@ def _operator_dispatch(
             suggested_input_schema.kwargs_schema,
             redistribute_with_schema=needs_redistribute,
         )
-
-        aten = torch.ops.aten
-        random_ops = [
-            aten.native_dropout.default,
-            aten.normal_.default,
-            aten.uniform_.default,
-        ]
-        # before running local op computation, check if op is random op
-        # for random ops, set RNG offset
-        assert isinstance(mesh, DeviceMesh)
-        if op_call in random_ops and is_rng_supported_mesh(mesh):
-            dtensor_arg = arg_list[0]
-            old_offset = _get_rng_offset(mesh)
-            set_pre_op_offset(dtensor_arg._spec)
-
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
-        local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
-
-        # if op is a random op, adjust Philox RNG state to maintain synchronization
-        if op_call in random_ops and is_rng_supported_mesh(mesh):
-            set_post_op_offset(dtensor_arg._spec, old_offset)
+        # For DTensor random operator, run it within a parallel region
+        assert isinstance(mesh, DeviceMesh)
+        if is_random_op(op_call) and is_rng_supported_mesh(mesh):
+            with _default_tracker._parallel_region(arg_list[0]._spec):
+                local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
+        else:
+            local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
     # communicate the result to all ranks for some operators that return scalar value
     if output_sharding.output_spec is None:

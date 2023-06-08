@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import contextlib
 import math
 import warnings
 from typing import List
@@ -301,3 +302,153 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
             f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh"
         )
         return False
+
+
+def manual_seed(seed: int, device_mesh: DeviceMesh, tp_dim: int=0) -> None:
+    # allgather the seed from rank 0 over the default PG
+    object_list = [seed] * dist.get_world_size()
+    dist.all_gather_object(object_list, seed)
+    for rank, object in enumerate(object_list):
+        if seed != int(object):
+            raise RuntimeError(
+                f"calling manual_seed function over {device_mesh} but received different seed values on ranks:",
+                f"seed on rank {dist.get_rank()} is {seed}, and seed on rank {rank} is {object}!",
+            )
+
+    # the current rank is in mesh
+    if device_mesh.get_coordinate() is not None:
+        if isinstance(_default_tracker, MegatronCudaRNGStatesTracker):
+            _default_tracker._manual_seed(seed)
+        elif isinstance(_default_tracker, CudaRNGStatesTracker):
+            _default_tracker._manual_seed(device_mesh, seed, tp_dim)
+        else:
+            raise RuntimeError("Unknown type of CUDA RNG tracker!")
+
+
+class CudaRNGStatesTracker:
+    # TODO: move device type check logic to this class
+    # now we assume that the caller of all the methods will do the check
+
+    def __init__(self):
+        # xilunwu: In DTensor, for each rank we only synchronize its parallel random seed
+        # with other participating ranks in DeviceMesh once. This is because the first
+        # instantiated mesh is the global mesh and the subsequent instantiations are just
+        # sub-meshes. 
+        self._seed_already_sync = False
+        self._seed_applied = False
+        self._states = {}
+    
+    def sync_rng_state(self) -> None:
+        # this function synchronizes CUDA RNG state within GroupMember.WORLD
+        if not self._seed_already_sync:
+            cuda_rng_state = torch.cuda.get_rng_state()
+            dist.broadcast(cuda_rng_state, 0)
+            self.set_rng_state(cuda_rng_state)
+
+    def set_rng_state(self, rng_state: Tensor) -> None:
+        self._states["parallel-rng"] = rng_state
+        self._seed_already_sync = True
+
+    def reset(self):
+        self._seed_already_sync = False
+        self._seed_applied = False
+        self._states = {}
+
+    def _manual_seed(self, parallel_seed: int) -> None:
+        self._seed_already_sync = True
+        self._seed_applied = True
+        # do not pollute torch's default RNG state
+        device = torch.cuda.current_device()
+        with torch.random.fork_rng([device]):
+            torch.cuda.manual_seed(parallel_seed)
+            self._states["parallel-rng"] = torch.cuda.get_rng_state()
+
+    @contextlib.contextmanager
+    def _parallel_region(self, spec: DTensorSpec):
+        # check if the parallel rng state has been applied or not
+        if not self._seed_already_sync:
+            raise RuntimeError(
+                "CudaRNGStatesTracker requires random seed to be"
+                "synchronized before entering into a parallel region!"
+            )
+
+        if not self._seed_applied:
+            # apply random state
+            torch.cuda.set_rng_state(self._states["parallel-rng"])
+            self._seed_applied = True
+
+        # TODO: rewrite this set/restore logic using fork_rng()?
+        # fork rng state first since parallel RNG state should be used instead
+        old_state = torch.cuda.get_rng_state()  # a 16-byte ByteTensor
+        torch.cuda.set_rng_state(self._states["parallel-rng"])
+        # set offset before entering the parallel region
+        mesh = spec.mesh
+        old_offset = _get_rng_offset(mesh)
+        set_pre_op_offset(spec)
+        try:
+            yield
+        finally:
+            # update offset to synchronize among ranks
+            set_post_op_offset(spec, old_offset)
+            self._states["parallel-rng"] = torch.cuda.get_rng_state()
+            torch.cuda.set_rng_state(old_state)
+
+
+class MegatronCudaRNGStatesTracker(CudaRNGStatesTracker):
+    def __init__(self):
+        super().__init__()
+
+    def _manual_seed(
+        self,
+        device_mesh: DeviceMesh,
+        default_seed: int = 1234,
+        tp_dim: int = 0,
+    ):
+        # Megatron maintains two sets of RNG states:
+        #   1. default state: torch's cuda RNG state. This is set to the same
+        #   across all ranks unless `data_parallel_random_init` is explicitly
+        #   set to True. Megatron uses this RNG state for non-tensor-parallel
+        #   regions.
+        #   2. tensor model parallel state: separate from the default state
+        #   and is only used in tensor-parallel regions. This is set to the same
+        #   across tensor parallel groups (i.e. along non-tp dimension) but different
+        #   within a tensor parallel group.
+
+        # calculate tensor_model_parallel_seed as Megatron does
+        # source: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/random.py
+        tensor_model_parallel_rank = device_mesh.get_coordinate()[tp_dim]
+        tensor_model_parallel_seed = default_seed + 2718 + tensor_model_parallel_rank
+
+        # store tensor model parallel RNG state
+        torch.cuda.manual_seed(tensor_model_parallel_seed)
+        self._states["model-parallel-rng"] = torch.cuda.get_rng_state()
+
+        # set torch default RNG state with the default seed
+        torch.cuda.manual_seed(default_seed)
+
+    @contextlib.contextmanager
+    def _parallel_region(self):
+        # check if the parallel rng state has been applied or not
+        if not self._seed_already_sync:
+            raise RuntimeError(
+                "MegatronCudaRNGStatesTracker requires random seed to be"
+                "synchronized before entering into a parallel region!"
+            )
+        
+        if not self._seed_applied:
+            # apply random state
+            torch.cuda.set_rng_state(self._states["parallel-rng"])
+            self._seed_applied = True
+
+        # fork rng state first since tensor model parallel RNG state should be used instead
+        old_state = torch.cuda.get_rng_state()  # a 16-byte ByteTensor
+        torch.cuda.set_rng_state(self._states["model-parallel-rng"])
+        try:
+            yield
+        finally:
+            self._states["model-parallel-rng"] = torch.cuda.get_rng_state()
+            torch.cuda.set_rng_state(old_state)
+
+
+# TODO: think about when this object should be instantiated?
+_default_tracker = CudaRNGStatesTracker()
