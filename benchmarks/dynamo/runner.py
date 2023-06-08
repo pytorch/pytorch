@@ -123,7 +123,7 @@ DEFAULTS = {
     ],
     "quick": {
         "torchbench": '-k "resnet..$"',
-        "huggingface": "-k Albert",
+        "huggingface": "-k MobileBert",
         "timm_models": ' -k "^resnet" -k "^inception"',
     },
 }
