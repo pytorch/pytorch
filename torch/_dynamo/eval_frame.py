@@ -677,40 +677,6 @@ def explain(f, *args, **kwargs):
     )
 
 
-class ExplainWithBackend:
-    def __init__(self, backend):
-        self.backend = backend
-        self.graphs = []
-        self.ops_per_graph = []
-        self.op_count = 0
-        self.break_reasons = []
-        self.invocations = 0
-        print("Init function of EWB")
-
-    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        from .backends.registry import lookup_backend
-
-        self.invocations += 1
-        print(f"Calling EWB instance: {self.invocations}")
-
-        # Accumulate the graph
-        self.graphs.append(gm)
-
-        # Accumulate ops for this graph
-        ops = []
-        for node in gm.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
-        self.op_count += len(ops)
-        self.ops_per_graph.append(ops)
-
-        # Accumulate break reasons
-        if gm.compile_subgraph_reason.graph_break:
-            self.break_reasons.append(gm.compile_subgraph_reason)
-
-        return lookup_backend(self.backend)(gm, example_inputs)
-
-
 @dataclasses.dataclass
 class ConstraintTarget:
     """
