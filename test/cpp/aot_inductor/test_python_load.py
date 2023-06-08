@@ -1,5 +1,6 @@
 import unittest
 import torch
+import subprocess
 import inductor_module
 
 class TestAoTInductorInPython(unittest.TestCase):
