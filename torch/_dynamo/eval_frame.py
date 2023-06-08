@@ -30,7 +30,6 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
-from . import reset as dynamo_reset
 
 from .hooks import Hooks
 
@@ -162,7 +161,9 @@ def remove_from_cache(f):
     elif hasattr(getattr(f, "forward", None), "__code__"):
         reset_code(f.forward.__code__)
     else:
-        dynamo_reset()
+        from . import reset
+        
+        reset()
         log.warning("could not determine __code__ for %s", f)
 
 
@@ -604,7 +605,9 @@ class ExplainOutput:
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
-    dynamo_reset()
+    from . import reset
+    
+    reset()
 
     out_guards = []
     graphs = []
@@ -661,7 +664,7 @@ def explain(f, *args, **kwargs):
     compile_time = compile_times(repr="str")
 
     # TODO(voz): Do we want a decorator for this?
-    dynamo_reset()
+    reset()
     return ExplainOutput(
         graph_count,
         graph_break_count,
@@ -676,25 +679,54 @@ def explain(f, *args, **kwargs):
 
 class Explain:
     def __init__(self):
-        self.graphs = []
-        self.break_reasons = []
-        self.ops = []
-        self.op_count = 0
+        self.explain_output = None
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        self.graphs.append(gm)
-        graph_count = len(self.graphs)
-        for node in gm.graph.nodes:
-            if node.op == "call_function":
-                self.ops.append(node.target)
+        from . import reset
+    
+        reset()
 
-        self.op_count += len(self.ops)
-        if gm.compile_subgraph_reason.graph_break:
-            self.break_reasons.append(gm.compile_subgraph_reason)
+        out_guards = []
+        graphs = []
+        ops_per_graph = []
+        op_count = 0
+        break_reasons = []
+
+        def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
+            nonlocal graphs
+            nonlocal op_count
+            nonlocal ops_per_graph
+
+            graphs.append(gm)
+            ops = []
+            for node in gm.graph.nodes:
+                if node.op == "call_function":
+                    ops.append(node.target)
+
+            op_count += len(ops)
+            ops_per_graph.append(ops)
+            if gm.compile_subgraph_reason.graph_break:
+                break_reasons.append(gm.compile_subgraph_reason)
+            return gm.forward
+
+        def guard_export_print(guards):
+            nonlocal out_guards
+            out_guards.extend(guards)
+
+        with patch(f"{__name__}.most_recent_backend", None):
+            opt_f = optimize(
+                dynamo_graph_accumulating_compiler,
+                nopython=False,
+                guard_export_fn=guard_export_print,
+            )(gm)
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+            opt_f(example_inputs)
+
+        graph_count = len(graphs)
 
         # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
         deduped_reasons = {}
-        for reason in self.break_reasons:
+        for reason in break_reasons:
             innermost_frame = reason.user_stack[-1]
             # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
             deduped_reasons[repr(innermost_frame)] = reason
@@ -702,29 +734,37 @@ class Explain:
         formatted_list = ""
         for idx, break_reason in enumerate(deduped_reasons.values()):
             formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
-            msg = f"{break_reason.reason}\n{formatted_stack}"
-            formatted_list += f"{idx + 1}. {msg} \n"
+            msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
+            formatted_list += msg
 
-        explanation = f"Dynamo produced {graph_count} graphs "
-        explanation += f"with {graph_count - 1} graph break(s) and {self.op_count} ops"
-        explanation_verbose = explanation
-        explanation_verbose += f"\n Break reasons: \n\n{formatted_list}"
-
-        print(explanation_verbose)
+        graph_break_count = graph_count - 1
+        compile_time = compile_times(repr="str")
+        
+        self.explain_output = ExplainOutput(
+            graph_count,
+            graph_break_count,
+            op_count,
+            out_guards,
+            graphs,
+            ops_per_graph,
+            break_reasons,
+            compile_time,
+        )
         return gm.forward
     
-    
+
 class ExplainWithBackend:
     def __init__(self, backend="inductor"):
         # If a backend is not provided by the user we default to inductor
         self.backend = backend
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        from . import reset
         from .backends.registry import lookup_backend
 
-        dynamo_reset()
+        reset()
         print(gm.graph)
-        dynamo_reset()
+        reset()
         return lookup_backend(self.backend)(gm, example_inputs)
 
 @dataclasses.dataclass
