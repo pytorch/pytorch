@@ -70,8 +70,10 @@ void DifferentiableViewMeta::set_creation_meta(CreationMeta new_creation_meta) {
   TORCH_CHECK(
       has_bw_view(), "creation_meta can only exist for backward views.");
   creation_meta_ = new_creation_meta;
-  creation_traceback_ = torch::CapturedTraceback::gather(
-      /*python*/ true, /*script*/ false, /*cpp*/ false);
+  if (AnomalyMode::is_enabled()) {
+    creation_traceback_ = torch::CapturedTraceback::gather(
+        /*python*/ true, /*script*/ false, /*cpp*/ false);
+  }
 }
 
 // Chain this view info with the new view op between base and tensor
