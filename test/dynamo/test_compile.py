@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import inspect
 import os
 import tempfile
 import unittest
