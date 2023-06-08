@@ -97,7 +97,9 @@ def constant_fold(gm):
             # skip constructors, since inductor generates optimal code for them already
             # and turning into tensor would result in an additional global memory read
             # TODO - more complicated strategy
-            if node.op != "get_attr" and not any(isinstance(e, torch.Tensor) for e in flattened_inputs):
+            if node.op != "get_attr" and not any(
+                isinstance(e, torch.Tensor) for e in flattened_inputs
+            ):
                 return unknown_value
 
             # All mutations should either be removed or on inputs which we did not make constant
@@ -202,7 +204,6 @@ def freeze(
     aot_autograd_gm = decompose_unfused_batchnorms(
         aot_autograd_gm, example_inputs, preserved_arg_indices
     )
-
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)
     aot_autograd_gm.graph = cse_graph

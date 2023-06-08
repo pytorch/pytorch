@@ -155,7 +155,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 self.assertEqual(out_eager, out_compiled)
 
     def test_mm_concat(self):
-
         class MM(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -169,7 +168,10 @@ class OptimizeForInferenceTemplate(TestCase):
 
         class AddMM(MM):
             def forward(self, x):
-                return [aten.addmm(torch.ones([10], device=x.device), x, p) for p in [self.t1, self.t2, self.t3]]
+                return [
+                    aten.addmm(torch.ones([10], device=x.device), x, p)
+                    for p in [self.t1, self.t2, self.t3]
+                ]
 
         for mod in [MM().to(self.device), AddMM().to(self.device)]:
             inp = torch.rand([10, 10]).to(self.device)
