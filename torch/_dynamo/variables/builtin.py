@@ -813,9 +813,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):
-        if arg is None:
+        if arg is None or isinstance(arg, dict):
             return ConstDictVariable(
-                {}, user_cls, mutable_local=MutableLocal()
+                arg if arg is not None else {}, user_cls, mutable_local=MutableLocal()
             ).add_options(options)
         elif isinstance(arg, variables.ConstDictVariable):
             return arg.clone(
