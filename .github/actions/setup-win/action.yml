@@ -94,3 +94,11 @@ runs:
         # Let's both exclude the path and disable Windows Defender completely just to be sure
         # that it doesn't interfere
         Set-MpPreference -DisableRealtimeMonitoring $True
+
+    - name: Install sysinternals handle tool
+      shell: powershell
+      run: |
+        choco install handle -y
+
+        # Testing
+        handle C:\actions-runner\_work\

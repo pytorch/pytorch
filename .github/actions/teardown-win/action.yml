@@ -50,3 +50,8 @@ runs:
           fi
 
           rm -rf ./*
+
+    - name: Debug locked files
+      shell: powershell
+      run: |
+        handle C:\actions-runner\_work\
