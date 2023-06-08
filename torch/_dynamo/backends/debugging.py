@@ -186,7 +186,7 @@ class ExplainOutput:
         return output
 
 
-def process_graph(
+def _explain_graph_detail(
     gm: torch.fx.GraphModule, graphs, op_count, ops_per_graph, break_reasons
 ):
     """
@@ -238,7 +238,7 @@ class ExplainWithBackend:
         eb = ExplainWithBackend("inductor")
         optimized_fn = torch.compile(fn, backend=eb)
         result = optimized_fn(torch.randn(5))
-        print(eb)
+        print(eb.output())
     """
 
     def __init__(self, backend):
@@ -250,12 +250,12 @@ class ExplainWithBackend:
         self.break_reasons = []
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        gm, self.graphs, self.op_count, _, self.break_reasons = process_graph(
+        gm, self.graphs, self.op_count, _, self.break_reasons = _explain_graph_detail(
             gm, self.graphs, self.op_count, [], self.break_reasons
         )
         return self.backend(gm, example_inputs)
 
-    def __str__(self):
+    def output(self) -> ExplainOutput:
         graph_count = len(self.graphs)
         output = ExplainOutput(
             self.graphs,
@@ -265,4 +265,4 @@ class ExplainWithBackend:
             self.op_count,
         )
 
-        return str(output)
+        return output

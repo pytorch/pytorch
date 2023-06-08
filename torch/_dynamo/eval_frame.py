@@ -573,14 +573,14 @@ def explain(f, *args, **kwargs):
     break_reasons = []
 
     def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
-        from .backends.debugging import process_graph
+        from .backends.debugging import _explain_graph_detail
 
         nonlocal graphs
         nonlocal op_count
         nonlocal ops_per_graph
         nonlocal break_reasons
 
-        gm, graphs, op_count, ops_per_graph, break_reasons = process_graph(
+        gm, graphs, op_count, ops_per_graph, break_reasons = _explain_graph_detail(
             gm, graphs, op_count, ops_per_graph, break_reasons
         )
 
