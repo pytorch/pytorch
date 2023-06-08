@@ -8,7 +8,11 @@ import yaml
 from torchgen.executorch.model import ETKernelIndex
 from torchgen.gen import LineLoader
 
-from torchgen.gen_executorch import gen_functions_declarations, translate_native_yaml, parse_yaml_files
+from torchgen.gen_executorch import (
+    gen_functions_declarations,
+    parse_yaml_files,
+    translate_native_yaml,
+)
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
@@ -196,7 +200,7 @@ class TestParseNativeYaml(unittest.TestCase):
             native_yaml_path=self.ops_yaml_path,
             custom_ops_yaml_path=custom_ops_yaml_path,
             selector=selector,
-            use_aten_lib=use_aten_lib
+            use_aten_lib=use_aten_lib,
         )
 
         # Just the default kernel entry
@@ -205,7 +209,9 @@ class TestParseNativeYaml(unittest.TestCase):
 
         op_entries = parsed_yaml.kernel_index.index
         for op_name, kernel_mapping in op_entries.items():
-            self.assertTrue(len(kernel_mapping) == expected_kernel_entry.pop(str(op_name)))
+            self.assertTrue(
+                len(kernel_mapping) == expected_kernel_entry.pop(str(op_name))
+            )
 
         self.assertTrue(len(expected_kernel_entry) == 0)
 
@@ -222,7 +228,9 @@ class TestParseKernelYamlFiles(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.mkdtemp()
 
-        self.aten_kernel_yaml_path = os.path.join(self.temp_dir, "test_kernel_native_functions.yaml")
+        self.aten_kernel_yaml_path = os.path.join(
+            self.temp_dir, "test_kernel_native_functions.yaml"
+        )
         with open(self.aten_kernel_yaml_path, "w") as f:
             f.write(TEST_KERNEL_YAML)
         self.ops_yaml_path = os.path.join(self.temp_dir, "test.yaml")
@@ -279,7 +287,7 @@ class TestParseKernelYamlFiles(unittest.TestCase):
             native_yaml_path=self.ops_yaml_path,
             custom_ops_yaml_path=custom_ops_yaml_path,
             selector=selector,
-            use_aten_lib=use_aten_lib
+            use_aten_lib=use_aten_lib,
         )
 
         expected_kernel_entry = {"add.out": 9, "mul.out": 2}
@@ -287,7 +295,9 @@ class TestParseKernelYamlFiles(unittest.TestCase):
 
         op_entries = parsed_yaml.kernel_index.index
         for op_name, kernel_mapping in op_entries.items():
-            self.assertTrue(len(kernel_mapping) == expected_kernel_entry.pop(str(op_name)))
+            self.assertTrue(
+                len(kernel_mapping) == expected_kernel_entry.pop(str(op_name))
+            )
 
         self.assertTrue(len(expected_kernel_entry) == 0)
 
@@ -298,6 +308,7 @@ class TestParseKernelYamlFiles(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
         except OSError:
             pass
+
 
 class TestGenFunctionsDeclarations(unittest.TestCase):
     def setUp(self) -> None:

@@ -3,7 +3,7 @@ import os
 import pathlib
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, TextIO, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, TextIO, Tuple, Union
 
 import yaml
 
@@ -11,7 +11,7 @@ import yaml
 from torchgen import dest
 from torchgen.api import cpp as aten_cpp
 from torchgen.api.types import CppSignature, CppSignatureGroup, CType, NamedCType
-from torchgen.context import method_with_native_function
+from torchgen.context import method_with_native_function, with_native_function_and_index
 from torchgen.executorch.api import et_cpp
 from torchgen.executorch.api.custom_ops import (
     ComputeNativeFunctionStub,
@@ -19,8 +19,8 @@ from torchgen.executorch.api.custom_ops import (
 )
 from torchgen.executorch.api.types import contextArg, ExecutorchCppSignature
 from torchgen.executorch.api.unboxing import Unboxing
-from torchgen.executorch.model import ETKernelIndex, ETKernelKey, ETParsedYaml
-from torchgen.executorch.parse import parse_et_yaml, parse_et_yaml_struct, ET_FIELDS
+from torchgen.executorch.model import ETKernelIndex, ETParsedYaml
+from torchgen.executorch.parse import ET_FIELDS, parse_et_yaml, parse_et_yaml_struct
 from torchgen.gen import (
     get_custom_build_selector,
     get_native_function_declarations,
@@ -34,6 +34,7 @@ from torchgen.model import (
     BackendMetadata,
     DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
+    FunctionSchema,
     Location,
     NativeFunction,
     NativeFunctionsGroup,
@@ -239,6 +240,7 @@ def gen_unboxing(
     )
 
 
+@with_native_function_and_index  # type: ignore[arg-type]
 def compute_native_function_declaration(
     g: Union[NativeFunctionsGroup, NativeFunction], kernel_index: ETKernelIndex
 ) -> List[str]:
@@ -412,7 +414,7 @@ def gen_headers(
         ns_grouped_kernels = get_ns_grouped_kernels(
             native_functions=native_functions,
             kernel_index=kernel_index,
-            native_function_decl_gen=compute_native_function_declaration,
+            native_function_decl_gen=compute_native_function_declaration,  # type: ignore[arg-type]
         )
         cpu_fm.write(
             "NativeFunctions.h",
@@ -540,15 +542,13 @@ def translate_native_yaml(
     )
 
     func_to_scoped_name: Dict[FunctionSchema, str] = {
-        f.func : f"{f.namespace}::{f.func.name}" for f in native_functions
+        f.func: f"{f.namespace}::{f.func.name}" for f in native_functions
     }
     op_to_scoped_name: Dict[OperatorName, str] = {
-        func.name : name for func, name in func_to_scoped_name.items()
+        func.name: name for func, name in func_to_scoped_name.items()
     }
 
-    schema_dict = {
-        name : str(func) for func, name in func_to_scoped_name.items()
-    }
+    schema_dict = {name: str(func) for func, name in func_to_scoped_name.items()}
     kernel_persist_dict: Dict[str, Dict[str, Any]] = {
         op_to_scoped_name[op]: v for op, v in persisted_fields.items()
     }
@@ -592,14 +592,17 @@ def parse_yaml(
     function_filter: Callable[[NativeFunction], bool],
     skip_native_fns_gen: bool = False,
 ) -> Tuple[
-    List[NativeFunction], Union[Dict[DispatchKey, Dict[OperatorName, BackendMetadata]], ETKernelIndex],
+    List[NativeFunction],
+    Union[Dict[DispatchKey, Dict[OperatorName, BackendMetadata]], ETKernelIndex],
 ]:
     if path and os.path.exists(path) and os.stat(path).st_size > 0:
         with open(path, "r") as f:
             es = yaml.load(f, Loader=LineLoader)
 
         # Check for kernel index structure
-        kernel_index = parse_et_yaml_struct(es) if any("kernels" in e for e in es) else None
+        kernel_index = (
+            parse_et_yaml_struct(es) if any("kernels" in e for e in es) else None
+        )
 
         # Remove ET specific fields from entries for BC compatibility
         for entry in es:
@@ -611,7 +614,7 @@ def parse_yaml(
             tags_yaml_path,
             None,
             skip_native_fns_gen=skip_native_fns_gen,
-            loaded_yaml=es
+            loaded_yaml=es,
         )
         native_functions = list(filter(function_filter, parsed_yaml.native_functions))
         op_names = [f.func.name for f in native_functions]
@@ -619,7 +622,8 @@ def parse_yaml(
         # (1) Return ETKernelIndex if kernel index is present
         if kernel_index is not None:
             filtered_index = {
-                op_name: kernel_mapping for op_name, kernel_mapping in kernel_index.index.items()
+                op_name: kernel_mapping
+                for op_name, kernel_mapping in kernel_index.index.items()
                 if op_name in op_names
             }
             return native_functions, ETKernelIndex(index=filtered_index)
@@ -695,20 +699,16 @@ def parse_yaml_files(
 
         # Convert BackendIndices to ETKernelIndex
         if not isinstance(translated_indices, ETKernelIndex):
-            translated_indices: ETKernelIndex = ETKernelIndex.from_backend_indices(
-                translated_indices
-            )
+            translated_indices = ETKernelIndex.from_backend_indices(translated_indices)
         if not isinstance(custom_ops_indices, ETKernelIndex):
-            custom_ops_indices: ETKernelIndex = ETKernelIndex.from_backend_indices(
-                custom_ops_indices
-            )
+            custom_ops_indices = ETKernelIndex.from_backend_indices(custom_ops_indices)
 
         combined_functions = translated_functions + custom_ops_functions
-        combined_kernel_index = ETKernelIndex.merge_indices(translated_indices, custom_ops_indices)
-        combined_yaml = ETParsedYaml(combined_functions, combined_kernel_index)
-        custom_ops_parsed_yaml = ETParsedYaml(
-            custom_ops_functions, custom_ops_indices
+        combined_kernel_index = ETKernelIndex.merge_indices(
+            translated_indices, custom_ops_indices
         )
+        combined_yaml = ETParsedYaml(combined_functions, combined_kernel_index)
+        custom_ops_parsed_yaml = ETParsedYaml(custom_ops_functions, custom_ops_indices)
 
     return combined_yaml, custom_ops_parsed_yaml
 

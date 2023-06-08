@@ -19,7 +19,6 @@ from ..observer import (
 )
 from ..qconfig import (
     _is_reuse_input_qconfig,
-    _obs_or_fq_ctr_equals,
     QConfigAny,
 )
 from ..qconfig_mapping import (
@@ -207,11 +206,11 @@ def _create_obs_or_fq_from_qspec(
     kwargs.pop("observer_or_fake_quant_ctr")
     # we will remove is_dynamic from QuantizationSpec because
     # it seems that dynamic range quantization
-    if not _obs_or_fq_ctr_equals(observer_or_fake_quant_ctr, PlaceholderObserver):
-        kwargs.pop("is_dynamic")
     obs_or_fq_class = observer_or_fake_quant_ctr
     if isinstance(observer_or_fake_quant_ctr, _PartialWrapper):
         obs_or_fq_class = observer_or_fake_quant_ctr.p.func  # type: ignore[union-attr, assignment]
+    if obs_or_fq_class != torch.ao.quantization.observer.PlaceholderObserver:
+        kwargs.pop("is_dynamic")
     if "PerChannel" not in obs_or_fq_class.__name__:  # type: ignore[operator, union-attr]
         kwargs.pop("ch_axis")
     return observer_or_fake_quant_ctr.with_args(**kwargs)()

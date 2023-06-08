@@ -3,20 +3,23 @@ from .quantizer import (
     EdgeOrNode,
     OperatorConfig,
     Quantizer,
+    QuantizationSpecBase,
     QuantizationSpec,
-    QuantizationAnnotation,
     FixedQParamsQuantizationSpec,
     SharedQuantizationSpec,
     DerivedQuantizationSpec,
+    QuantizationAnnotation,
 )
 
 __all__ = [
     "EdgeOrNode",
+    "OperatorConfig",
     "Quantizer",
-    "QuantizationSpec",
     "QNNPackQuantizer",
-    "QuantizationAnnotation",
+    "QuantizationSpecBase",
+    "QuantizationSpec",
     "FixedQParamsQuantizationSpec",
     "SharedQuantizationSpec",
     "DerivedQuantizationSpec",
+    "QuantizationAnnotation",
 ]
