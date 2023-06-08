@@ -22,11 +22,14 @@ def reset() -> None:
     It is recommended to call this function, especially after using operations like `torch.compile(...)`
     to ensure a clean state before another unrelated compilation
 
-    Usage:
-    1. Call `reset()` to clear all compilation caches and restore the initial state.
-    2. Perform any desired operations, such as :func:`torch.compile(...)`.
-    3. Call `reset()` again to ensure a clean state.
+    Example::
 
+        .. code-block:: python
+
+            import torch
+            torch.compiler.reset()
+            torch.compile(...)
+            torch.compiler.reset()
     """
 
     torch._dynamo.reset()
@@ -63,7 +66,10 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
         exclude_tags(optional): A tuple of strings representing tags to exclude.
 
     Example::
-        valid_backends = list_backends(exclude_tags=("debug", "experimental"))
+
+        .. code-block:: python
+
+            valid_backends = list_backends(exclude_tags=("debug", "experimental"))
 
     """
 
@@ -79,7 +85,10 @@ def assume_constant_result(fn):
         fn: The function to be marked as having a constant result.
 
     Example::
-        marked_function = assume_constant_result(my_function)
+
+        .. code-block:: python
+
+            marked_function = assume_constant_result(my_function)
 
     .. warning::
         `assume_constant_result` can if invalid cause safety and soundness issues, `torch.compile`
@@ -91,25 +100,24 @@ def assume_constant_result(fn):
 
 def disable(fn=None, recursive=True):
     """
-    This function provides both a decorator and a context manager to disable compilation.
+    This function provides both a decorator and a context manager to disable compilation on a function
+    It also provides the option of recursively disabling called functions
 
     Args:
-        fn (optional): The function to be decorated or used as a context manager.
-        If provided, compilation will be disabled for the decorated function frame and any
-        recursively invoked functions within it. If not provided, a context manager will be returned.
+        fn (optional): The function to disable
         recursive (optional): A boolean value indicating whether the disabling should be recursive.
-        If set to True (default), compilation is completely skipped on the decorated function frame
-        and any recursively invoked functions within it. If set to False, compilation skips frames
-        associated with the function code but still processes recursively invoked frames.
 
-    
     Example::
-      # The decorator without recursive disabling
-      @disable(recursive=False)
-      def my_function():
 
-      # The context manager with recursive disabling:
-      with disable(recursive=True):
+        .. code-block:: python
+
+            # The decorator without recursive disabling
+            @disable(recursive=False)
+            def my_function():
+
+            # The context manager with recursive disabling:
+            with disable(recursive=True):
+                ...
     """
 
     return torch._dynamo.disable(fn, recursive)
