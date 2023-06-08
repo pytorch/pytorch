@@ -13,7 +13,7 @@ namespace functionalization {
 // We can't easily share it though, because (eventually) these functions
 // will all call `permute/unsqueeze_copy()` instead of `permute/unsqueeze`.
 
-Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_views) {
+static Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_views) {
   // invert the permutation
   auto ndims = dims.size();
   std::vector<int64_t> dims_(ndims);
@@ -27,7 +27,7 @@ Tensor permute_copy_inverse(const Tensor& self, IntArrayRef dims, bool reapply_v
   }
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool reapply_views) {
+static Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool reapply_views) {
   auto result = self;
 
   int64_t nDims = sizes.size();
@@ -43,7 +43,7 @@ Tensor unsqueeze_copy_to(const Tensor & self, c10::SymIntArrayRef sizes, bool re
   return result;
 }
 
-Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIntArrayRef sizes, bool reapply_views) {
+static Tensor unsqueeze_copy_to(const Tensor & self, IntArrayRef dim, c10::SymIntArrayRef sizes, bool reapply_views) {
   const auto ndim = sizes.size();
   const auto mask = at::dim_list_to_bitset(dim, ndim);
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
@@ -330,6 +330,13 @@ Tensor FunctionalInverses::unfold_copy_inverse(const Tensor& base, const Tensor&
     // unfold_backward() is safe to use here because it is NOT a view op.
     // (note: technically, "reapply_views" won't do anything here and we'll have an extra memory copy.
     // We'd need to add an aliasing version of unfold_backward to fix that though).
+    TORCH_CHECK(
+      !(reapply_views && size > step),
+      "While executing unfold, functionalization encountered a tensor being mutated that has internal overlap. \
+When using torch.compile (or running functionalization directly), this is banned \
+as the behavior is not well defined. Consider cloning the tensor before mutating it, \
+or removing the mutation from your model."
+        );
     return unfold_backward(mutated_view, base.sizes(), dimension, size, step);
 }
 

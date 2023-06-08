@@ -343,6 +343,11 @@ static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor
   return at::MemoryFormat::Contiguous;
 }
 
+// controls whether emptyCache will be called following cudnn conv benchmarking
+TORCH_API void _cudnn_set_conv_benchmark_empty_cache(bool enable);
+TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
+
+
 static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||

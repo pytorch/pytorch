@@ -325,10 +325,14 @@ ALLOW_LIST = [
     ("aten::_upsample_nearest_exact2d", datetime.date(2022, 12, 15)),
     ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
     ("aten::_scaled_dot_product_attention", datetime.date(2023, 3, 15)),
-    ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 3, 15)),
+    ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 5, 15)),
+    ("aten::_scaled_dot_product_efficient_attention", datetime.date(2023, 6, 1)),
     ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
     ("aten::_fused_sdp_choice", datetime.date(2023, 3, 15)),
-    ("aten::_flash_attention_forward", datetime.date(2023, 3, 15)),
+    ("aten::_flash_attention_forward", datetime.date(2023, 5, 15)),
+    ("aten::_flash_attention_backward", datetime.date(2023, 5, 15)),
+    ("aten::_efficient_attention_forward", datetime.date(2023, 6, 1)),
+    ("aten::_efficient_attention_backward", datetime.date(2023, 6, 1)),
     ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
     ("prim::CudaFusionIvalGuard", datetime.date(2023, 2, 1)),
     ("prim::CudaFusionGuard", datetime.date(2023, 2, 1)),
@@ -357,6 +361,14 @@ ALLOW_LIST = [
     ("aten::_nested_view_from_buffer_copy.out", datetime.date(2023, 5, 1)),
     ("aten::_nested_view_from_buffer_copy", datetime.date(2023, 5, 1)),
     ("aten::_nested_view_from_buffer", datetime.date(2023, 5, 1)),
+    ("aten::_scaled_dot_product_flash_attention_backward", datetime.date(2023, 6, 1)),
+    ("mkldnn::_convolution_pointwise_.binary", datetime.date(2023, 7, 1)),
+    # These ops were moved to python under the c10d_functional namespace
+    ("aten::wait_tensor", datetime.date(9999, 1, 30)),
+    ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
+    ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
+    ("aten::all_reduce", datetime.date(9999, 1, 30)),
+
 ]
 
 ALLOW_LIST_COMPILED = [

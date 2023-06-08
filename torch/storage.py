@@ -29,6 +29,7 @@ class _StorageBase:
     def __init__(self, *args, **kwargs): ...  # noqa: E704
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
+    def __setitem__(self, *args, **kwargs): ...  # noqa: E704
     def copy_(self, source: T, non_blocking: bool = None) -> T: ...  # noqa: E704
     def new(self) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
@@ -39,7 +40,10 @@ class _StorageBase:
     def type(self, dtype: str = None, non_blocking: bool = False) -> T: ...  # noqa: E704
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
     def element_size(self) -> int: ...  # noqa: E704
-    def get_device(self) -> int: ...  # noqa: E704
+
+    def get_device(self) -> int:
+        return self.device.index
+
     def data_ptr(self) -> int: ...  # noqa: E704
 
     # Defined in torch/csrc/generic/StorageSharing.cpp
@@ -61,7 +65,6 @@ class _StorageBase:
     def _write_file(self, *args, **kwargs): ...  # noqa: E704
     def resize_(self, size: int): ...  # noqa: E704
     def _weak_ref(self, *args, **kwargs) -> T: ...  # noqa: E704
-    def is_pinned(self) -> bool: ...  # noqa: E704
     def _set_from_file(self, *args, **kwargs): ...  # noqa: E704
     def _set_cdata(self, *args, **kwargs): ...  # noqa: E704
     def _share_cuda_(self, *args, **kwargs): ...  # noqa: E704
@@ -77,6 +80,7 @@ class _StorageBase:
     def from_file(cls, filename, shared, nbytes) -> T: ...  # noqa: E704
     @classmethod
     def _expired(cls, *args, **kwargs) -> T: ...  # noqa: E704
+    def _byteswap(self, *args, **kwargs): ...  # noqa: E704
 
     def __str__(self):
         info_str = (
@@ -191,19 +195,33 @@ class _StorageBase:
         """Casts this storage to complex float type"""
         return self._to(torch.cfloat)
 
-    def pin_memory(self, device="cuda"):
-        """Copies the storage to pinned memory, if it's not already pinned."""
-        if self.is_cuda:
-            raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
-        """For other backends, device need to set.
-           If not set, the default behaviour is CUDA device. Currently, only CUDA is supported.
-        """
-        if device != "cuda":
-            raise TypeError(f"cannot pin memory to {device} device, only CUDA is supported.")
+    def is_pinned(self, device: Union[str, torch.device] = 'cuda'):
+        r"""Determine whether the CPU storage is already pinned on device.
 
-        import torch.cuda
-        allocator = torch.cuda.memory._host_allocator()  # type: ignore[attr-defined]
-        return type(self)(self.size(), allocator=allocator).copy_(self)
+        Args:
+            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
+
+        Returns:
+            A boolean variable.
+        """
+        return torch.tensor([], dtype=torch.uint8, device=self.device).set_(
+            cast(Storage, self)).is_pinned(device)
+
+    def pin_memory(self, device: Union[str, torch.device] = 'cuda'):
+        r"""Copies the CPU storage to pinned memory, if it's not already pinned.
+
+        Args:
+            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
+
+        Returns:
+            A pinned CPU storage.
+        """
+        if self.device.type != 'cpu':
+            raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
+
+        pinned_tensor = torch.tensor([], dtype=torch.uint8, device=self.device).set_(
+            cast(Storage, self)).pin_memory(device)
+        return pinned_tensor.untyped_storage()
 
     def share_memory_(self):
         """Moves the storage to shared memory.
@@ -220,8 +238,8 @@ class _StorageBase:
         Returns: self
         """
         from torch.multiprocessing import get_sharing_strategy
-        if self.is_cuda:
-            pass  # CUDA doesn't use POSIX shared memory
+        if self.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
+            pass  # CUDA or PrivateUse1 doesn't use POSIX shared memory
         elif get_sharing_strategy() == 'file_system':
             self._share_filename_cpu_()
         else:
@@ -233,7 +251,7 @@ class _StorageBase:
         """Creates a new storage in shared memory with the same data type"""
         from torch.multiprocessing import get_sharing_strategy
         device = torch.device(device)
-        if device.type == 'cuda':
+        if device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
             return cls(size, device=device)
         elif get_sharing_strategy() == 'file_system':
             return cls._new_using_filename_cpu(size)
@@ -242,6 +260,14 @@ class _StorageBase:
 
     def untyped(self):
         return self
+
+    def byteswap(self, dtype):
+        """Swaps bytes in underlying data"""
+        elem_size = torch._utils._element_size(dtype)
+        # for complex types, don't swap first and second numbers
+        if dtype.is_complex:
+            elem_size = max(int(elem_size / 2), 1)
+        self._byteswap(elem_size)
 
 
 def _share_memory_lock_protected(fn):
@@ -401,6 +427,12 @@ def _warn_typed_storage_removal(stacklevel=2):
 def _reset_warn_typed_storage_removal():
     _warn_typed_storage_removal.__dict__['has_warned'] = False
 
+def _get_device_from_module(module: str):
+    if module.split(".")[-1] in ["cuda", torch._C._get_privateuse1_backend_name()]:
+        return module.split(".")[-1]
+    else:
+        return "cpu"
+
 class TypedStorage:
     is_sparse = False
 
@@ -458,7 +490,7 @@ class TypedStorage:
                 return TypedStorage(
                     *args,
                     dtype=cls._dtype,
-                    device='cuda' if cls.__module__ == 'torch.cuda' else 'cpu',
+                    device=_get_device_from_module(cls.__module__),
                     _internal=True)
 
             else:
@@ -473,7 +505,7 @@ class TypedStorage:
                         arg_error_msg +
                         f"\nArgument 'wrap_storage' must be UntypedStorage, but got {type(wrap_storage)}")
 
-                cls_device = 'cuda' if cls.__module__ == 'torch.cuda' else 'cpu'
+                cls_device = _get_device_from_module(cls.__module__)
 
                 if wrap_storage.device.type != cls_device:
                     raise RuntimeError(
@@ -765,8 +797,27 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def pin_memory(self, device="cuda"):
-        """Copies the  storage to pinned memory, if it's not already pinned."""
+    def is_pinned(self, device: Union[str, torch.device] = 'cuda'):
+        r"""Determine whether the CPU TypedStorage is already pinned on device.
+
+        Args:
+            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``
+
+        Returns:
+            A boolean variable.
+        """
+        _warn_typed_storage_removal()
+        return self._untyped_storage.is_pinned(device)
+
+    def pin_memory(self, device: Union[str, torch.device] = 'cuda'):
+        r"""Copies the CPU TypedStorage to pinned memory, if it's not already pinned.
+
+        Args:
+            device (str or torch.device): The device to pin memory on. Default: ``'cuda'``.
+
+        Returns:
+            A pinned CPU storage.
+        """
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.pin_memory(device=device))
 
@@ -989,10 +1040,6 @@ class TypedStorage:
     def _expired(cls, *args, **kwargs):
         return UntypedStorage._expired(*args, **kwargs)
 
-    def is_pinned(self):
-        _warn_typed_storage_removal()
-        return self._untyped_storage.is_pinned()
-
     def _write_file(self, *args, **kwargs):
         return self._untyped_storage._write_file(*args, **kwargs)
 
@@ -1042,10 +1089,10 @@ class TypedStorage:
 
         storage_name = _dtype_to_storage_type_map()[self.dtype]
 
-        if self.device.type not in ['cpu', 'cuda']:
+        if self.device.type not in ['cpu', 'cuda', torch._C._get_privateuse1_backend_name()]:
             return None
 
-        module = torch if self.device.type == 'cpu' else torch.cuda
+        module = torch if self.device.type == 'cpu' else getattr(torch, self.device.type)
 
         try:
             return getattr(module, storage_name)
@@ -1060,7 +1107,7 @@ class _LegacyStorageMeta(type):
 
     def __instancecheck__(cls, instance):
         if type(instance) == TypedStorage:
-            cls_device = 'cuda' if cls.__module__ == 'torch.cuda' else 'cpu'
+            cls_device = _get_device_from_module(cls.__module__)
             return (cls_device == instance.device.type) and (cls.dtype == instance.dtype)
         return False
 

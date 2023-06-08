@@ -22,6 +22,10 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
     jit_mod = torch.jit.trace(gm, example_inputs)
     device = device_from_inputs(example_inputs)
     shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(example_inputs)]
+    example_outputs = gm(*example_inputs)
+    if len(example_outputs) == 0:
+        log.warning("Explicitly fall back to eager due to zero output")
+        return gm.forward
     mod, params = relay.frontend.from_pytorch(jit_mod, shape_list)
     if device.type == "cuda":
         dev = tvm.cuda(device.index)

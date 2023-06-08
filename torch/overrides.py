@@ -20,7 +20,7 @@ please report the benchmarks in ``benchmarks/overrides_benchmark``. See the
 instructions in the ``README.md`` in that directory.
 """
 
-import __future__
+import __future__  # noqa: F404
 
 import collections
 import functools
@@ -387,7 +387,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.argmin: lambda input: -1,
         torch.argsort: lambda input, dim=None: -1,
         torch.asin: lambda input, out=None: -1,
-        torch._assert_async: lambda input: -1,
+        torch._assert_async: lambda input, msg: -1,
         torch.arcsin: lambda input, out=None: -1,
         torch.asinh: lambda input, out=None: -1,
         torch.arcsinh: lambda input, out=None: -1,
@@ -936,6 +936,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                                      dilation=(1,), ceil_mode=False: -1),
         torch.quantized_max_pool2d: (lambda input, kernel_size, stride=tuple(), padding=(0, 0),
                                      dilation=(1, 1), ceil_mode=False: -1),
+        torch.quantized_max_pool3d: (lambda input, kernel_size, stride=tuple(), padding=(0, 0, 0),
+                                     dilation=(1, 1, 1), ceil_mode=False: -1),
         torch.quantized_rnn_relu_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
                                         col_offsets_hh, scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
         torch.quantized_rnn_tanh_cell: (lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih,
@@ -1874,12 +1876,20 @@ class BaseTorchFunctionMode(TorchFunctionMode):
         return func(*args, **kwargs)
 
 
-class enable_reentrant_dispatch():
-    def __enter__(self):
-        self._raii_guard = torch._C._RestorePythonTLSSnapshot()
-
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        del self._raii_guard
+@contextlib.contextmanager
+def enable_reentrant_dispatch():
+    # NB: this can't simply be
+    # `enable_reentrant_dispatch = torch._C._RestorePythonTLSSnapshot`
+    # because:
+    # 1. torch._C._RestorePythonTLSSnapshot is unavailable when this file
+    #    initially gets imported. Probably an import order thing.
+    # 2. enable_reentrant_dispatch is technically public API; assigning
+    #    it the object would change the __module__ to look private.
+    with torch._C._RestorePythonTLSSnapshot():
+        try:
+            yield
+        finally:
+            pass
 
 def get_buffer(tensor_subclass, data, prefix):
     import ctypes

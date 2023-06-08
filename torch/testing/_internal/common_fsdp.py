@@ -1,10 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+import os
 import re
 import sys
 from abc import ABC, abstractmethod
-from contextlib import suppress
+from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
@@ -25,7 +26,11 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_distributed import MultiProcessTestCase, TEST_SKIPS
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    MultiThreadedTestCase,
+    TEST_SKIPS,
+)
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
@@ -116,7 +121,7 @@ def _zero_model(
     summon_full=True,
 ):
     """Zeros the parameters and optionally buffers of ``model`` in place."""
-    ctx = FSDP.summon_full_params(model) if summon_full else suppress()
+    ctx = FSDP.summon_full_params(model) if summon_full else nullcontext()
     with ctx:
         for param in model.parameters():
             with torch.no_grad():
@@ -811,9 +816,58 @@ class MixtureOfExperts(NestedWrappedModule):
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
 
 
+def run_subtests(
+    cls_inst,
+    subtest_config: Dict[str, List[Any]],
+    test_fn: Callable,
+    *test_args,
+    **test_kwargs: Any,
+):
+    """
+    Runs a test function given by ``test_fn`` as a subtest according to the
+    configurations specified by ``subtest_config``. This amortizes the
+    costly setup overhead (including process spawn and initializing the
+    process group) over the subtests.
+
+    Args:
+        subtest_config (Dict[str, List[Any]]): A mapping from subtest
+            keyword argument name to a list of its possible values.
+        test_fn (Callable): A callable that runs the actual test.
+        test_args: Positional arguments to pass to ``test_fn``.
+        test_kwargs: Keyword arguments to pass to ``test_fn``.
+    """
+    # Convert the config mapping to a list to have a fixed order
+    subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
+    subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
+    subtest_config_values: List[List[Any]] = [item[1] for item in subtest_config_items]
+    for values in itertools.product(*subtest_config_values):
+        # Map keyword to chosen value
+        subtest_kwargs = dict(zip(subtest_config_keys, values))
+        with cls_inst.subTest(**subtest_kwargs):
+            test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+        dist.barrier()
+
+
+class FSDPTestMultiThread(MultiThreadedTestCase):
+    @property
+    def world_size(self):
+        return torch.cuda.device_count() if torch.cuda.is_available() else 4
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    def run_subtests(self, *args, **kwargs):
+        return run_subtests(self, *args, **kwargs)
+
+
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
+        # Set NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,
+        # which can cause unit test flakiness:
+        # https://github.com/pytorch/pytorch/issues/90848
+        os.environ["NCCL_DESYNC_DEBUG"] = "0"
         self._spawn_processes()
 
     @property
@@ -837,38 +891,8 @@ class FSDPTest(MultiProcessTestCase):
     def _check_forward_prefetch(self, fsdp_model, forward_prefetch):
         self.assertEqual(forward_prefetch, fsdp_model.forward_prefetch)
 
-    def run_subtests(
-        self,
-        subtest_config: Dict[str, List[Any]],
-        test_fn: Callable,
-        *test_args,
-        **test_kwargs: Any,
-    ):
-        """
-        Runs a test function given by ``test_fn`` as a subtest according to the
-        configurations specified by ``subtest_config``. This amortizes the
-        costly setup overhead (including process spawn and initializing the
-        process group) over the subtests.
-
-        Args:
-            subtest_config (Dict[str, List[Any]]): A mapping from subtest
-                keyword argument name to a list of its possible values.
-            test_fn (Callable): A callable that runs the actual test.
-            test_args: Positional arguments to pass to ``test_fn``.
-            test_kwargs: Keyword arguments to pass to ``test_fn``.
-        """
-        # Convert the config mapping to a list to have a fixed order
-        subtest_config_items: List[Tuple[str, List[Any]]] = list(subtest_config.items())
-        subtest_config_keys: List[str] = [item[0] for item in subtest_config_items]
-        subtest_config_values: List[List[Any]] = [
-            item[1] for item in subtest_config_items
-        ]
-        for values in itertools.product(*subtest_config_values):
-            # Map keyword to chosen value
-            subtest_kwargs = dict(zip(subtest_config_keys, values))
-            with self.subTest(**subtest_kwargs):
-                test_fn(*test_args, **test_kwargs, **subtest_kwargs)
-            dist.barrier()
+    def run_subtests(self, *args, **kwargs):
+        return run_subtests(self, *args, **kwargs)
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
@@ -908,7 +932,6 @@ class FSDPTest(MultiProcessTestCase):
         dist.barrier()
 
         dist.destroy_process_group()
-        sys.exit(0)
 
     def _train_for_several_steps(
         self,
@@ -1116,7 +1139,7 @@ class FSDPTest(MultiProcessTestCase):
                 "has parameters on cuda",
             )
             if expects_device_error
-            else suppress()
+            else nullcontext()
         )
         with context:
             fsdp_loss = self._train_for_several_steps(

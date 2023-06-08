@@ -14,7 +14,7 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
-#include <ATen/native/ConvUtils.h>
+#include <ATen/native/quantized/ConvUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
@@ -187,55 +187,6 @@ std::array<int64_t, 2> MakeInputShape(int64_t /*D*/, int64_t H, int64_t W) {
 template <>
 std::array<int64_t, 3> MakeInputShape(int64_t D, int64_t H, int64_t W) {
   return {D, H, W};
-}
-
-template <int kSpatialDim>
-at::SmallVector<int64_t, kSpatialDim + 2> MakeConvOutputShape(
-    int N, // mini-batch
-    int M, // output channels
-    const std::array<int64_t, kSpatialDim>& input_image_shape,
-    const std::vector<int64_t>& kernel,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation);
-
-template <>
-at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
-    int N, // mini-batch
-    int M, // output channels
-    const std::array<int64_t, 2>& input_image_shape,
-    const std::vector<int64_t>& kernel,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation) {
-  const int H = input_image_shape[0];
-  const int W = input_image_shape[1];
-  const int64_t Y_H =
-      (H + 2 * padding[0] - dilation[0] * (kernel[0] - 1) - 1) / stride[0] + 1;
-  const int64_t Y_W =
-      (W + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1;
-  return {N, M, Y_H, Y_W};
-}
-
-template <>
-at::SmallVector<int64_t, 5> MakeConvOutputShape<3>(
-    int N, // mini-batch
-    int M, // output channels
-    const std::array<int64_t, 3>& input_image_shape,
-    const std::vector<int64_t>& kernel,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation) {
-  const int D = input_image_shape[0];
-  const int H = input_image_shape[1];
-  const int W = input_image_shape[2];
-  const int64_t Y_D =
-      (D + 2 * padding[0] - dilation[0] * (kernel[0] - 1) - 1) / stride[0] + 1;
-  const int64_t Y_H =
-      (H + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1;
-  const int64_t Y_W =
-      (W + 2 * padding[2] - dilation[2] * (kernel[2] - 1) - 1) / stride[2] + 1;
-  return {N, M, Y_D, Y_H, Y_W};
 }
 
 #endif // USE_PYTORCH_QNNPACK
@@ -656,7 +607,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
    * quantization means XNNPACK will ignore kernel zero point(s).
    */
 
-  if ((std::is_same<underlying_t, c10::quint8>::value )) {
+  if constexpr (std::is_same_v<underlying_t, c10::quint8>) {
     TORCH_CHECK(!per_channel(),
       func_name, ": xnnpack does not currently have per_channel support with activation dtype of c10::quint8."
     );
@@ -793,7 +744,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
     output_shape = MakeDeConvOutputShape<kSpatialDim>(
         N, M, {H, W}, kernel_, stride(), padding(), output_padding(), dilation());
   } else {
-    output_shape = MakeConvOutputShape<kSpatialDim>(
+    output_shape = at::native::quantized::MakeConvOutputShape<kSpatialDim>(
         N, M, input_shape, kernel_, stride(), padding(), dilation());
   }
 
@@ -987,7 +938,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         output_padding(),
         dilation());
   } else {
-    output_shape = MakeConvOutputShape<kSpatialDim>(
+    output_shape = at::native::quantized::MakeConvOutputShape<kSpatialDim>(
         N, M, input_shape, kernel_, stride(), padding(), dilation());
   }
 
@@ -1425,8 +1376,7 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_relu(
 
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 /*
@@ -1585,5 +1535,4 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

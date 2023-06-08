@@ -85,6 +85,8 @@
 #include <ATen/ops/_index_put_impl.h>
 #include <ATen/ops/_index_put_impl_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
+#include <ATen/ops/_unsafe_index_native.h>
+#include <ATen/ops/_unsafe_index_put_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argwhere_native.h>
 #include <ATen/ops/as_strided.h>
@@ -398,7 +400,7 @@ static void build_index_op(
   iter.build(config);
 }
 
-void check_indices_on_cpu_or_selfdevice(
+static void check_indices_on_cpu_or_selfdevice(
     const Tensor& self,
     const at::MaterializedIOptTensorListRef& indices) {
   auto dev = self.device();
@@ -620,6 +622,19 @@ Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tens
       result, self.q_scale(), self.q_zero_point(), self.scalar_type());
 }
 
+Tensor _unsafe_index(const Tensor& self, const torch::List<c10::optional<Tensor>>& indices) {
+  // Disallow boolean indexing since it leads to dynamic output shapes
+  for (auto i : c10::irange(indices.size())) {
+    auto index = indices.get(i);
+    if (index.has_value()) {
+      auto dtype = index->scalar_type();
+      TORCH_CHECK(dtype == kLong || dtype == kInt,
+                  "_unsafe_index found unexpected index type ", dtype);
+    }
+  }
+  return at::index(self, indices);
+}
+
 Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const bool accumulate) {
   // See note [Writing Nondeterministic Operations]
   // Nondeterministic when index contains duplicate entries and we do not accumulate
@@ -668,6 +683,10 @@ Tensor put(const Tensor & self, const Tensor& index, const Tensor & source, cons
 
 Tensor index_put(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate) {
   return self.clone(at::MemoryFormat::Preserve).index_put_(indices, value, accumulate);
+}
+
+Tensor _unsafe_index_put(const Tensor& self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& value, bool accumulate) {
+  return at::index_put(self, indices, value, accumulate);
 }
 
 Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
@@ -946,7 +965,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
   }
 }
 
-void index_reduce_func_impl(
+static void index_reduce_func_impl(
   const Tensor& self,
   int64_t dim,
   const Tensor& index,
@@ -1130,7 +1149,7 @@ static void check_indexarray_range(
   }
 }
 
-Tensor & index_select_out_cpu_dim1_(
+static Tensor & index_select_out_cpu_dim1_(
     Tensor & result_contig, const Tensor & self, const Tensor & index_contig) {
 
   auto self_contig = self.contiguous();
@@ -1360,10 +1379,6 @@ Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tenso
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
-Tensor index_select_backward(const Tensor& grad, at::IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
-    return at::native::index_select_backward_symint(grad, c10::fromIntArrayRefSlow(self_sizes), dim, index);
-}
-
 Tensor index_select_backward_symint(const Tensor& grad, c10::SymIntArrayRef self_sizes, int64_t dim, const Tensor& index) {
   // for composite compliance, use out-of-place variant of
   // `index_add` if index tensor is a Tensor Subclass.
@@ -1518,7 +1533,7 @@ static void scatter_reduce_exclude_self_helper(
   });
 }
 
-void _scatter_via_index_put(
+static void _scatter_via_index_put(
   const Tensor& self,
   int64_t dim,
   const Tensor& index,
@@ -2125,7 +2140,7 @@ Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
     thread_count_nonzero[0] += thread_count_nonzero[i];
   }
   auto out = at::empty({}, self.options().dtype(kLong));
-  *out.data_ptr<int64_t>() = thread_count_nonzero[0];
+  *out.mutable_data_ptr<int64_t>() = thread_count_nonzero[0];
   return out;
 }
 
@@ -2372,6 +2387,8 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
+      // order of indexing matters
+      .enforce_linear_iteration()
       .add_output(self)
       .add_input(*b_mask)
       .build();

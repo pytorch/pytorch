@@ -1,7 +1,3 @@
-aten::__ilshift__.Scalar
-aten::__ilshift__.Tensor
-aten::__irshift__.Scalar
-aten::__irshift__.Tensor
 aten::__lshift__.Scalar
 aten::__lshift__.Scalar_out
 aten::__lshift__.Tensor
@@ -35,6 +31,7 @@ aten::_amp_update_scale
 aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
+aten::_assert_async.msg
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
@@ -487,6 +484,7 @@ aten::_standard_gamma
 aten::_standard_gamma.out
 aten::_standard_gamma_grad
 aten::_standard_gamma_grad.out
+aten::_structured_sparse_linear
 aten::_test_autograd_multiple_dispatch.fullcoverage
 aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
@@ -526,6 +524,8 @@ aten::_unique
 aten::_unique.out
 aten::_unique2
 aten::_unique2.out
+aten::_unsafe_index.Tensor
+aten::_unsafe_index_put
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
 aten::_upsample_bicubic2d_aa_backward
@@ -574,8 +574,6 @@ aten::affine_grid_generator
 aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
-aten::all_gather_into_tensor
-aten::all_reduce
 aten::allclose
 aten::angle
 aten::angle.out
@@ -974,8 +972,6 @@ aten::pixel_unshuffle
 aten::pixel_unshuffle.out
 aten::poisson
 aten::poisson.out
-aten::polar
-aten::polar.out
 aten::polygamma
 aten::polygamma.out
 aten::polygamma_
@@ -1014,6 +1010,8 @@ aten::quantized_max_pool1d
 aten::quantized_max_pool1d.out
 aten::quantized_max_pool2d
 aten::quantized_max_pool2d.out
+aten::quantized_max_pool3d
+aten::quantized_max_pool3d.out
 aten::rand
 aten::rand.generator
 aten::rand.generator_with_names
@@ -1060,7 +1058,6 @@ aten::range.out
 aten::range.out_
 aten::range.step
 aten::record_stream
-aten::reduce_scatter_tensor
 aten::reflection_pad1d
 aten::reflection_pad1d.out
 aten::reflection_pad1d_backward
@@ -1161,10 +1158,6 @@ aten::slow_conv_transpose2d
 aten::slow_conv_transpose2d.out
 aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
-aten::smooth_l1_loss
-aten::smooth_l1_loss.out
-aten::smooth_l1_loss_backward
-aten::smooth_l1_loss_backward.grad_input
 aten::softmax.int_out
 aten::sort
 aten::sort.stable
@@ -1321,6 +1314,7 @@ aten::values_copy
 aten::values_copy.out
 aten::vdot
 aten::vdot.out
+aten::view.dtype
 aten::view_as_complex
 aten::view_as_complex_copy
 aten::view_as_complex_copy.out
@@ -1331,7 +1325,6 @@ aten::view_copy
 aten::view_copy.dtype
 aten::view_copy.dtype_out
 aten::view_copy.out
-aten::wait_tensor
 aten::zeros.names
 aten::zeros.names_out
 aten::zeros.out

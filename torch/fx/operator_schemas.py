@@ -222,7 +222,7 @@ def type_matches(signature_type : Any, argument_type : Any):
             return issubclass(argument_type.__args__[0], sig_el_type)
 
         def is_homogeneous_tuple(t):
-            if not getattr(t, '__origin__', None) in {tuple, Tuple}:
+            if getattr(t, "__origin__", None) not in {tuple, Tuple}:
                 return False
             contained = t.__args__
             if t.__args__ == ((),):  # Tuple[()].__args__ == ((),) for some reason

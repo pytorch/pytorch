@@ -5,7 +5,7 @@ import os
 import sys
 import warnings
 from collections import namedtuple
-from contextlib import suppress
+from contextlib import nullcontext
 from copy import deepcopy
 from typing import Any, Tuple
 
@@ -33,6 +33,7 @@ from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
     FSDPInitMode,
     FSDPTest,
+    FSDPTestMultiThread,
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
@@ -55,7 +56,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestFSDPMisc(FSDPTest):
+class TestFSDPMiscMultiProcess(FSDPTest):
     @property
     def world_size(self):
         return 2
@@ -65,35 +66,112 @@ class TestFSDPMisc(FSDPTest):
         return dist.distributed_c10d._get_default_group()
 
     @skip_if_lt_x_gpu(2)
-    def test_fsdp_namedtuple(self):
-        # Ensure namedtuple support, preventing issues such as
-        # https://github.com/pytorch/pytorch/issues/83053
-        class MyModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lin = nn.Linear(100, 100)
-
-            def forward(self, x):
-                return x
-
-        m = MyModule().cuda()
-        m = FSDP(m)
-        t = torch.ones(1, device="cuda", requires_grad=True)
-
-        MyOutputType = namedtuple(
-            "MyOutputType", ["a", "b", "c", "d"], defaults=(t, t, t, t)
+    @parametrize("use_index", [True, False])
+    def test_fsdp_device_id(self, use_index):
+        """
+        Tests the FSDP ``device_id`` argument:
+          - Wrapping a CPU module should move the module to the GPU matching
+          ``device_id``
+          - Wrapping a GPU module already on the GPU matching ``device_id``
+          should not raise an error
+          - Wrapping a GPU module already on GPU and passing a GPU device
+          without specifying a device ID (i.e. ``torch.device("cuda")``) warns
+        """
+        dev_id = (
+            torch.cuda.current_device()
+            if use_index
+            else torch.device("cuda", torch.cuda.current_device())
         )
 
-        inp = MyOutputType()
-        out = m(inp)
-        # Ensure hooks are registered
-        for x in out:
-            self.assertNotEqual([], list(x._backward_hooks.values()))
+        def _check_device_matches(module, device_id):
+            """Checks that the ``FlatParameter``s in ``module`` have device
+            matching ``device_id``."""
+            devices = {
+                p.device for p in module.parameters() if isinstance(p, FlatParameter)
+            }
+            assert len(devices) > 0
+            self.assertEqual(1, len(devices))
+            found_device = devices.pop()
+            if use_index and not isinstance(device_id, torch.device):
+                device = torch.device("cuda", device_id)
+            else:
+                device = device_id
+            self.assertEqual(found_device, device)
 
-        # TODO: we should check backward() and param is resharded
-        # as well, but this is blocked by
-        # https://github.com/pytorch/pytorch/issues/83107 and
-        # https://github.com/pytorch/pytorch/issues/83129
+        # Check that FSDP parameters are moved to `device_id` for a CPU module
+        nested_wrapped_module = NestedWrappedModule.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_NEVER,
+            fsdp_kwargs={"device_id": dev_id},
+        )
+        _check_device_matches(nested_wrapped_module, dev_id)
+        # Check that specifying `device_id` for a GPU module already on that
+        # device does not raise an error
+        nested_wrapped_module = NestedWrappedModule.init(
+            self.process_group,
+            FSDPInitMode.RECURSIVE,
+            CUDAInitMode.CUDA_BEFORE,
+            fsdp_kwargs={"device_id": dev_id},
+        )
+        _check_device_matches(nested_wrapped_module, dev_id)
+        # Check that passing in `torch.device("cuda")` for a GPU module warns
+        regex = "does not have an explicit index"
+        context = self.assertWarnsRegex(
+            expected_warning=UserWarning, expected_regex=regex
+        )
+        with context:
+            nested_wrapped_module = NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_BEFORE,
+                fsdp_kwargs={"device_id": torch.device("cuda")},
+            )
+        _check_device_matches(
+            nested_wrapped_module, torch.device("cuda", torch.cuda.current_device())
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_second_layer", [True, False])
+    @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
+    def test_fsdp_module_no_compute_grad(self, use_second_layer, sharding_strategy):
+        # When use_second_layer=True, b is involved in forward computation but does
+        # not receive grad in backward. Otherwise, b is not involved in forward
+        # computation.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(10, 10)
+                self.b = nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                out1 = self.a(x)
+                if use_second_layer:
+                    out2 = self.b(y)
+                    return out1, out2
+                else:
+                    return out1
+
+        fsdp = FSDP(
+            MyModel().cuda(),
+            sharding_strategy=sharding_strategy,
+            auto_wrap_policy=always_wrap_policy,
+        )
+        x = torch.randn(10, 10, device="cuda")
+        y = torch.randn(10, 10, device="cuda")
+        for i in range(4):
+            if use_second_layer:
+                a, b = fsdp(x, y)
+            else:
+                a = fsdp(x, y)
+            loss = a.sum()
+            loss.backward()
+
+            # self.a receives grad, self.b does not
+            a_grad = fsdp.module.a._handles[0].flat_param.grad
+            b_grad = fsdp.module.b._handles[0].flat_param.grad
+            self.assertIsNotNone(a_grad)
+            self.assertIsNone(b_grad)
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_not_all_outputs_used_in_loss(self):
@@ -184,46 +262,72 @@ class TestFSDPMisc(FSDPTest):
         dist.barrier()
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("use_second_layer", [True, False])
-    @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
-    def test_fsdp_module_no_compute_grad(self, use_second_layer, sharding_strategy):
-        # When use_second_layer=True, b is involved in forward computation but does
-        # not receive grad in backward. Otherwise, b is not involved in forward
-        # computation.
-        class MyModel(nn.Module):
+    def test_fsdp_cpu_init_stays_on_cpu(self):
+        # Move me to MT test once warning logging and backward collective issue
+        # is resolved.
+        """Tests that passing a CPU module to FSDP preserves that the wrapped
+        module is on CPU after FSDP initialization, albeit after loging a
+        warning, and that FSDP moves CPU input to GPU before the forward."""
+        torch.cuda.set_device(self.rank)
+        regex = "passed-in `module` is on CPU"
+        context = self.assertWarnsRegex(
+            expected_warning=UserWarning, expected_regex=regex
+        )
+        with context:
+            nested_wrapped_module = NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_NEVER,
+            )
+            fsdp_model = FSDP(nested_wrapped_module, self.process_group)
+        devices = {p.device for p in fsdp_model.parameters()}
+        self.assertEqual(1, len(devices))
+        self.assertEqual(torch.device("cpu"), devices.pop())
+        fsdp_model = fsdp_model.cuda()
+        # Ensure fwd + backward can be performed after moving to CUDA.
+        # CPU input also tests that input is correctly moved to appropriate
+        # CUDA device.
+        inp = fsdp_model.module.get_input(device=torch.device("cpu"))
+        fsdp_model(*inp).sum().backward()
+
+
+class TestFSDPMiscMultiThread(FSDPTestMultiThread):
+    @property
+    def world_size(self):
+        return 2
+
+    @property
+    def process_group(self):
+        return dist.distributed_c10d._get_default_group()
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_namedtuple(self):
+        class MyModule(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = nn.Linear(10, 10)
-                self.b = nn.Linear(10, 10)
+                self.lin = nn.Linear(100, 100)
 
-            def forward(self, x, y):
-                out1 = self.a(x)
-                if use_second_layer:
-                    out2 = self.b(y)
-                    return out1, out2
-                else:
-                    return out1
+            def forward(self, x):
+                return x
 
-        fsdp = FSDP(
-            MyModel().cuda(),
-            sharding_strategy=sharding_strategy,
-            auto_wrap_policy=always_wrap_policy,
+        m = MyModule().cuda()
+        m = FSDP(m)
+        t = torch.ones(1, device="cuda", requires_grad=True)
+
+        MyOutputType = namedtuple(
+            "MyOutputType", ["a", "b", "c", "d"], defaults=(t, t, t, t)
         )
-        x = torch.randn(10, 10, device="cuda")
-        y = torch.randn(10, 10, device="cuda")
-        for i in range(4):
-            if use_second_layer:
-                a, b = fsdp(x, y)
-            else:
-                a = fsdp(x, y)
-            loss = a.sum()
-            loss.backward()
 
-            # self.a receives grad, self.b does not
-            a_grad = fsdp.module.a._handles[0].flat_param.grad
-            b_grad = fsdp.module.b._handles[0].flat_param.grad
-            self.assertIsNotNone(a_grad)
-            self.assertIsNone(b_grad)
+        inp = MyOutputType()
+        out = m(inp)
+        # Ensure hooks are registered
+        for x in out:
+            self.assertNotEqual([], list(x._backward_hooks.values()))
+
+        # TODO: we should check backward() and param is resharded
+        # as well, but this is blocked by
+        # https://github.com/pytorch/pytorch/issues/83107 and
+        # https://github.com/pytorch/pytorch/issues/83129
 
     @skip_if_lt_x_gpu(2)
     def test_device_id_auto_wrap(self):
@@ -299,79 +403,16 @@ class TestFSDPMisc(FSDPTest):
             self.assertEqual(handle.flat_param.device, cpu_device)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("use_index", [True, False])
-    def test_fsdp_device_id(self, use_index):
-        """
-        Tests the FSDP ``device_id`` argument:
-          - Wrapping a CPU module should move the module to the GPU matching
-          ``device_id``
-          - Wrapping a GPU module already on the GPU matching ``device_id``
-          should not raise an error
-          - Wrapping a GPU module already on GPU and passing a GPU device
-          without specifying a device ID (i.e. ``torch.device("cuda")``) warns
-        """
-        dev_id = (
-            torch.cuda.current_device()
-            if use_index
-            else torch.device("cuda", torch.cuda.current_device())
-        )
-
-        def _check_device_matches(module, device_id):
-            """Checks that the ``FlatParameter``s in ``module`` have device
-            matching ``device_id``."""
-            devices = {
-                p.device for p in module.parameters() if isinstance(p, FlatParameter)
-            }
-            assert len(devices) > 0
-            self.assertEqual(1, len(devices))
-            found_device = devices.pop()
-            if use_index and not isinstance(device_id, torch.device):
-                device = torch.device("cuda", device_id)
-            else:
-                device = device_id
-            self.assertEqual(found_device, device)
-
-        # Check that FSDP parameters are moved to `device_id` for a CPU module
-        nested_wrapped_module = NestedWrappedModule.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_NEVER,
-            fsdp_kwargs={"device_id": dev_id},
-        )
-        _check_device_matches(nested_wrapped_module, dev_id)
-        # Check that specifying `device_id` for a GPU module already on that
-        # device does not raise an error
-        nested_wrapped_module = NestedWrappedModule.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
-            fsdp_kwargs={"device_id": dev_id},
-        )
-        _check_device_matches(nested_wrapped_module, dev_id)
-        # Check that passing in `torch.device("cuda")` for a GPU module warns
-        regex = "does not have an explicit index"
-        context = self.assertWarnsRegex(
-            expected_warning=UserWarning, expected_regex=regex
-        )
-        with context:
-            nested_wrapped_module = NestedWrappedModule.init(
-                self.process_group,
-                FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
-                fsdp_kwargs={"device_id": torch.device("cuda")},
-            )
-        _check_device_matches(
-            nested_wrapped_module, torch.device("cuda", torch.cuda.current_device())
-        )
-
-    @skip_if_lt_x_gpu(2)
     def test_module_device_mismatches_device_id(self):
         """Tests that specifying a ``device_id`` argument to FSDP for a GPU
         module that does not match the GPU device ID raises an error."""
+        # TODO: override FSDP MT Thread _run to set this instead of here for
+        # every test.
+        torch.cuda.set_device(self.rank)
         context = (
             self.assertRaisesRegex(ValueError, f"cuda:{self.rank} vs cuda:0")
             if self.rank != 0
-            else suppress()
+            else nullcontext()
         )
         with context:
             NestedWrappedModule.init(
@@ -407,6 +448,9 @@ class TestFSDPMisc(FSDPTest):
         (they are effective noops, but ensure FSDP does not assume module
         has parameters during init)
         """
+        # TODO: override FSDP MT Thread _run to set this instead of here for
+        # every test.
+        torch.cuda.set_device(self.rank)
         # Test CPU
         no_params = nn.ReLU()
         module = FSDP(no_params)
@@ -427,37 +471,10 @@ class TestFSDPMisc(FSDPTest):
                 )
             )
             if self.rank != 0
-            else suppress()
+            else nullcontext()
         )
         with context:
-            module = FSDP(no_params, device_id=0)
-
-    @skip_if_lt_x_gpu(2)
-    def test_fsdp_cpu_init_stays_on_cpu(self):
-        """Tests that passing a CPU module to FSDP preserves that the wrapped
-        module is on CPU after FSDP initialization, albeit after loging a
-        warning, and that FSDP moves CPU input to GPU before the forward."""
-        torch.cuda.set_device(self.rank)
-        regex = "passed-in `module` is on CPU"
-        context = self.assertWarnsRegex(
-            expected_warning=UserWarning, expected_regex=regex
-        )
-        with context:
-            nested_wrapped_module = NestedWrappedModule.init(
-                self.process_group,
-                FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_NEVER,
-            )
-            fsdp_model = FSDP(nested_wrapped_module, self.process_group)
-        devices = {p.device for p in fsdp_model.parameters()}
-        self.assertEqual(1, len(devices))
-        self.assertEqual(torch.device("cpu"), devices.pop())
-        fsdp_model = fsdp_model.cuda()
-        # Ensure fwd + backward can be performed after moving to CUDA.
-        # CPU input also tests that input is correctly moved to appropriate
-        # CUDA device.
-        inp = fsdp_model.module.get_input(device=torch.device("cpu"))
-        fsdp_model(*inp).sum().backward()
+            FSDP(no_params, device_id=0)
 
     @skip_if_lt_x_gpu(2)
     def test_cpu_init_with_sync_module_states(self):
@@ -567,7 +584,7 @@ class TestFSDPMisc(FSDPTest):
             fsdp_model(*inp)
 
 
-class TestFSDPMiscWorldSize1(FSDPTest):
+class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
         return 1
@@ -695,7 +712,8 @@ class TestFSDPMiscWorldSize1(FSDPTest):
         self.assertTrue(called_setattr_override)
 
 
-instantiate_parametrized_tests(TestFSDPMisc)
+instantiate_parametrized_tests(TestFSDPMiscMultiThread)
+instantiate_parametrized_tests(TestFSDPMiscMultiProcess)
 
 if __name__ == "__main__":
     run_tests()

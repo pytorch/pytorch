@@ -176,7 +176,7 @@ class Freezer:
             return
 
         # Python packages are directories that have __init__.py in them.
-        is_package_dir = any([child.name == "__init__.py" for child in path.iterdir()])
+        is_package_dir = any(child.name == "__init__.py" for child in path.iterdir())
         if not is_package_dir:
             self.msg(path, "S")
             return

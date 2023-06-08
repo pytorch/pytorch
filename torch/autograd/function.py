@@ -339,7 +339,7 @@ class _SingleLevelFunction(_C._FunctionBase, FunctionCtx, _HookMixin, metaclass=
                                   " autograd.Function.")
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any], output: Any) -> Any:
+    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> Any:
         r"""There are two ways to define the forward pass of an autograd.Function.
 
         Either:
@@ -375,7 +375,7 @@ class _SingleLevelFunction(_C._FunctionBase, FunctionCtx, _HookMixin, metaclass=
         pass. It also has an attribute :attr:`ctx.needs_input_grad` as a tuple
         of booleans representing whether each input needs gradient. E.g.,
         :func:`backward` will have ``ctx.needs_input_grad[0] = True`` if the
-        first input to :func:`forward` needs gradient computated w.r.t. the
+        first input to :func:`forward` needs gradient computed w.r.t. the
         output.
         """
         raise NotImplementedError("You must implement either the backward or vjp method for "

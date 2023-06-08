@@ -1,7 +1,8 @@
 #pragma once
 
 #include <c10/core/DeviceType.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
+#include <cstdint>
 #include <ostream>
 #include <string>
 

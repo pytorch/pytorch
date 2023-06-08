@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/DeviceType.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
 #include <cstddef>
@@ -79,6 +79,11 @@ struct C10_API Device final {
   /// Return true if the device is of CUDA type.
   bool is_cuda() const noexcept {
     return type_ == DeviceType::CUDA;
+  }
+
+  /// Return true if the device is of PrivateUse1 type.
+  bool is_privateuseone() const noexcept {
+    return type_ == DeviceType::PrivateUse1;
   }
 
   /// Return true if the device is of MPS type.
