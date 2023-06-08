@@ -3219,9 +3219,19 @@ class FallbackKernel(ExternKernelAlloc):
         )
         self.use_cpp_op_schema = False
 
-        if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
+        def is_aten_op(kernel):
+            obj = torch.ops.aten
+
+            for part in kernel.__name__.split("."):
+                obj = getattr(obj, part, None)
+                if obj is None:
+                    return False
+
+            return obj is kernel
+
+        if is_aten_op(kernel):
             self.kernel = (
-                f"at::{kernel.__name__}"
+                f"at::{kernel.__name__.split('.')[0]}"
                 if V.graph.cpp_wrapper
                 else f"aten.{kernel.__name__}"
             )
@@ -3250,6 +3260,16 @@ class FallbackKernel(ExternKernelAlloc):
         assert (
             not kernel._schema.is_mutable
         ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
+
+        def is_not_write(arg):
+            return arg.alias_info is None or not arg.alias_info.is_write
+
+        assert all(
+            is_not_write(x) for x in kernel._schema.arguments
+        ), f"{kernel.__name__} with alias_info arguments is not supported with cpp_wrapper"
+        assert all(
+            is_not_write(x) for x in kernel._schema.returns
+        ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
         self.kernel = kernel._schema.name
         self.cpp_kernel_overlad_name = kernel._schema.overload_name

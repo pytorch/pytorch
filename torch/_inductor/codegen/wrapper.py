@@ -60,7 +60,7 @@ def is_float(s: str):
 
 
 def convert_arg_type(python_type):
-    from .cpp import PYTHON_TO_CPP
+    from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
 
     if python_type == "Tensor":
         # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
@@ -69,25 +69,16 @@ def convert_arg_type(python_type):
     if python_type in PYTHON_TO_CPP:
         return PYTHON_TO_CPP[python_type]
 
-    # Convert arg of type Optional[*]
-    optional_match = re.findall(r"Optional\[([a-zA-Z_]+)]", python_type)
-    if len(optional_match) == 1:
-        optional_type = optional_match[0]
-        assert (
-            optional_type in PYTHON_TO_CPP
-        ), f"unsupported optional type in convert_arg_type: {optional_type}"
-        cpp_optional_type = PYTHON_TO_CPP[optional_type]
-        return f"c10::optional<{cpp_optional_type}>"
-
-    # Convert arg of type List[*]
-    list_match = re.findall(r"List\[([a-zA-Z_]+)]", python_type)
-    if len(list_match) == 1:
-        list_type = list_match[0]
-        assert (
-            list_type in PYTHON_TO_CPP
-        ), f"unsupported list type in covert_arg_type: List[{list_type}]"
-        cpp_list_type = PYTHON_TO_CPP[list_type]
-        return f"std::vector<{cpp_list_type}>"
+    # Convert args of container types e.g. Optional[*]
+    for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
+        container_match = re.findall(py_container + r"\[([a-zA-Z_]+)]", python_type)
+        if len(container_match) == 1:
+            contained_type = container_match[0]
+            assert (
+                contained_type in PYTHON_TO_CPP
+            ), f"unsupported {py_container} type in convert_arg_type: {contained_type}"
+            cpp_contained_type = PYTHON_TO_CPP[contained_type]
+            return f"{cpp_container}<{cpp_contained_type}>"
 
     raise AssertionError(f"unsupport python_type: {python_type}")
 
@@ -122,11 +113,7 @@ def get_cpp_op_schema(kernel):
 
 SUPPORTED_FALLBACK_CPP_WRAPPER = [
     "repeat_interleave.Tensor",
-    # these are supported kernels but can show up as fallbacks if inputs are unsupported dtypes.
-    # TODO: handle these more generally instead of hardcoding all of them here.
-    "convert_element_type.default",
-    "_fft_c2c.default",
-    "view_as_real.default",
+    "convert_element_type.default",  # can appear as a fallback if it has a complex input
 ]
 
 

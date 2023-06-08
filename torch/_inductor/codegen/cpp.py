@@ -102,6 +102,11 @@ PYTHON_TO_CPP = {
     "ScalarType": "c10::ScalarType",
 }
 
+CONTAINER_PYTHON_TO_CPP = {
+    "List": "std::vector",
+    "Optional": "c10::optional",
+}
+
 
 def reduction_init(reduction_type, dtype):
     if dtype in (torch.float16, torch.bfloat16):
