@@ -1,5 +1,4 @@
 import datetime
-import decimal
 import gzip
 import inspect
 import io
@@ -10,6 +9,7 @@ import uuid
 import xml.etree.ElementTree as ET
 import zipfile
 
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List
 from warnings import warn
@@ -223,10 +223,7 @@ def is_rerun_disabled_tests(root: ET.ElementTree) -> bool:
 
 
 def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
-    for key, value in data.items():
-        if isinstance(value, float):
-            data[key] = decimal.Decimal(str(value))  # str() preserves the precision
-    return data
+    return {k: Decimal(str(v)) if isinstance(v, float) else v for k, v in data.items()}
 
 
 class EnvVarMetric:
@@ -250,16 +247,13 @@ class EnvVarMetric:
 
     def value(self) -> Any:
         value = os.environ.get(self.env_var)
-        if value is None:
-            if self.required:
-                raise ValueError(
-                    (
-                        f"Missing {self.name}. Please set the {self.env_var}"
-                        "environment variable to pass in this value."
-                    )
+        if value is None and self.required:
+            raise ValueError(
+                (
+                    f"Missing {self.name}. Please set the {self.env_var}"
+                    "environment variable to pass in this value."
                 )
-            else:
-                return None
+            )
         if self.type_conversion_fn:
             return self.type_conversion_fn(value)
         return value
@@ -331,7 +325,7 @@ def emit_metric(
         if used_reserved_keys:
             raise ValueError(f"Metrics dict contains reserved keys: [{', '.join(key)}]")
 
-    # boto3 doesn't support uplaoding float values to DynamoDB, so convert them all to decimals.
+    # boto3 doesn't support uploading float values to DynamoDB, so convert them all to decimals.
     metrics = _convert_float_values_to_decimals(metrics)
 
     try:

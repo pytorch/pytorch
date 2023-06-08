@@ -91,14 +91,23 @@ class TestUploadStats(unittest.TestCase):
         mock.patch.dict(
             "os.environ",
             {
-                "GITHUB_REPOSITORY": "",  # unset this env var
+                "CI": "true",
+                "BUILD_ENVIRONMENT": BUILD_ENV,
             },
+            clear=True,
         ).start()
+
+        put_item_invoked = False
+
+        def mock_put_item(Item: Dict[str, Any]) -> None:
+            nonlocal put_item_invoked
+            put_item_invoked = True
+
+        mock_resource.return_value.Table.return_value.put_item = mock_put_item
 
         emit_metric("metric_name", metric)
 
-        mock_table = mock_resource.return_value.Table.return_value
-        mock_table.put_item.assert_not_called()
+        self.assertFalse(put_item_invoked)
 
 
 if __name__ == "__main__":
