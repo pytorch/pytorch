@@ -1960,7 +1960,8 @@ class Module:
                     with torch.no_grad():
                         if assign_to_params_buffers:
                             # Shape checks are already done above
-                            if isinstance(param, torch.nn.Parameter):
+                            if (isinstance(param, torch.nn.Parameter) and
+                                    not isinstance(input_param, torch.nn.Parameter)):
                                 setattr(self, name, torch.nn.Parameter(input_param))
                             else:
                                 setattr(self, name, input_param)

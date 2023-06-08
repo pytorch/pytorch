@@ -2,8 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
-                        _default_to_fused_or_foreach, _differentiable_doc, _maximize_doc, _foreach_doc,
-                        _warn_step_no_param_with_grad)
+                        _default_to_fused_or_foreach, _differentiable_doc, _maximize_doc, _foreach_doc)
 from typing import List, Optional
 
 __all__ = ["Adamax", "adamax"]
@@ -133,8 +132,7 @@ class Adamax(Optimizer):
                 differentiable=differentiable,
             )
 
-        if not has_any_param_with_grad:
-            _warn_step_no_param_with_grad()
+        self.has_any_param_with_grad = has_any_param_with_grad
 
         return loss
 

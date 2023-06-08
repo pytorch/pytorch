@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc, _warn_step_no_param_with_grad)
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from torch._utils import is_compiling
 from typing import List, Optional
 
@@ -137,8 +137,7 @@ class ASGD(Optimizer):
                 differentiable=group["differentiable"],
             )
 
-        if not has_any_param_with_grad:
-            _warn_step_no_param_with_grad()
+        self.has_any_param_with_grad = has_any_param_with_grad
 
         return loss
 

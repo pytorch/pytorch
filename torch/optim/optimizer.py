@@ -6,7 +6,7 @@ import warnings
 import functools
 import math
 
-from typing import Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
@@ -570,3 +570,11 @@ class Optimizer:
             raise ValueError("some parameters appear in more than one parameter group")
 
         self.param_groups.append(param_group)
+
+
+def _global_warn_step_no_param_with_grad_post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
+    has_any_param_with_grad = getattr(opt, "has_any_param_with_grad", False)
+    if not has_any_param_with_grad:
+        _warn_step_no_param_with_grad()
+
+register_optimizer_step_post_hook(_global_warn_step_no_param_with_grad_post_hook)

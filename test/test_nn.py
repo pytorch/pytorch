@@ -2604,8 +2604,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         net_meta_state_dict = net_meta.state_dict(keep_vars=True)
         for key in state_dict.keys():
             if isinstance(state_dict[key], torch.nn.Parameter):
-                self.assertTrue(state_dict[key].data_ptr() == net_meta_state_dict[key].data_ptr())
-            else:
                 self.assertTrue(state_dict[key] is net_meta_state_dict[key])
 
         # Make sure that ordering of parameters and buffers is preserved
