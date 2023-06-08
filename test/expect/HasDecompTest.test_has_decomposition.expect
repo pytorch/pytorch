@@ -1,7 +1,3 @@
-aten::__ilshift__.Scalar
-aten::__ilshift__.Tensor
-aten::__irshift__.Scalar
-aten::__irshift__.Tensor
 aten::__lshift__.Scalar
 aten::__lshift__.Scalar_out
 aten::__lshift__.Tensor
@@ -529,6 +525,7 @@ aten::_unique.out
 aten::_unique2
 aten::_unique2.out
 aten::_unsafe_index.Tensor
+aten::_unsafe_index_put
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
 aten::_upsample_bicubic2d_aa_backward
@@ -1013,6 +1010,8 @@ aten::quantized_max_pool1d
 aten::quantized_max_pool1d.out
 aten::quantized_max_pool2d
 aten::quantized_max_pool2d.out
+aten::quantized_max_pool3d
+aten::quantized_max_pool3d.out
 aten::rand
 aten::rand.generator
 aten::rand.generator_with_names
@@ -1159,8 +1158,6 @@ aten::slow_conv_transpose2d
 aten::slow_conv_transpose2d.out
 aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
-aten::smooth_l1_loss
-aten::smooth_l1_loss.out
 aten::softmax.int_out
 aten::sort
 aten::sort.stable
@@ -1317,6 +1314,7 @@ aten::values_copy
 aten::values_copy.out
 aten::vdot
 aten::vdot.out
+aten::view.dtype
 aten::view_as_complex
 aten::view_as_complex_copy
 aten::view_as_complex_copy.out

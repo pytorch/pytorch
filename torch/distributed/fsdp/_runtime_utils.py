@@ -1,4 +1,5 @@
 import functools
+import logging
 from enum import auto, Enum
 from itertools import chain
 from typing import (
@@ -14,11 +15,14 @@ from typing import (
 )
 
 import torch
+import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torch.autograd.graph import _register_multi_post_grad_hook
+from torch.autograd.graph import register_multi_grad_hook
+from torch.distributed import get_backend, get_world_size
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks, LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
@@ -39,9 +43,15 @@ from torch.distributed.fsdp.flat_param import (
     HandleTrainingState,
     RESHARD_AFTER_FORWARD_HANDLE_STRATEGIES,
 )
-from torch.distributed.utils import _apply_to_tensors, _p_assert, _to_kwargs
+from torch.distributed.utils import (
+    _apply_to_tensors,
+    _cast_forward_inputs,
+    _p_assert,
+    _to_kwargs,
+)
 from torch.utils._pytree import tree_flatten
 
+log = logging.getLogger(__name__)
 
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
@@ -205,6 +215,23 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
             )
 
 
+def _init_device_mesh(
+    root_state: _FSDPState,
+) -> Optional[DeviceMesh]:
+    # We are testing 1D DeviceMesh where dist.get_world_size(pg) == dist.get_world_size() for now.
+    # TODO: Address cases when dist.get_world_size(pg) != dist.get_world_size(). This would capture
+    #       what 1D DeviceMesh currently would not work for:
+    #       1) HSDP Hybrid Sharding, 2) 2D FSDP + TP, 3) dist.new_group() cannot be expressed in 1D DeviceMesh.
+    if root_state.process_group != dist.distributed_c10d._get_default_group():
+        return None
+    if get_backend() == "fake" or not root_state.compute_device:
+        return None
+    device_type = root_state.compute_device.type
+    mesh_tensor = torch.arange(get_world_size(root_state.process_group))
+    device_mesh = DeviceMesh(device_type, mesh_tensor)
+    return device_mesh
+
+
 @no_type_check
 def _share_state_and_init_handle_attrs(
     root_state: _FSDPState,
@@ -223,6 +250,8 @@ def _share_state_and_init_handle_attrs(
         attr_name_to_values[attr_name] = set()
     root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
+    root_state._device_mesh = _init_device_mesh(root_state)
+
     for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
@@ -262,6 +291,7 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._free_event_queue = root_state._free_event_queue
         fsdp_state._handles_prefetched = root_state._handles_prefetched
         fsdp_state._needs_pre_backward_unshard = root_state._needs_pre_backward_unshard
+        fsdp_state._device_mesh = root_state._device_mesh
         for handle in fsdp_state._handles:
             handle.init_flat_param_attributes()
     for attr_name, attr_values in attr_name_to_values.items():
@@ -626,38 +656,6 @@ def _root_cast_forward_input(state: _FSDPState, args, kwargs) -> Tuple[Any, Any]
     return args, kwargs
 
 
-def _cast_forward_inputs(
-    input_dtype: Optional[torch.dtype],
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Prepares the forward inputs by casting them to ``input_dtype`` if it is not ``None``.
-    """
-    # TODO: For mixed precision, cast to reduced-precision in a single `to()` call.
-    if input_dtype is not None:
-        args, kwargs = _cast_fp_inputs_to_dtype(input_dtype, *args, **kwargs)
-    return args, kwargs
-
-
-def _cast_fp_inputs_to_dtype(
-    dtype: torch.dtype,
-    *args: Any,
-    **kwargs: Any,
-) -> Tuple[Any, Any]:
-    """
-    Casts floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
-    This respects the existing ``requires_grad`` on the tensors.
-    """
-
-    def cast_fn(x: torch.Tensor) -> torch.Tensor:
-        if not torch.is_floating_point(x) or x.dtype == dtype:
-            return x
-        return x.to(dtype)
-
-    return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
-
-
 @no_type_check
 def _pre_backward_hook(
     state: _FSDPState,
@@ -739,6 +737,19 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
+    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
+    # Below logging of module names this post-bwd hook fires for can help debug certain
+    # cases where hooks don't fire, such as under certain activation checkpoint configs.
+    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
+        param_to_fqn = state._exec_order_data.param_to_fqn
+        handle_params = handle.flat_param._params  # only populated for use_orig_params
+        param_fqns = [
+            param
+            for param_list in [param_to_fqn[p] for p in handle_params]
+            for param in param_list
+        ]
+        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
+
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
@@ -1389,9 +1400,7 @@ def _register_post_backward_reshard_only_hooks(
                 if torch.is_tensor(obj) and obj.requires_grad
             ]
         assert inp_tensors is not None  # mypy
-        # NOTE: Using `register_multi_grad_hook` does not fire the hooks
-        # reliably
-        hook_handle = _register_multi_post_grad_hook(
+        hook_handle = register_multi_grad_hook(
             inp_tensors, functools.partial(_post_backward_reshard, state, handle)
         )
         handle.flat_param._post_backward_hook_state = hook_handle  # type: ignore[attr-defined]

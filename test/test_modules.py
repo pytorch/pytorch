@@ -193,7 +193,6 @@ class TestModule(TestCase):
                         m(*input_device_1_args, **input_device_1_kwargs)
                     self._assert_module_parameters_and_buffer_are(m, torch.device("cuda:1"), dtype)
 
-
     @modules(module_db)
     def test_repr(self, device, dtype, module_info, training):
         # Test module can be represented with repr and str without errors.
@@ -355,7 +354,6 @@ class TestModule(TestCase):
                 return False
             return True
 
-
         for module_input in module_inputs:
             if module_input.forward_input is None:
                 continue
@@ -422,7 +420,6 @@ class TestModule(TestCase):
                 param_grad = [p.grad for p in m.parameters()]
                 self.assertEqual(param_grad, default_param_grad)
 
-
     def _test_gradients_helper(self, device, dtype, module_info, training, check):
         # Check gradients
         module_cls = module_info.module_cls
@@ -476,7 +473,6 @@ class TestModule(TestCase):
                     return output_flattened
 
             self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
-
 
     @modules(module_db, allowed_dtypes=[torch.double])
     def test_grad(self, device, dtype, module_info, training):
@@ -582,12 +578,14 @@ class TestModule(TestCase):
                         if cpu_output.requires_grad:
                             check_backward(cpu_output, gpu_output)
 
+    @with_tf32_off
     @modules(module_db)
     @skipIfTorchInductor("to be fixed")
     def test_memory_format(self, device, dtype, module_info, training):
-        is_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        is_sm86or80 = device.startswith("cuda") and (torch.cuda.get_device_capability(0) == (8, 6)
+                                                     or torch.cuda.get_device_capability(0) == (8, 0))
         # TODO tighten it to a specific module
-        atol, rtol = (3e-3, 7e-3) if is_sm86 else (None, None)
+        atol, rtol = (3e-3, 7e-3) if is_sm86or80 else (None, None)
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False, training=training)
@@ -714,6 +712,7 @@ class TestModule(TestCase):
                                     "for this ModuleInfo entry.")
                 else:
                     raise e
+
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
 

@@ -350,9 +350,6 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s0.pin_memory()
 
-        with self.assertRaisesRegex(RuntimeError, r'got unexpected device type'):
-            s0.resize_(10)
-
         with self.assertRaisesRegex(RuntimeError, r'only available on CPU'):
             s0.share_memory_()
 
@@ -368,6 +365,14 @@ class TestTorchDeviceType(TestCase):
 
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s1.copy_(s0)
+
+    @onlyCPU
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_storage_meta_ok(self, device, dtype):
+        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
+
+        # This is OK, it changes the meta storage size without allocating
+        s0.resize_(10)
 
     @onlyCUDA
     def test_module_share_memory(self):
@@ -2991,6 +2996,17 @@ else:
             # copy is a shallow copy, only copies the tensor view,
             # not the data
             self.assertEqual(x, y)
+
+    @onlyCPU
+    def test_bfloat16_neg_abs(self, device):
+        src = torch.randn(256)
+        src[0] = torch.nan
+        src[1] = -torch.nan
+        src[2] = torch.inf
+        src[3] = -torch.inf
+        src_bf16 = src.bfloat16()
+        self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
+        self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
 
     @onlyCPU
     def test_bfloat16_float_copy(self, device):
@@ -5960,17 +5976,6 @@ class TestTorch(TestCase):
                     for size in [(2, 512, 256), (5, 256, 256)]:
                         helper(dim, dtype, device, size, size)
 
-                # Check broadcast cases on CPU
-                size_result = (2, 512, 256)
-                size_source = (1, 512, 256)
-                helper(dim, dtype, 'cpu', size_result, size_source)
-                size_result = (2, 512, 512)
-                size_source = (1, 512, 1)
-                helper(dim, dtype, 'cpu', size_result, size_source)
-                size_result = (2, 512, 256)
-                size_source = (2, 1, 256)
-                helper(dim, dtype, 'cpu', size_result, size_source)
-
                 # Check bound
                 result = torch.zeros(1, 512, 256, dtype=dtype)
                 source = torch.ones(1, 512, 256, dtype=dtype)
@@ -6150,89 +6155,94 @@ class TestTorch(TestCase):
     # NOTE: test_equal will be deprecated in favor of torch.testing.assert_close
     #   once torch.testing is out of beta
     def test_equal(self):
-        # Contiguous, 1D
-        t1 = torch.tensor((3., 4., 9., 10.))
-        t2 = t1.contiguous()
-        t3 = torch.tensor((1., 9., 3., 10.))
-        t4 = torch.tensor((3., 4., 9.))
-        t5 = torch.tensor([])
-        self.assertTrue(t1.equal(t2))
-        self.assertFalse(t1.equal(t3))
-        self.assertFalse(t1.equal(t4))
-        self.assertFalse(t1.equal(t5))
-        self.assertTrue(torch.equal(t1, t2))
-        self.assertFalse(torch.equal(t1, t3))
-        self.assertFalse(torch.equal(t1, t4))
-        self.assertFalse(torch.equal(t1, t5))
+        devices = [torch.cpu, torch.cuda]
+        for device in ["cpu", "cuda"]:
+            if device == "cuda" and not torch.cuda.is_available():
+                continue
 
-        # Non contiguous, 2D
-        s = torch.tensor(((1, 2, 3, 4), (5, 6, 7, 8)))
-        s1 = s[:, 1:3]
-        s2 = s1.clone()
-        s3 = torch.tensor(((2, 3), (6, 7)))
-        s4 = torch.tensor(((0, 0), (0, 0)))
+            # Contiguous, 1D
+            t1 = torch.tensor((3., 4., 9., 10.), device=device)
+            t2 = t1.contiguous()
+            t3 = torch.tensor((1., 9., 3., 10.), device=device)
+            t4 = torch.tensor((3., 4., 9.), device=device)
+            t5 = torch.tensor([], device=device)
+            self.assertTrue(t1.equal(t2))
+            self.assertFalse(t1.equal(t3))
+            self.assertFalse(t1.equal(t4))
+            self.assertFalse(t1.equal(t5))
+            self.assertTrue(torch.equal(t1, t2))
+            self.assertFalse(torch.equal(t1, t3))
+            self.assertFalse(torch.equal(t1, t4))
+            self.assertFalse(torch.equal(t1, t5))
 
-        self.assertFalse(s1.is_contiguous())
-        self.assertTrue(s1.equal(s2))
-        self.assertTrue(s1.equal(s3))
-        self.assertFalse(s1.equal(s4))
-        self.assertTrue(torch.equal(s1, s2))
-        self.assertTrue(torch.equal(s1, s3))
-        self.assertFalse(torch.equal(s1, s4))
+            # Non contiguous, 2D
+            s = torch.tensor(((1, 2, 3, 4), (5, 6, 7, 8)), device=device)
+            s1 = s[:, 1:3]
+            s2 = s1.clone()
+            s3 = torch.tensor(((2, 3), (6, 7)), device=device)
+            s4 = torch.tensor(((0, 0), (0, 0)), device=device)
 
-        # Different dtypes
-        x = torch.tensor((1, 2, 3), dtype=torch.float)
-        y = torch.tensor((1, 2, 3), dtype=torch.int)
-        z = torch.tensor((1, -1), dtype=torch.int)
-        self.assertTrue(torch.equal(x, y))
-        self.assertFalse(torch.equal(z, x))
+            self.assertFalse(s1.is_contiguous())
+            self.assertTrue(s1.equal(s2))
+            self.assertTrue(s1.equal(s3))
+            self.assertFalse(s1.equal(s4))
+            self.assertTrue(torch.equal(s1, s2))
+            self.assertTrue(torch.equal(s1, s3))
+            self.assertFalse(torch.equal(s1, s4))
 
-        # Fast path test: tensor flags, like neg and conj
-        neg_0 = torch.tensor((1, 2, 3), dtype=torch.float)
-        neg_1 = neg_0._neg_view()
-        self.assertTrue(neg_1.is_neg())
-        self.assertEqual(neg_0.data_ptr(), neg_1.data_ptr())
-        self.assertEqual(neg_0.storage_offset(), neg_1.storage_offset())
-        self.assertEqual(neg_0.stride(), neg_1.stride())
-        self.assertEqual(neg_0.size(), neg_1.size())
-        self.assertFalse(torch.equal(neg_0, neg_1))
-        # FIXME: Disable the following check due to the inductor failure
-        # See https://github.com/pytorch/pytorch/issues/100340 and
-        # https://github.com/pytorch/pytorch/issues/98175
-        if not TEST_WITH_TORCHINDUCTOR:
-            self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
+            # Different dtypes
+            x = torch.tensor((1, 2, 3), dtype=torch.float, device=device)
+            y = torch.tensor((1, 2, 3), dtype=torch.int, device=device)
+            z = torch.tensor((1, -1), dtype=torch.int, device=device)
+            self.assertTrue(torch.equal(x, y))
+            self.assertFalse(torch.equal(z, x))
 
-        conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j])
-        conj_1 = conj_0.conj()
-        self.assertTrue(conj_1.is_conj())
-        self.assertEqual(conj_0.data_ptr(), conj_1.data_ptr())
-        self.assertEqual(conj_0.storage_offset(), conj_1.storage_offset())
-        self.assertEqual(conj_0.stride(), conj_1.stride())
-        self.assertEqual(conj_0.size(), conj_1.size())
-        self.assertFalse(torch.equal(conj_0, conj_1))
-        # FIXME: Disable the following check due to the inductor failure
-        # See https://github.com/pytorch/pytorch/issues/100340 and
-        # https://github.com/pytorch/pytorch/issues/98175
-        if not TEST_WITH_TORCHINDUCTOR:
-            self.assertTrue(torch.equal(conj_0, conj_1.conj()))
+            # Fast path test: tensor flags, like neg and conj
+            neg_0 = torch.tensor((1, 2, 3), dtype=torch.float, device=device)
+            neg_1 = neg_0._neg_view()
+            self.assertTrue(neg_1.is_neg())
+            self.assertEqual(neg_0.data_ptr(), neg_1.data_ptr())
+            self.assertEqual(neg_0.storage_offset(), neg_1.storage_offset())
+            self.assertEqual(neg_0.stride(), neg_1.stride())
+            self.assertEqual(neg_0.size(), neg_1.size())
+            self.assertFalse(torch.equal(neg_0, neg_1))
+            # FIXME: Disable the following check due to the inductor failure
+            # See https://github.com/pytorch/pytorch/issues/100340 and
+            # https://github.com/pytorch/pytorch/issues/98175
+            if not TEST_WITH_TORCHINDUCTOR:
+                self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
 
-        # Fast path test: two tensors share the same storage, but different dtype
-        s_0 = torch.rand((2, 3), dtype=torch.float)
-        s_1 = s_0.view(dtype=torch.int32)
-        self.assertEqual(s_0.data_ptr(), s_1.data_ptr())
-        self.assertEqual(s_0.storage_offset(), s_1.storage_offset())
-        self.assertEqual(s_0.stride(), s_1.stride())
-        self.assertEqual(s_0.size(), s_1.size())
-        self.assertFalse(torch.equal(s_0, s_1))
+            conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j], device=device)
+            conj_1 = conj_0.conj()
+            self.assertTrue(conj_1.is_conj())
+            self.assertEqual(conj_0.data_ptr(), conj_1.data_ptr())
+            self.assertEqual(conj_0.storage_offset(), conj_1.storage_offset())
+            self.assertEqual(conj_0.stride(), conj_1.stride())
+            self.assertEqual(conj_0.size(), conj_1.size())
+            self.assertFalse(torch.equal(conj_0, conj_1))
+            # FIXME: Disable the following check due to the inductor failure
+            # See https://github.com/pytorch/pytorch/issues/100340 and
+            # https://github.com/pytorch/pytorch/issues/98175
+            if not TEST_WITH_TORCHINDUCTOR:
+                self.assertTrue(torch.equal(conj_0, conj_1.conj()))
 
-        # Fast path test: two tensors share the same storage, but different strides
-        t_0 = torch.rand((2, 3), dtype=torch.float)
-        t_1 = t_0.t()
-        self.assertEqual(t_0.data_ptr(), t_1.data_ptr())
-        self.assertEqual(t_0.storage_offset(), t_1.storage_offset())
-        self.assertNotEqual(t_0.stride(), t_1.stride())
-        self.assertNotEqual(t_0.size(), t_1.size())
-        self.assertFalse(torch.equal(t_0, t_1))
+            # Fast path test: two tensors share the same storage, but different dtype
+            s_0 = torch.rand((2, 3), dtype=torch.float, device=device)
+            s_1 = s_0.view(dtype=torch.int32)
+            self.assertEqual(s_0.data_ptr(), s_1.data_ptr())
+            self.assertEqual(s_0.storage_offset(), s_1.storage_offset())
+            self.assertEqual(s_0.stride(), s_1.stride())
+            self.assertEqual(s_0.size(), s_1.size())
+            self.assertFalse(torch.equal(s_0, s_1))
+
+            # Fast path test: two tensors share the same storage, but different strides
+            t_0 = torch.rand((2, 3), dtype=torch.float, device=device)
+            t_1 = t_0.t()
+            self.assertEqual(t_0.data_ptr(), t_1.data_ptr())
+            self.assertEqual(t_0.storage_offset(), t_1.storage_offset())
+            self.assertNotEqual(t_0.stride(), t_1.stride())
+            self.assertNotEqual(t_0.size(), t_1.size())
+            self.assertFalse(torch.equal(t_0, t_1))
 
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
@@ -6857,6 +6867,63 @@ class TestTorch(TestCase):
         self.assertEqual(complexdouble_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
         self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
         self.assertIs(complexdouble_storage.dtype, torch.complex128)
+
+    def test_storage_byteswap(self):
+        input = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        swapped_8bytes = [7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8]
+        swapped_4bytes = [3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12]
+        swapped_2bytes = [1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14]
+        swapped_1byte = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+        storage = torch.storage.TypedStorage(input, dtype=torch.uint8)._untyped_storage
+
+        storage_f64 = storage.__copy__()
+        storage_f64.byteswap(torch.float64)
+        self.assertEqual(storage_f64.tolist(), swapped_8bytes)
+
+        storage_f32 = storage.__copy__()
+        storage_f32.byteswap(torch.float32)
+        self.assertEqual(storage_f32.tolist(), swapped_4bytes)
+
+        storage_f16 = storage.__copy__()
+        storage_f16.byteswap(torch.float16)
+        self.assertEqual(storage_f16.tolist(), swapped_2bytes)
+
+        storage_bf16 = storage.__copy__()
+        storage_bf16.byteswap(torch.bfloat16)
+        self.assertEqual(storage_bf16.tolist(), swapped_2bytes)
+
+        storage_i64 = storage.__copy__()
+        storage_i64.byteswap(torch.int64)
+        self.assertEqual(storage_i64.tolist(), swapped_8bytes)
+
+        storage_i32 = storage.__copy__()
+        storage_i32.byteswap(torch.int32)
+        self.assertEqual(storage_i32.tolist(), swapped_4bytes)
+
+        storage_i16 = storage.__copy__()
+        storage_i16.byteswap(torch.int16)
+        self.assertEqual(storage_i16.tolist(), swapped_2bytes)
+
+        storage_i8 = storage.__copy__()
+        storage_i8.byteswap(torch.int8)
+        self.assertEqual(storage_i8.tolist(), swapped_1byte)
+
+        storage_ui8 = storage.__copy__()
+        storage_ui8.byteswap(torch.uint8)
+        self.assertEqual(storage_ui8.tolist(), swapped_1byte)
+
+        storage_bool = storage.__copy__()
+        storage_bool.byteswap(torch.bool)
+        self.assertEqual(storage_bool.tolist(), swapped_1byte)
+
+        storage_c128 = storage.__copy__()
+        storage_c128.byteswap(torch.complex128)
+        self.assertEqual(storage_c128.tolist(), swapped_8bytes)
+
+        storage_c64 = storage.__copy__()
+        storage_c64.byteswap(torch.complex64)
+        self.assertEqual(storage_c64.tolist(), swapped_4bytes)
 
     # Test that internal versions of functions related to TypedStorage do not
     # produce a deprecation warning

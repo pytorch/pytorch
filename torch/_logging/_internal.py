@@ -133,6 +133,7 @@ def set_logs(
     recompiles: bool = False,
     output_code: bool = False,
     schedule: bool = False,
+    perf_hints: bool = False,
     modules: Optional[Dict[str, Union[int, bool]]] = None,
 ):
     """
@@ -221,6 +222,9 @@ def set_logs(
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
 
+        perf_hints (:class:`bool`):
+            Whether to emit the TorchInductor perf hints. Default: ``False``
+
         modules (dict):
             This argument provides an alternate way to specify the above log
             component and artifact settings, in the format of a keyword args
@@ -280,14 +284,16 @@ def set_logs(
             if log_registry.is_artifact(alias):
                 if val:
                     log_state.enable_artifact(alias)
-            elif log_registry.is_log(alias):
+            elif log_registry.is_log(alias) or alias in log_registry.child_log_qnames:
                 if val not in logging._levelToName:
                     raise ValueError(
                         f"Unrecognized log level for log {alias}: {val}, valid level values "
                         f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
                     )
 
-                log_state.enable_log(log_registry.log_alias_to_log_qname[alias], val)
+                log_state.enable_log(
+                    log_registry.log_alias_to_log_qname.get(alias, alias), val
+                )
             elif alias == "all":
                 continue
             else:
@@ -313,6 +319,7 @@ def set_logs(
         recompiles=recompiles,
         output_code=output_code,
         schedule=schedule,
+        perf_hints=perf_hints,
     )
 
 

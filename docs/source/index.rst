@@ -54,7 +54,11 @@ Features described in this documentation are classified by release status:
    compile/technical-overview
    compile/guards-overview
    compile/custom-backends
+   compile/fine_grained_apis
+   compile/profiling_torch_compile
+   compile/inductor_profiling
    compile/deep-dive
+   compile/cudagraph_trees
    compile/performance-dashboard
    compile/torchfunc-and-torchcompile
    ir
