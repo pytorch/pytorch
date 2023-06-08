@@ -33,8 +33,6 @@ from torch.onnx._internal.fx import decomposition_table, registration
 if TYPE_CHECKING:
     import onnx
 
-    from torch.onnx._internal.fx import dispatcher
-
 
 _DEFAULT_OPSET_VERSION: Final[int] = 18
 """The default ONNX opset version the exporter will use if one is not specified explicitly
@@ -106,7 +104,7 @@ class ResolvedExportOptions(ExportOptions):
     onnx_registry: registration.OnnxRegistry
     """The ONNX registry used to register ATen operators to ONNX functions."""
 
-    onnx_dispatcher: dispatcher.OnnxDispatcher
+    onnxfunction_dispatcher: torch.onnx._internal.fx.onnxfunction_dispatcher.OnnxFunctionDispatcher
     """The ONNX dispatcher used to dispatch ATen operators to ONNX functions."""
 
     fx_tracer: FXGraphExtractor
@@ -129,7 +127,7 @@ class ResolvedExportOptions(ExportOptions):
             self.logger = options.logger
             self.fx_tracer = options.fx_tracer
             self.onnx_registry = options.onnx_registry
-            self.onnx_dispatcher = options.onnx_dispatcher
+            self.onnxfunction_dispatcher = options.onnxfunction_dispatcher
             self.decomposition_table = options.decomposition_table
             self.diagnostic_context = options.diagnostic_context
         else:
@@ -172,14 +170,15 @@ class ResolvedExportOptions(ExportOptions):
             )
 
             # TODO(titaiwang, bowbao): Better way to annotate `onnxscript` types in diagnostics.
-            from torch.onnx._internal.fx import dispatcher
+            from torch.onnx._internal.fx import onnxfunction_dispatcher
 
             self.op_level_debug = resolve(options.op_level_debug, False)
-            self.onnx_dispatcher = dispatcher.OnnxDispatcher(
-                self.onnx_registry,
-                self.diagnostic_context,
-                self.opset_version,
-                self.op_level_debug,
+            self.onnxfunction_dispatcher = (
+                onnxfunction_dispatcher.OnnxFunctionDispatcher(
+                    self.onnx_registry,
+                    self.diagnostic_context,
+                    self.opset_version,
+                )
             )
 
             for key in dir(options):
@@ -443,13 +442,6 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        # Initialize the ONNX Script graph
-        from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-            graph_building as onnxscript_graph_builder,
-        )
-
-        self.onnxscript_graph = onnxscript_graph_builder.TorchScriptGraph()
-
     def export(self) -> ExportOutput:
         graph_module = self.options.fx_tracer.generate_fx(
             self.options, self.model, self.model_args, self.model_kwargs
@@ -462,24 +454,25 @@ class Exporter:
         # TODO: Design the passes API
         graph_module = pre_export_passes(self.options, graph_module, updated_model_args)
 
-        # TODO: Fix FakeTensorMode limitation asap
-        # We want to pass list of ints and floats to TorchScript graph correctly
-        # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
-        # receive FakeTensor and results runtime error. In addition, TorchScript-based
-        # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
-        # with FakeTensorMode.
-        with torch.utils._mode_utils.no_dispatch():
-            # node_fixed_shape is only used on op_level_debug purpose.
-            for node in graph_module.graph.nodes:
-                # Dispatch to ONNX op through OpSchema. The input argument dtypes are compared to
-                # function signature in OpSchema, and find the best matched overload.
-                # TODO(titaiwang): diagnostic rules.
-                self.options.onnx_dispatcher.dispatch(
-                    graph_module, self.onnxscript_graph, node=node
-                )
+        from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
+            graph_building,
+        )
+
+        onnxscript_graph = graph_building.TorchScriptGraph()
+
+        from torch.onnx._internal.fx import fx_onnx_interpreter
+
+        fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
+            onnxscript_graph,
+            graph_module,
+            self.options.onnxfunction_dispatcher,
+            self.options.diagnostic_context,
+            self.options.op_level_debug,
+        )
+        fx_interpreter.run()
 
         # Export TorchScript graph to ONNX ModelProto.
-        onnx_model = self.onnxscript_graph.to_model_proto(self.options.opset_version)
+        onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)
         return torch.onnx.ExportOutput(
             onnx_model,
             self.options.fx_tracer.input_adapter,
@@ -655,7 +648,7 @@ def pre_export_passes(
         )
 
     analysis.UnsupportedFxNodesAnalysis(
-        diagnostic_context, module, options.onnx_dispatcher
+        diagnostic_context, module, options.onnxfunction_dispatcher
     ).analyze(infra.levels.ERROR)
 
     # ONNX does not support None inputs. During graph building, all None inputs
