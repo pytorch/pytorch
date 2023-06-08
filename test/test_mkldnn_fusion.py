@@ -295,7 +295,7 @@ class TestMkldnnFusion(JitTestCase):
                         # for binary add, we support inplace version.
                         if attr == "add":
                             fused_inplace = torch.ops.mkldnn._convolution_pointwise_(
-                                x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
+                                other, x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                                 mod.conv.groups, attr, None, unary_attr, [], None
                             )
                             self.assertEqual(ref, other)

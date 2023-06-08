@@ -42,6 +42,7 @@ docs/cpp/build
 docs/cpp/source/api
 docs/cpp/source/html/
 docs/cpp/source/latex/
+docs/source/compile/generated/
 docs/source/generated/
 log
 usage_log.txt

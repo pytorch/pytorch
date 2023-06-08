@@ -4,6 +4,7 @@ import copy
 import math
 import os
 import random
+import re
 import signal
 import sys
 import tempfile
@@ -2713,12 +2714,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
         self._test_sequence_num_set_new_group(backend="nccl")
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_pass_nccl_options_high_priority_stream(self):
-        pg_opts = c10d.ProcessGroupNCCL.Options()
-        pg_opts.is_high_priority_stream = True
-
+    def _test_pass_nccl_options(self, pg_opts):
         store = c10d.FileStore(self.file_name, self.world_size)
         # Test init_process_group accepts options
         dist.init_process_group(
@@ -2736,6 +2732,37 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg.allreduce(t).wait()
         expected_tensor = torch.tensor([3] * 10).cuda(self.rank)
         self.assertEqual(expected_tensor, t)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_high_priority_stream(self):
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        pg_opts.is_high_priority_stream = True
+        self._test_pass_nccl_options(pg_opts)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 17), "Need NCCL 2.17+ for configuring NCCL communicators")
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config(self):
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        pg_opts.config.max_ctas = 4
+        pg_opts.config.min_ctas = 2
+        pg_opts.config.cga_cluster_size = 2
+        nccl_debug_file = tempfile.NamedTemporaryFile()
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+
+        # Tests functionality when passing nccl config
+        self._test_pass_nccl_options(pg_opts)
+
+        # Tests if comms were configured
+        nccl_debug_file_content = nccl_debug_file.read()
+        max_ctas = re.search(rb'Max CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
+        min_ctas = re.search(rb'Min CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
+        cga_cluster_size = re.search(rb'CGA cluster.*(\d+)|$', nccl_debug_file_content).group(1)
+        self.assertEqual(pg_opts.config.max_ctas, int(max_ctas))
+        self.assertEqual(pg_opts.config.min_ctas, int(min_ctas))
+        self.assertEqual(pg_opts.config.cga_cluster_size, int(cga_cluster_size))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)

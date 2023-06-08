@@ -773,11 +773,13 @@ def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
         other_args = []
         if DISABLED_TESTS_FILE:
-            other_args.append('--import-disabled-tests')
+            other_args.append("--import-disabled-tests")
         if SLOW_TESTS_FILE:
-            other_args.append('--import-slow-tests')
+            other_args.append("--import-slow-tests")
         if USE_PYTEST:
             other_args.append("--use-pytest")
+        if RERUN_DISABLED_TESTS:
+            other_args.append("--rerun-disabled-tests")
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1004,6 +1006,10 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # as we had before.  By default, we don't run these tests.
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
+TEST_CUDA_GRAPH = TEST_CUDA and os.getenv('PYTORCH_TEST_SKIP_CUDAGRAPH', '0') != '1' and (
+    (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or
+    (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
+)
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
@@ -1152,6 +1158,15 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def runOnRocm(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_ROCM:
+            fn(*args, **kwargs)
+        else:
+            raise unittest.SkipTest("test currently only works on the ROCm stack")
+    return wrapper
+
 def skipIfMps(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -1185,6 +1200,19 @@ def skipIfNotMiopenSuggestNHWC(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+
+# Reverts the linalg backend back to default to make sure potential failures in one
+# test do not affect other tests
+def setLinalgBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        finally:
+            torch.backends.cuda.preferred_linalg_library('default')
+    return _fn
+
 
 # Context manager for setting deterministic flag and automatically
 # resetting it to its original value
@@ -1459,13 +1487,7 @@ def set_rng_seed(seed):
         np.random.seed(seed)
 
 
-@contextmanager
-def disable_functorch():
-    guard = torch._C._DisableFuncTorch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
+disable_functorch = torch._C._DisableFuncTorch
 
 
 @contextlib.contextmanager
