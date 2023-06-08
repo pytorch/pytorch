@@ -134,10 +134,43 @@ def non_leaf_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs
     return gm
 
 
-@register_backend
-def explain(gm, example_inputs):
-    from torch._dynamo.eval_frame import Explain
-    
-    explain = Explain()
-    callable = explain(gm, example_inputs)
-    return callable
+class ExplainWithBackend:
+    def __init__(self, backend):
+        self.backend = backend
+        self.graphs = []
+        self.op_count = 0
+        self.break_reasons = []
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        from .registry import lookup_backend
+
+        # Accumulate the graph
+        self.graphs.append(gm)
+
+        # Accumulate ops for this graph
+        ops = []
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.op_count += len(ops)
+
+        # Accumulate break reasons
+        if gm.compile_subgraph_reason.graph_break:
+            self.break_reasons.append(gm.compile_subgraph_reason)
+
+        return lookup_backend(self.backend)(gm, example_inputs)
+
+    def __str__(self):
+        output = f"Graph Count: {len(self.graphs)}\n"
+        output += f"Graph Break Count: {len(self.break_reasons)}\n"
+        output += f"Op Count: {self.op_count}\n"
+
+        output += "Break Reasons:\n"
+        for idx, break_reason in enumerate(self.break_reasons):
+            output += f"  Break Reason {idx+1}:\n"
+            output += f"    Reason: {break_reason.reason}\n"
+            output += "    User Stack:\n"
+            for frame_summary in break_reason.user_stack:
+                output += f"      {frame_summary}\n"
+
+        return output
