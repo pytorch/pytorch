@@ -67,7 +67,7 @@ void for_serialization(const at::Tensor& t, std::unordered_map<std::string, bool
   if (t.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr() == nullptr) {
     return;
   }
-  CustomBackendMetadata* tmeta = dynamic_cast<CustomBackendMetadata*>(t.unsafeGetTensorImpl()->get_backend_meta());
+  auto tmeta = dynamic_cast<CustomBackendMetadata*>(t.unsafeGetTensorImpl()->get_backend_meta());
   if (tmeta->backend_version_format_ == 1) {
     m["backend_version_format"] = true;
   }
