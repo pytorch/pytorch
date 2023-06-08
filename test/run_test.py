@@ -44,6 +44,7 @@ try:
         calculate_shards,
         get_reordered_tests,
         get_test_case_configs,
+        log_time_savings,
         NUM_PROCS,
         ShardedTest,
         THRESHOLD,
@@ -1433,7 +1434,11 @@ def get_selected_tests(options) -> List[ShardedTest]:
     # Do sharding
     test_file_times_config = test_file_times.get(test_config, {})
     shards = calculate_shards(
-        num_shards, selected_tests, test_file_times_config, must_serial=must_serial
+        num_shards,
+        selected_tests,
+        test_file_times_config,
+        must_serial=must_serial,
+        debug=TEST_WITH_ROCM,
     )
     _, tests_from_shard = shards[which_shard - 1]
     selected_tests = tests_from_shard
@@ -1610,6 +1615,13 @@ def main():
     remaining_tests = selected_tests
     if IS_CI:
         (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
+        log_time_savings(
+            selected_tests,
+            prioritized_tests,
+            is_serial_test_fn=must_serial,
+            num_procs=NUM_PROCS,
+        )
+
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
