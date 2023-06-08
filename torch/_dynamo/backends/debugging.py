@@ -36,7 +36,6 @@ def eager_debug(gm, fake_tensor_inputs):
 def torchscript(gm, fake_tensor_inputs):
     return torch.jit.script(gm)
 
-
 # used boxed call to discard inputs when they are no longer needed
 def boxed_nop(fx_g, example_inputs):
     def run(args):
@@ -132,3 +131,12 @@ def non_leaf_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs
         if not t.is_leaf:
             raise TestingOnlyCompileError()
     return gm
+
+
+@register_backend
+def explain(gm, example_inputs):
+    from torch._dynamo.eval_frame import Explain
+    
+    explain = Explain()
+    callable = explain(gm, example_inputs)
+    return callable

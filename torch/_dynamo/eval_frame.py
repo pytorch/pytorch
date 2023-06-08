@@ -30,6 +30,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
+from . import reset as dynamo_reset
 
 from .hooks import Hooks
 
@@ -161,9 +162,7 @@ def remove_from_cache(f):
     elif hasattr(getattr(f, "forward", None), "__code__"):
         reset_code(f.forward.__code__)
     else:
-        from . import reset
-
-        reset()
+        dynamo_reset()
         log.warning("could not determine __code__ for %s", f)
 
 
@@ -605,9 +604,7 @@ class ExplainOutput:
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
     # TODO(voz): Do we want a decorator for this?
-    from . import reset
-
-    reset()
+    dynamo_reset()
 
     out_guards = []
     graphs = []
@@ -664,7 +661,7 @@ def explain(f, *args, **kwargs):
     compile_time = compile_times(repr="str")
 
     # TODO(voz): Do we want a decorator for this?
-    reset()
+    dynamo_reset()
     return ExplainOutput(
         graph_count,
         graph_break_count,
@@ -676,6 +673,59 @@ def explain(f, *args, **kwargs):
         compile_time,
     )
 
+
+class Explain:
+    def __init__(self):
+        self.graphs = []
+        self.break_reasons = []
+        self.ops = []
+        self.op_count = 0
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.graphs.append(gm)
+        graph_count = len(self.graphs)
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                self.ops.append(node.target)
+
+        self.op_count += len(self.ops)
+        if gm.compile_subgraph_reason.graph_break:
+            self.break_reasons.append(gm.compile_subgraph_reason)
+
+        # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
+        deduped_reasons = {}
+        for reason in self.break_reasons:
+            innermost_frame = reason.user_stack[-1]
+            # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
+            deduped_reasons[repr(innermost_frame)] = reason
+
+        formatted_list = ""
+        for idx, break_reason in enumerate(deduped_reasons.values()):
+            formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
+            msg = f"{break_reason.reason}\n{formatted_stack}"
+            formatted_list += f"{idx + 1}. {msg} \n"
+
+        explanation = f"Dynamo produced {graph_count} graphs "
+        explanation += f"with {graph_count - 1} graph break(s) and {self.op_count} ops"
+        explanation_verbose = explanation
+        explanation_verbose += f"\n Break reasons: \n\n{formatted_list}"
+
+        print(explanation_verbose)
+        return gm.forward
+    
+    
+class ExplainWithBackend:
+    def __init__(self, backend="inductor"):
+        # If a backend is not provided by the user we default to inductor
+        self.backend = backend
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        from .backends.registry import lookup_backend
+
+        dynamo_reset()
+        print(gm.graph)
+        dynamo_reset()
+        return lookup_backend(self.backend)(gm, example_inputs)
 
 @dataclasses.dataclass
 class ConstraintTarget:
