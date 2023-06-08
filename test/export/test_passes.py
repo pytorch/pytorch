@@ -52,7 +52,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(2, 2, 3)
 
-        ep = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6]).add_runtime_assertions()
+        ep = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6])
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -83,7 +83,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
+        ep = export(M(), (x, y), constraints=constraints)
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -114,7 +114,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
+        ep = export(M(), (x, y), constraints=constraints)
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -127,7 +127,7 @@ class TestPasses(TestCase):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1's dimension #0 size is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -152,7 +152,7 @@ class TestPasses(TestCase):
             dynamic_dim(y, 1) <= 6,
         ]
 
-        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
+        ep = export(M(), (x, y), constraints=constraints)
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -165,7 +165,7 @@ class TestPasses(TestCase):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, "Input arg1_1's dimension #0 size is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -236,7 +236,7 @@ class TestPasses(TestCase):
 
         x = torch.tensor([2])
         mod = M()
-        ep = export(mod, (x,)).add_runtime_assertions()
+        ep = export(mod, (x,))
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -263,7 +263,7 @@ class TestPasses(TestCase):
         x = torch.tensor([2, 1, 2, 3, 5, 0])
 
         mod = M()
-        ep = export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2]).add_runtime_assertions()
+        ep = export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2])
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -303,7 +303,7 @@ class TestPasses(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        ep = export(mod, (torch.tensor(True), x, y)).add_runtime_assertions()
+        ep = export(mod, (torch.tensor(True), x, y))
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
             ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
@@ -321,13 +321,12 @@ class TestPasses(TestCase):
         exported = torch._export.export(
             m, (x, y), constraints=[dynamic_dim(x, 1) == dynamic_dim(y, 1)]
         )
-        exported = exported.add_runtime_assertions()
 
         x = torch.rand(3, 5)
         y = torch.rand(3, 6)
         with self.assertRaisesRegex(
             RuntimeError,
-            "Input arg1_1's dimension #1 size is not equal to input arg0_1's dimension #1",
+            r"Input arg0_1.shape\[1\] is not equal to input arg1_1.shape\[1\]"
         ):
             exported(x, y)
 

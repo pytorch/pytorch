@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["oncall: quantization"]
 
+import logging
 from torch.testing._internal.common_utils import run_tests
 
 # Quantization core tests. These include tests for
@@ -42,8 +43,8 @@ try:
     # This test has extra data dependencies, so in some environments, e.g. Meta internal
     # Buck, it has its own test runner.
     from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
-except ImportError:
-    pass
+except ImportError as e:
+    logging.warning(e)
 
 # Eager Mode Workflow. Tests for the functionality of APIs and different features implemented
 # using eager mode.
@@ -74,18 +75,24 @@ try:
     from quantization.fx.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
     from quantization.fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
+except ImportError as e:
+    # In FBCode we separate FX out into a separate target for the sake of dev
+    # velocity. These are covered by a separate test target `quantization_fx`
+    logging.warning(e)
+
 # Quantization for PyTorch 2.0 Export path
+try:
     # To be moved to compiler side later
-    from quantization.pt2e.test_quantize_pt2e import TestGraphUtils  # noqa: F401
+    from quantization.pt2e.test_graph_utils import TestGraphUtils  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFX  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXX86Inductor  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXModels  # noqa: F401
-except ImportError:
-    # In FBCode we separate FX out into a separate target for the sake of dev
-    # velocity. These are covered by a separate test target `quantization_fx`
-    pass
+except ImportError as e:
+    # In FBCode we separate PT2 out into a separate target for the sake of dev
+    # velocity. These are covered by a separate test target `quantization_pt2e`
+    logging.warning(e)
 
 try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
@@ -93,8 +100,8 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteNShadows  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
-except ImportError:
-    pass
+except ImportError as e:
+    logging.warning(e)
 
 # Test the model report module
 try:
@@ -105,20 +112,20 @@ try:
     from quantization.fx.test_model_report_fx import TestFxDetectInputWeightEqualization  # noqa: F401
     from quantization.fx.test_model_report_fx import TestFxDetectOutliers  # noqa: F401
     from quantization.fx.test_model_report_fx import TestFxModelReportVisualizer  # noqa: F401
-except ImportError:
-    pass
+except ImportError as e:
+    logging.warning(e)
 
 # Equalization for FX mode
 try:
     from quantization.fx.test_equalize_fx import TestEqualizeFx  # noqa: F401
-except ImportError:
-    pass
+except ImportError as e:
+    logging.warning(e)
 
 # Backward Compatibility. Tests serialization and BC for quantized modules.
 try:
     from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
-except ImportError:
-    pass
+except ImportError as e:
+    logging.warning(e)
 
 # JIT Graph Mode Quantization
 from quantization.jit.test_quantize_jit import TestQuantizeJit  # noqa: F401
@@ -136,8 +143,8 @@ from quantization.ao_migration.test_ao_migration import TestAOMigrationNNQuantiz
 from quantization.ao_migration.test_ao_migration import TestAOMigrationNNIntrinsic  # noqa: F401
 try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
-except ImportError:
-    pass
+except ImportError as e:
+    logging.warning(e)
 
 # Experimental functionality
 from quantization.core.experimental.test_bits import TestBits  # noqa: F401

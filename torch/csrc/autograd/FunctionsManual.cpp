@@ -1523,6 +1523,54 @@ Tensor renorm_backward(
   return at::where(norm > maxnorm, grad_norm.to(grad.scalar_type()), grad);
 }
 
+Tensor renorm_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    const Scalar& p,
+    int64_t dim,
+    const Scalar& maxnorm) {
+  auto self_sizes = self_p.sizes();
+  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
+
+  at::DimVector reduce_dims(self_sizes.size());
+  std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
+  reduce_dims.erase(reduce_dims.begin() + dim);
+
+  // For cuda half, calculate norm in float precision then cast
+  // normalization factor to half
+  auto dtype = self_p.scalar_type();
+  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
+  Tensor norm = [&self_p, &p, &reduce_dims, acc_type, dtype]() {
+    if (acc_type != dtype) {
+      return at::linalg_vector_norm(
+          self_p,
+          p.toDouble(),
+          reduce_dims,
+          /*keepdim=*/true,
+          /*dtype=*/acc_type);
+    } else {
+      return at::linalg_vector_norm(
+          self_p,
+          p.toDouble(),
+          reduce_dims,
+          /*keepdim=*/true);
+    }
+  }();
+
+  auto double_maxnorm = maxnorm.toDouble();
+  auto invnorm = (norm + 1e-7).reciprocal();
+  auto factor = invnorm * double_maxnorm;
+
+  return where(
+      norm > double_maxnorm,
+      factor *
+          (self_t -
+           self_p * invnorm *
+               norm_jvp(
+                   self_p, self_t, p, norm, reduce_dims, /*keepdim=*/true)),
+      self_t);
+}
+
 Tensor repeat_backward(
     Tensor grad,
     c10::SymIntArrayRef repeats,
