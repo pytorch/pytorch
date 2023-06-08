@@ -171,12 +171,12 @@ struct AttentionKernel {
     int32_t q_strideH;
     int32_t k_strideH;
     int32_t v_strideH;
-    int32_t bias_strideH = 0;
+    int64_t bias_strideH = 0;
 
     int64_t q_strideB;
     int64_t k_strideB;
     int64_t v_strideB;
-    int32_t bias_strideB = 0;
+    int64_t bias_strideB = 0;
 
     int32_t num_batches;
     int32_t num_heads;

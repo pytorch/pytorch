@@ -538,7 +538,7 @@ def set_original_aten_op(func):
 # This mode is **only** used for pre_dispatch tracing.
 # In particular, we need to make sure that autograd/autocast API's
 # that do not desugar into dispatcher operators stay in the graph.
-class ProxyTorchFunctionMode(TorchFunctionMode):
+class PreDispatchProxyTorchFunctionMode(TorchFunctionMode):
 
     def __init__(self, tracer):
         self.tracer = tracer
@@ -546,7 +546,7 @@ class ProxyTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
         pre_dispatch_ops = [
-            torch._C._set_grad_enabled,
+            torch.set_grad_enabled,
             torch.amp._enter_autocast,
             torch.amp._exit_autocast,
         ]
@@ -779,7 +779,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
 
         proxy_function_mode: Any = nullcontext()
         if pre_dispatch:
-            proxy_function_mode = ProxyTorchFunctionMode(fx_tracer)
+            proxy_function_mode = PreDispatchProxyTorchFunctionMode(fx_tracer)
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode, pre_dispatch=pre_dispatch)
 

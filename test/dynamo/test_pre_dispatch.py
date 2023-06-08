@@ -4,6 +4,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 
+
 class PreDispatchTests(torch._dynamo.test_case.TestCase):
     def test_no_grad_simple(self):
         def f(a):
