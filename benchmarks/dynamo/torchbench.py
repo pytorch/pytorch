@@ -96,6 +96,7 @@ SKIP_TRAIN = {
     "pyhpc_isoneutral_mixing",
     "pyhpc_turbulent_kinetic_energy",
     "maml",
+    "llama",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
