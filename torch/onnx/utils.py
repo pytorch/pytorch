@@ -571,6 +571,7 @@ def _optimize_graph(
     dynamic_axes=None,
     input_names=None,
     module=None,
+    skip_shape_inference: bool = False,
 ):
     if params_dict is None:
         params_dict = {}
@@ -686,7 +687,7 @@ def _optimize_graph(
     _C._jit_pass_lint(graph)
     graph = _C._jit_pass_canonicalize(graph)
     _C._jit_pass_lint(graph)
-    if GLOBALS.onnx_shape_inference:
+    if GLOBALS.onnx_shape_inference and not skip_shape_inference:
         try:
             _C._jit_pass_onnx_graph_shape_type_inference(
                 graph, params_dict, GLOBALS.export_onnx_opset_version
@@ -1134,6 +1135,7 @@ def _model_to_graph(
             dynamic_axes=dynamic_axes,
             input_names=input_names,
             module=module,
+            skip_shape_inference=True,
         )
     except Exception as e:
         torch.onnx.log("Torch IR graph at exception: ", graph)
