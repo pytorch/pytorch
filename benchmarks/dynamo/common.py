@@ -1151,7 +1151,7 @@ class BenchmarkRunner:
         self._args = None
 
     def setup_amp(self):
-        if self.args.amp and self.args.training and self.args.devices == ["cuda"]:
+        if self.args.amp and self.args.devices == ["cuda"]:
             # AMP training can lead to small loss values which can undeflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
@@ -1263,10 +1263,7 @@ class BenchmarkRunner:
                     continue  # bad benchmark implementation
 
     def deepcopy_model(self, model):
-        try:
-            return copy.deepcopy(model)
-        except TypeError:
-            return model
+        return copy.deepcopy(model)
 
     def validate_model(self, model, example_inputs):
         """
@@ -2350,6 +2347,9 @@ def run(runner, args, original_dir=None):
             "pytorch_unet",
             "Super_SloMo",
             "vgg16",
+            # https://github.com/pytorch/pytorch/issues/96724
+            "Wav2Vec2ForCTC",
+            "Wav2Vec2ForPreTraining",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
