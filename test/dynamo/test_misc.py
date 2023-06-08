@@ -4068,6 +4068,14 @@ def fn():
         x, y = opt_fn()
         self.assertEqual(x, y)
 
+    def test_torch_distributions_lazy_property(self):
+        def fn(x):
+            return torch.distributions.Categorical(probs=x).entropy()
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        x = torch.rand([4, 4])
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
