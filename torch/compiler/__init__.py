@@ -102,17 +102,14 @@ def disable(fn=None, recursive=True):
         and any recursively invoked functions within it. If set to False, compilation skips frames
         associated with the function code but still processes recursively invoked frames.
 
-    The decorator without recursive disabling
+    
     Example::
+      # The decorator without recursive disabling
       @disable(recursive=False)
       def my_function():
 
-
-    The context manager with recursive disabling:
-
-    Example::
+      # The context manager with recursive disabling:
       with disable(recursive=True):
-        ...
     """
 
     return torch._dynamo.disable(fn, recursive)
