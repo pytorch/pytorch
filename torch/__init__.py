@@ -936,7 +936,7 @@ def is_warn_always_enabled():
 # These error checking functions must be kept consistent with their C++
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
-def _check_with(error_type, cond: builtins.bool, message: Callable[[], str]):
+def _check_with(error_type, cond, message):
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
