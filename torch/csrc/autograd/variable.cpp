@@ -856,7 +856,7 @@ void handle_view_on_rebase(
     auto* tb = diff_view_meta->get_creation_traceback().get();
     if (tb) {
       std::ostringstream oss;
-      torch::SymbolizedTracebacks st = torch::unwind::symbolize({tb});
+      torch::SymbolizedTracebacks st = torch::symbolize({tb});
       const std::vector<uint64_t>& traceback = st.tracebacks[0];
       for (uint64_t idx : traceback) {
         const unwind::Frame& frame = st.all_frames[idx];
