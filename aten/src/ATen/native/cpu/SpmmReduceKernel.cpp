@@ -66,52 +66,126 @@ void spmm_reduce_kernel_impl(
       }
 
       // step 2: reduce, do blocking on rowwise to reduce write memory bandwidth
-      for (int64_t e0 = row_start; e0 < row_end; e0 += CHUNK_SIZE) {
-        int64_t e1 = std::min(e0 + CHUNK_SIZE, row_end);
+      if (at::isReducedFloatingType(other_.scalar_type())) {
+        using Vec = vec::Vectorized<BFloat16>;
+        for (int64_t e0 = row_start; e0 < row_end; e0 += CHUNK_SIZE) {
+          int64_t e1 = std::min(e0 + CHUNK_SIZE, row_end);
 
-        int64_t k = 0;
-        for (; k < K - (K % kVLEN); k += kVLEN) {
-          Vec out_vec0 = Vec::loadu(out_ptr + k);
-          Vec out_vec1 = Vec::loadu(out_ptr + k + kVecSize);
-          Vec out_vec2 = Vec::loadu(out_ptr + k + kVecSize * 2);
-          Vec out_vec3 = Vec::loadu(out_ptr + k + kVecSize * 3);
-          for (const auto e : c10::irange(e0, e1)) {
-            c = col_data[e];
-            scalar_t val = val_data[e];
-            scalar_t* other_ptr = other_data + c * K + k;
+          int64_t k = 0;
+          for (; k < K - (K % kVLEN); k += kVLEN) {
+            Vec out_vec0 = Vec::loadu(out_ptr + k);
+            Vectorized<float> out_vec0_0, out_vec0_1;
+            std::tie(out_vec0_0, out_vec0_1) = convert_to_float<BFloat16>(out_vec0);
+            Vec out_vec1 = Vec::loadu(out_ptr + k + kVecSize);
+            Vectorized<float> out_vec1_0, out_vec1_1;
+            std::tie(out_vec1_0, out_vec1_1) = convert_to_float<BFloat16>(out_vec1);
+            Vec out_vec2 = Vec::loadu(out_ptr + k + kVecSize * 2);
+            Vectorized<float> out_vec2_0, out_vec2_1;
+            std::tie(out_vec2_0, out_vec2_1) = convert_to_float<BFloat16>(out_vec2);
+            Vec out_vec3 = Vec::loadu(out_ptr + k + kVecSize * 3);
+            Vectorized<float> out_vec3_0, out_vec3_1;
+            std::tie(out_vec3_0, out_vec3_1) = convert_to_float<BFloat16>(out_vec3);
 
-            out_vec0 = update<Vec, reduce>(out_vec0, Vec::loadu(other_ptr) * Vec(val));
-            out_vec1 = update<Vec, reduce>(out_vec1, Vec::loadu(other_ptr + kVecSize) * Vec(val));
-            out_vec2 = update<Vec, reduce>(out_vec2, Vec::loadu(other_ptr + kVecSize * 2) * Vec(val));
-            out_vec3 = update<Vec, reduce>(out_vec3, Vec::loadu(other_ptr + kVecSize * 3) * Vec(val));
+            for (const auto e : c10::irange(e0, e1)) {
+              c = col_data[e];
+              Vectorized<float> val = Vectorized<float>(float(val_data[e]));
+              scalar_t* other_ptr = other_data + c * K + k;
+
+              Vectorized<float> other_vec0_0, other_vec0_1;
+              std::tie(other_vec0_0, other_vec0_1) = convert_to_float<BFloat16>(Vec::loadu(other_ptr));
+              out_vec0_0 = update<Vectorized<float>, reduce>(out_vec0_0, other_vec0_0 * val);
+              out_vec0_1 = update<Vectorized<float>, reduce>(out_vec0_1, other_vec0_1 * val);
+              Vectorized<float> other_vec1_0, other_vec1_1;
+              std::tie(other_vec1_0, other_vec1_1) = convert_to_float<BFloat16>(Vec::loadu(other_ptr + kVecSize));
+              out_vec1_0 = update<Vectorized<float>, reduce>(out_vec1_0, other_vec1_0 * val);
+              out_vec1_1 = update<Vectorized<float>, reduce>(out_vec1_1, other_vec1_1 * val);
+              Vectorized<float> other_vec2_0, other_vec2_1;
+              std::tie(other_vec2_0, other_vec2_1) = convert_to_float<BFloat16>(Vec::loadu(other_ptr + kVecSize * 2));
+              out_vec2_0 = update<Vectorized<float>, reduce>(out_vec2_0, other_vec2_0 * val);
+              out_vec2_1 = update<Vectorized<float>, reduce>(out_vec2_1, other_vec2_1 * val);
+              Vectorized<float> other_vec3_0, other_vec3_1;
+              std::tie(other_vec3_0, other_vec3_1) = convert_to_float<BFloat16>(Vec::loadu(other_ptr + kVecSize * 3));
+              out_vec3_0 = update<Vectorized<float>, reduce>(out_vec3_0, other_vec3_0 * val);
+              out_vec3_1 = update<Vectorized<float>, reduce>(out_vec3_1, other_vec3_1 * val);
+            }
+            convert_from_float<BFloat16>(out_vec0_0, out_vec0_1).store(out_ptr + k);
+            convert_from_float<BFloat16>(out_vec1_0, out_vec1_1).store(out_ptr + k + kVecSize);
+            convert_from_float<BFloat16>(out_vec2_0, out_vec2_1).store(out_ptr + k + kVecSize * 2);
+            convert_from_float<BFloat16>(out_vec3_0, out_vec3_1).store(out_ptr + k + kVecSize * 3);
           }
-          out_vec0.store(out_ptr + k);
-          out_vec1.store(out_ptr + k + kVecSize);
-          out_vec2.store(out_ptr + k + kVecSize * 2);
-          out_vec3.store(out_ptr + k + kVecSize * 3);
+          for (; k < K - (K % kVecSize); k += kVecSize) {
+            Vec out_vec = Vec::loadu(out_ptr + k);
+            Vectorized<float> out_vec_0, out_vec_1;
+            std::tie(out_vec_0, out_vec_1) = convert_to_float<BFloat16>(out_vec);
+            for (const auto e : c10::irange(e0, e1)) {
+              c = col_data[e];
+              Vectorized<float> val = Vectorized<float>(float(val_data[e]));
+              scalar_t* other_ptr = other_data + c * K;
+              Vectorized<float> other_vec_0, other_vec_1;
+              std::tie(other_vec_0, other_vec_1) = convert_to_float<BFloat16>(Vec::loadu(other_ptr + k));
+              out_vec_0 = update<Vectorized<float>, reduce>(out_vec_0, other_vec_0 * val);
+              out_vec_1 = update<Vectorized<float>, reduce>(out_vec_1, other_vec_1 * val);
+            }
+            convert_from_float<BFloat16>(out_vec_0, out_vec_1).store(out_ptr + k);
+          }
+          for (; k < K; k++) {
+            float out_val = float(out_ptr[k]);
+            for (const auto e : c10::irange(e0, e1)) {
+              c = col_data[e];
+              float val = float(val_data[e]);
+              scalar_t* other_ptr = other_data + c * K;
+              out_val = update<float, reduce>(out_val, float(other_ptr[k]) * val);
+            }
+            out_ptr[k] = scalar_t(out_val);
+          }
         }
-        for (; k < K - (K % kVecSize); k += kVecSize) {
-          Vec out_vec = Vec::loadu(out_ptr + k);
-          for (const auto e : c10::irange(e0, e1)) {
-            c = col_data[e];
-            scalar_t val = val_data[e];
-            scalar_t* other_ptr = other_data + c * K;
-            out_vec = update<Vec, reduce>(out_vec, Vec::loadu(other_ptr + k) * Vec(val));
+      } else {
+        for (int64_t e0 = row_start; e0 < row_end; e0 += CHUNK_SIZE) {
+          int64_t e1 = std::min(e0 + CHUNK_SIZE, row_end);
+
+          int64_t k = 0;
+          for (; k < K - (K % kVLEN); k += kVLEN) {
+            Vec out_vec0 = Vec::loadu(out_ptr + k);
+            Vec out_vec1 = Vec::loadu(out_ptr + k + kVecSize);
+            Vec out_vec2 = Vec::loadu(out_ptr + k + kVecSize * 2);
+            Vec out_vec3 = Vec::loadu(out_ptr + k + kVecSize * 3);
+            for (const auto e : c10::irange(e0, e1)) {
+              c = col_data[e];
+              scalar_t val = val_data[e];
+              scalar_t* other_ptr = other_data + c * K + k;
+
+              out_vec0 = update<Vec, reduce>(out_vec0, Vec::loadu(other_ptr) * Vec(val));
+              out_vec1 = update<Vec, reduce>(out_vec1, Vec::loadu(other_ptr + kVecSize) * Vec(val));
+              out_vec2 = update<Vec, reduce>(out_vec2, Vec::loadu(other_ptr + kVecSize * 2) * Vec(val));
+              out_vec3 = update<Vec, reduce>(out_vec3, Vec::loadu(other_ptr + kVecSize * 3) * Vec(val));
+            }
+            out_vec0.store(out_ptr + k);
+            out_vec1.store(out_ptr + k + kVecSize);
+            out_vec2.store(out_ptr + k + kVecSize * 2);
+            out_vec3.store(out_ptr + k + kVecSize * 3);
           }
-          out_vec.store(out_ptr + k);
-        }
-        for (; k < K; k++) {
-          scalar_t out_val = out_ptr[k];
-          for (const auto e : c10::irange(e0, e1)) {
-            c = col_data[e];
-            scalar_t val = val_data[e];
-            scalar_t* other_ptr = other_data + c * K;
-            out_val = update<scalar_t, reduce>(out_val, other_ptr[k] * val);
+          for (; k < K - (K % kVecSize); k += kVecSize) {
+            Vec out_vec = Vec::loadu(out_ptr + k);
+            for (const auto e : c10::irange(e0, e1)) {
+              c = col_data[e];
+              scalar_t val = val_data[e];
+              scalar_t* other_ptr = other_data + c * K;
+              out_vec = update<Vec, reduce>(out_vec, Vec::loadu(other_ptr + k) * Vec(val));
+            }
+            out_vec.store(out_ptr + k);
           }
-          out_ptr[k] = out_val;
+          for (; k < K; k++) {
+            scalar_t out_val = out_ptr[k];
+            for (const auto e : c10::irange(e0, e1)) {
+              c = col_data[e];
+              scalar_t val = val_data[e];
+              scalar_t* other_ptr = other_data + c * K;
+              out_val = update<scalar_t, reduce>(out_val, other_ptr[k] * val);
+            }
+            out_ptr[k] = out_val;
+          }
         }
       }
-
       // step 3: finalize
       write<scalar_t, reduce>(out_ptr, count, K);
     }
