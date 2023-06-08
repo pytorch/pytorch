@@ -636,8 +636,13 @@ class ExportedProgramSerializer:
 
 
 class GraphModuleOpUpgrader:
-    """Given a dictionary of versioned op to upgraders, as well as model op set version number, register old versions
-    of operators as custom ops, provide an API to return these old ops.
+    """Given model op set version number as well as compiler op set version number, do the following:
+    1. retrieve upgraders from somewhere (TorchScript API or new API).
+    2. parse it and reorder for upgrading purpose.
+    3. register old versions of operators as custom ops.
+    4. prepare upgrader passes.
+
+    In `upgrade()` API run these upgrader passes.
 
     An example of op_upgraders:
     {
@@ -663,10 +668,10 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
 
     def __init__(
         self,
-        op_upgraders: Dict[str, Tuple[str, str]] = None,
         compiler_opset_version: Optional[Dict[str, int]] = None,
         model_opset_version: Optional[Dict[str, int]] = None,
     ):
+        op_upgraders = {}  # can add a new TS API: torch._C._get_upgraders_entry_map()
         self.compiler_opset_version = compiler_opset_version
         self.model_opset_version = model_opset_version
         # key is version number, value is a list of upgraders, keyed on op name
@@ -928,11 +933,10 @@ class GraphModuleDeserializer:
 
 
 class ExportedProgramDeserializer:
-    def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None, op_upgraders: Dict[str, Tuple[str, str]] = None):
+    def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
         self.expected_opset_version: Dict[str, int] = (
             {} if expected_opset_version is None else expected_opset_version
         )
-        self.op_upgraders = op_upgraders
 
     def deserialize(
         self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
@@ -942,7 +946,7 @@ class ExportedProgramDeserializer:
             .deserialize(serialized_exported_program.graph_module)
         )
         model_opset_version: Dict[str, int] = {}  # TODO(larryliu) this should be deserialized as well
-        upgrader = GraphModuleOpUpgrader(self.op_upgraders, self.expected_opset_version, model_opset_version)
+        upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
         upgrader.upgrade(graph_module)
 
         state_dict = deserialize_state_dict(serialized_state_dict)
