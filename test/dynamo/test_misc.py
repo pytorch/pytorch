@@ -5626,6 +5626,19 @@ def ___make_guard_fn():
         opt_out = opt_model(x)
         self.assertTrue(same(orig_out, opt_out))
 
+    def test_torch_variable_hasattr(self):
+        def fn(x):
+            if hasattr(torch.nn, "Module"):
+                return x * x
+            return x + 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.rand([4, 4])
+        fn_out = fn(x)
+        compiled_out = compiled_fn(x)
+        self.assertTrue(same(fn_out, compiled_out))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
