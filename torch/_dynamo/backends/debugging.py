@@ -180,8 +180,9 @@ class ExplainWithBackend:
         return lookup_backend(self.backend)(gm, example_inputs)
 
     def __str__(self):
-        output = f"Graph Count: {len(self.graphs)}\n"
-        output += f"Graph Break Count: {len(self.break_reasons)}\n"
+        graph_count = len(self.graphs)
+        output = f"Graph Count: {graph_count}\n"
+        output += f"Graph Break Count: {graph_count - 1}\n"
         output += f"Op Count: {self.op_count}\n"
 
         output += "Break Reasons:\n"
