@@ -1,18 +1,18 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import sys
 import unittest
 
 import torch
 
 import torch._inductor
-import functools
 
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     parametrize,
     TEST_WITH_ROCM,
     TestCase,
-    instantiate_parametrized_tests,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -30,7 +30,13 @@ except (unittest.SkipTest, ImportError) as e:
         sys.exit(0)
     raise
 
-bin_ops_under_test = [torch._foreach_add, torch._foreach_mul, torch._foreach_sub, torch._foreach_div, torch._foreach_maximum]
+bin_ops_under_test = [
+    torch._foreach_add,
+    torch._foreach_mul,
+    torch._foreach_sub,
+    torch._foreach_div,
+    torch._foreach_maximum,
+]
 un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg]
 bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
 
@@ -75,9 +81,10 @@ class ForeachTests(TestCase):
             ),
         )
 
-
     # called in test_cpp_wrapper.py
-    test_foreach_cpp_wrapper = requires_cuda()(functools.partial(_test_single_list, op=torch._foreach_add))
+    test_foreach_cpp_wrapper = requires_cuda()(
+        functools.partial(_test_single_list, op=torch._foreach_add)
+    )
 
     @requires_cuda()
     @bin_ops
@@ -213,9 +220,7 @@ class ForeachTests(TestCase):
 
         max_args = 370
         max_list_len = (max_args // 2) + 1
-        inputs = (
-            [torch.rand(10, 10, device="cuda:0") for _ in range(max_list_len)],
-        )
+        inputs = ([torch.rand(10, 10, device="cuda:0") for _ in range(max_list_len)],)
 
         actual = fn_opt(*inputs)
         expected = fn(*inputs)
