@@ -104,6 +104,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return v
 
     @make_test
+    def test_itertools_chain(a, b):
+        v = a
+        for x in itertools.chain([a, b], [1, 2]):
+            v = v + x
+        return v
+
+    @make_test
+    def test_itertools_combinations(a, b):
+        combs = []
+        for size in itertools.combinations((1, 2, 3, 4), 2):
+            combs.append(torch.ones(size))
+        return combs
+
+    @make_test
     def test_constant1(a, b, c):
         return a - b * c + 1.0
 
@@ -223,6 +237,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         args = [(a, b)]
         kwargs = {"dim": 0}
         return torch.cat(*args, **kwargs)
+
+    @make_test
+    def test_deque(a, b):
+        d = collections.deque([a, b])
+        d.append(a + 1)
+        d.extend([a, b])
+        d.insert(0, "foo")
+        tmp = d.pop()
+
+        another_deque = collections.deque([tmp])
+        d.extendleft(another_deque)
+        another_deque.clear()
+        d.extend(another_deque)
+
+        d[2] = "setitem"
+        d = d.copy()
+        d.append(d.popleft())
+
+        empty = collections.deque()
+        d.extend(empty)
+
+        # dynamo same() util doesn't support deque so just return a list
+        return list(d)
 
     @make_test
     def test_slice1(a):
@@ -614,11 +651,43 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test = make_test(fn)
         test(self)
 
-    def test_default_dict(self):
-        dd = collections.defaultdict(dict)
+    def _test_default_dict_helper(self, factory):
+        dd = collections.defaultdict(factory)
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
         def fn(x):
+            dd["a"] = x + 1
+            dd[param] = 123
+            dd["c"] = x * 2
+            return dd["b"], dd
+
+        x = torch.randn(10, 10)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize_assert("eager")(fn)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref[0], res[0]))
+        self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1][param], res[1][param]))
+
+    def test_default_dict(self):
+        self._test_default_dict_helper(dict)
+
+    def test_default_dict_lambda(self):
+        self._test_default_dict_helper(lambda: dict())
+
+    def test_default_dict_closure(self):
+        def factory():
+            return dict()
+
+        self._test_default_dict_helper(factory)
+
+    def test_default_dict_constr(self):
+        param = torch.nn.Parameter(torch.ones([2, 2]))
+
+        def fn(x):
+            dd = collections.defaultdict(lambda: dict())
             dd["a"] = x + 1
             dd[param] = 123
             dd["c"] = x * 2
@@ -793,6 +862,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return tmp
 
     @make_test
+    def test_not_list(a):
+        return not [a + 1]
+
+    @make_test
     def test_islice_chain(a, b):
         tmp1 = [a + 1, a + 2]
         tmp2 = [a + 3, a + 4]
@@ -937,6 +1010,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return torch.tensor(True)
         else:
             return torch.tensor(False)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_size(x):
+        a = x.numpy()
+        return a.size
 
     @requires_numpy_pytorch_interop
     @make_test
