@@ -311,5 +311,5 @@ if __name__ == "__main__":
     data = json.dumps(
         get_recurrently_failing_jobs_alerts(args.repo, args.branch, args.job_name_regex)
     )
-    
+
     print(data)
