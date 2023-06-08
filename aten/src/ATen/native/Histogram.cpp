@@ -16,8 +16,6 @@
 #include <ATen/ops/_histogramdd_from_bin_tensors.h>
 #include <ATen/ops/_histogramdd_from_bin_tensors_native.h>
 #include <ATen/ops/aminmax.h>
-#include <ATen/ops/amin.h>
-#include <ATen/ops/amax.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/histc_native.h>
 #include <ATen/ops/histogram_native.h>
@@ -196,9 +194,8 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
         // non-empty input
         AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
             if (input.is_mps()) {
-                // aminmax has not been implemented on mps.
-                Tensor min = at::amin(input, 0);
-                Tensor max = at::amax(input, 0);
+                Tensor min, max;
+                std::tie(min, max) = at::aminmax(input, 0);
 
                 for (const auto i : c10::irange(N)) {
                     leftmost_edges[i] = min[i].item().to<scalar_t>();
@@ -239,18 +236,9 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
     double rightmost_edge = max.to<double>();
 
     if (leftmost_edge == rightmost_edge && input.numel() > 0) {
-        if (input.is_mps()) {
-            // aminmax has not been implemented on mps.
-            Tensor min = at::amin(input);
-            Tensor max = at::amax(input);
-
-            leftmost_edge = min.item<double>();
-            rightmost_edge = max.item<double>();
-        } else {
-            auto extrema = aminmax(input);
-            leftmost_edge = std::get<0>(extrema).item<double>();
-            rightmost_edge = std::get<1>(extrema).item<double>();
-        }
+        auto extrema = aminmax(input);
+        leftmost_edge = std::get<0>(extrema).item<double>();
+        rightmost_edge = std::get<1>(extrema).item<double>();
     }
 
     if (leftmost_edge == rightmost_edge) {

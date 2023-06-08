@@ -352,7 +352,7 @@ static void sinc_kernel(TensorIteratorBase& iter) {
 }
 
 static void sinh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "sinh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::sinh(a); },
@@ -361,7 +361,7 @@ static void sinh_kernel(TensorIteratorBase& iter) {
 }
 
 static void cosh_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "cosh_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "cosh_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return std::cosh(a); },
@@ -425,7 +425,7 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   } else if (n == 1) {
     trigamma_kernel(iter);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "polygamma", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "polygamma", [&]() {
       cpu_kernel(
           iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(a, n); });
     });
@@ -460,10 +460,12 @@ static void nan_to_num_kernel(
 }
 
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "kaiser_window_cpu", [&](){
-    const scalar_t alpha = static_cast<scalar_t>((window_length - 1) / 2.0);
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "kaiser_window_cpu", [&](){
+    using opmath_t = at::opmath_type<scalar_t>;
+    const opmath_t alpha = static_cast<opmath_t>((window_length - 1) / 2.0);
+    const opmath_t beta_ = static_cast<opmath_t>(beta);
     cpu_kernel(iter, [=](scalar_t a){
-        return calc_i0(static_cast<scalar_t>(beta) * std::sqrt(1 - std::pow((a - alpha) / alpha, static_cast<scalar_t>(2.0)))) / calc_i0(static_cast<scalar_t>(beta));
+        return calc_i0(beta_ * std::sqrt(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0)))) / calc_i0(beta_);
     });
   });
 }
@@ -480,8 +482,8 @@ void rsqrt_kernel(TensorIteratorBase& iter) {
 }
 
 static void entr_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, iter.common_dtype(), "entr_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "entr_cpu", [&] {
         cpu_kernel(iter, [](scalar_t x) -> scalar_t {
           if (at::_isnan(x)) {
             return x;
@@ -528,8 +530,8 @@ static void log_ndtr_kernel(TensorIteratorBase& iter) {
 
 static void i0e_kernel(TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, iter.common_dtype(), "i0e_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "i0e_cpu", [&]() {
         cpu_kernel_vec(
             iter,
             [](scalar_t x) { return calc_i0e(x); },
@@ -560,18 +562,19 @@ static void erfcx_kernel(TensorIteratorBase& iter){
 }
 
 void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.dtype(), "round_cpu", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
         bool neg_flag = false;
-        scalar_t ten_pow_decimals;
+        opmath_t ten_pow_decimals;
         if (decimals < 0) {
           decimals = -decimals;
           neg_flag = true;
         }
-        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        ten_pow_decimals = static_cast<opmath_t>(std::pow(10, decimals));
         cpu_kernel(iter, [ten_pow_decimals, neg_flag](scalar_t a) -> scalar_t {
-          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
-                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
+          return neg_flag ? std::nearbyint(static_cast<opmath_t>(a) / ten_pow_decimals) * ten_pow_decimals
+                          : std::nearbyint(static_cast<opmath_t>(a) * ten_pow_decimals) / ten_pow_decimals;
         });
       });
 }

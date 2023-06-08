@@ -24,6 +24,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/count_nonzero.h>
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
 #include <ATen/ops/index_put.h>
@@ -287,19 +288,26 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
     MPSGraphTensor* inputTensor_ = nil;
     MPSGraphTensor* outputTensor_ = nil;
     MPSGraphTensor* scatterDataTensor_ = nil;
-    MPSGraphTensor* countNonzeroTensor_ = nil;
   };
 
   stream->synchronize(SyncType::COMMIT_AND_WAIT);
-  Tensor count_nonzero = at::empty({1}, self.options().dtype(kInt));
-  Tensor out = at::empty(
-      {self.numel(), nDim == 0 ? 1 : nDim}, out_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
+  at::native::resize_output(out_, {total_nonzero, nDim});
+  if (out_.numel() == 0) {
+    return out_;
+  }
+
+  bool contiguous_output = out_.is_contiguous();
+  Tensor out = out_;
+  if (!contiguous_output) {
+    out = at::empty(out_.sizes(), out_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  }
 
   int64_t _apparentInputShape = 1;
   for (auto dim : self.sizes()) {
     _apparentInputShape *= dim;
   }
-  MPSShape* apparentOutputShape = @[ @(self.numel() * nDim) ];
+  MPSShape* apparentOutputShape = @[ @(total_nonzero * nDim) ];
   MPSShape* apparentInputShape = @[ @(_apparentInputShape) ];
 
   // Pseudocode:
@@ -326,7 +334,6 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
       MPSGraphTensor* inputNotEqualToZeroTensor = [mpsGraph notEqualWithPrimaryTensor:inputTensor
                                                                       secondaryTensor:zeroTensor
                                                                                  name:nil];
-      MPSGraphTensor* countNonzero = [mpsGraph reductionSumWithTensor:inputNotEqualToZeroTensor axis:0 name:nil];
       MPSGraphTensor* maskTensor = [mpsGraph castTensor:inputNotEqualToZeroTensor
                                                  toType:MPSDataTypeInt32
                                                    name:@"castToInt32"];
@@ -376,11 +383,9 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->scatterDataTensor_ = scatterDataTensor;
       newCachedGraph->outputTensor_ = outputTensor;
-      newCachedGraph->countNonzeroTensor_ = countNonzero;
     });
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, apparentInputShape);
-    Placeholder countNonzeroPlaceholder = Placeholder(cachedGraph->countNonzeroTensor_, count_nonzero);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out, apparentOutputShape);
     Placeholder scatterPlaceholder = Placeholder(cachedGraph->scatterDataTensor_, out, apparentOutputShape);
 
@@ -392,15 +397,15 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-      countNonzeroPlaceholder.getMPSGraphTensor() : countNonzeroPlaceholder.getMPSGraphTensorData()
     };
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
-  int32_t total_nonzero = count_nonzero.item<int32_t>();
-  at::native::resize_output(out_, {total_nonzero, nDim});
-  out_.copy_(out.resize_({total_nonzero, nDim}));
+  if (!contiguous_output) {
+    out_.copy_(out);
+  }
+
   return out_;
 }
 

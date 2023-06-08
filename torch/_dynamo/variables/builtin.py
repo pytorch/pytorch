@@ -1215,6 +1215,7 @@ class BuiltinVariable(VariableTracker):
         from . import (
             BaseListVariable,
             ConstantVariable,
+            NNModuleVariable,
             TensorVariable,
             UserFunctionVariable,
         )
@@ -1228,6 +1229,13 @@ class BuiltinVariable(VariableTracker):
 
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
+
+        if (
+            isinstance(left, NNModuleVariable)
+            and isinstance(right, NNModuleVariable)
+            and op in supported_const_comparison_ops
+        ):
+            self.push(ConstantVariable(op(left, right)))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():
@@ -1314,6 +1322,10 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+
+        if isinstance(a, ListVariable):
+            return ConstantVariable(len(a.items) == 0).add_options(self, a)
+
         return None
 
     call_eq = _comparison

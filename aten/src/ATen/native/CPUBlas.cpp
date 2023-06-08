@@ -421,22 +421,19 @@ void gemm_batched(
     return gemm(transa, transb, m, n, k, alpha, a[0], lda, b[0], ldb, beta, c[0], ldc);
   }
 
-  c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
-      [&](auto _) {
-        internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-        if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-          gemm_batched_mkl_impl(
-              transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-        } else {
-          gemm_batched_generic(
-              transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-        }
-      },
-      [&](auto _) {
-        gemm_batched_generic(
-            transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-      }
-    );
+  if constexpr (AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value) {
+    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+      gemm_batched_mkl_impl(
+          transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+    } else {
+      gemm_batched_generic(
+          transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+    }
+  } else {
+    gemm_batched_generic(
+        transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  }
 }
 
 template <typename scalar_t>
@@ -469,33 +466,31 @@ void gemm_batched_with_stride(
     return gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   }
 
-  c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
-      [&](auto _) {
-        internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-        if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-          c10::SmallBuffer<const scalar_t*, 16> a_ptrs(batch_size);
-          c10::SmallBuffer<const scalar_t*, 16> b_ptrs(batch_size);
-          c10::SmallBuffer<scalar_t*, 16> c_ptrs(batch_size);
+  if constexpr (AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value) {
+    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+      c10::SmallBuffer<const scalar_t*, 16> a_ptrs(batch_size);
+      c10::SmallBuffer<const scalar_t*, 16> b_ptrs(batch_size);
+      c10::SmallBuffer<scalar_t*, 16> c_ptrs(batch_size);
 
-          for (const auto batch : c10::irange(batch_size)) {
-            a_ptrs[batch] = a + batch_stride_a * batch;
-            b_ptrs[batch] = b + batch_stride_b * batch;
-            c_ptrs[batch] = c + batch_stride_c * batch;
-          }
-          gemm_batched_mkl_impl(
-              transa, transb, batch_size, m, n, k, alpha, a_ptrs.data(), lda,
-              b_ptrs.data(), ldb, beta, c_ptrs.data(), ldc);
-        } else {
-          gemm_batched_with_stride_generic(
-              transa, transb, batch_size, m, n, k, alpha, a, lda, batch_stride_a,
-              b, ldb, batch_stride_b, beta, c, ldc, batch_stride_c);
-        }
-      },
-      [&](auto _) {
-        gemm_batched_with_stride_generic(transa, transb, batch_size, m, n, k, alpha,
-                                         a, lda, batch_stride_a, b, ldb, batch_stride_b,
-                                         beta, c, ldc, batch_stride_c);
-      });
+      for (const auto batch : c10::irange(batch_size)) {
+        a_ptrs[batch] = a + batch_stride_a * batch;
+        b_ptrs[batch] = b + batch_stride_b * batch;
+        c_ptrs[batch] = c + batch_stride_c * batch;
+      }
+      gemm_batched_mkl_impl(
+          transa, transb, batch_size, m, n, k, alpha, a_ptrs.data(), lda,
+          b_ptrs.data(), ldb, beta, c_ptrs.data(), ldc);
+    } else {
+      gemm_batched_with_stride_generic(
+          transa, transb, batch_size, m, n, k, alpha, a, lda, batch_stride_a,
+          b, ldb, batch_stride_b, beta, c, ldc, batch_stride_c);
+    }
+  } else {
+    gemm_batched_with_stride_generic(transa, transb, batch_size, m, n, k, alpha,
+                                     a, lda, batch_stride_a, b, ldb, batch_stride_b,
+                                     beta, c, ldc, batch_stride_c);
+  }
 }
 
 #define INSTANTIATE_BATCHED_GEMM(scalar_t, DType)               \

@@ -22,7 +22,7 @@ dce = False
 static_weight_shapes = True
 
 # put correctness assertions in generated code
-size_asserts = True
+size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -66,10 +66,20 @@ search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") ==
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
-
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
 )
+
+layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
+
+# Whether to keep the output strides the same as eager after layout optimization.
+keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == "1"
+
+# Enabling this will let compiler print warning messages if a generated triton
+# kernel has inputs with mixed layouts.  This is helpful for perf debugging
+# since kernel with mixed layout inputs may run much slower then one whose inputs
+# have uniform layouts.
+warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematerialization can lead to exponential blowup. So, have
@@ -157,7 +167,7 @@ else:
 kernel_name_max_ops = 10
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
-shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "0") == "1"
+shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -229,6 +239,9 @@ class cpp:
     # similar to config.triton.descriptive_names
     descriptive_names = "original_aten"
 
+    # how many nodes to allow into a single horizontal fusion
+    max_horizontal_fusion_size = 16
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -265,6 +278,9 @@ class triton:
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
+
+    # max autotune gemm with cublasLt
+    autotune_cublasLt = True
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -306,7 +322,13 @@ class triton:
     # register.
     # Settting it to a larger value allows a config spilling a small amount
     # of registers being benchmarked.
-    spill_threshold = 0
+    #
+    # NOTE: triton will always report >0 register spills for kernels using sin/cos.
+    # (check this issue https://github.com/openai/triton/issues/1756 )
+    # So far we see a fixed 8 spilled registers for kernels using sin/cos.
+    # Raise the threshold to 16 to be safe.
+    # We should revisit this once we understand more of the source of register spills.
+    spill_threshold: int = 16
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.

@@ -35,7 +35,7 @@ if _running_with_deploy():
 else:
     from .torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
 import builtins
 
 __all__ = [
@@ -937,7 +937,7 @@ def is_warn_always_enabled():
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
 def _check_with(error_type, cond, message):
-    if not isinstance(cond, builtins.bool):
+    if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
     if cond:
@@ -1400,14 +1400,7 @@ from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
-import torch.backends.cpu
-import torch.backends.cuda
-import torch.backends.mps
-import torch.backends.cudnn
-import torch.backends.mkl
-import torch.backends.mkldnn
-import torch.backends.openmp
-import torch.backends.quantized
+from torch import backends as backends
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -1509,7 +1502,8 @@ class _TorchCompileInductorWrapper:
         if mode is None or mode == "default":
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
-            self.apply_options(torch._inductor.list_mode_options(mode))
+            from torch._inductor import list_mode_options
+            self.apply_options(list_mode_options(mode))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
@@ -1695,6 +1689,23 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
                   'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
+
+# Register MPS specific decomps
+torch.backends.mps._init()
+
+if not _running_with_deploy():
+    class _TritonLibrary(object):
+        lib = torch.library.Library("triton", "DEF")
+        ops_table: Dict[Tuple[str, str], Callable] = {}
+
+        @classmethod
+        def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):
+            if (op_key, dispatch_key) not in cls.ops_table:
+                cls.lib.define(full_schema)
+                cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
+                cls.ops_table[(op_key, dispatch_key)] = op_impl
+
+            return cls.ops_table[(op_key, dispatch_key)]
 
 
 from . import _logging
