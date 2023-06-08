@@ -872,7 +872,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     // the original impl will go sequential on dim0 and try to parallel/vectorize on
     // the rest of dims, which is not performant for commonly used scenarios in Embedding.
     //
-    if (dim == 0 && alpha.equal(1.0)) {
+    if (dim == 0 && alpha.equal(1.0) && 0) {
       // scatter_add supports only int64_t index
       auto index_long = index_contig.to(kLong);
 
@@ -887,6 +887,8 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
         return;
       }
     }
+
+    dim = maybe_wrap_dim(dim, self.dim());
 
     // When the slice of source or result is noncontiguous,
     // original index_add is slow as it uses add for the sliced tensor,
@@ -903,7 +905,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     if ((result.stride(dim) == 1 || source.stride(dim) == 1) &&
         // Data type of index should be long and alpha should be 1 to use scatter_add.
         alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long &&
-        result.numel() > at::internal::GRAIN_SIZE &&
+        //result.numel() > at::internal::GRAIN_SIZE &&
         // scatter_add does not support ComplexHalf
         source.scalar_type() != ScalarType::ComplexHalf &&
         result.scalar_type() != ScalarType::ComplexHalf) {
@@ -915,9 +917,9 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       // source.select(dim, i) is broadcast for result.select(dim, index_data[i])
       // The broadcast case is not applicable for scatter_add
       auto check_sizes = [&ep_sizes, &ep_strides, &numel](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
-        if (a.size() != b.size()) {
-          return false;
-        }
+        //if (a.size() != b.size()) {
+        //  return false;
+        //}
 
         ep_sizes[dim] = numel;
         ep_strides[dim] = 1;
