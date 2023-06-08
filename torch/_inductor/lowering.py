@@ -417,14 +417,21 @@ def make_pointwise(
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
         def is_dynamic(*args):
-            return any(isinstance(t, TensorBox) and any(x.free_symbols for x in t.data.get_size()) for t in args)
+            return any(
+                isinstance(t, TensorBox)
+                and any(x.free_symbols for x in t.data.get_size())
+                for t in args
+            )
 
         def has_type_promotion(*args):
             if len(args) < 2:
                 return False
             else:
                 dtype = args[0].data.get_dtype()
-                return any(isinstance(t, TensorBox) and t.data.get_dtype() != dtype for t in args)
+                return any(
+                    isinstance(t, TensorBox) and t.data.get_dtype() != dtype
+                    for t in args
+                )
 
         def realize_inputs(*args):
             for arg in args:
@@ -439,9 +446,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
         def group_args(arg_pairs):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
-                use_foreach = not (
-                    is_dynamic(*args) or has_type_promotion(*args)
-                )
+                use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
                 out[(args[0].get_device(), use_foreach)].append((i, args))
             return out
 
@@ -453,7 +458,10 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
         outputs = [None] * len(inputs[0])
         for (device, use_foreach), group in groups.items():
             buffer_list = []
-            for output_ind, args, in group:
+            for (
+                output_ind,
+                args,
+            ) in group:
                 if device.type == "cuda" and use_foreach:
                     realize_inputs(*args)
 
@@ -4155,6 +4163,7 @@ register_foreach_pointwise(aten._foreach_div.List, div)
 register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
+register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 
 
