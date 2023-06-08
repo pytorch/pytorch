@@ -194,12 +194,13 @@ profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 disable_cpp_codegen = is_fbcode()
 
 
-# Runs constant folding upon inductor compilation, freezing the values of parameters
-# and buffers
+# Freezing will attempt to inline weights as constants in optimization
+# and run constant folding and other optimizations on them. After freezing, weights
+# can no longer be updated.
 freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 
 # Make freezing invalidate the eager Parameters of nn modules, to avoid memory overhead
-# of potentially keeping multiple copies of weights
+# of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
 
 
