@@ -10,12 +10,18 @@ from . import config
 def replace_node_with_constant(gm, node, constant):
     g = gm.graph
 
-    i = 0
+    if not hasattr(gm, "_frozen_param_count"):
+        gm._frozen_param_count = 0
+
+    i = gm._frozen_param_count
+
     while True:
         qualname = f"_frozen_param{i}"
         if not hasattr(gm, qualname):
             break
         i += 1
+
+    gm._frozen_param_count = i + 1
 
     with g.inserting_before(node):
         new_input_node = g.create_node("get_attr", qualname, (), {})
@@ -36,7 +42,7 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     """
 
     params = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    fake_inp_nodes = [node for (_, node) in zip(flat_params, params)]
+    fake_inp_nodes = params[: len(params)]
 
     g = gm.graph
 
@@ -71,7 +77,15 @@ def constant_fold(gm):
     class ConstantFolder(torch.fx.Interpreter):
         def run_node(self, node):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
-            if unknown_value in pytree.tree_flatten((args, kwargs))[0]:
+
+            flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
+            if unknown_value in flattened_inputs:
+                return unknown_value
+
+            # skip constructors, since inductor generates optimal code for them already
+            # and turning into tensor would result in an additional global memory read
+            # TODO - more complicated strategy
+            if node.op != "get_attr" and not any(isinstance(e, torch.Tensor) for e in flattened_inputs):
                 return unknown_value
 
             # All mutations should either be removed or on inputs which we did not make constant
