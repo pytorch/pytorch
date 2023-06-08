@@ -403,7 +403,13 @@ template <typename scalar_t>
 static inline void get_cubic_upsample_coefficients(
     scalar_t coeffs[4],
     scalar_t t) {
-  scalar_t A = -0.75;
+  // scalar_t A = -0.75;
+  // TODO We Can't change this like that.
+  // But right now, that makes the float and uint8 paths much closer (when antialias=False), because
+  // the uint8 path uses -0.5
+  // Maybe... we can find a way to use -0.75 in the antialias=False case for
+  // uint8 paths, isntead of changing this value here?
+  scalar_t A = -0.5;
 
   scalar_t x1 = t;
   coeffs[0] = cubic_convolution2<scalar_t>(x1 + 1.0, A);
