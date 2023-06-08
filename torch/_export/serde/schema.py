@@ -72,7 +72,7 @@ class Device:
 
 @dataclass
 class SymInt(_Union):
-    as_symbol: str
+    as_symbol: Tuple[str, int]
     as_int: int
 
 

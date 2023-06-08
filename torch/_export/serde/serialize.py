@@ -135,7 +135,8 @@ def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
         if symbolic_shapes.is_concrete_int(s):
             return SymInt.create(as_int=int(s))
         else:
-            return SymInt.create(as_symbol=str(s))
+            assert isinstance(s, torch.SymInt)
+            return SymInt.create(as_symbol=[str(s), s.node.hint])
     else:
         raise SerializeError(
             f"SymInt should be either symbol or int, got `{s}` of type `{type(s)}`"
@@ -179,7 +180,20 @@ def serialize_metadata(node: torch.fx.Node) -> Dict[str, str]:
     # The walrus operator returns False on an empty string :(
     if module_fqn is not None:
         ret["module_fqn"] = module_fqn
-    # TODO(angelayi) add nn_module_stack and source_fn
+
+    if nn_module_stack := node.meta.get("nn_module_stack"):
+        # Serialize to "fx_node_name:(orig_ref,type_str)"
+        nn_module_list = [
+            f"{k}:({v[0]},{serialize_operator(v[1])})"
+            for k, v in nn_module_stack.items()
+        ]
+        ret["nn_module_stack"] = ";".join(nn_module_list)
+
+    if source_fn := node.meta.get("source_fn"):
+        # Serialize to "fx_node_name,op_str"
+        op = serialize_operator(source_fn[1])
+        ret["source_fn"] = f"{source_fn[0]},{op}"
+
     return ret
 
 
@@ -193,7 +207,47 @@ def deserialize_metadata(metadata) -> Dict[str, str]:
     module_fqn = metadata.get("module_fqn")
     if module_fqn is not None:
         ret["module_fqn"] = module_fqn
-    # TODO(angelayi) add nn_module_stack and source_fn
+
+    def deserialize_meta_func(serialized_target: str):
+        module = None
+        if serialized_target.startswith("torch.nn"):
+            module = torch.nn
+            serialized_target_names = serialized_target.split(".")[2:]
+        elif serialized_target.startswith("torch"):
+            module = torch
+            serialized_target_names = serialized_target.split(".")[1:]
+        else:
+            return deserialize_operator(serialized_target)
+
+        target = module
+        for name in serialized_target_names:
+            if not hasattr(target, name):
+                return serialized_target
+            else:
+                target = getattr(target, name)
+        return target
+
+    if nn_module_stack_str := metadata.get("nn_module_stack"):
+        # Originally serialized to "fx_node_name:(orig_ref,type_str)"
+        nn_module_stack_list = nn_module_stack_str.split(";")
+        nn_module_stack = {}
+        for kv in nn_module_stack_list:
+            key_idx = kv.find(":")
+            key = kv[:key_idx]
+            assert kv[key_idx + 1] == "("
+            assert kv[-1] == ")"
+            values = kv[key_idx + 2: -1].split(",")
+            assert len(values) == 2
+            module = deserialize_meta_func(values[1])
+            nn_module_stack[key] = (values[0], module)
+        ret["nn_module_stack"] = nn_module_stack
+
+    if source_fn_str := metadata.get("source_fn"):
+        # Originally serializes to "fx_node_name,op_str"
+        source_fn = source_fn_str.split(",")
+        op = deserialize_meta_func(source_fn[1])
+        ret["source_fn"] = (source_fn[0], op)
+
     return ret
 
 
@@ -684,28 +738,34 @@ class ExportedProgramSerializer:
 class GraphModuleDeserializer:
     def __init__(self):
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
-        self.serialized_name_to_meta: Dict[str, Union[FakeTensor, int, torch.SymInt, torch.SymBool]] = {}
+        self.serialized_name_to_meta: Dict[str, Union[FakeTensor, int, torch.SymInt, bool, torch.SymBool]] = {}
         self.graph = torch.fx.Graph()
 
-    def deserialize_sym(
-        self, s: Union[SymInt, SymBool]
-    ) -> Union[int, torch.SymInt, bool, torch.SymBool]:
+    def deserialize_sym_int(self, s: SymInt) -> Union[int, torch.SymInt]:
         val = s.value
         if s.type == "as_symbol":
-            # 7*s0
-            # "s0" --> s0
-            expr = sympy.sympify(val, locals=self.symbol_name_to_symbol)
-            symint = self.shape_env.create_symintnode(expr, hint=None)
-            return symint
+            expr, hint = val
+            sym = sympy.sympify(expr, locals=self.symbol_name_to_symbol)
+            return self.shape_env.create_symintnode(sym, hint=hint)
         elif s.type == "as_int":
             assert isinstance(val, int)
             return val
+        else:
+            raise SerializeError(
+                f"SymInt has invalid field type {s.type} with value {s.value}"
+            )
+
+    def deserialize_sym_bool(self, s: SymBool) -> Union[bool, torch.SymBool]:
+        val = s.value
+        if s.type == "as_symbol":
+            expr = sympy.sympify(val, locals=self.symbol_name_to_symbol)
+            return symbolic_shapes.SymBool(symbolic_shapes.SymNode(expr, self.shape_env, bool, None))
         elif s.type == "as_bool":
             assert isinstance(val, bool)
             return val
         else:
             raise SerializeError(
-                f"SymInt has invalid field type {s.type} with value {s.value}"
+                f"SymBool has invalid field type {s.type} with value {s.value}"
             )
 
     def deserialize_tensor_meta(
@@ -717,8 +777,8 @@ class GraphModuleDeserializer:
             return cast(
                 FakeTensor,
                 torch.empty_strided(
-                    tuple(self.deserialize_sym(val) for val in tensor_meta.sizes),
-                    tuple(self.deserialize_sym(val) for val in tensor_meta.strides),
+                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.sizes),  # type: ignore[misc]
+                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.strides),  # type: ignore[misc]
                     device=deserialize_device(tensor_meta.device),
                     dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
                 ),
@@ -750,12 +810,10 @@ class GraphModuleDeserializer:
             self.serialized_name_to_meta[name] = meta_val
 
         for name, sym_int_value in serialized_graph.sym_int_values.items():
-            v = self.deserialize_sym(sym_int_value)
-            self.serialized_name_to_meta[name] = v
+            self.serialized_name_to_meta[name] = self.deserialize_sym_int(sym_int_value)
 
         for name, sym_bool_value in serialized_graph.sym_bool_values.items():
-            v = self.deserialize_sym(sym_bool_value)
-            self.serialized_name_to_meta[name] = v
+            self.serialized_name_to_meta[name] = self.deserialize_sym_bool(sym_bool_value)
 
         # Inputs: convert to placeholder nodes in FX.
         for input in serialized_graph.inputs:
