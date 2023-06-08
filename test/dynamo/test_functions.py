@@ -437,6 +437,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x - 1
 
     @make_test
+    def test_get_autocast_gpu_dtype(x):
+        dtype = torch.get_autocast_gpu_dtype()
+        return x.type(dtype)
+
+    @make_test
+    def test_get_calculate_correct_fan(x):
+        fan_in = torch.nn.init._calculate_correct_fan(x, "fan_in")
+        return x + fan_in
+
+    @make_test
+    def test_is_complex(x):
+        if torch.is_complex(x):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
     def test_device(x):
         if not x.is_cuda:
             return x + 1
