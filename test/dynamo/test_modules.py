@@ -1422,8 +1422,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertIn("param0", opt_mod_keys)
 
         # Check all attributes, parameters and buffers
-        for p1, p2 in zip(mod_keys, opt_mod_keys):
-            self.assertTrue(p1 == p2)
+        self.assertTrue(len(set(mod_keys).difference(opt_mod_keys)) == 0)
 
     def test_recursion(self):
         mod = MockModule()

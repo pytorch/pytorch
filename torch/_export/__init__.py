@@ -15,7 +15,7 @@ from .exported_program import (
     ExportedProgram,
     ExportBackwardSignature,
     ExportGraphSignature,
-    _set_constraints,
+    _process_constraints,
 )
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
@@ -98,6 +98,8 @@ def export(
     f: Callable,
     args: Tuple[Any],
     constraints: Optional[List[Constraint]] = None,
+    *,
+    _add_runtime_assertions=True,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -196,19 +198,23 @@ def export(
                 if re.match(r"^[if]\d+$", str(k))
             }
 
+            range_constraints, equality_constraints = _process_constraints(
+                gm,
+                export_graph_signature,
+                flat_args,
+            )
             exported_program = ExportedProgram(
                 gm,
                 gm.graph,
                 export_graph_signature,
                 CallSpec(in_spec, orig_out_spec),
                 params_buffers,
+                range_constraints,
+                equality_constraints,
             )
-            _set_constraints(
-                exported_program,
-                gm.meta.get("input_shape_constraints", []),
-                gm.meta.get("inline_constraints", []),
-                flat_args,
-            )
+
+            if _add_runtime_assertions:
+                exported_program = exported_program._add_runtime_assertions()
 
             return exported_program
 
