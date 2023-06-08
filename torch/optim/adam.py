@@ -5,7 +5,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
                         _dispatch_sqrt, _default_to_fused_or_foreach, _capturable_doc,
                         _differentiable_doc, _foreach_doc, _fused_doc, _maximize_doc)
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Adam', 'adam']
 
@@ -424,7 +423,8 @@ def _multi_tensor_adam(params: List[Tensor],
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
          device_max_exp_avg_sqs, device_state_steps) in grouped_tensors.values():
 
@@ -435,7 +435,7 @@ def _multi_tensor_adam(params: List[Tensor],
         device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
         device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
         device_exp_avg_sqs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs]
-        params_ = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
+        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
         # update steps
         torch._foreach_add_(device_state_steps, 1)
@@ -485,7 +485,7 @@ def _multi_tensor_adam(params: List[Tensor],
                 torch._foreach_reciprocal_(eps_over_step_size)
                 denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
 
-            torch._foreach_addcdiv_(params_, device_exp_avgs, denom)
+            torch._foreach_addcdiv_(device_params, device_exp_avgs, denom)
         else:
             bias_correction1 = [1 - beta1 ** _get_value(step) for step in device_state_steps]
             bias_correction2 = [1 - beta2 ** _get_value(step) for step in device_state_steps]
@@ -507,7 +507,7 @@ def _multi_tensor_adam(params: List[Tensor],
                 torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
                 denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-            torch._foreach_addcdiv_(params_, device_exp_avgs, denom, step_size)
+            torch._foreach_addcdiv_(device_params, device_exp_avgs, denom, step_size)
 
 
 def _fused_adam(
@@ -532,7 +532,8 @@ def _fused_adam(
 ) -> None:
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, dtype) in grouped_tensors:
         (
             device_params,

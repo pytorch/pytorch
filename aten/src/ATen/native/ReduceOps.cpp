@@ -593,11 +593,11 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     cumprod(input.conj()) = cumprod(input).conj()
   */
 
-  if (input.numel() <= 1) {
+  if (input.sym_numel() <= 1) {
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.dim());
-  const int64_t dim_size = input.sizes()[dim];
+  const int64_t dim_size = input.sym_sizes()[dim].guard_int(__FILE__, __LINE__);
   if (dim_size == 1) {
     return grad;
   }
@@ -641,7 +641,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // zeros_like(indices).scatter_(dim, indices, 1.) & cumsum == 1
     // Note that the logic_and with cumsum == 1 accounts
     // for the case when there is no first zero
-    Tensor grad_input = at::zeros(input.sizes(), grad.options());
+    Tensor grad_input = at::zeros_symint(input.sym_sizes(), grad.options());
     const auto cumsum = is_zero.cumsum(dim);
 
     // case k < z1
@@ -710,9 +710,9 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     } else {
       grad_input = at::zeros(input.sizes(), grad.options());
     }
-    auto ones_size = input.sizes().vec();
+    auto ones_size = input.sym_sizes().vec();
     ones_size[dim] = 1;
-    const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
+    const Tensor ones = at::ones({1}, grad.options()).expand_symint(ones_size);
     Tensor prods_from_k_plus_1;
     Tensor omitted_products;
     for (const auto k : c10::irange(dim_size)) {
@@ -732,7 +732,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       // At this point omitted_products is the same size
       // as input, except on the dimension dim where it's
       // dim_size - k
-      TORCH_CHECK(omitted_products.size(dim) == dim_size - k);
+      TORCH_CHECK(omitted_products.sym_size(dim) == dim_size - k);
 
       auto grad_slice = at::sum(grad.slice(dim, k) * omitted_products, dim);
       if (are_inputs_tensors_sublcass) {
@@ -2060,6 +2060,21 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   if (!self.is_same_size(other)) {
     return false;
   }
+  // Since the flags like neg/conj should be already handled outside the
+  // TensorIterator, it should be safe to have the following fast path by
+  // ensuring the storage and strides exactly the same.
+  if (self.is_alias_of(other)
+      && self.storage_offset() == other.storage_offset()
+      && self.dtype() == other.dtype()
+      && self.is_contiguous() == other.is_contiguous()
+      && self.strides().equals(other.strides())
+      // Extra checks to ensure the safety in case cpu_equal is directly called in C++.
+      && self.layout() == other.layout()
+      && self.is_neg() == other.is_neg()
+      && self.is_conj() == other.is_conj()) {
+    return true;
+  }
+
   std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
     .add_input(self)

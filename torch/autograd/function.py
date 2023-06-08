@@ -339,7 +339,7 @@ class _SingleLevelFunction(_C._FunctionBase, FunctionCtx, _HookMixin, metaclass=
                                   " autograd.Function.")
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any], output: Any) -> Any:
+    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> Any:
         r"""There are two ways to define the forward pass of an autograd.Function.
 
         Either:

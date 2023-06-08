@@ -110,8 +110,8 @@ TORCH_API void checkNumel(
     int64_t numel);
 TORCH_API void checkSameNumel(
     CheckedFrom c,
-    const TensorGeometryArg& t1,
-    const TensorGeometryArg& t2);
+    const TensorArg& t1,
+    const TensorArg& t2);
 TORCH_API void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
 TORCH_API void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
 TORCH_API void checkScalarTypes(

@@ -63,6 +63,7 @@ import __main__  # type: ignore[import]
 import torch
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.backends.mps
 import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
@@ -152,9 +153,11 @@ class _TestParametrizer:
     The decision of how to parametrize / what to parametrize over is intended to be implemented
     by each derived class.
 
-    In the details, the decorator adds a 'parametrize_fn' property to the test function that is called
-    during device-specific test instantiation performed in instantiate_device_type_tests(). Because of this,
-    there is no need to parametrize over device type, as that is already handled separately.
+    In the details, the decorator adds a 'parametrize_fn' property to the test function. This function
+    is intended to be called later by one of:
+      * Device-specific test instantiation via instantiate_device_type_tests(). Note that for this
+        case there is no need to explicitly parametrize over device type, as that is handled separately.
+      * Device-agnostic parametrized test instantiation via instantiate_parametrized_tests().
 
     If the decorator is applied to a test function that already has a 'parametrize_fn' property, a new
     composite 'parametrize_fn' will be created that generates tests with the product of the parameters
@@ -239,7 +242,8 @@ def instantiate_parametrized_tests(generic_cls):
     """
     Instantiates tests that have been decorated with a parametrize_fn. This is generally performed by a
     decorator subclass of _TestParametrizer. The generic test will be replaced on the test class by
-    parametrized tests with specialized names.
+    parametrized tests with specialized names. This should be used instead of
+    instantiate_device_type_tests() if the test class contains device-agnostic tests.
 
     You can also use it as a class decorator. E.g.
 
@@ -345,6 +349,11 @@ class parametrize(_TestParametrizer):
                               subtest((1, 4), name='quadruple')])
         def test_baz(self, x, y):
             ...
+
+    To actually instantiate the parametrized tests, one of instantiate_parametrized_tests() or
+    instantiate_device_type_tests() should be called. The former is intended for test classes
+    that contain device-agnostic tests, while the latter should be used for test classes that
+    contain device-specific tests. Both support arbitrary parametrizations using the decorator.
 
     Args:
         arg_str (str): String of arg names separate by commas (e.g. "x,y").
@@ -705,6 +714,8 @@ def sanitize_pytest_xml(xml_file: str):
         full_classname = testcase.attrib['classname']
         # The test prefix is optional
         regex_result = re.search(r"^(test\.)?(?P<file>.*)\.(?P<classname>[^\.]*)$", full_classname)
+        if regex_result is None:
+            continue
         classname = regex_result.group("classname")
         file = regex_result.group("file").replace(".", "/")
         testcase.set("classname", classname)
@@ -762,11 +773,13 @@ def run_tests(argv=UNITTEST_ARGS):
     if TEST_IN_SUBPROCESS:
         other_args = []
         if DISABLED_TESTS_FILE:
-            other_args.append('--import-disabled-tests')
+            other_args.append("--import-disabled-tests")
         if SLOW_TESTS_FILE:
-            other_args.append('--import-slow-tests')
+            other_args.append("--import-slow-tests")
         if USE_PYTEST:
             other_args.append("--use-pytest")
+        if RERUN_DISABLED_TESTS:
+            other_args.append("--rerun-disabled-tests")
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -955,6 +968,7 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_MPS = torch.backends.mps.is_available()
 TEST_CUDA = torch.cuda.is_available()
 TEST_NUMBA = _check_module_exists('numba')
 
@@ -992,6 +1006,10 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # as we had before.  By default, we don't run these tests.
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
+TEST_CUDA_GRAPH = TEST_CUDA and os.getenv('PYTORCH_TEST_SKIP_CUDAGRAPH', '0') != '1' and (
+    (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or
+    (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
+)
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
@@ -1140,10 +1158,19 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def runOnRocm(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_ROCM:
+            fn(*args, **kwargs)
+        else:
+            raise unittest.SkipTest("test currently only works on the ROCm stack")
+    return wrapper
+
 def skipIfMps(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if torch.backends.mps.is_available():
+        if TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
         else:
             fn(*args, **kwargs)
@@ -1460,13 +1487,7 @@ def set_rng_seed(seed):
         np.random.seed(seed)
 
 
-@contextmanager
-def disable_functorch():
-    guard = torch._C._DisableFuncTorch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
+disable_functorch = torch._C._DisableFuncTorch
 
 
 @contextlib.contextmanager
@@ -1797,6 +1818,7 @@ def check_if_enable(test: unittest.TestCase):
                         "rocm": TEST_WITH_ROCM,
                         "asan": TEST_WITH_ASAN,
                         "dynamo": TEST_WITH_TORCHDYNAMO,
+                        "inductor": TEST_WITH_TORCHINDUCTOR,
                     }
 
                     invalid_platforms = list(filter(lambda p: p not in platform_to_conditional, platforms))
@@ -2135,6 +2157,16 @@ class TestCase(expecttest.TestCase):
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
 
+    def assertLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertLogs(logger, level)
+
+    def assertNoLogs(self, logger=None, level=None):
+        if logger is None:
+            logger = logging.getLogger("torch")
+        return super().assertNoLogs(logger, level)
+
     def wrap_with_cuda_policy(self, method_name, policy):
         test_method = getattr(self, method_name)
         # the import below may initialize CUDA context, so we do it only if
@@ -2229,10 +2261,9 @@ class TestCase(expecttest.TestCase):
             skipped_before = 0 if result is None else len(result.skipped)
 
         super_run = super().run
-        # TODO remove version check once dynamo supports 3.11
-        if TEST_WITH_TORCHINDUCTOR and sys.version_info < (3, 11):
+        if TEST_WITH_TORCHINDUCTOR:
             super_run = torch._dynamo.optimize("inductor")(super_run)
-        elif TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
+        elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)
 
@@ -3107,7 +3138,7 @@ class TestCase(expecttest.TestCase):
         # Checks whether the test is instantiated for a device type by testing
         # if the test class has defined the device_type attribute and,
         # if so, tests whether the instantiated device type is native or not
-        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES:  # type: ignore[attr-defined]
+        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES and self.device_type != "mps":  # type: ignore[attr-defined]
             # empty string matches any string
             expected_regex = ''
 

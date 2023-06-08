@@ -2,6 +2,7 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -913,6 +914,18 @@ static void registerCudaDeviceProperties(PyObject* module) {
             alloc_trace_max_entries,
             alloc_trace_record_context);
       });
+
+  m.def("_cuda_isHistoryEnabled", []() {
+    return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
+  });
+
+  m.def("_cuda_get_conv_benchmark_empty_cache", []() {
+    return at::native::_cudnn_get_conv_benchmark_empty_cache();
+  });
+
+  m.def("_cudnn_set_conv_benchmark_empty_cache", [](bool enable) {
+    return at::native::_cudnn_set_conv_benchmark_empty_cache(enable);
+  });
 }
 
 // We choose to ignore certain blocks that are currently allocated
@@ -1083,6 +1096,11 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
+  m.def("_set_storage_access_error_msg", [](at::Tensor t, std::string s) {
+    t.unsafeGetTensorImpl()
+        ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+  });
+
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
@@ -1147,6 +1165,20 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
     c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
   });
+
+  m.def(
+      "_cuda_checkPoolLiveAllocations",
+      [](int device,
+         at::cuda::MempoolId_t mempool_id,
+         const py::set& expected_live_allocations) {
+        std::unordered_set<void*> allocations;
+        allocations.reserve(expected_live_allocations.size());
+        for (auto& elem : expected_live_allocations) {
+          allocations.insert(reinterpret_cast<void*>(py::cast<size_t>(elem)));
+        }
+        return c10::cuda::CUDACachingAllocator::checkPoolLiveAllocations(
+            device, mempool_id, allocations);
+      });
 
   m.def(
       "_cuda_setCheckpointPoolState",

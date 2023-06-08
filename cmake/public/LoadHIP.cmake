@@ -119,13 +119,6 @@ else()
   set(ROCTHRUST_PATH $ENV{ROCTHRUST_PATH})
 endif()
 
-# ROCSOLVER_PATH
-if(NOT DEFINED ENV{ROCSOLVER_PATH})
-  set(ROCSOLVER_PATH ${ROCM_PATH}/rocsolver)
-else()
-  set(ROCSOLVER_PATH $ENV{ROCSOLVER_PATH})
-endif()
-
 # HIPSOLVER_PATH
 if(NOT DEFINED ENV{HIPSOLVER_PATH})
   set(HIPSOLVER_PATH ${ROCM_PATH}/hipsolver)
@@ -261,7 +254,6 @@ if(HIP_FOUND)
     set(rocprim_DIR ${ROCM_PATH}/lib/cmake/rocprim)
     set(hipcub_DIR ${ROCM_PATH}/lib/cmake/hipcub)
     set(rocthrust_DIR ${ROCM_PATH}/lib/cmake/rocthrust)
-    set(rocsolver_DIR ${ROCM_PATH}/lib/cmake/rocsolver)
     set(hipsolver_DIR ${ROCM_PATH}/lib/cmake/hipsolver)
   else()
     set(hip_DIR ${HIP_PATH}/lib/cmake/hip)
@@ -279,7 +271,6 @@ if(HIP_FOUND)
     set(rocprim_DIR ${ROCPRIM_PATH}/lib/cmake/rocprim)
     set(hipcub_DIR ${HIPCUB_PATH}/lib/cmake/hipcub)
     set(rocthrust_DIR ${ROCTHRUST_PATH}/lib/cmake/rocthrust)
-    set(rocsolver_DIR ${ROCSOLVER_PATH}/lib/cmake/rocsolver)
     set(hipsolver_DIR ${HIPSOLVER_PATH}/lib/cmake/hipsolver)
   endif()
 
@@ -300,7 +291,6 @@ if(HIP_FOUND)
   find_package_and_print_version(rocprim REQUIRED)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
-  find_package_and_print_version(rocsolver REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
 
   # Enabling HIP language support

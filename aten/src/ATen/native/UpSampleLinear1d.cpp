@@ -93,9 +93,8 @@ Tensor upsample_linear1d(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors,
-    bool round_with_scale_factor) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors, round_with_scale_factor);
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_w = get_scale_value(scale_factors, 0);
   return at::upsample_linear1d(input, osize, align_corners, scale_w);
 }

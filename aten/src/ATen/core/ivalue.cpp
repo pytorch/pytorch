@@ -467,6 +467,10 @@ bool IValue::isIntList() const {
   return isListOf<c10::IntType>();
 }
 
+bool IValue::isSymIntList() const {
+  return isListOf<c10::SymIntType>();
+}
+
 bool IValue::isBoolList() const {
   return isListOf<c10::BoolType>();
 }
@@ -535,7 +539,7 @@ std::ostream& printDict(
 }
 
 // Properly disambiguate the type of an empty dict
-std::ostream& printMaybeAnnotatedDict(
+static std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
     IValueFormatter formatter) {
@@ -550,7 +554,7 @@ std::ostream& printMaybeAnnotatedDict(
   return out;
 }
 
-std::ostream& printComplex(std::ostream & out, const IValue & v) {
+static std::ostream& printComplex(std::ostream & out, const IValue & v) {
   c10::complex<double> d = v.toComplexDouble();
   IValue real(d.real()), imag(std::abs(d.imag()));
   auto sign = "";
@@ -642,7 +646,7 @@ std::ostream& IValue::repr(
   }
 }
 
-bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
+static bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
   return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
 }
 
@@ -1076,6 +1080,8 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
+        // TODO (rohan-varma): for tensors created with at::sparse_coo_tensor held
+        // in a python object, this might need a coalesce().
         weakStorageImpls.emplace_back(tensor.indices().storage().getWeakStorageImpl());
         weakStorageImpls.emplace_back(tensor.values().storage().getWeakStorageImpl());
       } else {
@@ -1090,7 +1096,15 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        weakStorageImpls.emplace_back(sub_value.toTensor().storage().getWeakStorageImpl());
+        auto tens = sub_value.toTensor();
+        if (tens.is_sparse()) {
+          // sparse tensors have 2 storages! one for indices one for values
+          auto coalesced = tens.coalesce();
+          weakStorageImpls.emplace_back(coalesced.indices().storage().getWeakStorageImpl());
+          weakStorageImpls.emplace_back(coalesced.values().storage().getWeakStorageImpl());
+        } else {
+          weakStorageImpls.emplace_back(tens.storage().getWeakStorageImpl());
+        }
       }
     }
   }

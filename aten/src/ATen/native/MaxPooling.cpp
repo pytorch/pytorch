@@ -75,7 +75,7 @@ static void check_max_pool1d(
       dilation[0] > 0, "max_pool1d() dilation must be greater than zero, but got ", dilation[0]);
 
   const int64_t OW = pooling_output_shape(self.size(-1), kernel_size[0], padding[0], stride[0], dilation[0], ceil_mode);
-  TORCH_CHECK(OW >= 0, "max_pool1d() Invalid computed output size: ", OW);
+  TORCH_CHECK(OW > 0, "max_pool1d() Invalid computed output size: ", OW);
 }
 
 } // namespace

@@ -22,14 +22,9 @@ from .autotune_process import BenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
-from .codegen.triton import (
-    config_of,
-    signature_of,
-    texpr,
-    TritonKernel,
-    TritonPrinter,
-    TritonScheduling,
-)
+from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
+
+from .codegen.triton_utils import config_of, signature_of
 
 from .utils import do_bench, sympy_dot, sympy_product
 from .virtualized import V
@@ -294,28 +289,36 @@ class TritonTemplateKernel(TritonKernel):
         self.body.clear()
         self.indexing_code.clear()
 
-    def call_kernel(self, code, name: str):
+    def call_kernel(self, name: str):
+        wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
 
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
-        call_args = ", ".join(call_args)
 
-        stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
+        if V.graph.cpp_wrapper:
+            wrapper.generate_kernel_call(
+                name,
+                call_args,
+                device_index=V.graph.scheduler.current_device.index,
+            )
+        else:
+            call_args = ", ".join(call_args)
+            stream_name = wrapper.write_get_cuda_stream(
+                V.graph.scheduler.current_device.index
+            )
 
-        V.graph.wrapper_code.add_import_once(f"import {self.grid_fn.__module__}")
-        meta = V.graph.wrapper_code.add_meta_once(self.meta)
+            wrapper.add_import_once(f"import {self.grid_fn.__module__}")
+            meta = wrapper.add_meta_once(self.meta)
 
-        grid_call = [texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes] + [
-            meta
-        ]
-        grid_call = (
-            f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
-        )
-        code.writeline(
-            f"{name}.run({call_args}, grid={grid_call}, stream={stream_name})"
-        )
+            grid_call = [
+                texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
+            ] + [meta]
+            grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
+            wrapper.writeline(
+                f"{name}.run({call_args}, grid={grid_call}, stream={stream_name})"
+            )
 
 
 @functools.lru_cache(None)
@@ -896,7 +899,14 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
 
-autotune_select_algorithm = AlgorithmSelectorCache()
+_ALGORITHM_SELECTOR_CACHE = None
+
+
+def autotune_select_algorithm(*args, **kwargs):
+    global _ALGORITHM_SELECTOR_CACHE
+    if _ALGORITHM_SELECTOR_CACHE is None:
+        _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+    return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
 
 def realize_inputs(*args):

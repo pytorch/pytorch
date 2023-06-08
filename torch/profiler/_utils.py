@@ -345,3 +345,13 @@ def source_code_location(event):
             continue
         return event.name
     return "No source code location found"
+
+
+# Provide an OSS workaround for cudagraphs + CUPTI issue
+# https://github.com/pytorch/pytorch/issues/75504
+# TODO(dberard) - deprecate / remove workaround for CUDA >= 12, when
+# we stop supporting older CUDA versions.
+def _init_for_cuda_graphs():
+    from torch.autograd.profiler import profile
+    with profile():
+        pass

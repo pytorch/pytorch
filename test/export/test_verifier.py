@@ -14,10 +14,8 @@ from torch._dynamo.eval_frame import is_dynamo_supported
 
 from torch._export.verifier import (
     SpecViolationError,
-    check_valid_aten_dialect,
-    check_valid,
-    is_valid_aten_dialect,
-    is_valid,
+    Verifier,
+    ATenDialectVerifier,
 )
 
 
@@ -122,17 +120,19 @@ class VerifierTest(TestCase):
         m = ElementwiseAdd()
         egm = capture(m, (torch.randn(100), torch.randn(100)))
         # assert not throw
-        check_valid(egm)
-        self.assertTrue(is_valid(egm))
+        verifier = Verifier()
+        verifier(egm)
+        self.assertTrue(verifier.is_valid(egm))
 
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_verifier_call_module(self) -> None:
         m = FeedForwardBlock(10, 10)
         gm = torch.fx.symbolic_trace(m)
         # this would have modules that are not delegates
+        verifier = Verifier()
         with self.assertRaises(SpecViolationError):
-            check_valid(gm)
-        self.assertFalse(is_valid(gm))
+            verifier(gm)
+        self.assertFalse(verifier.is_valid(gm))
 
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_verifier_no_functional(self) -> None:
@@ -141,16 +141,18 @@ class VerifierTest(TestCase):
         for node in egm.graph.nodes:
             if node.target == torch.ops.aten.add.Tensor:
                 node.target = torch.ops.aten.add.out
+        verifier = Verifier()
         with self.assertRaises(SpecViolationError):
-            check_valid(egm)
-        self.assertFalse(is_valid(egm))
+            verifier(egm)
+        self.assertFalse(verifier.is_valid(egm))
 
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_aten_dialect(self) -> None:
         m = ElementwiseAdd()
         egm = capture(m, (torch.randn(100), torch.randn(100)))
-        check_valid_aten_dialect(egm)
-        self.assertTrue(is_valid_aten_dialect(egm))
+        verifier = ATenDialectVerifier()
+        verifier(egm)
+        self.assertTrue(verifier.is_valid(egm))
 
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_aten_wrong_mem_format(self) -> None:
@@ -167,9 +169,10 @@ class VerifierTest(TestCase):
         m = TestModel()
         egm = capture(m, (torch.randn(1, 3, 100, 100),))
         egm._apply(lambda t: t.to(memory_format=torch.channels_last))
+        verifier = ATenDialectVerifier()
         with self.assertRaises(SpecViolationError):
-            check_valid_aten_dialect(egm)
-        self.assertFalse(is_valid_aten_dialect(egm))
+            verifier(egm)
+        self.assertFalse(verifier.is_valid(egm))
 
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_aten_wrong_mem_format_buffer(self) -> None:
@@ -187,9 +190,25 @@ class VerifierTest(TestCase):
         m = TestModel()
         egm = capture(m, (torch.randn(1, 3, 100, 100),))
         egm._apply(lambda t: t.to(memory_format=torch.channels_last))
+        verifier = ATenDialectVerifier()
         with self.assertRaises(SpecViolationError):
-            check_valid_aten_dialect(egm)
-        self.assertFalse(is_valid_aten_dialect(egm))
+            verifier(egm)
+        self.assertFalse(verifier.is_valid(egm))
+
+    def test_aten_wrong_op(self) -> None:
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.ops.aten._add_relu(x, x)
+
+        m = TestModel()
+        egm = torch.fx.symbolic_trace(m)
+        verifier = ATenDialectVerifier()
+        with self.assertRaises(SpecViolationError):
+            verifier(egm)
+        self.assertFalse(verifier.is_valid(egm))
 
 
 if __name__ == '__main__':
