@@ -1208,6 +1208,28 @@ class TestQuantizePT2E(QuantizationTestCase):
             m1, example_inputs, is_per_channel=True, has_relu=True
         )
 
+    def test_qat_inplace_add_relu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU(inplace=True)
+
+            def forward(self, x):
+                x0 = x
+                x = self.conv(x)
+                x += x0
+                x = self.relu(x)
+                return x
+
+        example_inputs = (torch.randn(1, 1, 3, 3),)
+        self._verify_symmetric_qnnpack_qat_numerics(
+            M(), example_inputs, is_per_channel=False, verify_convert=True,
+        )
+        self._verify_symmetric_qnnpack_qat_numerics(
+            M(), example_inputs, is_per_channel=True, verify_convert=True,
+        )
+
     def test_prepare_qat_conv_bn_fusion_getitem_placeholder(self):
         """
         Test this special case seen in resnet18:

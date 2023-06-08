@@ -557,6 +557,50 @@ def optimize(
     )
 
 
+@dataclasses.dataclass
+class ExplainOutput:
+    """
+    This is the output of :func:`torch._dynamo.explain()
+    There is no reason to create this class directly
+    """
+
+    graph_count: int
+    graph_break_count: int
+    op_count: int
+    out_guards: List[_guards.Guard]
+    graphs: List[torch.fx.GraphModule]
+    ops_per_graph: List[torch.fx.Node]
+    break_reasons: List[Any]  # TODO: Not sure if graph break is a type
+    compile_times: str
+
+    def __str__(self):
+        output = f"Graph Count: {self.graph_count}\n"
+        output += f"Graph Break Count: {self.graph_break_count}\n"
+        output += f"Op Count: {self.op_count}\n"
+
+        output += "Break Reasons:\n"
+        for idx, break_reason in enumerate(self.break_reasons):
+            output += f"  Break Reason {idx+1}:\n"
+            output += f"    Reason: {break_reason.reason}\n"
+            output += "    User Stack:\n"
+            for frame_summary in break_reason.user_stack:
+                output += f"      {frame_summary}\n"
+
+        output += "Ops per Graph:\n"
+        for idx, ops in enumerate(self.ops_per_graph):
+            output += f"  Ops {idx+1}:\n"
+            for op in ops:
+                output += f"    {op}\n"
+
+        output += "Out Guards:\n"
+        for i, guard in enumerate(self.out_guards):
+            output += f"  Guard {i+1}:\n"
+            output += f"    {str(guard)}"
+
+        output += f"Compile Times: {self.compile_times}\n"
+        return output
+
+
 # TODO(voz): Consider making "explain" output alongside a run / part of a run
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
@@ -590,7 +634,7 @@ def explain(f, *args, **kwargs):
 
     def guard_export_print(guards):
         nonlocal out_guards
-        out_guards.append(guards)
+        out_guards.extend(guards)
 
     with patch(f"{__name__}.most_recent_backend", None):
         opt_f = optimize(
@@ -613,25 +657,23 @@ def explain(f, *args, **kwargs):
     formatted_list = ""
     for idx, break_reason in enumerate(deduped_reasons.values()):
         formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
-        msg = f"{break_reason.reason}\n{formatted_stack}"
-        formatted_list += f"{idx + 1}. {msg} \n"
+        msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
+        formatted_list += msg
 
-    explanation = f"Dynamo produced {graph_count} graphs "
-    explanation += f"with {graph_count - 1} graph break and {op_count} ops"
-    explanation_verbose = explanation
-    explanation_verbose += f"\n Break reasons: \n\n{formatted_list}"
-
-    explanation_verbose += compile_times()
+    graph_break_count = graph_count - 1
+    compile_time = compile_times(repr="str")
 
     # TODO(voz): Do we want a decorator for this?
     reset()
-    return (
-        explanation,
+    return ExplainOutput(
+        graph_count,
+        graph_break_count,
+        op_count,
         out_guards,
         graphs,
         ops_per_graph,
         break_reasons,
-        explanation_verbose,
+        compile_time,
     )
 
 

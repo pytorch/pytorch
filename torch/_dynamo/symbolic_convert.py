@@ -1063,6 +1063,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     supported_const_comparison_ops[op](object(), right.value), **options
                 )
             )
+
         elif (
             left.is_python_constant()
             and right.is_python_constant()
