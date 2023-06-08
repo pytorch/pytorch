@@ -3,8 +3,8 @@
 name: Upload Alerts to AWS/Rockset
 
 on:
+  pull_request:
   schedule:
-    - pull_request:
     - cron: '*/10 * * * *'
 
 jobs:
