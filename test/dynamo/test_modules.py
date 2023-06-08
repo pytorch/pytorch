@@ -729,6 +729,47 @@ class ConvTransposeCallForwardDirectly(torch.nn.Module):
         return self.layer.forward(x)
 
 
+class ConvCallSuperForwardDirectly(torch.nn.Conv1d):
+    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+        super(ConvCallSuperForwardDirectly, self).__init__(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            **kwargs,
+        )
+
+    def forward(self, inputs, mask=None):
+        outputs = super(ConvCallSuperForwardDirectly, self).forward(inputs)
+        return outputs
+
+
+class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
+    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+        super(ConvTransposeCallSuperForwardDirectly, self).__init__(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            **kwargs,
+        )
+
+    def forward(self, x):
+        if x.numel() > 0:
+            return super(ConvTransposeCallSuperForwardDirectly, self).forward(x)
+        output_shape = [
+            ((i - 1) * d - 2 * p + (di * (k - 1) + 1) + op)
+            for i, p, di, k, d, op in zip(
+                x.shape[-2:],
+                self.padding,
+                self.dilation,
+                self.kernel_size,
+                self.stride,
+                self.output_padding,
+            )
+        ]
+        output_shape = [x.shape[0], self.bias.shape[0]] + output_shape
+        return _NewEmptyTensorOp.apply(x, output_shape)
+
+
 class ModuleNameString(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1316,6 +1357,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     def test_conv_transpose_call_forward_directly(self):
         m = ConvTransposeCallForwardDirectly()
         x = torch.rand([4, 4, 4, 4])
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_conv_call_super_forward_directly(self):
+        x = torch.randn(4, 4)
+        m = ConvCallSuperForwardDirectly(4, 4, 4)
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_conv_transpose_call_super_forward_directly(self):
+        x = torch.randn(4, 4, 4)
+        m = ConvTransposeCallSuperForwardDirectly(4, 4, 4)
         ref = m(x)
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
