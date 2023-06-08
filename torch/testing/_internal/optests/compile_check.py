@@ -41,7 +41,7 @@ def operator_compile_check(
     def run_static_or_dynamic_tests(dynamic):
         tracing_mode = 'symbolic' if dynamic else 'fake'
         make_fx_check(func, args, kwargs, tracing_mode=tracing_mode)
-        if not supports_autograd:
+        if supports_autograd:
             aot_autograd_check(func, args, kwargs, dynamic=dynamic)
         check_compile(func, args, kwargs, fullgraph=fullgraph, backend='aot_eager', dynamic=dynamic)
         check_compile(func, args, kwargs, fullgraph=fullgraph, backend='inductor', dynamic=dynamic)
@@ -52,9 +52,29 @@ def operator_compile_check(
     run_static_or_dynamic_tests(dynamic=True)
 
 
+def clone_arg(arg):
+    if isinstance(arg, torch.Tensor):
+        return arg.clone()
+    if isinstance(arg, (tuple, list)):
+        return type(arg)(clone_arg(a) for a in arg)
+    return arg
+
 def add_clones(func):
+    def clone_tensors(args, kwargs):
+        # This is easier to express via tree_map. However:
+        # 1. We wish to check if one can dynamo with fullgraph=True over the custom op
+        # 2. The function we pass to dynamo is these clones + the custom op
+        # 3. Dynamo doesn't support tree_map and graph breaks on it.
+        # We should change this when Dynamo does support tree_map.
+        # Note that what we have is still correct, because operators do
+        # not accept nested lists.
+        args = tuple(clone_arg(a) if isinstance(a, torch.Tensor) else a for a in args)
+        kwargs = {(clone_arg(a) if isinstance(k, torch.Tensor) else k): v
+                  for k, v in kwargs.items()}
+        return args, kwargs
+
     def clone_then_func(*args, **kwargs):
-        args, kwargs = pytree.tree_map_only(torch.Tensor, torch.clone, args, kwargs)
+        args, kwargs = clone_tensors(args, kwargs)
         return func(*args, **kwargs)
     return clone_then_func
 

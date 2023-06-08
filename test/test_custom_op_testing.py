@@ -2,7 +2,7 @@
 
 from torch.testing._internal.common_utils import *  # noqa: F403
 from torch.testing._internal.common_device_type import *  # noqa: F403
-from torch.testing._internal.optests.operator_compile_check import operator_compile_check
+from torch.testing._internal.optests.compile_check import operator_compile_check
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch._custom_op.impl import custom_op
 
@@ -283,10 +283,9 @@ class TestCustomOpTesting(TestCase):
             dynamic_only = op.name in ("NumpyNMSCustomOp", "NumpyNonzeroCustomOp")
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            inference_only = not op.supports_autograd
             operator_compile_check(
                 op.op, args, kwargs,
-                inference_only=inference_only,
+                supports_autograd=op.supports_autograd,
                 dynamic_only=dynamic_only,
                 fullgraph=False,  # Dynamo graph breaks on CustomOp today
             )
