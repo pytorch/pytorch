@@ -299,7 +299,7 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
 // Declare BackendMeta serialization and deserialization function pointer types.
 using BackendMetaPtr =
-    void (*)(const at::Tensor&, std::unordered_map<std::string, bool>&);
+    std::function<void(const at::Tensor&, std::unordered_map<std::string, bool>&)>;
 
 // A allowlist of device type, currently available is PrivateUse1
 static std::unordered_set<c10::DeviceType> DeviceTypeAllowlist{
