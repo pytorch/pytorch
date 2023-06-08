@@ -211,6 +211,7 @@ def classify_jobs(
     :param filtered_jobs_names: set of job names to actually consider
     :return:
     """
+    print(sha_grid[:1])
     job_data = map_job_data(all_job_names, sha_grid)
     job_statuses: List[JobStatus] = []
     for job in job_data:
@@ -262,10 +263,10 @@ def get_recurrently_failing_jobs_alerts(
     for job in recurrently_failing_jobs:
         entry = {
             "AlertType": "Recurrently Failing Job",
-            "AlertObject": job.job_name,
-            "OncallTeams": [],
-            "OncallIndividuals": [],
-            "Flags": [],
+            "AlertObject": job.__repr__(),
+            "OncallTeams": "",
+            "OncallIndividuals": "",
+            "Flags": "",
         }
         alerts.append(entry)
     return alerts
@@ -308,8 +309,10 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-    data = json.dumps(
-        get_recurrently_failing_jobs_alerts(args.repo, args.branch, args.job_name_regex)
+    print(
+        json.dumps(
+            get_recurrently_failing_jobs_alerts(
+                args.repo, args.branch, args.job_name_regex
+            )
+        )
     )
-
-    print(data)
