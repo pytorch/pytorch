@@ -135,6 +135,30 @@ def non_leaf_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs
 
 
 class ExplainWithBackend:
+    """
+    This class is intended to be used as a backend for `torch.compile`. It is
+    composable with other backends. When used in this way, it accumulates
+    information about graph breaks, ops, and other info and provides a string
+    representation summarizing this information.
+
+    Attributes:
+        backend (str): The name of the backend to use for optimization.
+        graphs (list): A list of the graphs captured by TorchDynamo.
+        op_count (int): The total number of operations in all optimized graphs.
+        break_reasons (list): A list of graph break reasons with stack traces.
+
+    Example Usage:
+        def fn(x):
+            x = torch.sigmoid(x)
+            return x
+
+        torch._dynamo.reset()
+        eb = ExplainWithBackend("inductor")
+        optimized_fn = torch.compile(fn, backend=eb)
+        result = optimized_fn(torch.randn(5))
+        print(eb)
+    """
+
     def __init__(self, backend):
         self.backend = backend
         self.graphs = []
@@ -144,17 +168,12 @@ class ExplainWithBackend:
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         from .registry import lookup_backend
 
-        # Accumulate the graph
         self.graphs.append(gm)
-
-        # Accumulate ops for this graph
         ops = []
         for node in gm.graph.nodes:
             if node.op == "call_function":
                 ops.append(node.target)
         self.op_count += len(ops)
-
-        # Accumulate break reasons
         if gm.compile_subgraph_reason.graph_break:
             self.break_reasons.append(gm.compile_subgraph_reason)
 
