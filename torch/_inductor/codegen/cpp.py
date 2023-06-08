@@ -2177,7 +2177,7 @@ class CppKernelProxy(CppKernel):
                 store_dtype = V.graph.get_dtype(store_var)
                 return store_dtype == torch.bfloat16
 
-            sub_graph_nodes = sub_graph.nodes
+            sub_graph_nodes = list(sub_graph.nodes)
             to_bf16_legalized_nodes = []
             for _node in sub_graph_nodes:
                 if is_bf16_load_or_constant(_node):
