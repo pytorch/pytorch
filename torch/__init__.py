@@ -1707,8 +1707,6 @@ if not _running_with_deploy():
 
             return cls.ops_table[(op_key, dispatch_key)]
 
-from torch import _dynamo as _dynamo
-from torch import _inductor as _inductor
 from torch import compiler as compiler
 
 from . import _logging

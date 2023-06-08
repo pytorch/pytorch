@@ -1,4 +1,5 @@
 import torch
+import torch._dynamo
 from typing import List
 
 __all__ = [
@@ -25,12 +26,10 @@ def reset() -> None:
 
     Example::
 
-        .. code-block:: python
-
-            import torch
-            torch.compiler.reset()
-            torch.compile(...)
-            torch.compiler.reset()
+        >>> import torch
+        >>> torch.compiler.reset()
+        >>> torch.compile(...)
+        >>> torch.compiler.reset()
     """
 
     torch._dynamo.reset()
@@ -68,9 +67,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
 
     Example::
 
-        .. code-block:: python
-
-            valid_backends = list_backends(exclude_tags=("debug", "experimental"))
+        >>> valid_backends = list_backends(exclude_tags=("debug", "experimental"))
 
     """
 
@@ -87,12 +84,10 @@ def assume_constant_result(fn):
 
     Example::
 
-        .. code-block:: python
-
-            marked_function = assume_constant_result(my_function)
+            >>> marked_function = assume_constant_result(my_function)
 
     .. warning::
-        `assume_constant_result` can if invalid cause safety and soundness issues, `torch.compile`
+        `assume_constant_result` can if invalid cause safety and soundness issues, :func:`torch.compile`
         will not attempt to validate whether the constant assumption is true or not
 
     """
@@ -110,15 +105,13 @@ def disable(fn=None, recursive=True):
 
     Example::
 
-        .. code-block:: python
+        >>> # The decorator without recursive disabling
+        >>> @disable(recursive=False)
+        >>> def my_function():
 
-            # The decorator without recursive disabling
-            @disable(recursive=False)
-            def my_function():
-
-            # The context manager with recursive disabling:
-            with disable(recursive=True):
-                ...
+        >>> # The context manager with recursive disabling:
+        >>> with disable(recursive=True):
+        
     """
 
     return torch._dynamo.disable(fn, recursive)

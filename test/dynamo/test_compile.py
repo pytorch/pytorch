@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 import torch
+import torch._dynamo
 from torch._dynamo.testing import CompileCounter
 
 
