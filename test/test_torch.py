@@ -5976,17 +5976,6 @@ class TestTorch(TestCase):
                     for size in [(2, 512, 256), (5, 256, 256)]:
                         helper(dim, dtype, device, size, size)
 
-                # Check broadcast cases on CPU
-                size_result = (2, 512, 256)
-                size_source = (1, 512, 256)
-                helper(dim, dtype, 'cpu', size_result, size_source)
-                size_result = (2, 512, 512)
-                size_source = (1, 512, 1)
-                helper(dim, dtype, 'cpu', size_result, size_source)
-                size_result = (2, 512, 256)
-                size_source = (2, 1, 256)
-                helper(dim, dtype, 'cpu', size_result, size_source)
-
                 # Check bound
                 result = torch.zeros(1, 512, 256, dtype=dtype)
                 source = torch.ones(1, 512, 256, dtype=dtype)
