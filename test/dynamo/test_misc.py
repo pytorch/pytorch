@@ -3430,8 +3430,9 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
-    @patch.object(torch._dynamo.config, "print_graph_breaks", True)
-    def test_duplicate_graph_break_warning(self):
+    def test_duplicate_graph_break_log(self):
+        torch._logging.set_logs(graph_breaks=True)
+
         @torch._dynamo.optimize("eager")
         def f1(a, b):
             f2(a, b)
@@ -3462,6 +3463,9 @@ def fn():
             torch._dynamo.config.verbose = False
             g1(torch.randn(10), torch.randn(10))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
+
+        # reset logging state
+        torch._logging.set_logs()
 
     def test_inplace_param_update(self):
         def fn(param, y):
