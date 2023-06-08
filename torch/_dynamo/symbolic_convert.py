@@ -1890,7 +1890,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
         self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
-        self.call_order = []
         self.fwd_seq_id = -1
         # Flag to indicate whether tracing is used for export.
         self.export = export

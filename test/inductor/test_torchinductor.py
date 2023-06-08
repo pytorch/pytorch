@@ -2331,12 +2331,17 @@ class CommonTemplate:
         class Model(torch.nn.Module):
             def __init__(self):
                 super(Model, self).__init__()
-                self.conv1 = torch.nn.Conv2d(in_channels=16, out_channels=16,
-                    kernel_size=(1, 1), stride=1, padding='same', bias=True)
+                self.conv1 = torch.nn.Conv2d(
+                    in_channels=16,
+                    out_channels=16,
+                    kernel_size=(1, 1),
+                    stride=1,
+                    padding="same",
+                    bias=True
+                )
                 self.bn1 = torch.nn.BatchNorm2d(num_features=16)
                 self.relu1 = torch.nn.ReLU()
-                self.linear1 = torch.nn.Linear(in_features=1638400,
-                    out_features=1)
+                self.fc1 = torch.nn.Linear(in_features=1638400, out_features=1)
                 self.loss_fn = torch.nn.L1Loss()
 
             def forward(self, x, target):
@@ -2346,7 +2351,7 @@ class CommonTemplate:
                 x = self.relu1(x)
                 x = x + y
                 x = torch.flatten(x)
-                x = self.linear1(x)
+                x = self.fc1(x)
                 output = self.loss_fn(x, target)
 
                 return output
@@ -2358,14 +2363,29 @@ class CommonTemplate:
         H = 32
         W = 32
         C = 16
-        x = torch.rand(batch, C, H, W, device='cuda')
-        target = torch.rand(1, device='cuda')
+        x = torch.rand(batch, C, H, W, device="cuda")
+        target = torch.rand(1, device="cuda")
         opt_mod = torch.compile(mod)
         res = opt_mod(x, target)
         expected = mod(x, target)
         self.assertTrue(torch.allclose(res, expected))
         res.backward(retain_graph=True)
         optimizer.step()
+        g_mod, _ = torch._dynamo.export(mod, x, target)
+
+        for node in g_mod.graph.nodes:
+            seq_id = node.meta.get("seq_id", -1)
+            if seq_id >= 0:
+                print(f"Node {node.op} seq_id {seq_id}")
+
+        # Run it w/ inductor
+        aot_fn = torch._dynamo.optimize("inductor")(g_mod)
+        output = aot_fn(x, target)
+        print(f"Type of output {type(output)}")
+        expl, out_guards, graphs, _, _, verbose = torch._dynamo.explain(aot_fn, x, target)
+        for idx, graph in enumerate(graphs):
+            print(f"Graph {idx} listing {graph}")
+        
 
 
     def test_adaptive_avg_pool2d_low_prec(self):
