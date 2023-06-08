@@ -34,7 +34,7 @@ jobs:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           # AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_UPDATE_ACCESS_KEY_ID }}
           # AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_UPDATE_SECRET_ACCESS_KEY }}
-        uses: pytorch/test-infra/.github/actions/upload-alerts@4b09a2108a34bdfbdb9b7bb4b4f79c6033411764
+        uses: pytorch/test-infra/.github/actions/upload-alerts@3876d9031325756cee7ef7ba676ddba95e310d72
         with:
           alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
           organization: "pytorch"
