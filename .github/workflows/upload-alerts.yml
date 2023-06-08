@@ -4,6 +4,7 @@ name: Upload Alerts to AWS/Rockset
 
 on:
   schedule:
+    - pull_request:
     - cron: '*/10 * * * *'
 
 jobs:
@@ -30,7 +31,7 @@ jobs:
       - name: Upload alerts
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
-        uses: pytorch/test-infra/.github/actions/upload-alerts@main
+        uses: pytorch/test-infra/.github/actions/upload-alerts@468a696ac94626b02d045a3b9b111859033f62a3
         with:
           alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
           organization: "pytorch"
