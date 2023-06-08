@@ -15,7 +15,7 @@ class PreDispatchTests(torch._dynamo.test_case.TestCase):
 
         f_compiled = torch.compile(f, backend="pre_dispatch_eager")
 
-        a_ref = torch.randn(4, device="cuda", requires_grad=True)
+        a_ref = torch.randn(4, requires_grad=True)
         a_test = a_ref.clone().detach().requires_grad_(True)
 
         out_ref = f(a_ref)
