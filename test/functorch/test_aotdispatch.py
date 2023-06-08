@@ -2733,7 +2733,6 @@ aot_autograd_failures = {
 
     # Too annoying to generate random inputs
     xfail('cholesky'),
-    xfail('linalg.cholesky'),
 
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
@@ -2877,7 +2876,8 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
         try:
             aot_autograd_check(
                 op.op, t_args, t_kwargs, dynamic,
-                self.assertRaisesRegex, self.assertEqual)
+                self.assertRaisesRegex, self.assertEqual,
+                try_check_data_specialization=True)
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
         except GuardOnDataDependentSymNode:
