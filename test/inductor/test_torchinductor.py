@@ -2327,6 +2327,47 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    def test_aot_sequence_nr(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv1 = torch.nn.Conv2d(in_channels=16, out_channels=16,
+                    kernel_size=(1, 1), stride=1, padding='same', bias=True)
+                self.bn1 = torch.nn.BatchNorm2d(num_features=16)
+                self.relu1 = torch.nn.ReLU()
+                self.linear1 = torch.nn.Linear(in_features=1638400,
+                    out_features=1)
+                self.loss_fn = torch.nn.L1Loss()
+
+            def forward(self, x, target):
+                y = x
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu1(x)
+                x = x + y
+                x = torch.flatten(x)
+                x = self.linear1(x)
+                output = self.loss_fn(x, target)
+
+                return output
+
+        mod = Model()
+        mod.cuda().to(memory_format=torch.contiguous_format)
+        optimizer = torch.optim.SGD(mod.parameters(), lr=0.01)
+        batch = 100
+        H = 32
+        W = 32
+        C = 16
+        x = torch.rand(batch, C, H, W, device='cuda')
+        target = torch.rand(1, device='cuda')
+        opt_mod = torch.compile(mod)
+        res = opt_mod(x, target)
+        expected = mod(x, target)
+        self.assertTrue(torch.allclose(res, expected))
+        res.backward(retain_graph=True)
+        optimizer.step()
+
+
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
             def __init__(self):
