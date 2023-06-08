@@ -314,7 +314,7 @@ class TestDeserialize(TestCase):
 
         inputs = (torch.randn(3, 3),)
         self.check_graph(M(), inputs)
-    
+
     @parametrize(
         "name,case",
         get_filtered_export_db_tests(),
