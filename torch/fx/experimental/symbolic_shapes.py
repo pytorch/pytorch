@@ -1589,7 +1589,7 @@ try:
                 # Ignore output nodes.
                 pass
             else:
-                assert False, f"unsupported operation: {node.op}"
+                raise AssertionError(f"unsupported operation: {node.op}")
 
     # Unwraps the result of 'func', given that it is of type 'Z3Node'.
     # Note that it makes it so 'Z3Node.assertion' is ignored.
@@ -1717,7 +1717,7 @@ try:
                 self.symbols[symbol] = z3.Int(symbol.name)
 
                 # If 's' is positive (SymPy assumption), we have to convey it to Z3 as well.
-                if symbol.is_positive:  # type: ignore
+                if symbol.is_positive:  # type: ignore[attr-defined]
                     self._outputs.add(self.symbols[symbol] > 0)
 
         # Create a float variable in Z3, if it doesn't already exists.
@@ -1728,8 +1728,7 @@ try:
         # Create a boolean variable in Z3, if it doesn't already exists.
         def add_bool(self, symbol: sympy.Symbol) -> None:
             if symbol not in self.symbols:
-                var = self.symbols[symbol] = z3.Int(symbol.name)
-                self.add_assertion(z3.Or(var == 0, var == 1))  # type: ignore
+                var = self.symbols[symbol] = z3.Bool(symbol.name)
 
         # Checks whether all symbols were already added.
         def _check_freesymbols(self, e: sympy.Basic) -> None:
@@ -1781,7 +1780,7 @@ try:
             # "Is there any case where it's TRUE for the outputs but FALSE for the inputs?"
             solver.add(z3.And(z3.Not(z3.And(*self._inputs)), z3.And(*self._outputs)))
 
-            log.debug(f"translation validation: start")
+            log.debug("translation validation: start")
             if dynamo_timed()(solver.check)() == z3.sat:
                 # Output expressions are unsound.
                 # Log the found model and input expressions that failed.
@@ -2457,7 +2456,14 @@ Failed inputs:
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best
     # guess
-    def create_symintnode(self, sym: "sympy.Expr", *, hint: Optional[int], source: Optional[Source] =None, positive: Optional[bool] =None):
+    def create_symintnode(
+            self,
+            sym: "sympy.Expr",
+            *,
+            hint: Optional[int],
+            source: Optional[Source] = None,
+            positive: Optional[bool] = None
+    ):
         if _translation_validator_enabled() and source is not None:
             # Create a new symbol for this source.
             symbol = self._create_symbol_for_source(source, positive=positive)
