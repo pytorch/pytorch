@@ -277,7 +277,9 @@ class MetaConverter:
                     is_leaf = safe_is_leaf(t)
 
                     def _is_contiguous_enough(t):
-                        for size, stride in zip(t._nested_tensor_size(), t._nested_tensor_strides()):
+                        for size, stride in zip(
+                            t._nested_tensor_size(), t._nested_tensor_strides()
+                        ):
                             # Only support (B, *, D) here for now -> 2D size / stride data
                             assert len(size) == len(stride) == 2
                             # For (B, *, D) format, make sure constituent strides for inner dim
@@ -292,9 +294,7 @@ class MetaConverter:
                     # Only support contiguous (B, *, D) format for now.
                     try:
                         supported_format = (
-                            t.dim() == 3 and
-                            _is_contiguous_enough(t) and
-                            t.size(2) > 0
+                            t.dim() == 3 and _is_contiguous_enough(t) and t.size(2) > 0
                         )
                     except Exception:
                         supported_format = False
@@ -319,9 +319,7 @@ class MetaConverter:
                             shape_env.create_symbol(
                                 collapsed_size,
                                 # TODO: Fix the number if it matters
-                                TensorPropertySource(
-                                    source, TensorProperty.SIZE, 42
-                                ),
+                                TensorPropertySource(source, TensorProperty.SIZE, 42),
                             ),
                             hint=collapsed_size,
                         ),
@@ -329,9 +327,7 @@ class MetaConverter:
                             shape_env.create_symbol(
                                 sizes[-1],
                                 # TODO: Fix the number if it matters
-                                TensorPropertySource(
-                                    source, TensorProperty.SIZE, 223
-                                ),
+                                TensorPropertySource(source, TensorProperty.SIZE, 223),
                             ),
                             hint=sizes[-1],
                         ),
@@ -349,12 +345,11 @@ class MetaConverter:
                             # TODO: Fix the number if it matters
                             shape_env.create_symbol(
                                 dim0_stride,
-                                TensorPropertySource(
-                                    source, TensorProperty.STRIDE, 43
-                                )
+                                TensorPropertySource(source, TensorProperty.STRIDE, 43),
                             ),
-                            hint=dim0_stride
-                        ), 1
+                            hint=dim0_stride,
+                        ),
+                        1,
                     ]
 
                     # TODO: Anything to do here to handle strides / storage offset?

@@ -467,7 +467,9 @@ class Loops(IRNode):
             # the relevant symbol has is_integer=False to indicate a ragged dim.
             sympy.Integer(0)
             if s == 1
-            else sympy_symbol(f"{prefix}{n}", integer=(isinstance(s, int) or s.is_integer))
+            else sympy_symbol(
+                f"{prefix}{n}", integer=(isinstance(s, int) or s.is_integer)
+            )
             for n, s in enumerate(ranges)
         ]
 
@@ -504,7 +506,7 @@ class Pointwise(Loops):
         ranges: List[Expr],
         # Indicates whether we're operating on a NT
         full_nested_size: List[Expr] = None,
-        jagged_offsets_src: Optional[str] = None
+        jagged_offsets_src: Optional[str] = None,
     ):
         self.full_nested_size = full_nested_size
         self.jagged_offsets_src = jagged_offsets_src
@@ -1805,8 +1807,8 @@ class Layout(IRNode):
         size: List[Expr],
         stride: List[Expr],
         offset: Expr = Integer(0),
-        full_nested_size = None,
-        jagged_offsets_src = None,
+        full_nested_size=None,
+        jagged_offsets_src=None,
     ):
         assert stride is None or len(size) == len(
             stride
@@ -1826,7 +1828,9 @@ class Layout(IRNode):
 
     @property
     def has_std_size(self):
-        return all([sz.is_integer if isinstance(sz, sympy.Expr) else True for sz in self.size])
+        return all(
+            [sz.is_integer if isinstance(sz, sympy.Expr) else True for sz in self.size]
+        )
 
     def __str__(self):
         offset = ""
@@ -3459,7 +3463,9 @@ class FallbackKernel(ExternKernelAlloc):
                             convert_shape_to_inductor(output.size()),
                             convert_shape_to_inductor(output.stride()),
                             offset=convert_shape_to_inductor(output.storage_offset()),
-                            full_nested_size=convert_shape_to_inductor(full_nested_size)
+                            full_nested_size=convert_shape_to_inductor(
+                                full_nested_size
+                            ),
                         ),
                         packed,
                         indices,
@@ -4387,7 +4393,7 @@ class StorageBox(MutableBox):
                 jagged_offsets_src=jagged_offsets_src,
             )
         else:
-            layout=FlexibleLayout(
+            layout = FlexibleLayout(
                 device=self.data.get_device(),
                 dtype=self.data.get_dtype(),
                 size=self.data.get_size(),

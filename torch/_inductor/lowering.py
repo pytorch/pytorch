@@ -236,7 +236,12 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
 
 def _register_lowering(
-    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool, lowerings_dict=None
+    aten_fn,
+    decomp_fn,
+    broadcast,
+    type_promotion_kind,
+    convert_input_to_bool,
+    lowerings_dict=None,
 ):
     """
     Add a lowering to lowerings dict

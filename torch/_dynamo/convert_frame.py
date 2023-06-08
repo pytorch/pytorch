@@ -207,9 +207,11 @@ def exception_handler(e, code, frame=None):
     if hasattr(e, "exec_record"):
         # SKip serializing records with nested tensors for now (NT doesn't support serialization)
         def _has_nested(d):
-            return any([isinstance(v, torch.Tensor) and v.is_nested for v in d.values()])
+            return any(isinstance(v, torch.Tensor) and v.is_nested for v in d.values())
 
-        has_nested = _has_nested(e.exec_record.locals) or _has_nested(e.exec_record.globals)
+        has_nested = _has_nested(e.exec_record.locals) or _has_nested(
+            e.exec_record.globals
+        )
         if not has_nested:
             record_filename = gen_record_file_name(e, code)
             write_record_to_file(record_filename, e.exec_record)

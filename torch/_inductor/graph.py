@@ -31,16 +31,24 @@ from .exc import (
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox, JaggedTensorBox
+from .ir import (
+    Constant,
+    FixedLayout,
+    InputBuffer,
+    JaggedTensorBox,
+    Pointwise,
+    Reduction,
+    TensorBox,
+)
 from .lowering import (
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
     layout_constraints,
     lowerings,
-    nested_lowerings,
     make_fallback,
     needs_realized_inputs,
+    nested_lowerings,
     unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
@@ -517,8 +525,12 @@ class GraphLowering(torch.fx.Interpreter):
             jagged_offsets_tensor = TensorBox.create(
                 InputBuffer(
                     f"{target}_jagged_offsets",
-                    FixedLayout(jagged_offsets.device, jagged_offsets.dtype,
-                                offset_sizes, offset_strides)
+                    FixedLayout(
+                        jagged_offsets.device,
+                        jagged_offsets.dtype,
+                        offset_sizes,
+                        offset_strides,
+                    ),
                 )
             )
             tensor = JaggedTensorBox.create(
@@ -531,16 +543,22 @@ class GraphLowering(torch.fx.Interpreter):
                         strides,
                         offset=storage_offset,
                         full_nested_size=nested_sizes,
-                        jagged_offsets_src=target),
+                        jagged_offsets_src=target,
+                    ),
                 ),
-                jagged_offsets=jagged_offsets_tensor
+                jagged_offsets=jagged_offsets_tensor,
             )
         else:
             tensor = TensorBox.create(
                 InputBuffer(
                     target,
-                    FixedLayout(example.device, example.dtype, sizes, strides,
-                                full_nested_size=nested_sizes),
+                    FixedLayout(
+                        example.device,
+                        example.dtype,
+                        sizes,
+                        strides,
+                        full_nested_size=nested_sizes,
+                    ),
                 )
             )
         self.graph_inputs[target] = tensor
@@ -563,14 +581,15 @@ class GraphLowering(torch.fx.Interpreter):
                 isinstance(arg, ir.TensorBox)
                 and isinstance(arg.data, ir.StorageBox)
                 and (
-                        (
-                            hasattr(arg.data.data, "layout")
-                            and arg.data.data.layout.full_nested_size is not None
-                        ) or (
-                            isinstance(arg.data.data, Pointwise)
-                            and arg.data.data.full_nested_size is not None
-                        )
+                    (
+                        hasattr(arg.data.data, "layout")
+                        and arg.data.data.layout.full_nested_size is not None
                     )
+                    or (
+                        isinstance(arg.data.data, Pointwise)
+                        and arg.data.data.full_nested_size is not None
+                    )
+                )
                 for arg in args_flat
             ]
         )
@@ -585,7 +604,6 @@ class GraphLowering(torch.fx.Interpreter):
                 return out
             except Exception as e:
                 raise LoweringException(e, target, args, kwargs) from e
-
 
         if target not in lowerings:
             base_name = target.name().split(".")[0]

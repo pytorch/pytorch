@@ -969,19 +969,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     if not fake.is_nested:
                         used_symbols |= free_symbols(fake)
 
-        # def symbol_is_non_int(s):
-        #     val = self.shape_env.var_to_val.get(s, None)
-        #     if val is None:
-        #         return False
-        #     if not isinstance(val, int) and not isinstance(val, sympy.Integer):
-        #         return True
-        #     return False
-
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
             symbol = placeholder_binds_symbol(node)
             if symbol is not None:
-                #if symbol not in used_symbols or symbol_is_non_int(symbol):
                 if symbol not in used_symbols:
                     remove_unused(node)
                 else:

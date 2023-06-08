@@ -130,10 +130,8 @@ class TensorVariable(VariableTracker):
             "requires_grad": value.requires_grad,
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
-            # TODO: Need to do something with this for NestedTensor!
             "class_type": type(value),
-            # TODO: Need is_nested here?
-            #"is_nested": value.is_nested,
+            # TODO: do we need to do something here for NestedTensor like is_nested?
         }
         if not free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.

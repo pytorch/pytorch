@@ -524,8 +524,11 @@ class WrapperCodeGen(CodeGen):
         # Remove any del calls on sources we need for jagged offsets
         for jagged_source in jagged_sources:
             new_lines = [
-                line for line in self.wrapper_call._lines
-                if not (isinstance(line, str) and line.strip() == f"del {jagged_source}")
+                line
+                for line in self.wrapper_call._lines
+                if not (
+                    isinstance(line, str) and line.strip() == f"del {jagged_source}"
+                )
             ]
             self.wrapper_call._lines = new_lines
 
