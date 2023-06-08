@@ -6413,11 +6413,11 @@ Tensor lu_factor_ex_backward(
 
   // L.shape == (..., m, k)
   // U.shape == (..., k, n)
-  const auto m = LU.size(-2);
-  const auto n = LU.size(-1);
+  const auto m = LU.sym_size(-2);
+  const auto n = LU.sym_size(-1);
   const auto k = std::min(m, n);
-  const auto L_grad = grad.narrow(-1, 0, k);
-  const auto U_grad = grad.narrow(-2, 0, k);
+  const auto L_grad = grad.narrow_symint(-1, 0, k);
+  const auto U_grad = grad.narrow_symint(-2, 0, k);
   return linalg_lu_backward(
       /*L_grad=*/L_grad, /*U_grad=*/U_grad, P, L, U, pivot);
 }
