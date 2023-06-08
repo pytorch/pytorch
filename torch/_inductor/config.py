@@ -34,7 +34,10 @@ inplace_buffers = True
 allow_buffer_reuse = True
 
 # codegen benchmark harness
-benchmark_harness = True
+benchmark_harness = False
+
+# AOT export harness
+py_aot_export = True
 
 # fuse pointwise into templates
 epilogue_fusion = True

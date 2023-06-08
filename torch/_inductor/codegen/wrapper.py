@@ -485,6 +485,8 @@ class WrapperCodeGen(CodeGen):
 
         self.add_benchmark_harness(result)
 
+        self.add_export_harness(result)
+
         return result.getvaluewithlinemap()
 
     def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
@@ -616,6 +618,15 @@ class WrapperCodeGen(CodeGen):
             output.writeline(
                 f"return print_performance(lambda: {call_str}, times=times, repeat=repeat)"
             )
+
+    def add_export_harness(self, output):
+        if not config.py_aot_export:
+            return 
+        
+        print("model saved")
+        output.writelines(["", "", '__all__ = ["call"]'])
+
+
 
     def add_benchmark_harness(self, output):
         """
