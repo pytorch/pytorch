@@ -401,7 +401,6 @@ class Optimizer:
         # that are assumed to always match the type of params.
         # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
         # UNLESS fused or capturable, see [special device hosting for step]
-        # and https://github.com/pytorch/pytorch/pull/88015#issuecomment-1569523106
         fused = False
         capturable = False
         for pg in paramGroups:
