@@ -1059,6 +1059,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 false_tensor_weakref_to_sizes_strides
             )
 
+            # FIXME (tmanlaibaatar) this is probably wrong?
+            tx.output.side_effects = true_cmp.output.side_effects
+
             def fixup_branch_inps(graph, add_after, new_args, suffix) -> None:
                 inp_count = 0
                 for node in graph.nodes:
