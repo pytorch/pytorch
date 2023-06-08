@@ -1395,7 +1395,13 @@ try:
 
         @property
         def arith(self) -> z3.ArithRef:
-            return cast(z3.ArithRef, self.expr)
+            assert isinstance(self.expr, z3.ArithRef)
+            return self.expr
+
+        @property
+        def bool(self) -> z3.BoolRef:
+            assert isinstance(self.expr, z3.BoolRef)
+            return self.expr
 
     # Implementation of Python semantics as Z3 expressions.
     #
@@ -1575,7 +1581,7 @@ try:
         def run_assertion(node: torch.fx.Node) -> None:
             assertion = node.args[0]
             assert isinstance(assertion, torch.fx.Node)
-            validator._inputs.add(node_to_z3[assertion].expr)
+            validator.add_input(node_to_z3[assertion].bool)
 
         for node in graph.nodes:
             if node.op == "placeholder":
@@ -1657,8 +1663,8 @@ try:
             print(name)
             raise AttributeError
 
-        def run(self, expr: sympy.Expr) -> z3.ArithRef:
-            return sympy_interp(self, self._validator.symbols, expr)
+        def run(self, expr: sympy.Basic) -> Z3Expr:
+            return sympy_interp(self, self._validator.symbols, expr)  # type: ignore[arg-type]
 
     # Frontend class to Z3 validation.
     #
@@ -1734,23 +1740,30 @@ try:
         def _check_freesymbols(self, e: sympy.Basic) -> None:
             assert all(isinstance(s, sympy.Symbol) and s in self.symbols for s in e.free_symbols)
 
-        def to_z3(self, e: sympy.Expr) -> z3.ArithRef:
+        def to_z3(self, e: sympy.Basic) -> Z3Expr:
             return SympyToZ3(self).run(e)
 
-        def add_input(self, e: sympy.Expr) -> None:
-            self._check_freesymbols(e)
-            self._inputs.add(self.to_z3(e))
+        def add_input(self, e: z3.BoolRef) -> None:
+            self._inputs.add(e)
 
         def add_output(self, e: sympy.Expr) -> None:
             self._check_freesymbols(e)
             self._outputs.add(self.to_z3(e))
 
         def add_assertion(self, e: Any) -> None:
-            if e is not None:
-                if not isinstance(e, z3.BoolRef):
-                    self._check_freesymbols(e)
-                    e = self.to_z3(e)
-                self._assertions.add(e)
+            if e is None:
+                return
+
+            if not isinstance(e, z3.BoolRef):
+                assert isinstance(e, sympy.Basic)
+                self._check_freesymbols(e)
+
+                ref = self.to_z3(e)
+                assert isinstance(ref, z3.BoolRef)
+            else:
+                ref = e
+
+            self._assertions.add(ref)
 
         # The result of a validation run.
         @dataclass
@@ -2262,10 +2275,6 @@ class ShapeEnv:
                 self.validator.add_bool(symbol)
             else:
                 raise ValueError(f"can't create Z3 variable for type: {type}")
-
-    def _add_input_guard(self, expr) -> None:
-        if _translation_validator_enabled():
-            self.validator.add_input(expr)
 
     def _add_output_guard(self, expr) -> None:
         if _translation_validator_enabled():
