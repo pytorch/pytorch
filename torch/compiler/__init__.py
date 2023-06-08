@@ -67,7 +67,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
 
     Example::
 
-        >>> valid_backends = list_backends(exclude_tags=("debug", "experimental"))
+        >>> valid_backends = torch.compiler.list_backends(exclude_tags=("debug", "experimental"))
 
     """
 
@@ -84,7 +84,7 @@ def assume_constant_result(fn):
 
     Example::
 
-            >>> marked_function = assume_constant_result(my_function)
+            >>> marked_function = torch.compiler.assume_constant_result(my_function)
 
     .. warning::
         `assume_constant_result` can if invalid cause safety and soundness issues, :func:`torch.compile`
@@ -106,12 +106,12 @@ def disable(fn=None, recursive=True):
     Example::
 
         >>> # The decorator without recursive disabling
-        >>> @disable(recursive=False)
+        >>> @torch.compiler.disable(recursive=False)
         >>> def my_function():
 
         >>> # The context manager with recursive disabling:
-        >>> with disable(recursive=True):
-        
+        >>> with torch.compiler.disable(recursive=True):
+
     """
 
     return torch._dynamo.disable(fn, recursive)
