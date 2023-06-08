@@ -923,7 +923,13 @@ class TestForeach(TestCase):
             self.skipTest("forward AD not supported")
 
         # note(crcrpar): without this, some unary functions fail, unlike inplace and/or complex.
-        value_range = {"low": 0.5, "high": 1.0} if dtype == torch.float64 else {}
+        if dtype == torch.float64 and op.name in (
+            "_foreach_acos", "_foreach_asin", "_foreach_log10", "_foreach_log1p", "_foreach_log2",
+            "_foreach_log", "_foreach_pow", "_foreach_sqrt",
+        ):
+            value_range = {"low": 0.5, "high": 1.0}
+        else:
+            value_range = {}
         for sample in op.sample_inputs(
             device, dtype, requires_grad=True, num_input_tenosrs=[5], same_size=True, **value_range,
         ):
