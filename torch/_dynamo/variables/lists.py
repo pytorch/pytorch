@@ -550,17 +550,19 @@ class NamedTupleVariable(TupleVariable):
 
     def var_getattr(self, tx, name):
         def check_and_create_method():
-            method = getattr(self.tuple_cls, name, None)
-            if inspect.ismethod(method):
+            options = VariableTracker.propagate(self)
+            method = inspect.getattr_static(self.tuple_cls, name, None)
+            if isinstance(method, classmethod):
                 # We need the unbounded cls method to avoid the inline __self__
                 return UserMethodVariable(
-                    method.__func__, variables.UserDefinedClassVariable(self.tuple_cls)
+                    method.__func__, variables.UserDefinedClassVariable(
+                        self.tuple_cls, **options
+                    )
                 )
+            elif isinstance(method, staticmethod):
+                return UserFunctionVariable(method.__func__, **options)
             elif inspect.isfunction(method):
-                if "self" in inspect.signature(method).parameters:
-                    return UserMethodVariable(method, self)
-                else:
-                    return UserFunctionVariable(method)
+                return UserMethodVariable(method, self, **options)
             else:
                 return None
 
