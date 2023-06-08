@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -180,8 +181,7 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       NSError* error = nil;
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       const IntArrayRef& iterShape = iter.shape();
       std::vector<uint32_t> iterShapeData(iterShape.size());
@@ -198,10 +198,8 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
         }
       }
 
-      id<MTLFunction> kernelDataOffsetsFunction =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          [[device newComputePipelineStateWithFunction:kernelDataOffsetsFunction error:&error] autorelease];
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
                                                              options:0] autorelease];
       TORCH_CHECK(
@@ -222,6 +220,10 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
 
       const std::string kernel = func_name + "_" + scalarToMetalTypeString(input.scalar_type());
       id<MTLComputePipelineState> binaryPSO = binaryPipelineState(device, kernel);
+
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(binaryPSO, kernel, {input, other});
+
       [computeEncoder setComputePipelineState:binaryPSO];
       [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
       [computeEncoder setBuffer:otherBuffer offset:other.storage_offset() * other.element_size() atIndex:1];
@@ -236,8 +238,7 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
 
-      [computeEncoder endEncoding];
-      mpsStream->commit(true);
+      getMPSProfiler().endProfileKernel(binaryPSO);
     }
   });
 }

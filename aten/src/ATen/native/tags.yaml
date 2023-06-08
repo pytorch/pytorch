@@ -24,11 +24,14 @@
           native_functions.yaml, and instead was generated automatically by the codegen.
 - tag: nondeterministic_seeded
   desc: |
-          This tag indicates if an operator is nondeterminstically seeded (ie is random)
-          such that the operator intentionally produces different results when run twice on the same inputs.
+          This tag indicates if an operator is nondeterministically seeded
+          (i.e., is random) such that the operator intentionally produces
+          different results when run twice on the same inputs, but this randomness
+          is controlled by a Generator which, if reseeded would give you the
+          same result.
 - tag: nondeterministic_bitwise
   desc: |
-          This tag indicates if an operator doesn't guarentee bitwise equivalence
+          This tag indicates if an operator doesn't guarantee bitwise equivalence
           across different runs of an operator with identical inputs.
 - tag: core
   desc: |

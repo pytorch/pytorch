@@ -87,6 +87,23 @@ public:
   }
 
   /**
+   * Set the offset field of Philox Generator to the desired offset.
+   */
+  C10_HOST_DEVICE inline void set_offset(uint64_t offset) {
+    counter_[0] = static_cast<uint32_t>(offset);
+    counter_[1] = static_cast<uint32_t>(offset >> 32);
+  }
+
+  /**
+   * Gets the current offset of the Philox Generator.
+   */
+  C10_HOST_DEVICE uint64_t get_offset() const {
+    uint64_t lo = static_cast<uint64_t>(counter_[0]);
+    uint64_t hi = static_cast<uint64_t>(counter_[1]) << 32;
+    return lo | hi;
+  }
+
+  /**
    * Produces a unique 32-bit pseudo random number on every invocation. Bookeeps state to avoid waste.
    */
   C10_HOST_DEVICE inline uint32_t operator()(int32_t n_rounds = 10) { // 10 here to preserve back-compat behavior

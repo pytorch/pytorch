@@ -88,7 +88,7 @@ def _lazy_import():
 
     import_submodule(backends)
 
-    from ..debug_utils import dynamo_minifier_backend
+    from ..repro.after_dynamo import dynamo_minifier_backend
 
     assert dynamo_minifier_backend is not None
 

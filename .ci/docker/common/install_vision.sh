@@ -43,3 +43,6 @@ case "$ID" in
     exit 1
     ;;
 esac
+
+# Cache vision models used by the test
+source "$(dirname "${BASH_SOURCE[0]}")/cache_vision_models.sh"

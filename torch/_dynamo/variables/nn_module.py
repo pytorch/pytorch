@@ -82,6 +82,20 @@ class NNModuleVariable(VariableTracker):
         # implement list/iter/tuple/etc calls
         base = tx.output.get_submodule(self.module_key)
         options = VariableTracker.propagate([self])
+        if isinstance(base, torch.nn.ModuleDict):
+            result = []
+            for name, submod in base.items():
+                name_var = variables.ConstantVariable(name)
+                tx.output.register_attr_or_module(
+                    submod,
+                    self.module_key,
+                    name,
+                    source=NNModuleSource(GetItemSource(self.source, name)),
+                    **options,
+                )
+                result.append(name_var)
+            return result
+
         assert isinstance(
             base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
         ), typestr(base)
@@ -265,14 +279,18 @@ class NNModuleVariable(VariableTracker):
 
             if is_lazy:
                 # The module type will change after it is called
-                self.module_type = mod.cls_to_become
+                if mod.cls_to_become is not None:
+                    self.module_type = mod.cls_to_become
 
                 # The pre-hook runs to initialize the module shapes, then deletes itself.  After this,
                 # the module is more or less not lazy and can be treated as a normal module regardless of
                 # is_allowed or other variations.
                 initialize_lazy_module(tx, mod, args, kwargs)
 
-            if is_allowed(mod.__class__):
+            # If we are tracing the higher order op, we want Dynamo to step
+            # inside the module call so that Dynamo can see the underlying
+            # parameters and buffers and raise them as inputs to the graph.
+            if tx.output.is_root_tracer() and is_allowed(mod.__class__):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
@@ -303,7 +321,7 @@ class NNModuleVariable(VariableTracker):
                     # the call_wrapped currently, and maybe other issues too
                     fn = mod.forward
                 else:
-                    fn = mod.__call__
+                    fn = mod._call_impl
                 fn_source = AttrSource(self.source, "__call__")
                 if istype(fn, types.MethodType):
                     fn = fn.__func__
@@ -311,7 +329,6 @@ class NNModuleVariable(VariableTracker):
                     args = [self] + args
                 else:
                     assert istype(fn, types.FunctionType)
-
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
@@ -359,7 +376,7 @@ class NNModuleVariable(VariableTracker):
                 **options,
             )
 
-        if name == "_call_impl":
+        if name in ["_call_impl", "_wrapped_call_impl"]:
             # Example: `self.layer.__call__(x)`
             # This is used for explicit calling `__call__` in a forward function.
             # Dynamo inlines `__call__`, includes hooks.
@@ -380,6 +397,8 @@ class NNModuleVariable(VariableTracker):
             assert args[1].is_python_constant()
             assert isinstance(args[0], TupleVariable)
             mod_var = args[0].items[args[1].value]
+            if isinstance(mod_var, UnspecializedNNModuleVariable):
+                return mod_var
             key = mod_var.module_key
             submod = tx.output.get_submodule(key)
             return tx.output.register_attr_or_module(
@@ -483,6 +502,8 @@ class NNModuleVariable(VariableTracker):
             return wrap_values(module.named_modules())
         elif name == "parameters":
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
+        elif name == "buffers":
+            return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "keys":
             assert not (args or kwargs)
             result = []
@@ -576,12 +597,23 @@ class NNModuleVariable(VariableTracker):
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
-        elif name == "_get_abs_string_index":
+        elif (
+            name == "_get_abs_string_index"
+            or (
+                isinstance(module, torch.nn.modules.conv._ConvNd)
+                and name == "_conv_forward"
+            )
+            or (
+                isinstance(module, torch.nn.modules.conv._ConvTransposeNd)
+                and name == "_output_padding"
+            )
+        ):
             # Inline the function
             fn = getattr(module, name).__func__
-            src = AttrSource(AttrSource(self.source, name), "__func__")
+            fn_source = AttrSource(self.source, "__func__")
+            options["source"] = fn_source
             return tx.inline_user_function_return(
-                variables.UserFunctionVariable(fn, source=src, **options),
+                variables.UserFunctionVariable(fn, **options),
                 [self] + args,
                 kwargs,
             )
@@ -668,13 +700,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = self.value
-
         # see comment on lazy module handling in NNModuleVariable.call_function for context
         if is_lazy_module(mod):
-            self.value_type = mod.cls_to_become
+            if mod.cls_to_become is not None:
+                self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
-
-        name = "__call__"
+        name = "_call_impl"
         fn = getattr(self.value_type, name)
         if self.source:
             source = AttrSource(AttrSource(self.source, "__class__"), name)
@@ -695,6 +726,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         from .builder import VariableBuilder
 
         options = VariableTracker.propagate(self, args, kwargs.values())
+        if name in ["_call_impl", "_wrapped_call_impl"]:
+            fn = getattr(self.value_type, name)
+            if self.source:
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
+            else:
+                source = None
+
+            return variables.UserFunctionVariable(
+                fn, source=source, **options
+            ).call_function(tx, [self] + list(args), kwargs)
 
         if name not in getattr(self.value, "__dict__", {}):
             try:

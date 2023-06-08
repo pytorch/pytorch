@@ -2,9 +2,13 @@ import copy
 import logging
 from typing import Callable, Optional
 
-import triton
+from .utils import has_triton, triton_config_to_hashable
 
-from .utils import triton_config_to_hashable
+if has_triton():
+    import triton
+else:
+    triton = None
+
 
 log = logging.getLogger(__name__)
 
@@ -103,10 +107,10 @@ class CoordescTuner:
 
     def autotune(
         self,
-        func: Callable[[triton.Config], float],
-        baseline_config: triton.Config,
+        func: Callable[["triton.Config"], float],
+        baseline_config: "triton.Config",
         baseline_timing: Optional[float] = None,
-    ) -> triton.Config:
+    ) -> "triton.Config":
         if baseline_timing is None:
             baseline_timing = self.call_func(func, baseline_config)
 

@@ -21,7 +21,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/max_pool3d_with_indices_native.h>
 #include <ATen/ops/max_pool3d_with_indices_backward_native.h>
-#include <ATen/ops/zeros_like.h>
 #endif
 
 namespace at::native {
@@ -33,7 +32,7 @@ __device__ inline int min(int a, int b) {
 
 template <typename scalar_t>
 __global__ static void max_pool3d_with_indices_single_out_frame(
-  scalar_t* inputData,
+  const scalar_t* inputData,
   scalar_t* outputData,
   int64_t* indicesData,
   int features,
@@ -131,7 +130,7 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
 
 template <typename scalar_t>
 void max_pool3d_with_indices_out_frame(
-  scalar_t* input_data,
+  const scalar_t* input_data,
   const Tensor& output,
   const Tensor& indices,
   int features,
@@ -164,8 +163,8 @@ void max_pool3d_with_indices_out_frame(
     max_pool3d_with_indices_single_out_frame
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
          input_data,
-         output.data_ptr<scalar_t>(),
-         indices.data_ptr<int64_t>(),
+         output.mutable_data_ptr<scalar_t>(),
+         indices.mutable_data_ptr<int64_t>(),
          features,
          itime, iheight, iwidth,
          obatch, otime, oheight, owidth,
@@ -186,8 +185,8 @@ void max_pool3d_with_indices_out_frame(
 template <typename scalar_t>
 __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   scalar_t *gradInputData,
-  scalar_t *gradOutputData,
-  int64_t *indicesData,
+  const scalar_t *gradOutputData,
+  const int64_t *indicesData,
   int features,
   int itime, int iheight, int iwidth,
   int obatch, int otime, int oheight, int owidth,
@@ -267,8 +266,8 @@ void max_pool3d_with_indices_backward_out_frame(
     max_pool3d_with_indices_backward_single_out_frame
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         gradInputData,
-        gradOutput.data_ptr<scalar_t>(),
-        indices.data_ptr<int64_t>(),
+        gradOutput.const_data_ptr<scalar_t>(),
+        indices.const_data_ptr<int64_t>(),
         features,
         itime, iheight, iwidth,
         obatch, otime, oheight, owidth,
@@ -392,7 +391,7 @@ void max_pool3d_with_indices_out_cuda_template(
     input.scalar_type(),
     "max_pool3d_with_indices_out_frame",
     [&]{
-      scalar_t *input_data = work_input.data_ptr<scalar_t>();
+      const scalar_t *input_data = work_input.const_data_ptr<scalar_t>();
       const int64_t totalZ = otime * nslices * nbatch;
 
       max_pool3d_with_indices_out_frame(
@@ -532,7 +531,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
     "max_pool3d_with_indices_backward_out_frame",
     [&] {
       const int64_t totalZ = otime * nslices * nbatch;
-      scalar_t *grad_input_data = work_grad_input.data_ptr<scalar_t>();
+      scalar_t *grad_input_data = work_grad_input.mutable_data_ptr<scalar_t>();
 
       max_pool3d_with_indices_backward_out_frame(
         grad_input_data, work_grad_output, work_indices,
@@ -636,7 +635,7 @@ Tensor max_pool3d_with_indices_backward_cuda(
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("max_pool3d_with_indices_backward_cuda");
-  auto gradInput = at::zeros_like(input, input.suggest_memory_format());
+  auto gradInput = at::empty(input.sizes(), input.options());
   max_pool3d_with_indices_backward_out_cuda_template(
     gradInput,
     gradOutput,

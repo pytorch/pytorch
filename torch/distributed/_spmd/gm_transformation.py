@@ -14,13 +14,11 @@ from torch.distributed._spmd.iter_graph_module import IterGraphModule
 class GraphModuleTransformation:
     def __init__(
         self,
-        num_iters: int,
         *,
         enable_graph_optimization: bool = False,
         enable_inductor: bool = False,
         dump_graphs: bool = False,
     ) -> None:
-        self.num_iters = num_iters
         self.enable_graph_optimization = enable_graph_optimization
         self.enable_inductor = enable_inductor
         self.dump_graphs = dump_graphs
@@ -38,7 +36,7 @@ class GraphModuleTransformation:
             schedule_comm_wait(iter_gm)
             remove_copy_from_optimizer(iter_gm)
         # Must be called after we are not going to move the graphs
-        iter_gm.setup(self.num_iters)
+        iter_gm.finalize_setup()
 
         if self.dump_graphs:
             dump_graphs_to_files(

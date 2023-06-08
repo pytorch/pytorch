@@ -1,4 +1,5 @@
 import functools
+import logging
 from typing import List
 
 import torch
@@ -26,6 +27,8 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
+
+log = logging.getLogger(__name__)
 
 
 aten = torch.ops.aten
@@ -221,10 +224,10 @@ def conv_layout(
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
             stride,
-            padding,
+            tuple(V.graph.sizevars.size_hint(p) for p in padding),
             dilation,
             transposed,
-            output_padding,
+            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
@@ -335,10 +338,24 @@ def convolution(
 
     x.realize()
     weight.realize()
-    layout = conv_layout(x, weight, None, **kwargs)
-    req_stride_order = ir.get_stride_order(V.graph.sizevars.size_hints(layout.stride))
-    x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-    weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+
+    # ndim can be 1 for convolution in models such as demucs
+    # TODO: check if it's beneficial to convert Conv1d to Conv2d and then
+    # apply channels last.
+    if V.graph.layout_opt and ndim == 2:
+        V.graph.num_channels_last_conv += 1
+        x = ir.ExternKernel.require_channels_last(x)
+        # TODO maybe we can convert weights to channels last just once before
+        # running the model.
+        weight = ir.ExternKernel.require_channels_last(weight)
+        layout = conv_layout(x, weight, None, **kwargs)
+    else:
+        layout = conv_layout(x, weight, None, **kwargs)
+        req_stride_order = ir.get_stride_order(
+            V.graph.sizevars.size_hints(layout.stride)
+        )
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
     if bias is None:
         args = (x, weight)
@@ -358,7 +375,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.maybe_guard_equals(in_chan, x.get_size()[1])
+        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])
     ):
         if (
             is_ones(kernel_shape)
@@ -417,4 +434,12 @@ def _convolution(
     )
 
 
-add_layout_constraint(aten.convolution, constrain_to_fx_strides)
+def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
+    assert fx_node.target == torch.ops.aten.convolution.default
+    if V.graph.layout_opt:
+        return args, kwargs
+    else:
+        return constrain_to_fx_strides(fx_node, *args, **kwargs)
+
+
+add_layout_constraint(aten.convolution, constrain_conv_to_fx_strides)

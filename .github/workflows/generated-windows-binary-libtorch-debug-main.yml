@@ -8,8 +8,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'ciflow/trunk/*'
   workflow_dispatch:
 
 env:
@@ -29,7 +27,7 @@ concurrency:
 jobs:
   libtorch-cpu-shared-with-deps-debug-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -70,10 +68,13 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
+          # Let's both exclude the path and disable Windows Defender completely just to be sure
+          # that it doesn't interfere
+          Set-MpPreference -DisableRealtimeMonitoring $True
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -139,7 +140,7 @@ jobs:
   libtorch-cpu-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-debug-build
-    runs-on: windows.4xlarge
+    runs-on: windows.4xlarge.nonephemeral
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -180,10 +181,13 @@ jobs:
         run: |
           Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # Since it's just a defensive command, the workflow should continue even the command fails
-      - name: Disables Windows Defender scheduled and real-time scanning for files in pytorch directory.
+      - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
+          Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TEMP -ErrorAction Ignore
+          # Let's both exclude the path and disable Windows Defender completely just to be sure
+          # that it doesn't interfere
+          Set-MpPreference -DisableRealtimeMonitoring $True
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.

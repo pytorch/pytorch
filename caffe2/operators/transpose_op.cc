@@ -51,7 +51,7 @@ For example, when axes=(1, 0, 2), given an input tensor of shape
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/transpose_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/transpose_op.cc
 
 <details>
 
