@@ -85,7 +85,10 @@ class Tensor(torch._C._TensorBase):
         if not self.is_leaf:
             raise RuntimeError(
                 "Only Tensors created explicitly by the user "
-                "(graph leaves) support the deepcopy protocol at the moment"
+                "(graph leaves) support the deepcopy protocol at the moment.  "
+                "If you were attempting to deepcopy a module, this may be because "
+                "of a torch.nn.utils.weight_norm usage, "
+                "see https://github.com/pytorch/pytorch/pull/103001"
             )
         if id(self) in memo:
             return memo[id(self)]

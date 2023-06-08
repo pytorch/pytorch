@@ -22,7 +22,6 @@ hf_GPT2,pass,7
 hf_Reformer,pass,46
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,8
-llama,fail_accuracy,9
 maml_omniglot,pass,8
 mnasnet1_0,pass,8
 mobilenet_v2,pass,8
