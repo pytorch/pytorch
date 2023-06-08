@@ -641,7 +641,9 @@ def convert_weighted_module(
         observed_node_names: Set[str],
         node_name_to_qconfig: Dict[str, QConfigAny],
         backend_config: BackendConfig,
-        is_decomposed: bool = False) -> None:
+        is_decomposed: bool = False,
+        is_reference: bool = False,
+) -> None:
     """ Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
     a float module.
@@ -722,13 +724,32 @@ def convert_weighted_module(
     else:
         # weight_post_process is None means the original module is not a QAT module
         # we need to get weight_post_process from qconfig in this case
-        if weight_post_process is None:
+        is_ptq = weight_post_process is None
+        if is_ptq:
             weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
-        # run weight observer
-        # TODO: This is currently a hack for QAT to get the right shapes for scale and zero point.
-        # In the future, we should require the user to calibrate the model after calling prepare
-        # Issue: https://github.com/pytorch/pytorch/issues/73941
-        weight_post_process(float_module.weight)  # type: ignore[operator]
+
+        # Call weight observer/fake_quant at least once to ensure the scales and zero points
+        # have the right shapes. Note: there are two cases where we don't have to do this:
+        #
+        # (1) QAT: The model's forward method already calls the weight observer/fake_quant,
+        #     and this typically happens during training, so we don't need to do it here.
+        #
+        # (2) Non-reference (lowered) case: The quantized module's from_float method already
+        #     calls the weight observer/fake_quant, so we don't have to do it here.
+        #
+        # Currently we ignore both cases and call the weight observer/fake_quant here
+        # regardless, which is technically incorrect. For (1), this is mainly to preserve BC
+        # in test code, which may not always train before convert. In the future, we should
+        # break BC for these two cases. See https://github.com/pytorch/pytorch/issues/73941.
+        #
+        # For PT2, however, we don't need to preserve BC here, so we can skip this hack
+        # for QAT. We identify this case as (is_decomposed + is_reference + is_qat).
+        # Note that we still need it for PTQ in the PT2 flow since the model's forward
+        # method doesn't call the weight observer.
+        is_qat = not is_ptq
+        if not (is_decomposed and is_reference and is_qat):
+            weight_post_process(float_module.weight)  # type: ignore[operator]
+
         wq_or_wq_dict.update(get_qparam_dict(weight_post_process))
 
     # We use the same reference module for all modes of quantization: static, dynamic, weight_only
@@ -1044,7 +1065,8 @@ def convert(
                    type_before_parametrizations(mod[0]) not in root_module_classes:  # type: ignore[index]
                     continue
                 convert_weighted_module(
-                    node, modules, observed_node_names, node_name_to_qconfig, backend_config, is_decomposed)
+                    node, modules, observed_node_names, node_name_to_qconfig, backend_config,
+                    is_decomposed, is_reference)
             elif type_before_parametrizations(mod) in custom_module_classes:
                 convert_custom_module(
                     node, model.graph, modules, custom_module_class_mapping,

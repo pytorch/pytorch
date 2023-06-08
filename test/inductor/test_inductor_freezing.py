@@ -181,6 +181,22 @@ class OptimizeForInferenceTemplate(TestCase):
             o2 = foo()
             self.assertNotEqual(o1, o2)
 
+    def test_symint_not_folded(self):
+        def fn(a):
+            return a.cos(), torch.zeros(a.shape[0], a.shape[1])
+
+        fn_opt = torch._dynamo.optimize("inductor", dynamic=True)(fn)
+        inp = torch.randn(2, 4, 6).to(self.device)
+        torch._dynamo.mark_dynamic(inp, 0)
+        torch._dynamo.mark_dynamic(inp, 1)
+
+        with torch.no_grad():
+            self.assertEqual(fn(inp), fn_opt(inp))
+            inp2 = torch.randn(3, 5, 6).to(self.device)
+            torch._dynamo.mark_dynamic(inp2, 0)
+            torch._dynamo.mark_dynamic(inp2, 1)
+            self.assertEqual(fn(inp2), fn_opt(inp2))
+
     def test_unfolded_bn(self):
         x = torch.rand([3, 32, 15, 15]).to(self.device)
 
