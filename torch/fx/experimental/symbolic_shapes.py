@@ -2238,6 +2238,8 @@ class ShapeEnv:
         if _translation_validator_enabled():
             self.validator = TranslationValidator()
             self.graph = torch.fx.Graph()
+            # Create an output graph and start inserting before that.
+            # This is needed when 'deepcopy'-ing this object.
             self.graph.inserting_before(self.graph.output(None))
 
     def freeze(self):
