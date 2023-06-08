@@ -3,7 +3,9 @@ from enum import Enum
 import io
 import json
 import logging
+import math
 import operator
+import sympy
 import typing
 from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
@@ -25,6 +27,7 @@ from .schema import (   # type: ignore[attr-defined]
     MemoryFormat,
     NamedArgument,
     Node,
+    RangeConstraint,
     ScalarType,
     SymBool,
     SymBoolArgument,
@@ -166,19 +169,6 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
     )
 
 
-def deserialize_tensor_meta(tensor_meta: TensorMeta, fake_tensor_mode: FakeTensorMode) -> FakeTensor:
-    with fake_tensor_mode:
-        return cast(
-            FakeTensor,
-            torch.empty_strided(
-                tuple([val.as_int for val in tensor_meta.sizes]),
-                tuple([val.as_int for val in tensor_meta.strides]),
-                device=deserialize_device(tensor_meta.device),
-                dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
-            ),
-        )
-
-
 def serialize_metadata(node: torch.fx.Node) -> Dict[str, str]:
     ret = {}
     if stack_trace := node.meta.get("stack_trace"):
@@ -308,6 +298,59 @@ def deserialize_state_dict(serialized: bytes) -> Dict[str, torch.Tensor]:
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
     return torch.load(buffer)
+
+
+
+def _convert_sympy_int_to_int(val: sympy.Integer):
+    # Convert simple sympy Integers into concrete int
+    if val == sympy.oo:
+        return math.inf
+    if val == -sympy.oo:
+        return -math.inf
+    if isinstance(val, sympy.Integer):
+        return int(val)
+    raise RuntimeError(
+        "Export constraints cannot be non-integer expressions"
+    )
+
+
+def _convert_int_to_sympy_int(val) -> sympy.Integer:
+    # Convert concrete int into simple sympy Integers
+    if val == math.inf:
+        return sympy.oo
+    if val == -math.inf:
+        return -sympy.oo
+    return sympy.Integer(val)
+
+
+def serialize_range_constraints(
+    range_constraints: Dict[sympy.Symbol, ep.RangeConstraint]
+) -> Dict[str, RangeConstraint]:
+    return {
+        str(k): RangeConstraint(
+            _convert_sympy_int_to_int(v.min_val),
+            _convert_sympy_int_to_int(v.max_val),
+        )
+        for k, v in range_constraints.items()
+    }
+
+
+def serialize_equality_constraints(
+    equality_constraints: List[Tuple[ep.InputDim, ep.InputDim]]
+) -> List[Tuple[Tuple[str, int], Tuple[str, int]]]:
+    return [
+        ((v1.input_name, v1.dim), (v2.input_name, v2.dim))
+        for (v1, v2) in equality_constraints
+    ]
+
+
+def deserialize_equality_constraints(
+    equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
+) -> List[Tuple[ep.InputDim, ep.InputDim]]:
+    return [
+        (ep.InputDim(v1[0], v1[1]), ep.InputDim(v2[0], v2[1]))
+        for (v1, v2) in equality_constraints
+    ]
 
 
 def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
@@ -624,10 +667,15 @@ class ExportedProgramSerializer:
                 exported_program.call_spec
             ).serialize(exported_program.graph_module)
         )
+        serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
+        serialized_equality_constraints = serialize_equality_constraints(exported_program.equality_constraints)
+
         return (
             ExportedProgram(
                 graph_module=serialized_graph_module,
-                opset_version=self.opset_version
+                opset_version=self.opset_version,
+                range_constraints=serialized_range_constraints,
+                equality_constraints=serialized_equality_constraints,
             ),
             serialize_state_dict(exported_program.state_dict),
         )
@@ -638,14 +686,17 @@ class GraphModuleDeserializer:
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
         self.serialized_name_to_meta: Dict[str, Union[FakeTensor, int, torch.SymInt, torch.SymBool]] = {}
         self.graph = torch.fx.Graph()
-        self.fake_tensor_mode = FakeTensorMode()
 
     def deserialize_sym(
         self, s: Union[SymInt, SymBool]
     ) -> Union[int, torch.SymInt, bool, torch.SymBool]:
         val = s.value
         if s.type == "as_symbol":
-            raise NotImplementedError("TODO(angelayi)")
+            # 7*s0
+            # "s0" --> s0
+            expr = sympy.sympify(val, locals=self.symbol_name_to_symbol)
+            symint = self.shape_env.create_symintnode(expr, hint=None)
+            return symint
         elif s.type == "as_int":
             assert isinstance(val, int)
             return val
@@ -657,15 +708,45 @@ class GraphModuleDeserializer:
                 f"SymInt has invalid field type {s.type} with value {s.value}"
             )
 
+    def deserialize_tensor_meta(
+        self,
+        tensor_meta: TensorMeta,
+        fake_tensor_mode: FakeTensorMode,
+    ) -> FakeTensor:
+        with fake_tensor_mode:
+            return cast(
+                FakeTensor,
+                torch.empty_strided(
+                    tuple(self.deserialize_sym(val) for val in tensor_meta.sizes),
+                    tuple(self.deserialize_sym(val) for val in tensor_meta.strides),
+                    device=deserialize_device(tensor_meta.device),
+                    dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
+                ),
+            )
+
     def deserialize(
-        self, serialized_graph_module: GraphModule,
+        self,
+        serialized_graph_module: GraphModule,
+        shape_env: Optional[symbolic_shapes.ShapeEnv] = None,
+        symbol_name_to_symbol: Optional[Dict[str, sympy.Symbol]] = None,
     ) -> Tuple[torch.fx.GraphModule, ep.ExportGraphSignature, ep.CallSpec]:
+        self.fake_tensor_mode = FakeTensorMode(shape_env=shape_env)
+        self.shape_env = (
+            shape_env if shape_env is not None
+            else symbolic_shapes.ShapeEnv()
+        )
+        self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = (
+            symbol_name_to_symbol
+            if symbol_name_to_symbol is not None
+            else {}
+        )
+
         graph = self.graph
         serialized_graph = serialized_graph_module.graph
 
         # Handle the tensor metas.
         for name, tensor_value in serialized_graph.tensor_values.items():
-            meta_val = deserialize_tensor_meta(tensor_value.meta, self.fake_tensor_mode)
+            meta_val = self.deserialize_tensor_meta(tensor_value.meta, self.fake_tensor_mode)
             self.serialized_name_to_meta[name] = meta_val
 
         for name, sym_int_value in serialized_graph.sym_int_values.items():
@@ -866,18 +947,54 @@ class ExportedProgramDeserializer:
             {} if expected_opset_version is None else expected_opset_version
         )
 
+    def deserialize_range_constraints(
+        self,
+        serialized_range_constraints: Dict[str, RangeConstraint],
+    ) -> Dict[sympy.Symbol, ep.RangeConstraint]:
+        range_constraints = {}
+        for k, v in serialized_range_constraints.items():
+            symbol = sympy.Symbol(k)
+            self.symbol_name_to_symbol[k] = symbol
+
+            sympy_min_val = _convert_int_to_sympy_int(v.min_val)
+            sympy_max_val = _convert_int_to_sympy_int(v.max_val)
+            range_constraints[symbol] = ep.RangeConstraint(
+                sympy_min_val, sympy_max_val,
+            )
+            self.shape_env.var_to_range[symbol] = symbolic_shapes.ValueRanges(
+                sympy_min_val, sympy_max_val
+            )
+
+        return range_constraints
+
     def deserialize(
         self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
     ) -> ep.ExportedProgram:
+        self.shape_env: symbolic_shapes.ShapeEnv = symbolic_shapes.ShapeEnv()
+        self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
+
+        range_constraints = self.deserialize_range_constraints(
+            serialized_exported_program.range_constraints,
+        )
         graph_module, sig, call_spec = (
             GraphModuleDeserializer()
-            .deserialize(serialized_exported_program.graph_module)
+            .deserialize(
+                serialized_exported_program.graph_module,
+                self.shape_env,
+                self.symbol_name_to_symbol,
+            )
         )
         state_dict = deserialize_state_dict(serialized_state_dict)
+        equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
 
-        # TODO(angelyi): serialize constraints
         return ep.ExportedProgram(
-            state_dict, graph_module.graph, sig, call_spec, state_dict, {}, [],
+            state_dict,
+            graph_module.graph,
+            sig,
+            call_spec,
+            state_dict,
+            range_constraints,
+            equality_constraints,
         )
 
 
