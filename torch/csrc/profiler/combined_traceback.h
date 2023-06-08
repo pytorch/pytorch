@@ -1,6 +1,8 @@
 #pragma once
 
+#ifndef BUILD_LITE_INTERPRETER
 #include <torch/csrc/jit/runtime/interpreter.h>
+#endif
 #include <torch/csrc/profiler/unwind/unwind.h>
 
 namespace torch {
@@ -47,7 +49,9 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
  private:
   std::vector<PyFrame> frames_;
   std::vector<void*> cpp_frames_;
+#ifndef BUILD_LITE_INTERPRETER
   std::vector<jit::StackEntry> script_frames_;
+#endif
   friend TORCH_API SymbolizedTracebacks
   symbolize(const std::vector<CapturedTraceback*>& to_symbolize);
 
