@@ -16,7 +16,7 @@
 namespace {
 
 namespace vulkan_api = at::native::vulkan::api;
-void report_pep(const std::string& name, const uint64_t duration) {
+[[maybe_unused]] void report_pep(const std::string& name, const uint64_t duration) {
   std::stringstream buffer;
   buffer << "PyTorchObserver {\"type\": \"";
   buffer << name << "\",";
@@ -31,7 +31,7 @@ void report_pep(const std::string& name, const uint64_t duration) {
   std::cout << buffer.str();
 }
 
-void report_aibench_res(vulkan_api::QueryPool& qpool) {
+[[maybe_unused]] void report_aibench_res(vulkan_api::QueryPool& qpool) {
   std::unordered_map<std::string, uint64_t> shader_runtimes;
   uint64_t num_additions = 0;
   auto result_aggregator =
