@@ -2,6 +2,12 @@ from torch.utils import _pytree as pytree
 
 
 def patch_non_tensor_outputs(correct_result, new_result, fp64_outputs):
+    """Patch non-tensor outputs to make them comparable with the correct result.
+
+    ONNX model always returns a flat tuple of tensors, but the PyTorch model outputs
+    `correct_result` and `fp64_outputs` can be arbitrary types. This function normalizes
+    the outputs to make them comparable with the ONNX model output.
+    """
     try:
         from transformers import modeling_outputs
     except ImportError:

@@ -24,15 +24,25 @@ _COMPACT_ERROR_GROUP = False
 
 class ErrorAggregator(object):
     """
-    Collect and group error messages for report at the end
+    Collect and group error messages for report at the end.
+
+    Error messages are grouped if they are considered similar enough by inspecting the
+    shared bigrams. If any keyword in `_EXACT_MATCH_KEYWORDS` are found in the error
+    message, it will require exact match to be grouped.
 
     Copied and modified from pytorch-jit-paritybench/paritybench/reporting.py
     """
 
     # If these keywords are found in an error message, it won't be aggregated with other errors,
     # unless it is an exact match.
+    # NOTE: When adding or updating keywords, please also comment the source of the keyword
+    # and the reason why it is added.
     _EXACT_MATCH_KEYWORDS = [
+        # Defined at https://github.com/pytorch/pytorch/blob/0eb4f072825494eda8d6a4711f7ef10163342937/torch/onnx/_internal/fx/function_dispatcher.py#L268  # noqa: B950
+        # Show individual missing symbolic functions.
         "Cannot find symbolic function",
+        # Defined at https://github.com/pytorch/pytorch/blob/773f6b626d2f6d44a9a875d08991627ec631dc01/torch/onnx/_internal/diagnostics/rules.yaml#L310  # noqa: B950
+        # Show individual unsupported FX node.
         "Unsupported FX nodes",
     ]
 
@@ -133,7 +143,10 @@ class ErrorAggregator(object):
 
 class ErrorAggregatorDict(object):
     """
-    Collect and group error messages for a debug report at the end
+    Collect error types and individually group their error messages for a debug report at the end.
+
+    For each error type, create an `ErrorAggregator` object to collect and group
+    error messages.
 
     Copied and modified from pytorch-jit-paritybench/paritybench/reporting.py
     """
@@ -167,6 +180,17 @@ class ErrorAggregatorDict(object):
 
 
 class ExportErrorCsvParser(object):
+    """Parses `*_export_error.csv` produced by onnxbench, aggregates errors and produces report.
+
+    Two types of aggregations are performed.
+    - Per error type: For each error type, group affected models by similar error messages.
+        Sorted by number of affected models. Helps identifying critical errors that affect
+        models the most.
+    - Per model: For each model, group error messages by similar error type.
+        Sorted by number of errors. This is typically showing all errors reported for
+        each model.
+    """
+
     def __init__(
         self,
         output_dir: pathlib.Path,
@@ -382,7 +406,7 @@ if __name__ == "__main__":
     assert suites, "Must specify at least one suite"
     device = args.device
 
-    # TODO(bowbao): support different dtype, mode, device, testing
+    # TODO(bowbao): support different dtype, mode, testing
     dtype = "float32"
     mode = "inference"
     testing = "accuracy"

@@ -6,7 +6,13 @@ This folder contains python scripts to extend the dynamo benchmarking framework 
 
 It is recommended to create a fresh python environment, clone and build PyTorch from source.
 
-It is expected that PyTorch is already built. Run the following script to install the benchmark dependencies:
+```bash
+# NOTE: It is required to build PyTorch with `develop`.
+# It is highly recommended to build PyTorch with CUDA support.
+USE_CUDA=1 python setup.py develop
+```
+
+Run the following script to install the benchmark dependencies:
 
 ```bash
 ./0_build_bench.sh

@@ -830,7 +830,7 @@ def speedup_experiment_ds(args, model_iter_fn, model, example_inputs):
 
 
 def speedup_experiment_onnx(
-    onnx_model_cls: Type[OnnxModel],
+    onnx_model_cls: Type[OnnxModelFromTorchScript],
     args,
     model_iter_fn,
     model,
@@ -859,7 +859,9 @@ def speedup_experiment_onnx(
         args.output_directory or ".", model, copy.deepcopy(example_inputs)
     )
 
-    def create_onnx_input_binded_fn(onnx_model: OnnxModel, pt_inputs, example_outputs):
+    def create_onnx_input_binded_fn(
+        onnx_model: OnnxModelFromTorchScript, pt_inputs, example_outputs
+    ):
         # Goal is to move the iobinding creation outside of the timer function.
         iobinding, outputs = onnx_model.create_iobinding(pt_inputs, example_outputs)
 
@@ -870,7 +872,7 @@ def speedup_experiment_onnx(
 
         return onnxrt_model_iter_fn
 
-    def create_onnx_fn(onnx_model: OnnxModel, pt_inputs):
+    def create_onnx_fn(onnx_model: OnnxModelFromTorchScript, pt_inputs):
         def onnxrt_model_iter_fn(model, inputs, collect_outputs=True):
             return onnx_model.run(pt_inputs)
 
@@ -1098,17 +1100,18 @@ def download_retry_decorator(download_fn):
     return wrapper
 
 
-class OnnxModel:
-    # TorchScript based onnx export. `torch.onnx.export`
-    #
-    # TODO(bowbao):
-    # * large model export failed.
-    #       Onnx Model is larger than 2GB, but exporter makes decision based pt model size, which is
-    #       smaller than 2GB.
-    # * OOM on slightly larger model.
-    #       Both pt model and ort inference session are on gpu. Attempt has been made to move ORT to
-    #       cuda:1, however ORT perf drop significantly.
-    #       For now running everything with batch_size 1 set in launch script.
+class OnnxModelFromTorchScript:
+    """TorchScript based onnx export. `torch.onnx.export`
+
+    TODO(bowbao):
+    * large model export failed.
+          Onnx Model is larger than 2GB, but exporter makes decision based pt model size, which is
+          smaller than 2GB.
+    * OOM on slightly larger model.
+          Both pt model and ort inference session are on gpu. Attempt has been made to move ORT to
+          cuda:1, however ORT perf drop significantly.
+          For now running everything with batch_size 1 set in launch script.
+    """
 
     TORCH_TO_NUMPY_DTYPE = {
         torch.float16: np.float16,
@@ -1286,8 +1289,8 @@ class OnnxModel:
         return pt_outputs
 
 
-class OnnxModelV2(OnnxModel):
-    # Dynamo and Fx based export. `torch.onnx.dynamo_export`.
+class OnnxModelFromDynamo(OnnxModelFromTorchScript):
+    """Dynamo and Fx based export. `torch.onnx.dynamo_export`."""
 
     def __init__(self, output_directory, model, example_inputs):
         self.model_path = self._generate_onnx_model_path(
@@ -1329,14 +1332,16 @@ class OnnxModelV2(OnnxModel):
 
 
 def optimize_onnx_ctx(
-    output_directory: str, onnx_model_cls: Type[OnnxModel], run_n_iterations: Callable
+    output_directory: str,
+    onnx_model_cls: Type[OnnxModelFromTorchScript],
+    run_n_iterations: Callable,
 ) -> Callable:
     # NOTE(bowbao): This function creates and returns the onnx version of 'run_n_iterations',
     # which does the following:
     #   1. Export and cache model.
     #   2. Create iobinding for ORT.
     #   3. Run ORT for n iterations.
-    onnx_model: Optional[OnnxModel] = None
+    onnx_model: Optional[OnnxModelFromTorchScript] = None
 
     def run_n_iterations_onnx(model, inputs, n=2):
         from _onnx import reporter
@@ -2616,9 +2621,10 @@ def parse_args(args=None):
         "--xla", action="store_true", help="Compare TorchXLA to eager PyTorch"
     )
     group.add_argument(
-        "--onnx",
+        "--torchscript-onnx",
+        "--torchscript_onnx",
         action="store_true",
-        help="Measure speedup with ONNX, i.e. `torch.onnx.export`",
+        help="Measure speedup with TorchScript ONNX, i.e. `torch.onnx.export`",
     )
     group.add_argument(
         "--dynamo-onnx",
@@ -2950,18 +2956,20 @@ def run(runner, args, original_dir=None):
         torch._dynamo.mark_dynamic = MagicMock()
         experiment = xla
         output_filename = "xla.csv"
-    elif args.onnx:
+    elif args.torchscript_onnx:
         optimize_ctx = functools.partial(
-            optimize_onnx_ctx, args.output_directory or ".", OnnxModel
+            optimize_onnx_ctx, args.output_directory or ".", OnnxModelFromTorchScript
         )
-        experiment = functools.partial(speedup_experiment_onnx, OnnxModel)
-        output_filename = "onnx.csv"
+        experiment = functools.partial(
+            speedup_experiment_onnx, OnnxModelFromTorchScript
+        )
+        output_filename = "torchscript_onnx.csv"
         current_onnx_compiler = "torchscript"
     elif args.dynamo_onnx:
         optimize_ctx = functools.partial(
-            optimize_onnx_ctx, args.output_directory or ".", OnnxModelV2
+            optimize_onnx_ctx, args.output_directory or ".", OnnxModelFromDynamo
         )
-        experiment = functools.partial(speedup_experiment_onnx, OnnxModelV2)
+        experiment = functools.partial(speedup_experiment_onnx, OnnxModelFromDynamo)
         output_filename = "dynamo_onnx.csv"
         current_onnx_compiler = "dynamo"
     elif args.speedup_dynamo_ts:
