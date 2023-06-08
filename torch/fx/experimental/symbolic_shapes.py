@@ -1215,7 +1215,7 @@ def _make_node_magic(method, func):
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode, other.fxnode), pytype)
+        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode, other.fxnode))
         return SymNode(out, self.shape_env, pytype, out_hint, fxnode=fxnode)
 
     def unary_magic_impl(self):
@@ -1245,7 +1245,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode,), pytype)
+        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode,))
         return SymNode(out, self.shape_env, pytype, out_hint, fxnode=fxnode)
 
     if method in unary_magic_methods:
@@ -1585,6 +1585,9 @@ try:
                     run_assertion(node)
                 else:
                     run_call_function(node)
+            elif node.op == "output":
+                # Ignore output nodes.
+                pass
             else:
                 assert False, f"unsupported operation: {node.op}"
 
@@ -2206,7 +2209,7 @@ class ShapeEnv:
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
         self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
         self.var_to_stack: Dict["sympy.Symbol", str] = {}
-        # Maps symbolic ints to the guards that refine ther lower/upper
+        # Maps symbolic ints to the guards that refine their lower/upper
         # bound. If one of them is None, it means that there are no guards
         # that refine that respective bound.
         self.var_to_guards: Dict["sympy.Symbol", Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
@@ -2240,8 +2243,8 @@ class ShapeEnv:
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
         if _translation_validator_enabled():
             self.validator = TranslationValidator()
-            self.tracer = torch.fx.Tracer()
-            self.tracer.graph = torch.fx.Graph()
+            self.graph = torch.fx.Graph()
+            self.graph.inserting_before(self.graph.output(None))
 
     def freeze(self):
         self.frozen = True
@@ -2259,9 +2262,10 @@ class ShapeEnv:
                 self.validator.add_int(symbol)
             elif type == float:
                 self.validator.add_real(symbol)
-            else:
-                assert type == bool
+            elif type == bool:
                 self.validator.add_bool(symbol)
+            else:
+                raise ValueError(f"can't create Z3 variable for type: {type}")
 
     def _add_input_guard(self, expr) -> None:
         if _translation_validator_enabled():
@@ -2294,7 +2298,6 @@ Failed inputs:
             self,
             op: Callable,
             args: Tuple,
-            pytype: Optional[Type]
     ) -> Optional[torch.fx.Node]:
         # Cache this tuple in order to avoid dupplicated nodes.
         node_key = (op, args)
@@ -2310,23 +2313,23 @@ Failed inputs:
             # If translation validation is enabled, all arguments must have its
             # own FX node.
             assert all(a is not None for a in args), f"missing arg in FX graph ({op.__name__}): {args}"
-
-            node = self.tracer.create_node("call_function", _operator_to_z3(op), args, {})
-            node.meta["pytype"] = pytype
-            self.graph_added_nodes[node_key] = node
+            self.graph_added_nodes[node_key] = self.graph.call_function(_operator_to_z3(op), args)
 
         return self.graph_added_nodes.get(node_key, None)
 
-    def create_fx_placeholder(
+    def create_fx_placeholder_and_z3var(
             self,
-            pytype: Type,
-            name: Optional[str],
-            symbol: Optional[sympy.Symbol] = None,
+            symbol: sympy.Symbol,
+            type: Type,
     ) -> Optional[torch.fx.Node]:
-        if _translation_validator_enabled() and name is not None:
-            node = self.tracer.create_node("placeholder", name, (), {})
+        if _translation_validator_enabled():
+            # Add a Z3 variable according to 'type'.
+            self._add_z3var_for(symbol, type)
+            # Create the FX placeholder.
+            node = self.graph.placeholder(symbol.name)
+            # Attach the 'symbol' to the placeholder so that we can retrieve
+            # the Z3 variable later.
             node.meta["symbol"] = symbol
-            node.meta["pytype"] = pytype
             return node
 
     def _suppress_guards_tls(self):
@@ -2465,10 +2468,10 @@ Failed inputs:
             symbol = self._create_symbol_for_source(source, positive=positive)
             assert symbol is not None
 
-            fxnode = self.create_fx_placeholder(int, name=symbol.name, symbol=symbol)
+            # Create a new FX placeholder and Z3 variable for 'symbol'.
+            fxnode = self.create_fx_placeholder_and_z3var(symbol, int)
 
-            # Create the Z3 variable for it and add an assertion.
-            self._add_z3var_for(symbol, int)
+            # Add an equality assertion for the newly created symbol and 'sym'.
             self._add_assertion(sympy.Eq(symbol, sym))
         else:
             fxnode = None
@@ -2480,12 +2483,13 @@ Failed inputs:
         return SymInt(SymNode(sym, self, int, hint, fxnode=fxnode))
 
     def create_unbacked_symfloat(self):
-        name = f"f{next(self.unbacked_symfloat_counter)}"
-        symbol: sympy.Symbol = sympy.Symbol(name)
+        symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges.unknown()
-        self._add_z3var_for(symbol, float)
-        fxnode = self.create_fx_placeholder(float, name, symbol=symbol)
+
+        # Create a new FX placeholder and Z3 variable for 'symbol'.
+        fxnode = self.create_fx_placeholder_and_z3var(symbol, float)
+
         return SymFloat(SymNode(symbol, self, float, None, fxnode=fxnode))
 
     def create_unbacked_symint(self):
@@ -2493,8 +2497,10 @@ Failed inputs:
         symbol: sympy.Symbol = sympy.Symbol(name, integer=True)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
-        self._add_z3var_for(symbol, int)
-        fxnode = self.create_fx_placeholder(int, name, symbol=symbol)
+
+        # Create a new FX placeholder and Z3 variable for 'symbol'.
+        fxnode = self.create_fx_placeholder_and_z3var(symbol, int)
+
         return SymInt(SymNode(symbol, self, int, None, fxnode=fxnode))
 
     def create_unbacked_symbool(self):
@@ -2502,12 +2508,10 @@ Failed inputs:
         symbol: sympy.Symbol = sympy.Symbol(name, integer=True)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges(0, 1)
-        # Add output guards for the validator.
-        # Necessary, since they are implicit constraints. i.e. guards might not
-        # be issued because of them.
-        self._add_z3var_for(symbol, bool)
-        self._add_assertion(sympy.And(sympy.Eq(symbol, 0), sympy.Eq(symbol, 1)))  # type: ignore
-        fxnode = self.create_fx_placeholder(bool, name, symbol=symbol)
+
+        # Create a new FX placeholder and Z3 variable for 'symbol'.
+        fxnode = self.create_fx_placeholder_and_z3var(symbol, bool)
+
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fxnode=fxnode))
 
     def create_symbol(
@@ -2834,18 +2838,19 @@ Failed inputs:
         issued = set()
 
         def issue_guard(guard: ShapeGuard) -> None:
+            # Avoid re-issueing the same guard.
             if guard.expr in issued:
                 return
 
             issued.add(guard.expr)
 
             try:
-                if any(is_dim(source) for s in g.free_symbols for source in symbol_to_source[s]):
-                    self.dim_constraints.add(g)
+                if any(is_dim(source) for s in guard.expr.free_symbols for source in symbol_to_source[s]):
+                    self.dim_constraints.add(guard.expr)
                 expr = self.simplify(guard.expr)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(guard_expr)
-                self._add_output_guard(g)
+                self._add_output_guard(guard.expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
                 if len(guard.expr.free_symbols) == 1:
@@ -2871,13 +2876,16 @@ Failed inputs:
                 self.log.warning("Failing guard allocated at: \n%s", guard.stack)
                 raise
 
+        # First, issue all the non-trivial guards.
         for guard in self.guards:
             if self._maybe_evaluate_static(guard.expr) is not None:
                 continue
             issue_guard(guard)
 
-        # Then, issue the guards that actually refine the value range of tracked
-        # symbols. Avoid duplicates with a set.
+        # Then, issue the guards that refine the value range of tracked symbols.
+        # We need to explicitly issue these guards, since they are the ones that
+        # guarantee the symbol's value range. Plus, due to the updated value
+        # range, they may be skipped in the previous step.
         for symbol, guards in self.var_to_guards.items():
             if symbol not in symbol_to_source:
                 continue
@@ -2965,7 +2973,7 @@ Failed inputs:
 
             # Before validating, populate the input of the validator with the
             # built FX graph.
-            _populate_validator_with_fx_graph(self.validator, self.tracer.graph)
+            _populate_validator_with_fx_graph(self.validator, self.graph)
 
         self._check_translation_validate()
         return exprs
@@ -3115,7 +3123,25 @@ Failed inputs:
         self.divisible = new_divisible
 
     @_lru_cache
-    def maybe_simplify_floordiv(self, expr: "sympy.Expr") -> "sympy.Expr":
+    def try_isolate_symbol_lhs(self, expr: "sympy.Expr") -> "sympy.Expr":
+        def get_added_const(expr):
+            """
+            Returns an integer constant being added at the top-level of this expression.
+            """
+            if isinstance(expr, sympy.Integer):
+                return expr
+            elif isinstance(expr, sympy.Add):
+                for a in expr.args:
+                    if isinstance(a, sympy.Integer):
+                        return a
+            return None
+
+        # Move any constants in the left-hand side to the right-hand side.
+        if isinstance(expr, sympy.Rel):
+            lhs_const = get_added_const(expr.lhs)
+            if lhs_const is not None and lhs_const != 0 :
+                expr = type(expr)(expr.lhs - lhs_const, expr.rhs - lhs_const)  # type: ignore[arg-type]
+
         # a // b == expr
         # => a >= (b * expr) and a < ((b + 1) * expr)
         if isinstance(expr, sympy.Eq) and isinstance(expr.lhs, FloorDiv):
@@ -3156,18 +3182,6 @@ Failed inputs:
 
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
-        def get_added_const(expr):
-            """
-            Returns an integer constant being added at the top-level of this expression.
-            """
-            if isinstance(expr, sympy.Integer):
-                return expr
-            elif isinstance(expr, sympy.Add):
-                for a in expr.args:
-                    if isinstance(a, sympy.Integer):
-                        return a
-            return None
-
         expr = self.replace(expr)
         # TODO it would seem that this pass is not necessary given the
         # below replacement of // with /, but for nested FloorDivs
@@ -3202,16 +3216,6 @@ Failed inputs:
             # divisions simplified away
             if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                 expr = new_expr
-        if isinstance(expr, sympy.Rel):
-            lhs_const = get_added_const(expr.lhs)
-            rhs_const = get_added_const(expr.rhs)
-            if (
-                    lhs_const is not None
-                    and rhs_const is not None
-                    and lhs_const != 0
-            ):
-                expr = type(expr)(expr.lhs - lhs_const, expr.rhs - lhs_const)  # type: ignore[arg-type]
-
         return expr
 
     @lru_cache(256)
@@ -3354,24 +3358,6 @@ Failed inputs:
             self.evaluate_expr(eq_expr)
         return self.simplify(expr)
 
-    def _add_guard(self, expr: "sympy.Expr") -> None:
-        stack = get_debugging_stack()
-        guard = ShapeGuard(expr, stack)
-        if torch._dynamo.config.print_guards:
-            if log.level <= logging.WARNING:
-                # reusing flag that prints guards
-                frame_summaries = TracingContext.get().frame_summary_stack
-                # frame_summaries describes a stack of functions
-                # TODO(avik): It would be better to describe a stack of function calls instead
-                current_loc = TracingContext.get().loc_in_frame
-                # current_loc describes a line in the current frame
-                user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
-                expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
-                log.warning(f"Adding shape guard {expr} at \n{user_stack}")
-            log.debug("SHAPE GUARD", stack_info=True)
-        self.guards.append(guard)
-        self.refine_ranges(guard)
-
     @lru_cache(256)
     def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fxnode=None):
         """
@@ -3392,13 +3378,13 @@ Failed inputs:
 
         if _translation_validator_enabled() and fxnode is not None:
             if concrete_val is sympy.true:
-                self.create_fx_call_function(torch._assert, (fxnode,), None)
+                self.create_fx_call_function(torch._assert, (fxnode,))
             elif concrete_val is sympy.false:
-                neg = self.create_fx_call_function(operator.not_, (fxnode,), bool)
-                self.create_fx_call_function(torch._assert, (neg,), None)
+                neg = self.create_fx_call_function(operator.not_, (fxnode,))
+                self.create_fx_call_function(torch._assert, (neg,))
             else:
-                eql = self.create_fx_call_function(operator.eq, (fxnode, concrete_val), bool)
-                self.create_fx_call_function(torch._assert, (eql,), None)
+                eql = self.create_fx_call_function(operator.eq, (fxnode, concrete_val))
+                self.create_fx_call_function(torch._assert, (eql,))
 
         if len(orig_expr.free_symbols) == 0:
             self.log.debug("eval %s [trivial]", orig_expr)
@@ -3445,6 +3431,7 @@ Failed inputs:
             stack = ''.join(traceback.format_list(tb))
             guard = ShapeGuard(g, stack)
             self.guards.append(guard)
+            self.refine_ranges(guard)
             if self.log.isEnabledFor(logging.INFO):
                 for frame in reversed(tb):
                     if frame.filename not in uninteresting_files():
@@ -3486,14 +3473,13 @@ Failed inputs:
             """
             Simplification specialized for range refinement.
             """
-            return self.maybe_simplify_floordiv(self.simplify(expr))
+            return self.try_isolate_symbol_lhs(self.simplify(expr))
 
         def simplify_until(expr: sympy.Expr, max_iterations: int = 10) -> sympy.Expr:
             """
             Calls 'simplify' either until it does not change or until it reaches the
             maximum number of iterations.
             """
-            max_iterations = 10
             for _ in range(max_iterations):
                 previous, expr = expr, simplify(expr)
                 if expr == previous:
@@ -3556,10 +3542,10 @@ Failed inputs:
             if lower < rhs_vr.lower and isinstance(expr, (sympy.Eq, sympy.Ge, sympy.Gt)):
                 # Strictly greater relations allow us to refine a bit more, since
                 # x < y implies that the lower bound for x is: y + 1.
-                lower = rhs_vr.lower + (1 * int(isinstance(expr, sympy.Gt)))
+                lower = rhs_vr.lower + int(isinstance(expr, sympy.Gt))
                 lower_guard = guard
             if upper < rhs_vr.upper and isinstance(expr, (sympy.Eq, sympy.Le, sympy.Lt)):
-                upper = rhs_vr.upper - (1 * int(isinstance(expr, sympy.Lt)))
+                upper = rhs_vr.upper - int(isinstance(expr, sympy.Lt))
                 upper_guard = guard
 
             # Do nothing if the new value range is no better than what we already have.
