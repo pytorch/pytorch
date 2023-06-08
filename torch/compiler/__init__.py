@@ -3,6 +3,7 @@ from typing import List
 
 __all__ = [
     "compile",
+    "assume_constant_result",
     "reset",
     "allow_in_graph",
     "list_backends",
