@@ -637,7 +637,8 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
     return creation_meta_;
   }
 
-  const std::shared_ptr<torch::CapturedTraceback>& get_creation_traceback() const {
+  const std::shared_ptr<torch::CapturedTraceback>& get_creation_traceback()
+      const {
     return creation_traceback_;
   }
 
