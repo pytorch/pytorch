@@ -41,6 +41,7 @@ from .quantizer import (
     QuantizationAnnotation,
     QuantizationConfig,
     QuantizationSpec,
+    SharedQuantizationSpec,
     Quantizer,
 )
 
@@ -571,17 +572,22 @@ class QNNPackQuantizer(Quantizer):
             input_act = maxpool_node.args[0]  # type: ignore[union-attr]
             assert isinstance(input_act, Node)
 
-            input_act_qspec = get_input_act_qspec(quantization_config)
-            output_act_qspec = get_output_act_qspec(quantization_config)
+            # only annotate maxpool when the output of the input node is annotated
+            if "quantization_annotation" not in input_act.meta or \
+               not input_act.meta["quantization_annotation"]._annotated or \
+               input_act.meta["quantization_annotation"].output_qspec is None:
+                continue
+            # input and output of maxpool will share quantization parameter with input of maxpool
+            act_qspec = SharedQuantizationSpec(input_act)
+            # act_qspec = get_act_qspec(quantization_config)
             maxpool_node.meta["quantization_annotation"] = QuantizationAnnotation(  # type: ignore[union-attr]
                 input_qspec_map={
-                    input_act: input_act_qspec,
+                    input_act: act_qspec,
                 },
                 _annotated=True,
             )
             output_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                output_qspec=output_act_qspec,
-                _input_output_share_observers=True,
+                output_qspec=act_qspec,
                 _annotated=True,
             )
 
@@ -604,16 +610,21 @@ class QNNPackQuantizer(Quantizer):
             input_act = io_obs_sharing_node.args[0]
             assert isinstance(input_act, Node)
 
-            input_act_qspec = get_input_act_qspec(quantization_config)
-            output_act_qspec = get_output_act_qspec(quantization_config)
+            # only annotate input output sharing operator
+            # when the output of the input node is annotated
+            if "quantization_annotation" not in input_act.meta or \
+               not input_act.meta["quantization_annotation"]._annotated or \
+               input_act.meta["quantization_annotation"].output_qspec is None:
+                continue
+
+            act_qspec = SharedQuantizationSpec(input_act)
             io_obs_sharing_node.meta[
                 "quantization_annotation"
             ] = QuantizationAnnotation(
                 input_qspec_map={
-                    input_act: input_act_qspec,
+                    input_act: act_qspec,
                 },
-                output_qspec=output_act_qspec,
-                _input_output_share_observers=True,
+                output_qspec=act_qspec,
                 _annotated=True,
             )
 

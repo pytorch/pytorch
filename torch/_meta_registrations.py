@@ -704,6 +704,47 @@ def linalg_lu_solve_meta(
     return result
 
 
+@register_meta(aten.lu_unpack)
+@out_wrapper("P", "L", "U")
+def lu_unpack_meta(
+    LU: Tensor,
+    pivots: Tensor,
+    unpack_data: bool = True,
+    unpack_pivots: bool = True,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    torch._check(
+        LU.ndim >= 2,
+        lambda: f"torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: {LU.shape} instead",
+    )
+    if unpack_pivots:
+        torch._check(
+            pivots.dtype == torch.int32,
+            lambda: (
+                "torch.lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype.\n"
+                "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor"
+            ),
+        )
+    sizes = list(LU.shape)
+    m = sizes[-2]
+    n = sizes[-1]
+    k = min(m, n)
+    sizes[-1] = m
+    if unpack_pivots:
+        P = LU.new_empty(sizes)
+    else:
+        P = LU.new_empty([0])
+    if unpack_data:
+        sizes[-1] = k
+        L = LU.new_empty(sizes)
+        sizes[-2] = k
+        sizes[-1] = n
+        U = LU.new_empty(sizes)
+    else:
+        L = LU.new_empty([0])
+        U = LU.new_empty([0])
+    return P, L, U
+
+
 # parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
 def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
     if mode == "reduced":
@@ -755,6 +796,24 @@ def linalg_qr_meta(
     R = A.new_empty(R_shape)
     R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))
     return Q, R
+
+
+@register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
+@out_wrapper("sign", "logabsdet", "LU", "pivots")
+def _linalg_slogdet(A: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    squareCheckInputs(A, "linalg.slogdet")
+    checkFloatingOrComplex(A, "linalg.slogdet", False)
+    shape = A.shape
+    sign = A.new_empty(shape[:-2])
+    logabsdet = A.new_empty(shape[:-2], dtype=toRealValueType(A.dtype))
+    LU = torch.empty_strided(
+        size=shape,
+        stride=make_contiguous_strides_for(shape, False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+    pivots = A.new_empty(shape[:-1], dtype=torch.int32)
+    return sign, logabsdet, LU, pivots
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -829,6 +888,74 @@ def _linalg_broadcast_batch_dims_name(
         arg2 if arg2_expand_size == arg2.shape else arg2.expand(arg2_expand_size)
     )
     return arg1_broadcasted, arg2_broadcasted
+
+
+def linalg_solve_is_vector_rhs(input: Tensor, other: Tensor) -> bool:
+    expected_batched_rhs_shape = input.shape[:-1]
+    vector_case = other.ndim == 1 or (
+        input.ndim - 1 == other.ndim and other.shape == expected_batched_rhs_shape
+    )
+    return vector_case
+
+
+@register_meta(aten._linalg_solve_ex)
+def _linalg_solve_ex(
+    A: Tensor,
+    B: Tensor,
+    *,
+    left: bool = True,
+    check_errors: bool = False,
+    result: Optional[Tensor] = None,
+    LU: Optional[Tensor] = None,
+    pivots: Optional[Tensor] = None,
+    info: Optional[Tensor] = None,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    checkFloatingOrComplex(A, "linalg.solve")
+    torch._check(
+        A.dtype == B.dtype,
+        lambda: (
+            f"linalg.solve: Expected A and B to have the same dtype, but found A of type "
+            f"{A.dtype} and B of type {B.dtype} instead"
+        ),
+    )
+    vector_case = linalg_solve_is_vector_rhs(A, B)
+    B_ = B.unsqueeze(-1) if vector_case else B
+    checkInputsSolver(A, B_, left, "linalg.solve")
+    B_broad_shape, _ = _linalg_broadcast_batch_dims(B_, A)
+    torch._check(
+        left or not vector_case,
+        lambda: (
+            "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. "
+            "In this case linalg.solve is equivalent to B / A.squeeze(-1)"
+        ),
+    )
+    result_shape = B_broad_shape[:-1] if vector_case else B_broad_shape
+    result_ = torch.empty_strided(
+        size=result_shape,
+        stride=make_contiguous_strides_for(result_shape, not left),
+        dtype=B.dtype,
+        device=B.device,
+    )
+    shape = A.shape
+    ndim = A.ndim
+    LU_ = torch.empty_strided(
+        size=shape,
+        stride=make_contiguous_strides_for(shape, False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+    pivots_ = A.new_empty(shape[:-1], dtype=torch.int32)
+    info_ = A.new_empty(shape[:-2], dtype=torch.int32)
+    out = (result, LU, pivots, info)
+    res = (result_, LU_, pivots_, info_)
+    if all(x is not None for x in out):
+        for r, o in zip(res, out):
+            # resize and copy operations are done in-place
+            _maybe_resize_out(o, r.shape)  # type: ignore[arg-type]
+            # strides are not copied in out_wrapper
+            o.as_strided_(r.shape, r.stride())  # type: ignore[union-attr]
+            _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=False)  # type: ignore[arg-type]
+    return res
 
 
 @register_meta([aten.linalg_solve_triangular.default, aten.linalg_solve_triangular.out])
@@ -1511,6 +1638,11 @@ def meta_complex(real, imag):
     assert imag.dtype.is_floating_point
     out_shape = _broadcast_shapes(real.shape, imag.shape)
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
+
+
+@register_meta(aten.view.dtype)
+def view_dtype(self, dtype):
+    return utils.clone_preserve_strides(self).to(dtype)
 
 
 @register_meta(aten.vdot.default)

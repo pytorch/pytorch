@@ -522,6 +522,24 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(pending) == 0)
         self.assertTrue(len(failed) == 2)
 
+    def test_get_classifications_unstable(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 102784)
+        checks = pr.get_checkrun_conclusions()
+        checks = get_classifications(
+            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], []
+        )
+        self.assertTrue(
+            checks[
+                "trunk / win-vs2019-cpu-py3 / test (default, 1, 3, windows.4xlarge.nonephemeral, unstable)"
+            ].classification
+            == "UNSTABLE"
+        )
+        pending, failed = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=1
+        )
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+
     def test_ignore_current(self, *args: Any) -> None:
         # Test various interactions of the failure classifier, mostly that
         # ignore current checks takes precedence over classifications for flaky
