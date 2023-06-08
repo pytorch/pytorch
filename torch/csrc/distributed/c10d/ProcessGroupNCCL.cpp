@@ -772,12 +772,14 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seq_;
 }
 
-// Abort all communicators on this rank
-void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
-  std::lock_guard<std::mutex> lock(mutex_);
+void abortCommsFromMap(
+    std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
+        ncclCommsMap,
+    const int rank,
+    c10::optional<std::string> abortReason) {
   // The process may control multiple devices, loop through the communicators on
   // each device
-  for (auto& it : devNCCLCommMap_) {
+  for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComms = it.second;
 
@@ -794,9 +796,16 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
-    LOG(INFO) << "[Rank " << rank_ << "] Destroyed " << ncclComms.size()
+    LOG(INFO) << "[Rank " << rank << "] Destroyed " << ncclComms.size()
               << "communicators on CUDA device " << devName;
   }
+}
+
+// Abort all communicators on this rank
+void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  abortCommsFromMap(devNCCLCommMap_, rank_, abortReason);
+  abortCommsFromMap(inProgressCommMap_, rank_, abortReason);
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
@@ -1160,6 +1169,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
         at::cuda::getStreamFromPool(options_->is_high_priority_stream));
   }
 
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    inProgressCommMap_.emplace(devicesKey, std::move(ncclComms));
+  }
+
   // [Note 2 ]
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
@@ -1202,6 +1216,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // Move the NCCL resource to cache
   devNCCLCommMap_.emplace(devicesKey, std::move(ncclComms));
+  inProgressCommMap_.erase(devicesKey);
   return devNCCLCommMap_[devicesKey];
 }
 
