@@ -1005,7 +1005,8 @@ class TestForeach(TestCase):
                 self.assertEquals(t.device, device)
                 self.assertEquals(t.dtype, dtype)
                 num_tensors_seen += 1
-            assert len(l1) == len(l2) and all(p == None for p in l2)
+            self.assertEqual(len(l1), len(l2))
+            self.assertTrue(all(p is None for p in l2))
             for i, index in enumerate(indices):
                 self.assertEquals(l1[i], list1[index])
                 self.assertEquals(l2[i], list2[index])
