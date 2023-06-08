@@ -71,7 +71,7 @@ echo "Running benchmarking onnx w/ torchbench..."
 echo "Benchmark logs will be saved under pytorch/$log_folder"
 
 # NOTE: --quick is handy to run on small subset of ~3 models for quick sanity check.
-(set -x; PATH=/usr/local/cuda/bin/:$PATH time python benchmarks/dynamo/runner.py \
+(set -x; PATH=/usr/local/cuda/bin/:$PATH python benchmarks/dynamo/runner.py \
     --suites=torchbench \
     --suites=huggingface \
     --suites=timm_models \
