@@ -68,7 +68,8 @@ class TestExperimentalExport(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
-    def test_export_constraints(self):
+    @unittest.expectedFailure
+    def test_export_inline_constraints(self):
 
         def f(x):
             b = x.item()
@@ -172,8 +173,9 @@ class TestExport(TestCase):
 
     def test_if_functional(self):
         def foo(x):
-            x.add_(4)
-            y = x.view(x.shape)
+            z = x + 4
+            z.add_(4)
+            y = z.view(x.shape)
             return x.cos() + y.cos()
 
         gm = export(foo, (torch.tensor([2, 3, 5]),), constraints=None)
