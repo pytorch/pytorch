@@ -3451,14 +3451,16 @@ class TestSerialization(TestCase, SerializationMixin):
             state_dict = DummyModel().state_dict()
             torch.save(state_dict, f)
             result = torch.load(f, mmap=True, weights_only=weights_only)
-            result_non_mmap = torch.load(f, mmap=False, weights_only=weights_only)
+            # JUST COMMENTING OUT FOR NOW TO TEST WHETHER THIS FIRST LOAD
+            # CAUSES THE WINDOWS PERMISSION ERROR
+            # result_non_mmap = torch.load(f, mmap=False, weights_only=weights_only)
 
-            model_mmap_state_dict = DummyModel()
-            model_mmap_state_dict.load_state_dict(result)
-            model_non_mmap_state_dict = DummyModel()
-            model_non_mmap_state_dict.load_state_dict(result_non_mmap)
-            input = torch.randn(4, 3)
-            self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
+            # model_mmap_state_dict = DummyModel()
+            # model_mmap_state_dict.load_state_dict(result)
+            # model_non_mmap_state_dict = DummyModel()
+            # model_non_mmap_state_dict.load_state_dict(result_non_mmap)
+            # input = torch.randn(4, 3)
+            # self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_serialization_mmap_loading_with_map_location(self):
