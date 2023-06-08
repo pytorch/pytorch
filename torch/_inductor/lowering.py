@@ -2162,17 +2162,16 @@ def index_impl(x, indices, check):
     def fn(idx):
         assert len(idx) == len(output_size)
         assert len(indices_loaders) == len(indexed_size)
-        new_index = [
-            ir.ModularIndexing(
-                ops.indirect_indexing(
-                    loader(idx[start_offset:end_offset]), size, check=check
-                )
-                + size,
-                1,
-                size,
+        new_index = []
+        for loader, size in zip(indices_loaders, indexed_size):
+            x = loader(idx[start_offset:end_offset])
+            size_ir = ops.index_expr(size, torch.int64)
+            zero = ops.constant(0, torch.int64)
+            i = ops.indirect_indexing(
+                ops.where(ops.lt(x, zero), ops.add(x, size_ir), x), size
             )
-            for loader, size in zip(indices_loaders, indexed_size)
-        ]
+            new_index.append(i)
+
         new_index = [*idx[:start_offset], *new_index, *idx[end_offset:]]
         return x_loader(new_index)
 

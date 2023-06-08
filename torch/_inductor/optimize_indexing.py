@@ -68,31 +68,6 @@ def get_expr_range(expr, vars_ranges: dict):
     if len(free_symbols) == 0:
         return ValueRanges(expr, expr)
 
-    if expr.has(sympy.Mod) or expr.has(ModularIndexing):
-
-        def lower_mod_rep(x, y):
-            return 0
-
-        def upper_mod_rep(x, y):
-            return y - 1
-
-        def lower_mod_indexing_rep(x, y, z):
-            return 0
-
-        def upper_mod_indexing_rep(x, y, z):
-            return z - 1
-
-        min_expr = expr.replace(sympy.Mod, lower_mod_rep).replace(
-            ModularIndexing, lower_mod_indexing_rep
-        )
-        max_expr = expr.replace(sympy.Mod, upper_mod_rep).replace(
-            ModularIndexing, upper_mod_indexing_rep
-        )
-        return ValueRanges(
-            get_expr_range(min_expr, vars_ranges).lower,
-            get_expr_range(max_expr, vars_ranges).upper,
-        )
-
     def replace_symbols_for_deriv(expr):
         # for the purposes of finding local, minimum, maximum, assume smoothness
         def mod_indexing_rep(x, y, z):

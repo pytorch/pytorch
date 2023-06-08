@@ -117,6 +117,28 @@ class SymPyOps:
         result_expr = ir.ModularIndexing(x.expr, sympy.Integer(1), y.expr)
         return TypedExpr(result_expr, result_type)
 
+    @staticmethod
+    def lt(x, y):
+        if not x.dtype.is_signed or not y.dtype.is_signed:
+            return NotImplemented
+        expr = x.expr - y.expr
+        if len((expr).free_symbols) > 0:
+            if isinstance(expr, FloorDiv):
+                if (expr.args[0].is_negative and expr.args[1].is_negative) or (
+                    expr.args[0].is_positive and expr.args[1].is_positive
+                ):
+                    return TypedExpr(sympy.Integer(False), torch.bool)
+            if isinstance(expr, ir.ModularIndexing):
+                return TypedExpr(sympy.Integer(False), torch.bool)
+            return NotImplemented
+        return TypedExpr(sympy.Integer(bool(expr < 0)), torch.bool)
+
+    @staticmethod
+    def where(x, y, z):
+        if x.expr:
+            return TypedExpr(y.expr, y.dtype)
+        return TypedExpr(z.expr, z.dtype)
+
 
 @dataclass
 class IndexPropVar:
