@@ -85,7 +85,9 @@ def constant_fold(gm):
             # skip constructors, since inductor generates optimal code for them already
             # and turning into tensor would result in an additional global memory read
             # TODO - more complicated strategy
-            if node.op != "get_attr" and not any(isinstance(e, torch.Tensor) for e in flattened_inputs):
+            if node.op != "get_attr" and not any(
+                isinstance(e, torch.Tensor) for e in flattened_inputs
+            ):
                 return unknown_value
 
             # All mutations should either be removed or on inputs which we did not make constant
