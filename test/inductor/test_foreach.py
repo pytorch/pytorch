@@ -212,6 +212,9 @@ class ForeachTests(TestCase):
 
     @requires_cuda()
     @bin_ops
+    @unittest.skip(
+        "Triton recursion depth exceeded: https://github.com/openai/triton/issues/1763"
+    )
     def test_kernel_split_arg_limit_scalar(self, op):
         def fn(a):
             return op(a, 3.3)
@@ -286,9 +289,10 @@ class ForeachTests(TestCase):
     @bin_ops
     def test_non_foreach_producer_list(self, op):
         def fn(a0, a1, b0, b1):
-            c0 = torch.mul(a0, b0)
-            c1 = torch.mul(a1, b1)
+            c0 = torch.add(a0, b0)
+            c1 = torch.add(a1, b1)
             return op([a0, a1], [c0, c1])
+            # return [torch.sub(a0, c0), torch.sub(a1, c1)]
 
         self.check_model_cuda(
             fn,
@@ -326,9 +330,9 @@ class ForeachTests(TestCase):
     @bin_ops
     def test_non_foreach_consumer_producer_list(self, op):
         def fn(a0, a1, b0, b1):
-            c0 = torch.mul(a0, b0)
-            c1 = torch.mul(a1, b1)
-            d = torch.op([a0, a1], [c0, c1])
+            c0 = torch.add(a0, b0)
+            c1 = torch.add(a1, b1)
+            d = op([a0, a1], [c0, c1])
             e0 = torch.mul(d[0], a0)
             e1 = torch.mul(d[1], a1)
             return [e0, e1]
@@ -349,9 +353,9 @@ class ForeachTests(TestCase):
     @bin_ops
     def test_non_foreach_consumer_producer_scalar(self, op):
         def fn(a0, a1, b0, b1):
-            c0 = torch.mul(a0, b0)
-            c1 = torch.mul(a1, b1)
-            d = torch.op([c0, c1], 5.8)
+            c0 = torch.add(a0, b0)
+            c1 = torch.add(a1, b1)
+            d = op([c0, c1], 5.8)
             e0 = torch.mul(d[0], a0)
             e1 = torch.mul(d[1], a1)
             return [e0, e1]
