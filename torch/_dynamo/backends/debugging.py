@@ -1,10 +1,12 @@
 import functools
+import traceback
 from importlib import import_module
 
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch
 from torch._functorch.compilers import ts_compile
+from .. import config
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
 
@@ -16,6 +18,58 @@ This file contains TorchDynamo backends intended for debugging uses.
 @register_backend
 def eager(gm, fake_tensor_inputs):
     return gm
+
+
+@register_backend(name="explain")
+def explain(gm: torch.fx.GraphModule, example_inputs):
+    """
+    Explain `compiler_fn` that provide explanation for graph breaks and logs modules' graph information.
+    This function prints the graph structure if `config.explain_print_graphs` is set to True.
+    It uses the `tabulate` library to display the node information in a table format.
+    If `tabulate` is not installed, it prints an error message suggesting to install it using `pip install tabulate`.
+
+    In case of any graph break while compilation,
+    it prints the break reason and the formatted stack trace for debugging-purposes.
+
+    Args:
+        gm (torch.fx.GraphModule): The module for debugging.
+        example_inputs: Inputs to the module.
+
+    Returns:
+        gm.forward as callable.
+
+    Example usage:
+        ```
+        opt_fn = torch.compile(fn,backend="explain") #  or torch._dynamo.optimize("explain")(fn)
+        ```
+    """
+    if config.explain_print_graphs:
+        try:
+            from tabulate import tabulate
+        except ImportError:
+            print(
+                "`Explain Backend` relies on the library `tabulate`, "
+                "which could not be found on this machine. Run `pip "
+                "install tabulate` to install the library."
+            )
+
+        node_specs = [
+            [n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes
+        ]
+        print(
+            "Node:\n",
+            tabulate(
+                node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
+            ),
+        )
+    if gm.compile_subgraph_reason.graph_break:
+        formatted_stack = "".join(
+            traceback.format_list(gm.compile_subgraph_reason.user_stack)
+        )
+        msg = f"{gm.compile_subgraph_reason.reason}\n{formatted_stack}"
+        print("Graph Break\nBreak reason:\n", msg)
+
+    return gm.forward
 
 
 @register_backend
@@ -51,7 +105,6 @@ def boxed_nop(fx_g, example_inputs):
 aot_eager = aot_autograd(fw_compiler=boxed_nop)
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
-
 # Uses TorchInductor AOT Autograd decomps and partitioner to isolate aot vs
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
@@ -77,6 +130,7 @@ register_backend(
 # by using the relevant fuser with torch.jit.fuser(...)
 aot_ts = aot_autograd(fw_compiler=ts_compile)
 register_backend(name="aot_ts", compiler_fn=aot_ts)
+
 
 # These buggy backends are used for inducing bugs so that we can test
 # our repro extraction / minifier scripts

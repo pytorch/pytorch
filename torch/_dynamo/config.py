@@ -108,6 +108,11 @@ rewrite_assert_with_torch_assert = True
 # Show a warning on every graph break
 print_graph_breaks = False
 
+# This flag will enable logging nodes while
+# the explain backend is traversing the module
+# for debugging-purposes
+explain_print_graphs = False
+
 # Show a warning for every specialization
 print_specializations = False
 
