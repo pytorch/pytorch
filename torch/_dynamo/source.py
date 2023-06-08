@@ -60,6 +60,21 @@ def is_input_source(source):
     ]
 
 
+def reconstruct_getitem(source: Union["GetItemSource", "ODictGetItemSource"], codegen, index_is_slice):
+    instrs = source.base.reconstruct(codegen)
+
+    if isinstance(source.index, Source):
+        instrs.extend(source.index.reconstruct(codegen))
+    else:
+        if index_is_slice:
+            assert isinstance(source, GetItemSource)
+            instrs.append(codegen.create_load_const(source.unpack_slice()))
+        else:
+            instrs.append(codegen.create_load_const(source.index))
+
+    return instrs
+
+
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
@@ -301,18 +316,10 @@ class GetItemSource(Source):
             super().__setattr__("index_is_slice", True)
 
     def reconstruct(self, codegen):
-        instrs = self.base.reconstruct(codegen)
-
-        if isinstance(self.index, Source):
-            instrs.extend(self.index.reconstruct(codegen))
-        else:
-            if self.index_is_slice:
-                instrs.append(codegen.create_load_const(self.unpack_slice()))
-            else:
-                instrs.append(codegen.create_load_const(self.index))
-        instrs.append(create_instruction("BINARY_SUBSCR"))
-
-        return instrs
+        return [
+            *reconstruct_getitem(self, codegen, index_is_slice=self.index_is_slice),
+            create_instruction("BINARY_SUBSCR")
+        ]
 
     def guard_source(self):
         return self.base.guard_source()
@@ -399,15 +406,9 @@ class ODictGetItemSource(Source):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        index_inst = (
-            self.index.reconstruct(codegen)
-            if isinstance(self.index, Source)
-            else [codegen.create_load_const(self.index)]
-        )
         return [
             codegen._create_load_const(collections.OrderedDict.__getitem__),
-            *self.base.reconstruct(codegen),
-            *index_inst,
+            *reconstruct_getitem(self, codegen, index_is_slice=False),
             *create_call_function(2, True),
         ]
 
