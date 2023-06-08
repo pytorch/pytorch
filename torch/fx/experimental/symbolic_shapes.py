@@ -2846,23 +2846,24 @@ Failed inputs:
         issued = set()
 
         def issue_guard(guard: ShapeGuard) -> None:
+            expr = self.simplify(guard.expr)
+
             # Avoid re-issueing the same guard.
             if guard.expr in issued:
                 return
 
-            issued.add(guard.expr)
+            issued.add(expr)
 
             try:
-                if any(is_dim(source) for s in guard.expr.free_symbols for source in symbol_to_source[s]):
-                    self.dim_constraints.add(guard.expr)
-                expr = self.simplify(guard.expr)
+                if any(is_dim(source) for s in expr.free_symbols for source in symbol_to_source[s]):
+                    self.dim_constraints.add(expr)
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(guard_expr)
-                self._add_output_guard(guard.expr)
+                self._add_output_guard(expr)
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
-                if len(guard.expr.free_symbols) == 1:
-                    symbol = list(guard.expr.free_symbols)[0]
+                if len(expr.free_symbols) == 1:
+                    symbol = list(expr.free_symbols)[0]
                     source = symbol_to_source[symbol][0]
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
@@ -3552,7 +3553,7 @@ Failed inputs:
                 # x < y implies that the lower bound for x is: y + 1.
                 lower = rhs_vr.lower + int(isinstance(expr, sympy.Gt))
                 lower_guard = guard
-            if upper < rhs_vr.upper and isinstance(expr, (sympy.Eq, sympy.Le, sympy.Lt)):
+            if upper > rhs_vr.upper and isinstance(expr, (sympy.Eq, sympy.Le, sympy.Lt)):
                 upper = rhs_vr.upper - int(isinstance(expr, sympy.Lt))
                 upper_guard = guard
 
