@@ -1215,7 +1215,7 @@ def _make_node_magic(method, func):
 
         # Create a FX node that corresponds to the operation being applied to
         # this node.
-        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode, other.fxnode), pytype)
+        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode, other.fxnode))
         return SymNode(out, self.shape_env, pytype, out_hint, fxnode=fxnode)
 
     def unary_magic_impl(self):
@@ -1245,7 +1245,7 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode,), pytype)
+        fxnode = self.shape_env.create_fx_call_function(op, (self.fxnode,))
         return SymNode(out, self.shape_env, pytype, out_hint, fxnode=fxnode)
 
     if method in unary_magic_methods:
@@ -1585,6 +1585,9 @@ try:
                     run_assertion(node)
                 else:
                     run_call_function(node)
+            elif node.op == "output":
+                # Ignore output nodes.
+                pass
             else:
                 assert False, f"unsupported operation: {node.op}"
 
@@ -2235,8 +2238,8 @@ class ShapeEnv:
         self.source_to_symbol: Dict[str, sympy.Symbol] = {}
         if _translation_validator_enabled():
             self.validator = TranslationValidator()
-            self.tracer = torch.fx.Tracer()
-            self.tracer.graph = torch.fx.Graph()
+            self.graph = torch.fx.Graph()
+            self.graph.inserting_before(self.graph.output(None))
 
     def freeze(self):
         self.frozen = True
@@ -2254,9 +2257,10 @@ class ShapeEnv:
                 self.validator.add_int(symbol)
             elif type == float:
                 self.validator.add_real(symbol)
-            else:
-                assert type == bool
+            elif type == bool:
                 self.validator.add_bool(symbol)
+            else:
+                raise ValueError(f"can't create Z3 variable for type: {type}")
 
     def _add_input_guard(self, expr) -> None:
         if _translation_validator_enabled():
@@ -2289,7 +2293,6 @@ Failed inputs:
             self,
             op: Callable,
             args: Tuple,
-            pytype: Optional[Type]
     ) -> Optional[torch.fx.Node]:
         # Cache this tuple in order to avoid dupplicated nodes.
         node_key = (op, args)
@@ -2305,23 +2308,23 @@ Failed inputs:
             # If translation validation is enabled, all arguments must have its
             # own FX node.
             assert all(a is not None for a in args), f"missing arg in FX graph ({op.__name__}): {args}"
-
-            node = self.tracer.create_node("call_function", _operator_to_z3(op), args, {})
-            node.meta["pytype"] = pytype
-            self.graph_added_nodes[node_key] = node
+            self.graph_added_nodes[node_key] = self.graph.call_function(_operator_to_z3(op), args)
 
         return self.graph_added_nodes.get(node_key, None)
 
-    def create_fx_placeholder(
+    def create_fx_placeholder_and_z3var(
             self,
-            pytype: Type,
-            name: Optional[str],
-            symbol: Optional[sympy.Symbol] = None,
+            symbol: sympy.Symbol,
+            type: Type,
     ) -> Optional[torch.fx.Node]:
-        if _translation_validator_enabled() and name is not None:
-            node = self.tracer.create_node("placeholder", name, (), {})
+        if _translation_validator_enabled():
+            # Add a Z3 variable according to 'type'.
+            self._add_z3var_for(symbol, type)
+            # Create the FX placeholder.
+            node = self.graph.placeholder(symbol.name)
+            # Attach the 'symbol' to the placeholder so that we can retrieve
+            # the Z3 variable later.
             node.meta["symbol"] = symbol
-            node.meta["pytype"] = pytype
             return node
 
     def _suppress_guards_tls(self):
@@ -2460,10 +2463,10 @@ Failed inputs:
             symbol = self._create_symbol_for_source(source, positive=positive)
             assert symbol is not None
 
-            fxnode = self.create_fx_placeholder(int, name=symbol.name, symbol=symbol)
+            # Create a new FX placeholder and Z3 variable for 'symbol'.
+            fxnode = self.create_fx_placeholder_and_z3var(symbol, int)
 
-            # Create the Z3 variable for it and add an assertion.
-            self._add_z3var_for(symbol, int)
+            # Add an equality assertion for the newly created symbol and 'sym'.
             self._add_assertion(sympy.Eq(symbol, sym))
         else:
             fxnode = None
@@ -2475,12 +2478,13 @@ Failed inputs:
         return SymInt(SymNode(sym, self, int, hint, fxnode=fxnode))
 
     def create_unbacked_symfloat(self):
-        name = f"f{next(self.unbacked_symfloat_counter)}"
-        symbol: sympy.Symbol = sympy.Symbol(name)
+        symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges.unknown()
-        self._add_z3var_for(symbol, float)
-        fxnode = self.create_fx_placeholder(float, name, symbol=symbol)
+
+        # Create a new FX placeholder and Z3 variable for 'symbol'.
+        fxnode = self.create_fx_placeholder_and_z3var(symbol, float)
+
         return SymFloat(SymNode(symbol, self, float, None, fxnode=fxnode))
 
     def create_unbacked_symint(self):
@@ -2488,8 +2492,10 @@ Failed inputs:
         symbol: sympy.Symbol = sympy.Symbol(name, integer=True)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
-        self._add_z3var_for(symbol, int)
-        fxnode = self.create_fx_placeholder(int, name, symbol=symbol)
+
+        # Create a new FX placeholder and Z3 variable for 'symbol'.
+        fxnode = self.create_fx_placeholder_and_z3var(symbol, int)
+
         return SymInt(SymNode(symbol, self, int, None, fxnode=fxnode))
 
     def create_unbacked_symbool(self):
@@ -2497,12 +2503,10 @@ Failed inputs:
         symbol: sympy.Symbol = sympy.Symbol(name, integer=True)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
         self.var_to_range[symbol] = ValueRanges(0, 1)
-        # Add output guards for the validator.
-        # Necessary, since they are implicit constraints. i.e. guards might not
-        # be issued because of them.
-        self._add_z3var_for(symbol, bool)
-        self._add_assertion(sympy.And(sympy.Eq(symbol, 0), sympy.Eq(symbol, 1)))  # type: ignore
-        fxnode = self.create_fx_placeholder(bool, name, symbol=symbol)
+
+        # Create a new FX placeholder and Z3 variable for 'symbol'.
+        fxnode = self.create_fx_placeholder_and_z3var(symbol, bool)
+
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fxnode=fxnode))
 
     def create_symbol(
@@ -2940,7 +2944,7 @@ Failed inputs:
 
             # Before validating, populate the input of the validator with the
             # built FX graph.
-            _populate_validator_with_fx_graph(self.validator, self.tracer.graph)
+            _populate_validator_with_fx_graph(self.validator, self.graph)
 
         self._check_translation_validate()
         return exprs
@@ -3287,13 +3291,13 @@ Failed inputs:
 
         if _translation_validator_enabled() and fxnode is not None:
             if concrete_val is sympy.true:
-                self.create_fx_call_function(torch._assert, (fxnode,), None)
+                self.create_fx_call_function(torch._assert, (fxnode,))
             elif concrete_val is sympy.false:
-                neg = self.create_fx_call_function(operator.not_, (fxnode,), bool)
-                self.create_fx_call_function(torch._assert, (neg,), None)
+                neg = self.create_fx_call_function(operator.not_, (fxnode,))
+                self.create_fx_call_function(torch._assert, (neg,))
             else:
-                eql = self.create_fx_call_function(operator.eq, (fxnode, concrete_val), bool)
-                self.create_fx_call_function(torch._assert, (eql,), None)
+                eql = self.create_fx_call_function(operator.eq, (fxnode, concrete_val))
+                self.create_fx_call_function(torch._assert, (eql,))
 
         if len(orig_expr.free_symbols) == 0:
             self.log.debug("eval %s [trivial]", orig_expr)
