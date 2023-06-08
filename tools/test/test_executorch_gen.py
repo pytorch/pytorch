@@ -8,7 +8,12 @@ import yaml
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey
 from torchgen.gen import LineLoader
 
-from torchgen.gen_executorch import gen_functions_declarations, translate_native_yaml, parse_yaml_files, ComputeCodegenUnboxedKernels, gen_unboxing
+from torchgen.gen_executorch import (
+    ComputeCodegenUnboxedKernels,
+    gen_functions_declarations,
+    parse_yaml_files,
+    translate_native_yaml,
+)
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
@@ -18,7 +23,6 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import FileManager
 
 TEST_YAML = """
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -197,7 +201,7 @@ class TestParseNativeYaml(unittest.TestCase):
             native_yaml_path=self.ops_yaml_path,
             custom_ops_yaml_path=custom_ops_yaml_path,
             selector=selector,
-            use_aten_lib=use_aten_lib
+            use_aten_lib=use_aten_lib,
         )
 
         # Just the default kernel entry
@@ -206,7 +210,9 @@ class TestParseNativeYaml(unittest.TestCase):
 
         op_entries = parsed_yaml.kernel_index.index
         for op_name, kernel_mapping in op_entries.items():
-            self.assertTrue(len(kernel_mapping) == expected_kernel_entry.pop(str(op_name)))
+            self.assertTrue(
+                len(kernel_mapping) == expected_kernel_entry.pop(str(op_name))
+            )
 
         self.assertTrue(len(expected_kernel_entry) == 0)
 
@@ -223,7 +229,9 @@ class TestParseKernelYamlFiles(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.mkdtemp()
 
-        self.aten_kernel_yaml_path = os.path.join(self.temp_dir, "test_kernel_native_functions.yaml")
+        self.aten_kernel_yaml_path = os.path.join(
+            self.temp_dir, "test_kernel_native_functions.yaml"
+        )
         with open(self.aten_kernel_yaml_path, "w") as f:
             f.write(TEST_KERNEL_YAML)
         self.ops_yaml_path = os.path.join(self.temp_dir, "test.yaml")
@@ -280,7 +288,7 @@ class TestParseKernelYamlFiles(unittest.TestCase):
             native_yaml_path=self.ops_yaml_path,
             custom_ops_yaml_path=custom_ops_yaml_path,
             selector=selector,
-            use_aten_lib=use_aten_lib
+            use_aten_lib=use_aten_lib,
         )
 
         expected_kernel_entry = {"add.out": 9, "mul.out": 2}
@@ -288,7 +296,9 @@ class TestParseKernelYamlFiles(unittest.TestCase):
 
         op_entries = parsed_yaml.kernel_index.index
         for op_name, kernel_mapping in op_entries.items():
-            self.assertTrue(len(kernel_mapping) == expected_kernel_entry.pop(str(op_name)))
+            self.assertTrue(
+                len(kernel_mapping) == expected_kernel_entry.pop(str(op_name))
+            )
 
         self.assertTrue(len(expected_kernel_entry) == 0)
 
@@ -299,6 +309,7 @@ class TestParseKernelYamlFiles(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
         except OSError:
             pass
+
 
 class TestGenFunctionsDeclarations(unittest.TestCase):
     def setUp(self) -> None:
@@ -409,40 +420,46 @@ class TestComputeCodegenUnboxedKernels(unittest.TestCase):
             self.native_function_no_kern,
             _,
         ) = NativeFunction.from_yaml(
-            {"func": "custom_1::op_1() -> bool", "dispatch": {"CPU": "unused_kernel_1"}},
+            {
+                "func": "custom_1::op_1() -> bool",
+                "dispatch": {"CPU": "unused_kernel_1"},
+            },
             loc=Location(__file__, 1),
             valid_tags=set(),
         )
 
         self.default_kernel_key = ETKernelKey(default=True)
-        self.default_backend_metadata = BackendMetadata("default_kernel", False, "at")
+        self.default_backend_metadata = BackendMetadata(
+            "default_kernel", False, "at::native"
+        )
         self.default_kernel_entry = (
-            self.default_kernel_key, self.default_backend_metadata
+            self.default_kernel_key,
+            self.default_backend_metadata,
         )
 
     def test_codegen_unboxed_default(self) -> None:
         selector = SelectiveBuilder.get_nop_selector()
         use_aten_lib = False
-        entry = (
-            self.native_function_no_kern,
-            self.default_kernel_entry
-        )
+        entry = (self.native_function_no_kern, self.default_kernel_entry)
 
         result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
         # Concat used to prevent whitespace stripping
-        expected_str ="""
+        expected_str = (
+            """
 Kernel(
     "custom_1::op_1",
     "default",
     [](torch::executor::RuntimeContext & context, EValue** stack) {
-        """ + """
+        """
+            + """
 
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
-        bool result_ = torch::executor::at::default_kernel(context, );
+        bool result_ = at::native::default_kernel(context, );
 
         *stack[0] = EValue(result_);
     }
 ),
 """
+        )
 
         self.assertTrue(expected_str == result)

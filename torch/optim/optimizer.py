@@ -11,6 +11,7 @@ from typing import Callable, Dict, List, Tuple
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
 from torch._utils import is_compiling
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
@@ -226,7 +227,11 @@ class Optimizer:
 
     # Currently needed by Adam and AdamW
     def _cuda_graph_capture_health_check(self):
-        if torch.has_cuda and torch.cuda.is_available():
+        # If we are compiling, we take the capturable path automatically
+        # One caveat here is that if we are compiling, we *permit* step/param tensors to be on CPU
+        # so we do not explicitly enable the capturable flag. Inductor will decide whether cudagraphs
+        # can be enabled based on whether there is input mutation or CPU tensors.
+        if not is_compiling() and torch.has_cuda and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
 
             if capturing and not all(group['capturable'] for group in self.param_groups):
@@ -287,6 +292,18 @@ class Optimizer:
                 return out
 
         return wrapper
+
+    @staticmethod
+    def _group_tensors_by_device_and_dtype(tensorlistlist, with_indices=False):
+        """Groups a list of lists of tensors by device and dtype.
+        Skips this step if we are compiling since this will occur during inductor lowering."""
+        if is_compiling():
+            if with_indices:
+                indices = list(range(len(tensorlistlist[0])))
+                tensorlistlist.append(indices)
+            return {(None, None): tensorlistlist}
+        else:
+            return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
 
     def _patch_step_function(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)

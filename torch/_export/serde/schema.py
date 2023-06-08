@@ -113,14 +113,8 @@ class NamedArgument:
 
 
 @dataclass
-class Operator:
-    name: str
-    version: Optional[int]
-
-
-@dataclass
 class Node:
-    target: Operator
+    target: str
     inputs: List[NamedArgument]
     outputs: List[Argument]
     metadata: Dict[str, str]
@@ -143,7 +137,7 @@ class Graph:
 @dataclass
 class BackwardSignature:
     gradients_to_parameters: Dict[str, str]
-    gradients_to_userInputs: Dict[str, str]
+    gradients_to_user_inputs: Dict[str, str]
     loss_output: str
 
 
@@ -154,15 +148,23 @@ class GraphSignature:
     user_inputs: List[str]
     user_outputs: List[str]
     buffers_to_mutate: Dict[str, str]
+    backward_signature: Optional[BackwardSignature]
+
+
+@dataclass
+class CallSpec:
     in_spec: str
     out_spec: str
-    backward_signature: Optional[BackwardSignature]
 
 
 @dataclass
 class GraphModule:
     graph: Graph
-    buffers: Dict[str, TensorMeta]
-    parameters: Dict[str, TensorMeta]
-    metadata: Dict[str, str]
     signature: GraphSignature
+    call_spec: CallSpec
+
+
+@dataclass
+class ExportedProgram:
+    graph_module: GraphModule
+    opset_version: Dict[str, int]
