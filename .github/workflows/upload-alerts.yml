@@ -31,8 +31,8 @@ jobs:
       - name: Upload alerts
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_UPDATE_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_UPDATE_SECRET_ACCESS_KEY }}
+          # AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_UPDATE_ACCESS_KEY_ID }}
+          # AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_UPDATE_SECRET_ACCESS_KEY }}
         uses: pytorch/test-infra/.github/actions/upload-alerts@468a696ac94626b02d045a3b9b111859033f62a3
         with:
           alerts: '${{ steps.alert_creation_step.outputs.script-output }}'
