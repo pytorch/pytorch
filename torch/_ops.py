@@ -122,6 +122,14 @@ class OperatorBase:
                     f"Trying to override a python impl for {k} on operator {self.name()}"
                 )
             self.py_kernels[k] = fn
+            if k == torch._C.DispatchKey.CompositeImplicitAutograd and torch._C.DispatchKey.Functionalize not in self.py_kernels:
+                # Functionalization codegen is sneaky,
+                # and it registers C++ CompositeImplicit kernels *directly* to the Functionalize key.
+                # If we have a CompositeImplicit decomp registered from python, we want functionalize
+                # to use it, instead of the C++ decomp. We can't though, because Functionalize
+                # isn't part of the CompositeImplicitAutograd alias set.
+                # (open quesetion: will we eventually need to do this for functorch transform keys too?)
+                self.py_kernels[torch._C.DispatchKey.Functionalize] = fn
             self._dispatch_cache.clear()
             return fn
 
