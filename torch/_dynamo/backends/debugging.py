@@ -7,6 +7,7 @@ from functorch.compile import min_cut_rematerialization_partition
 import torch
 from torch._functorch.compilers import ts_compile
 from .. import config
+from ..utils import compilation_metrics
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
 
@@ -67,7 +68,10 @@ def explain(gm: torch.fx.GraphModule, example_inputs):
             traceback.format_list(gm.compile_subgraph_reason.user_stack)
         )
         msg = f"{gm.compile_subgraph_reason.reason}\n{formatted_stack}"
-        print("Graph Break\nBreak reason:\n", msg)
+        print(
+            f"Graph Break\nBreak reason {len(compilation_metrics['OutputGraph.call_user_compiler'])+1}:\n",
+            msg,
+        )
 
     return gm.forward
 
