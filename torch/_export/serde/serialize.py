@@ -135,7 +135,8 @@ def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
         if symbolic_shapes.is_concrete_int(s):
             return SymInt.create(as_int=int(s))
         else:
-            return SymInt.create(as_symbol=str(s))
+            assert isinstance(s, torch.SymInt)
+            return SymInt.create(as_symbol=[str(s), s.node.hint])
     else:
         raise SerializeError(
             f"SymInt should be either symbol or int, got `{s}` of type `{type(s)}`"
@@ -684,28 +685,34 @@ class ExportedProgramSerializer:
 class GraphModuleDeserializer:
     def __init__(self):
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
-        self.serialized_name_to_meta: Dict[str, Union[FakeTensor, int, torch.SymInt, torch.SymBool]] = {}
+        self.serialized_name_to_meta: Dict[str, Union[FakeTensor, int, torch.SymInt, bool, torch.SymBool]] = {}
         self.graph = torch.fx.Graph()
 
-    def deserialize_sym(
-        self, s: Union[SymInt, SymBool]
-    ) -> Union[int, torch.SymInt, bool, torch.SymBool]:
+    def deserialize_sym_int(self, s: SymInt) -> Union[int, torch.SymInt]:
         val = s.value
         if s.type == "as_symbol":
-            # 7*s0
-            # "s0" --> s0
-            expr = sympy.sympify(val, locals=self.symbol_name_to_symbol)
-            symint = self.shape_env.create_symintnode(expr, hint=None)
-            return symint
+            expr, hint = val
+            sym = sympy.sympify(expr, locals=self.symbol_name_to_symbol)
+            return self.shape_env.create_symintnode(sym, hint=hint)
         elif s.type == "as_int":
             assert isinstance(val, int)
             return val
+        else:
+            raise SerializeError(
+                f"SymInt has invalid field type {s.type} with value {s.value}"
+            )
+
+    def deserialize_sym_bool(self, s: SymBool) -> Union[bool, torch.SymBool]:
+        val = s.value
+        if s.type == "as_symbol":
+            expr = sympy.sympify(val, locals=self.symbol_name_to_symbol)
+            return symbolic_shapes.SymBool(symbolic_shapes.SymNode(expr, self.shape_env, bool, None))
         elif s.type == "as_bool":
             assert isinstance(val, bool)
             return val
         else:
             raise SerializeError(
-                f"SymInt has invalid field type {s.type} with value {s.value}"
+                f"SymBool has invalid field type {s.type} with value {s.value}"
             )
 
     def deserialize_tensor_meta(
@@ -717,8 +724,8 @@ class GraphModuleDeserializer:
             return cast(
                 FakeTensor,
                 torch.empty_strided(
-                    tuple(self.deserialize_sym(val) for val in tensor_meta.sizes),
-                    tuple(self.deserialize_sym(val) for val in tensor_meta.strides),
+                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.sizes),  # type: ignore[misc]
+                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.strides),  # type: ignore[misc]
                     device=deserialize_device(tensor_meta.device),
                     dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
                 ),
@@ -750,12 +757,10 @@ class GraphModuleDeserializer:
             self.serialized_name_to_meta[name] = meta_val
 
         for name, sym_int_value in serialized_graph.sym_int_values.items():
-            v = self.deserialize_sym(sym_int_value)
-            self.serialized_name_to_meta[name] = v
+            self.serialized_name_to_meta[name] = self.deserialize_sym_int(sym_int_value)
 
         for name, sym_bool_value in serialized_graph.sym_bool_values.items():
-            v = self.deserialize_sym(sym_bool_value)
-            self.serialized_name_to_meta[name] = v
+            self.serialized_name_to_meta[name] = self.deserialize_sym_bool(sym_bool_value)
 
         # Inputs: convert to placeholder nodes in FX.
         for input in serialized_graph.inputs:
