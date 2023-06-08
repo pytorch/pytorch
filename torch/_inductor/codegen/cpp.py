@@ -2158,37 +2158,46 @@ class CppKernelProxy(CppKernel):
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            for node in sub_graph.nodes:
-                _node: torch.fx.Node = node
-                if _node.target in ["load", "constant"]:
-                    assert len(_node.args) == 3
-                    ops = _node.args[0]
-                    # If the node is constant, the last arg is dtype
-                    load_dtype = (
-                        V.graph.get_dtype(_node.args[1])
-                        if _node.target == "load"
-                        else _node.args[-1]
-                    )
+            def is_bf16_load_or_constant(node: torch.fx.Node):
+                if node.target not in ["load", "constant"]:
+                    return False
+                assert len(node.args) == 3
+                # If the node is constant, the last arg is dtype
+                load_dtype = (
+                    V.graph.get_dtype(node.args[1])
+                    if node.target == "load"
+                    else node.args[-1]
+                )
+                return load_dtype == torch.bfloat16
 
-                    if load_dtype == torch.bfloat16:
-                        with sub_graph.inserting_after(_node):
-                            to_type_node = sub_graph.call_method(
-                                "to_dtype", args=(ops, _node, torch.float)
-                            )
-                            to_type_node_args = to_type_node.args
-                            _node.replace_all_uses_with(to_type_node)
-                            to_type_node.args = to_type_node_args
-                            metrics.cpp_to_dtype_count += 1
-                elif _node.target == "store":
-                    ops, store_var, _, value_var, _ = _node.args
-                    store_dtype = V.graph.get_dtype(store_var)
-                    if store_dtype == torch.bfloat16:
-                        with sub_graph.inserting_before(_node):
-                            to_type_node = sub_graph.call_method(
-                                "to_dtype", args=(ops, value_var, torch.bfloat16)
-                            )
-                            _node.replace_input_with(value_var, to_type_node)
-                            metrics.cpp_to_dtype_count += 1
+            def is_bf16_store(node: torch.fx.Node):
+                if node.target != "store":
+                    return False
+                _, store_var, _, _, _ = node.args
+                store_dtype = V.graph.get_dtype(store_var)
+                return store_dtype == torch.bfloat16
+
+            sub_graph_nodes = list(sub_graph.nodes)
+            to_bf16_legalized_nodes = []
+            for _node in sub_graph_nodes:
+                if is_bf16_load_or_constant(_node):
+                    ops = _node.args[0]
+                    with sub_graph.inserting_after(_node):
+                        to_type_node = sub_graph.call_method(
+                            "to_dtype", args=(ops, _node, torch.float)
+                        )
+                        to_type_node_args = to_type_node.args
+                        _node.replace_all_uses_with(to_type_node)
+                        to_type_node.args = to_type_node_args
+                        metrics.cpp_to_dtype_count += 1
+                elif is_bf16_store(_node):
+                    ops, _, _, value_var, _ = _node.args
+                    with sub_graph.inserting_before(_node):
+                        to_type_node = sub_graph.call_method(
+                            "to_dtype", args=(ops, value_var, torch.bfloat16)
+                        )
+                        _node.replace_input_with(value_var, to_type_node)
+                        metrics.cpp_to_dtype_count += 1
                 elif _node.target == "reduction":
                     (
                         ops,
@@ -2217,13 +2226,18 @@ class CppKernelProxy(CppKernel):
                         )
                 elif _node.target == "to_dtype" and _node.args[-1] in [torch.bfloat16]:
                     (ops, x, _) = _node.args
-                    from_load = _node.all_input_nodes[-1].target == "load"
-                    to_store = all(usr.target == "store" for usr in _node.users)
                     # The legalization always loads the BF16 tensor as FP32 for computation and converts
                     # back to BF16 after the computation. Hence, there should be no computation w/ BF16.
                     # Therefore, we update the to_dtype by replacing the bf16 dtype with fp32.
-                    if not (from_load or to_store):
-                        _node.args = (ops, x, torch.float)
+                    # Save the legalized to_dtype node for the elimination(eliminate_to_dtype step):
+                    #  1) Eliminate the redundant to_dtype node if we have a pattern as follows:
+                    #     graph():
+                    #       %bf16_legalized = call_method[target=to_dtype](args = (%ops, %input, torch.float))
+                    #       %to_dtype2 = call_method[target=to_dtype](args = (%ops, %bf16_legalized, torch.bfloat16))
+                    # Regarding the first to_dtype, it is redundant because the second to_type also converts to the torch.bfloat16.
+                    # Hence, we remove the first to_type.
+                    to_bf16_legalized_nodes.append(_node)
+                    _node.args = (ops, x, torch.float)
                 else:
                     pass
 
@@ -2246,7 +2260,15 @@ class CppKernelProxy(CppKernel):
                     ]
                     for node_users in all_to_nodes_and_users:
                         for node, users in node_users.items():
-                            if all(usr.args[-1] == node.args[-1] for usr in users):
+                            if node in sub_graph.nodes and (
+                                all(usr.args[-1] == node.args[-1] for usr in users)
+                                or (
+                                    node in to_bf16_legalized_nodes
+                                    and all(
+                                        usr.args[-1] == torch.bfloat16 for usr in users
+                                    )
+                                )
+                            ):
                                 val_node = node.all_input_nodes[-1]
                                 node.replace_all_uses_with(val_node)
                                 sub_graph.erase_node(node)
