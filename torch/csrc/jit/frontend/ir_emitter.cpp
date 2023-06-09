@@ -187,7 +187,7 @@ struct CondValue {
 };
 
 enum NoneStatus { ALWAYS, MAYBE, NEVER };
-NoneStatus canBeNone(Value* v) {
+static NoneStatus canBeNone(Value* v) {
   if (v->node()->mustBeNone()) {
     return ALWAYS;
   }
@@ -5605,7 +5605,7 @@ std::vector<Function*> CompilationUnit::define(
       self);
 }
 
-void eraseListLiterals(std::shared_ptr<Graph>& graph) {
+static void eraseListLiterals(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
 
   for (auto next_node = it.next(); next_node != nullptr;) {

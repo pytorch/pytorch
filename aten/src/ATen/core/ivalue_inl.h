@@ -1622,7 +1622,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 
   TORCH_API friend std::ostream& operator<<(
       std::ostream& out,
-      const EnumHolder& v);
+      const ivalue::EnumHolder& v);
 
   TORCH_API const std::string qualifiedClassName() const;
 
