@@ -1,5 +1,4 @@
 import inspect
-import itertools
 import operator
 import types
 from typing import Dict, List
@@ -373,14 +372,6 @@ class TensorVariable(VariableTracker):
                     [constant_result.getitem_const(a) for a in args], **options
                 )
             return constant_result
-        elif (
-            name == "repeat"
-            and not all(
-                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-            )
-            and not config.dynamic_shapes
-        ):
-            unimplemented("dynamic Tensor.repeat")
         elif name == "numpy":
             if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
                 unimplemented(
