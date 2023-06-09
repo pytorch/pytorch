@@ -3,7 +3,7 @@ import os
 import pathlib
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, TextIO, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, TextIO, Tuple, Union
 
 import yaml
 
@@ -20,6 +20,7 @@ from torchgen.executorch.api.custom_ops import (
 from torchgen.executorch.api.types import contextArg, ExecutorchCppSignature
 from torchgen.executorch.api.unboxing import Unboxing
 from torchgen.executorch.model import ETKernelIndex, ETParsedYaml
+from torchgen.executorch.parse import ET_FIELDS, parse_et_yaml, parse_et_yaml_struct
 from torchgen.gen import (
     get_custom_build_selector,
     get_native_function_declarations,
@@ -33,6 +34,7 @@ from torchgen.model import (
     BackendMetadata,
     DEFAULT_KERNEL_NAMESPACE,
     DispatchKey,
+    FunctionSchema,
     Location,
     NativeFunction,
     NativeFunctionsGroup,
@@ -531,16 +533,26 @@ def translate_native_yaml(
         with open(aten_yaml_path, "r") as aten_yaml:
             out_file.writelines(aten_yaml.readlines())
         return
-    aten_parsed_yaml = parse_native_yaml(
+
+    native_functions, persisted_fields = parse_et_yaml(
         aten_yaml_path,
         tags_yaml_path,
         None,
         skip_native_fns_gen=False,
     )
-    aten_native_functions = aten_parsed_yaml.native_functions
-    schema_dict = {
-        f"{f.namespace}::{f.func.name}": str(f.func) for f in aten_native_functions
+
+    func_to_scoped_name: Dict[FunctionSchema, str] = {
+        f.func: f"{f.namespace}::{f.func.name}" for f in native_functions
     }
+    op_to_scoped_name: Dict[OperatorName, str] = {
+        func.name: name for func, name in func_to_scoped_name.items()
+    }
+
+    schema_dict = {name: str(func) for func, name in func_to_scoped_name.items()}
+    kernel_persist_dict: Dict[str, Dict[str, Any]] = {
+        op_to_scoped_name[op]: v for op, v in persisted_fields.items()
+    }
+
     if (
         not native_yaml_path
         or not os.path.exists(native_yaml_path)
@@ -565,6 +577,12 @@ def translate_native_yaml(
                     opname = "aten::" + opname
                 assert opname in schema_dict
                 e["func"] = schema_dict.get(opname)
+
+                # Write out persisted kernel information
+                if opname in kernel_persist_dict:
+                    for k, v in kernel_persist_dict[opname].items():
+                        e[k] = v
+
         yaml.dump(native_es, out_file, width=1000)
 
 
@@ -574,18 +592,43 @@ def parse_yaml(
     function_filter: Callable[[NativeFunction], bool],
     skip_native_fns_gen: bool = False,
 ) -> Tuple[
-    List[NativeFunction], Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]
+    List[NativeFunction],
+    Union[Dict[DispatchKey, Dict[OperatorName, BackendMetadata]], ETKernelIndex],
 ]:
     if path and os.path.exists(path) and os.stat(path).st_size > 0:
+        with open(path, "r") as f:
+            es = yaml.load(f, Loader=LineLoader)
+
+        # Check for kernel index structure
+        kernel_index = (
+            parse_et_yaml_struct(es) if any("kernels" in e for e in es) else None
+        )
+
+        # Remove ET specific fields from entries for BC compatibility
+        for entry in es:
+            for field in ET_FIELDS:
+                entry.pop(field, None)
+
         parsed_yaml = parse_native_yaml(
             path,
             tags_yaml_path,
             None,
             skip_native_fns_gen=skip_native_fns_gen,
+            loaded_yaml=es,
         )
         native_functions = list(filter(function_filter, parsed_yaml.native_functions))
         op_names = [f.func.name for f in native_functions]
 
+        # (1) Return ETKernelIndex if kernel index is present
+        if kernel_index is not None:
+            filtered_index = {
+                op_name: kernel_mapping
+                for op_name, kernel_mapping in kernel_index.index.items()
+                if op_name in op_names
+            }
+            return native_functions, ETKernelIndex(index=filtered_index)
+
+        # (2) Return BackendIndices if kernel index is absent
         def map_index(
             m: Dict[OperatorName, BackendMetadata]
         ) -> Dict[OperatorName, BackendMetadata]:
@@ -594,6 +637,7 @@ def parse_yaml(
         backend_indices = {
             k: map_index(b.index) for (k, b) in parsed_yaml.backend_indices.items()
         }
+
         return native_functions, backend_indices
     else:
         return [], {}
@@ -645,24 +689,27 @@ def parse_yaml_files(
                 use_aten_lib,
                 translated,
             )
-        translated_functions, translated_backend_indices = parse_yaml(
+
+        translated_functions, translated_indices = parse_yaml(
             translated_yaml_path, tags_yaml_path, function_filter, not use_aten_lib
         )
-        custom_ops_functions, custom_ops_backend_indices = parse_yaml(
+        custom_ops_functions, custom_ops_indices = parse_yaml(
             custom_ops_yaml_path, tags_yaml_path, function_filter, True
         )
 
+        # Convert BackendIndices to ETKernelIndex
+        if not isinstance(translated_indices, ETKernelIndex):
+            translated_indices = ETKernelIndex.from_backend_indices(translated_indices)
+        if not isinstance(custom_ops_indices, ETKernelIndex):
+            custom_ops_indices = ETKernelIndex.from_backend_indices(custom_ops_indices)
+
         combined_functions = translated_functions + custom_ops_functions
-        combined_kernel_index: ETKernelIndex = ETKernelIndex.from_backend_indices(
-            translated_backend_indices
-        ).grow(custom_ops_backend_indices)
-        custom_ops_kernel_index: ETKernelIndex = ETKernelIndex.from_backend_indices(
-            custom_ops_backend_indices
+        combined_kernel_index = ETKernelIndex.merge_indices(
+            translated_indices, custom_ops_indices
         )
         combined_yaml = ETParsedYaml(combined_functions, combined_kernel_index)
-        custom_ops_parsed_yaml = ETParsedYaml(
-            custom_ops_functions, custom_ops_kernel_index
-        )
+        custom_ops_parsed_yaml = ETParsedYaml(custom_ops_functions, custom_ops_indices)
+
     return combined_yaml, custom_ops_parsed_yaml
 
 
