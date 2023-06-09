@@ -11,7 +11,6 @@ from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed._tensor.random import (
     _calc_shard_linear_idx,
     _get_rng_offset,
-    CudaRNGStatesTracker,
     get_rng_state,
     is_rng_supported_mesh,
     manual_seed,
@@ -46,9 +45,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
             dtensor = init_op(dtensor, *args, **kwargs)
             self.assertEqual(local_tensor_clone, dtensor.to_local())
         else:
-            # initialize rng state
-            manual_seed(1234, device_mesh)
-
             # create DTensor from Tensor
             _tensor = torch.empty(*input_size, device="cuda")
             dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])

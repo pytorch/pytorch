@@ -17,11 +17,8 @@ from torch.distributed._tensor.op_schema import (
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.random import (
-    _default_tracker,
-    _get_rng_offset,
+    _parallel_rng_style,
     is_rng_supported_mesh,
-    set_post_op_offset,
-    set_pre_op_offset,
 )
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
@@ -236,7 +233,7 @@ def _operator_dispatch(
         # For DTensor random operator, run it within a parallel region
         assert isinstance(mesh, DeviceMesh)
         if is_random_op(op_call) and is_rng_supported_mesh(mesh):
-            with _default_tracker._parallel_region(arg_list[0]._spec):
+            with _parallel_rng_style._parallel_region(arg_list[0]._spec):
                 local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
         else:
             local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
