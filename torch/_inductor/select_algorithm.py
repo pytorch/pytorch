@@ -561,7 +561,7 @@ class ExternKernelChoice:
             pass
         return code_hash("-".join(parts))
 
-    def bind(self, input_nodes, layout, ordered_kwargs_for_cpp_kernel, **kwargs):
+    def bind(self, input_nodes, layout, ordered_kwargs_for_cpp_kernel=(), **kwargs):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         return ExternKernelCaller(
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
