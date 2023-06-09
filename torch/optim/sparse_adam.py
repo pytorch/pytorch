@@ -1,6 +1,6 @@
 import torch
 from . import _functional as F
-from .optimizer import Optimizer, _maximize_doc
+from .optimizer import Optimizer, _maximize_doc, _warn_step_no_param_with_grad
 
 __all__ = ['SparseAdam']
 
@@ -99,7 +99,8 @@ class SparseAdam(Optimizer):
                           eps=group['eps'],
                           maximize=maximize)
 
-        self.has_any_param_with_grad = has_any_param_with_grad
+        if not has_any_param_with_grad:
+            _warn_step_no_param_with_grad()
 
         return loss
 

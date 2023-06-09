@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _default_to_fused_or_foreach, _use_grad_for_differentiable,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _warn_step_no_param_with_grad)
 from typing import List, Optional
 
 __all__ = ["RMSprop", "rmsprop"]
@@ -135,7 +135,8 @@ class RMSprop(Optimizer):
                 differentiable=group["differentiable"],
             )
 
-        self.has_any_param_with_grad = has_any_param_with_grad
+        if not has_any_param_with_grad:
+            _warn_step_no_param_with_grad()
 
         return loss
 

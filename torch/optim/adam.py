@@ -4,7 +4,8 @@ import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _stack_if_compiling,
                         _dispatch_sqrt, _default_to_fused_or_foreach, _capturable_doc,
-                        _differentiable_doc, _foreach_doc, _fused_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _fused_doc, _maximize_doc,
+                        _warn_step_no_param_with_grad)
 
 __all__ = ['Adam', 'adam']
 
@@ -165,7 +166,8 @@ class Adam(Optimizer):
                 found_inf=getattr(self, "found_inf", None),
             )
 
-        self.has_any_param_with_grad = has_any_param_with_grad
+        if not has_any_param_with_grad:
+            _warn_step_no_param_with_grad()
 
         return loss
 
