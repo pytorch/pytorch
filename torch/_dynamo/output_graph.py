@@ -233,15 +233,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
             )
-            if config.dynamic_shapes
-            or config.automatic_dynamic_shapes
+            if config.automatic_dynamic_shapes
             or not config.assume_static_by_default
             else None,
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        if config.dynamic_shapes:
+        if fake_mode.shape_env is not None:
             # Register a SHAPE_ENV guard to make sure we setup shape guards
             # that show up in ShapeEnv
             self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
