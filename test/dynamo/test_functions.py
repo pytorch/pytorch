@@ -460,7 +460,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_get_privateuse1_name(x):
-        if torch._C._get_privateuse1_backend_name == "privateuseone":
+        if torch._C._get_privateuse1_backend_name() == "privateuseone":
             return x + 1
         else:
             return x - 1
