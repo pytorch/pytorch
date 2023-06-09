@@ -1,6 +1,5 @@
 from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 
-from .common_types import _params_t
 from .optimizer import Optimizer
 
 class LRScheduler:
