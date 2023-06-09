@@ -117,6 +117,7 @@ aten::_fft_c2r
 aten::_fft_c2r.out
 aten::_fft_r2c
 aten::_fft_r2c.out
+aten::_fill_mem_eff_dropout_mask_
 aten::_flash_attention_backward
 aten::_flash_attention_forward
 aten::_foobar
@@ -1314,6 +1315,7 @@ aten::values_copy
 aten::values_copy.out
 aten::vdot
 aten::vdot.out
+aten::view.dtype
 aten::view_as_complex
 aten::view_as_complex_copy
 aten::view_as_complex_copy.out

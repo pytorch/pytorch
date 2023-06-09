@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/native/Padding.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -30,18 +31,13 @@ TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
   int64_t dim_w = 1;
   int64_t nbatch = 1;
 
-  // allow dim=0 only in the batch dimension.
-  TORCH_CHECK(
-      (input.ndimension() == 2 && input.size(1) != 0) ||
-          (input.ndimension() == 3 && input.size(1) != 0 && input.size(2) != 0),
-      "2D or 3D (batch mode) tensor expected for input, but got: ",
-      input);
-
   if (input.ndimension() == 3) {
     nbatch = input.size(0);
     dim_w++;
     dim_plane++;
   }
+
+  at::native::padding::check_valid_input<1>(input, padding);
 
   /* sizes */
   auto pad_l = padding[0];
@@ -82,11 +78,7 @@ TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
   int64_t dim_w = 1;
-  int64_t nbatch = 1;
-
   if (input.ndimension() == 3) {
-    nbatch = input.size(0);
-    (void)nbatch;
     dim_w++;
   }
 
@@ -115,7 +107,6 @@ TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
 }
 
 TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
-  TORCH_CHECK(padding.size() == 6, "padding size is expected to be 6");
   int64_t pad_left = padding[0];
   int64_t pad_right = padding[1];
   int64_t pad_top = padding[2];
@@ -127,16 +118,7 @@ TORCH_META_FUNC(reflection_pad3d)(const Tensor& input, IntArrayRef padding) {
   int64_t dim_d = 1;
   int64_t dim_plane = 0;
 
-  // allow batch size of 0-dim.
-  bool valid_dims =
-      input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
-  bool valid_single = input.dim() == 4 && input.size(0) != 0 && valid_dims;
-  bool valid_batch = input.dim() == 5 && valid_dims && input.size(4) != 0;
-
-  TORCH_CHECK(
-    valid_single || valid_batch,
-      "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-  input.sizes());
+  at::native::padding::check_valid_input<3>(input, padding);
 
   bool batch_mode = (input.dim() == 5);
   if (batch_mode) {
@@ -201,8 +183,7 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
   int64_t dim_h = 2;
   int64_t dim_d = 1;
 
-  if (input.dim() == 5)
-  {
+  if (input.dim() == 5) {
     // batch mode
     dim_w++;
     dim_h++;
@@ -444,11 +425,7 @@ void reflection_pad2d_out_template(
   int dim_slices = 0;
   int64_t nbatch = 1;
 
-  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
-  TORCH_CHECK(
-      (input_.ndimension() == 3 && valid_dims) ||
-      (input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
-      "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
+  at::native::padding::check_valid_input<2>(input_, padding);
 
   if (input_.ndimension() == 4) {
     nbatch = input_.size(0);
