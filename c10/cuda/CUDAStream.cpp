@@ -291,6 +291,7 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
 }
 
 CUDAStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
+  initCUDAStreamsOnce();
   int priority = isHighPriority ? -max_stream_priorities + 1 : 0;
   return getStreamFromPool(priority, device);
 }
