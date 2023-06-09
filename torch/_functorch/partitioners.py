@@ -52,7 +52,7 @@ counter = itertools.count()
 
 
 
-def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs, is_fwd=None, recomputable_rng_ops_map={}):
+def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs, is_fwd=None, recomputable_rng_ops_map=None):
     """
     Given a graph, extracts out a subgraph that takes the specified nodes as
     inputs and returns the specified outputs.
@@ -87,7 +87,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs, is_fwd=None
             env[node] = new_graph.node_copy(node, lambda x: env[x])
 
             # Record the node to new node mapping if it is a recomputable rng op
-            if node in recomputable_rng_ops_map:
+            if recomputable_rng_ops_map and node in recomputable_rng_ops_map:
                 attr = "fwd" if is_fwd else "bwd"
                 recomputable_rng_ops_map[node][attr] = env[node]
 
@@ -122,11 +122,6 @@ def _is_primal(node):
 def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
 
-def _is_not_a_tangent(node):
-    return node.op == "placeholder" and "tangents" not in node.target
-
-
-
 def _is_bwd_seed_offset(node):
     return node.op == "placeholder" and ("bwd_seed" in node.target or "bwd_base_offset" in node.target)
 
@@ -141,7 +136,9 @@ def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
     return fwd_outputs, bwd_outputs
 
 
-def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), recomputable_rng_ops_map={}, *, num_fwd_outputs):
+def _extract_fwd_bwd_modules(
+    joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), recomputable_rng_ops_map=None, *, num_fwd_outputs
+):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
@@ -390,98 +387,6 @@ def pointwise_ops():
     return ops
 
 
-def get_depth(node, depth_map):
-    # Memoization
-    if node in depth_map:
-        return depth_map[node]
-
-    # Base case
-    if node.op == "placeholder":
-        depth_map[node] = 0
-        # if "tangents" in node.name:
-        #     depth_map[node] = 1000
-
-        return depth_map[node]
-
-    # Handle output node
-    if node.op == "output":
-        args = node.args[0]
-        for arg in args:
-            if isinstance(arg, torch.fx.node.Node):
-                get_depth(arg, depth_map)
-        return
-
-    # Get the depth of args and set the depth of this node
-    arg_depths = [get_depth(arg, depth_map) for arg in node.all_input_nodes if isinstance(arg, torch.fx.node.Node)]
-    # factory ops like full, rand might not have any input args
-    if len(arg_depths) == 0:
-        arg_depths = [0]
-
-    depth_map[node] = max(arg_depths) + 1
-    return depth_map[node]
-
-
-def sort_depths(args, depth_map):
-    arg_depths = {arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)}
-    return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
-
-def dfs(node, visited, new_graph, depth_map, env):
-    # Memoization
-    if node in visited:
-        return
-
-    # Base case
-    if node.op == "placeholder":
-        return
-
-    # Handle output node
-    if node.op == "output":
-        args = node.args[0]
-        sorted_arg_depths = sort_depths(args, depth_map)
-        for arg_node, _ in sorted_arg_depths:
-            dfs(arg_node, visited, new_graph, depth_map, env)
-
-        new_outputs = []
-        for output in args:
-            if isinstance(output, torch.fx.node.Node):
-                new_outputs.append(env[output])
-            else:
-                new_outputs.append(output)
-
-        new_graph.output(new_outputs)
-        return
-
-    # Sort all the args on the basis of depth in descenging manner
-    sorted_arg_depths = sort_depths(node.all_input_nodes, depth_map)
-    # print("Sorted node", node, sorted_arg_depths)
-    for arg_node, _ in sorted_arg_depths:
-        dfs(arg_node, visited, new_graph, depth_map, env)
-
-    env[node] = new_graph.node_copy(node, lambda x: env[x])
-    visited.add(node)
-    return
-
-def depth_based_topological_reordering(gm):
-    # Preprocess - get a depth map for nodes in the fx graph
-    depth_map = {}
-    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
-    get_depth(output_node, depth_map)
-
-    new_graph = torch.fx.Graph()
-    env = {}
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            new_node = new_graph.placeholder(node.name)
-            # Can't use node_copy here as we may be turning previous call_function into placeholders
-            new_node.meta = node.meta
-            env[node] = new_node
-
-    visited = set()
-    dfs(output_node, visited, new_graph, depth_map, env)
-    new_graph.lint()
-    new_gm = torch.fx.GraphModule(gm, new_graph)
-    return new_gm
-
 def tangent_driven_topological_reordering(gm):
     new_graph = fx.Graph()
     env = {}
@@ -536,10 +441,6 @@ def tangent_driven_topological_reordering(gm):
     new_graph.output(new_outputs)
     new_gm = torch.fx.GraphModule(gm, new_graph)
     return new_gm
-
-
-def reorder(gm):
-    return tangent_driven_topological_reordering(gm)
 
 
 def functionalize_rng_ops(joint_module, fw_module, bw_module, recomputable_rng_ops_map):
@@ -612,18 +513,29 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, recomputable_rng_o
     return fw_module, bw_module
 
 
-def _extract_fwd_bwd_modules_with_functionalized_rng(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
+def _extract_fwd_bwd_modules_with_functionalized_rng(
+    joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs
+):
     recomputable_rng_ops_map = dict()
     for node in joint_module.graph.nodes:
-        if is_recomputable(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
+        if (
+            is_recomputable(node)
+            and hasattr(node.target, "tags")
+            and torch.Tag.nondeterministic_seeded in node.target.tags
+        ):
             recomputable_rng_ops_map[node] = {"fwd": InvalidNode, "bwd": InvalidNode}
 
     fw_module, bw_module = _extract_fwd_bwd_modules(
-        joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs, recomputable_rng_ops_map=recomputable_rng_ops_map,
+        joint_module,
+        saved_values,
+        saved_sym_nodes=saved_sym_nodes,
+        num_fwd_outputs=num_fwd_outputs,
+        recomputable_rng_ops_map=recomputable_rng_ops_map,
     )
 
-    return functionalize_rng_ops(joint_module, fw_module, bw_module, recomputable_rng_ops_map)
-
+    return functionalize_rng_ops(
+        joint_module, fw_module, bw_module, recomputable_rng_ops_map
+    )
 
 def cleanup_recompute_tags(joint_module):
     for node in joint_module.graph.nodes:
@@ -912,7 +824,7 @@ def min_cut_rematerialization_partition(
             joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
 
     if graph_has_recomputable_ops:
-        bw_module = reorder(bw_module)
+        bw_module = tangent_driven_topological_reordering(gm)
 
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
