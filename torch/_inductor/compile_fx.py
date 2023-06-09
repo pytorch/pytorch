@@ -333,14 +333,30 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
-        if (
-            set(graph.device_types) == {"cuda"}
-            and not graph.mutated_inputs
-            and not has_incompatible_cudagraph_ops(gm)
-            and not complex_memory_overlap_inputs
-            and all(isinstance(t, torch.Tensor) for t in example_inputs)
-            and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
-        ):
+        cudagraph_tests = [
+            (set(graph.device_types) == {"cuda"}, "non-cuda device in graph"),
+            (not graph.mutated_inputs, "mutated inputs"),
+            (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
+            (not complex_memory_overlap_inputs, "complex memory overlap"),
+            (
+                all(
+                    isinstance(t, (torch.Tensor, torch.SymInt)) for t in example_inputs
+                ),
+                "non-Tensor inputs",
+            ),
+            (
+                (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees),
+                "multiple device indices without cudagraph_trees",
+            ),
+        ]
+        cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
+
+        if not cudagraph_fail_reasons:
+            # Force specialize all inputs so that CUDA graphs will work
+            for t in example_inputs:
+                if isinstance(t, torch.SymInt):
+                    int(t)  # guard
+
             if (
                 boxed_forward_device_index is not None
                 and not is_inference
@@ -358,6 +374,7 @@ def compile_fx_inner(
                 is_inference=is_inference,
             )
         else:
+            log.debug("disabled cudagraphs because %s", cudagraph_fail_reasons)
             BoxedBool.disable(cudagraphs)
 
             # See [Backward Generation Handling]
@@ -707,9 +724,7 @@ def compile_fx(
 
     assert not config._raise_error_for_testing
     num_example_inputs = len(example_inputs_)
-    cudagraphs = BoxedBool(
-        config.triton.cudagraphs and not dynamo_config.dynamic_shapes
-    )
+    cudagraphs = BoxedBool(config.triton.cudagraphs)
     forward_device = BoxedDeviceIndex(None)
 
     graph_id = next(_graph_counter)
