@@ -3,7 +3,10 @@
 #ifndef BUILD_LITE_INTERPRETER
 #include <torch/csrc/jit/runtime/interpreter.h>
 #endif
+#include <c10/core/Allocator.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
+#include <unordered_map>
 
 namespace torch {
 
