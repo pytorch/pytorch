@@ -4068,6 +4068,14 @@ def fn():
         x, y = opt_fn()
         self.assertEqual(x, y)
 
+    def test_torch_distributions_lazy_property(self):
+        def fn(x):
+            return torch.distributions.Categorical(probs=x).entropy()
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        x = torch.rand([4, 4])
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
@@ -5617,6 +5625,19 @@ def ___make_guard_fn():
         opt_model = torch._dynamo.optimize("eager")(MyModule())
         opt_out = opt_model(x)
         self.assertTrue(same(orig_out, opt_out))
+
+    def test_torch_variable_hasattr(self):
+        def fn(x):
+            if hasattr(torch.nn, "Module"):
+                return x * x
+            return x + 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.rand([4, 4])
+        fn_out = fn(x)
+        compiled_out = compiled_fn(x)
+        self.assertTrue(same(fn_out, compiled_out))
 
 
 class TestTracer(JitTestCase):

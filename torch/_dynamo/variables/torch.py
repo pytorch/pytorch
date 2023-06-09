@@ -185,6 +185,10 @@ class TorchVariable(VariableTracker):
     def __repr__(self):
         return f"TorchVariable({self.value})"
 
+    def call_hasattr(self, tx, name):
+        result = hasattr(self.value, name)
+        return variables.ConstantVariable(result).add_options(self)
+
     def unique_var_name(self):
         name = torch_get_name(self.value, f"allowed_fn_{id(self.value)}")
         return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
