@@ -3260,7 +3260,9 @@ class FallbackKernel(ExternKernelAlloc):
             not kernel._schema.is_mutable
         ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
 
-        # NOTE: we might not need these checks for is_not_write
+        # These checks are here because ops that return aliasing tensors will
+        # return type Tensor& instead of Tensor, but codegen will always write
+        # type Tensor on the LHS.
         def is_not_write(arg):
             return arg.alias_info is None or not arg.alias_info.is_write
 
