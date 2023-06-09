@@ -514,44 +514,45 @@ class QNNPackQuantizer(Quantizer):
         weight_qspec = get_weight_qspec(quantization_config)
         bias_qspec = get_bias_qspec(quantization_config)
         for module_or_fn_type, partitions in module_partitions.items():
-            if module_or_fn_type == torch.nn.Linear:
-                for p in partitions:
-                    act_node = p.input_nodes[0]
-                    output_node = p.output_nodes[0]
-                    weight_node = None
-                    bias_node = None
-                    for node in p.params:
-                        weight_or_bias = getattr(gm, node.target)  # type: ignore[arg-type]
-                        if weight_or_bias.ndim == 2:  # type: ignore[attr-defined]
-                            weight_node = node
-                        if weight_or_bias.ndim == 1:  # type: ignore[attr-defined]
-                            bias_node = node
-                    if weight_node is None:
-                        raise ValueError("No weight found in Linear pattern")
-                    # find use of act node within the matched pattern
-                    act_use_node = None
-                    for node in p.nodes:
-                        if node in act_node.users:  # type: ignore[union-attr]
-                            act_use_node = node
-                            break
-                    if act_use_node is None:
-                        raise ValueError(
-                            "Could not find an user of act node within matched pattern."
-                        )
-                    if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
-                        _annotate_input_qspec_map(
-                            act_use_node,
-                            act_node,
-                            input_act_qspec,
-                        )
-                    if bias_node and _is_annotated([bias_node]) is False:
-                        _annotate_output_qspec(bias_node, bias_qspec)
-                    if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
-                        _annotate_output_qspec(weight_node, weight_qspec)
-                    if _is_annotated([output_node]) is False:
-                        _annotate_output_qspec(output_node, output_act_qspec)
-                    nodes_to_mark_annotated = list(p.nodes)
-                    _mark_nodes_as_annotated(nodes_to_mark_annotated)
+            for p in partitions:
+                if len(p.input_nodes) > 1:
+                    raise ValueError(f"More than one input node found for {module_or_fn_type} partition")
+                act_node = p.input_nodes[0]
+                output_node = p.output_nodes[0]
+                weight_node = None
+                bias_node = None
+                for node in p.params:
+                    weight_or_bias = getattr(gm, node.target)  # type: ignore[arg-type]
+                    if weight_or_bias.ndim == 2:  # type: ignore[attr-defined]
+                        weight_node = node
+                    if weight_or_bias.ndim == 1:  # type: ignore[attr-defined]
+                        bias_node = node
+                if weight_node is None:
+                    raise ValueError("No weight found in Linear pattern")
+                # find use of act node within the matched pattern
+                act_use_node = None
+                for node in p.nodes:
+                    if node in act_node.users:  # type: ignore[union-attr]
+                        act_use_node = node
+                        break
+                if act_use_node is None:
+                    raise ValueError(
+                        "Could not find an user of act node within matched pattern."
+                    )
+                if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
+                    _annotate_input_qspec_map(
+                        act_use_node,
+                        act_node,
+                        input_act_qspec,
+                    )
+                if bias_node and _is_annotated([bias_node]) is False:
+                    _annotate_output_qspec(bias_node, bias_qspec)
+                if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
+                    _annotate_output_qspec(weight_node, weight_qspec)
+                if _is_annotated([output_node]) is False:
+                    _annotate_output_qspec(output_node, output_act_qspec)
+                nodes_to_mark_annotated = list(p.nodes)
+                _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_maxpool2d(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig

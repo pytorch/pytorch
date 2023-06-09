@@ -207,6 +207,16 @@ class TestMetaConverter(TestCase):
 
         self.assertMetadataMatches(m, x)
 
+    def test_view_mutate(self):
+        x = torch.zeros(4)
+        y = x.view(2, 2)
+
+        to_meta = MetaConverter()
+        m = to_meta(y)
+
+        y.add_(torch.randn(2, 2, requires_grad=True))
+        m.add_(torch.randn(2, 2, device='meta', requires_grad=True))
+
     def test_non_leaf_torture(self):
         x = torch.empty(20, requires_grad=True)
         with torch.no_grad():
@@ -689,7 +699,6 @@ meta_function_skips = {
     torch.nn.functional.interpolate : {bf16, f64, f32, u8},
     torch.nn.functional.nll_loss : {bf16, f64, f32},
     torch.linalg.cond : {c128, c64, f32, f64},
-    torch.linalg.vander: {c128, c64, f32, f64, i16, i32, i64, i8, u8},
     torch.linalg.vecdot : {bf16, f64, f32, f16},
     torch.empty : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
