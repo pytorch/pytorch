@@ -161,6 +161,9 @@ inductor_skips = defaultdict(dict)
 inductor_skips["cpu"] = {
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
+    "_softmax_backward_data": {
+        f16
+    },  # half_to_float is only valid for the CUDA implementatio
 }
 
 if IS_MACOS and IS_X86:
