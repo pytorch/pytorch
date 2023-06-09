@@ -977,9 +977,8 @@ class VariableBuilder:
                 # and it is inappropriate to eagerly duck size them with
                 # real sizevars
                 if (
-                    frame_state_entry.scalar is None
-                    or not config.assume_static_by_default
-                ):
+                    config.automatic_dynamic_shapes and frame_state_entry.scalar is None
+                ) or not config.assume_static_by_default:
                     dynamic_dim = DimDynamic.DYNAMIC
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
