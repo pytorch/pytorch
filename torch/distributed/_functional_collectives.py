@@ -27,7 +27,7 @@ else:
         def is_torchdynamo_compiling():
             return False
 
-distributed_log = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 """
 New traceable, functional collectives.
@@ -379,7 +379,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    distributed_log.debug("all_reduce size: %s, op: %s, group: %s, tag: %s", str(self.size()), reduceOp, group, tag)
+    log.debug("all_reduce size: %s, op: %s, group: %s, tag: %s", str(self.size()), reduceOp, group, tag)
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     return _maybe_wrap_tensor(tensor)
@@ -407,7 +407,7 @@ def all_gather_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    distributed_log.debug(
+    log.debug(
         "all_gather_tensor size: %s, gather_dim: %d, group: %s, tag: %s",
         self.size(),
         gather_dim,
@@ -445,7 +445,7 @@ def reduce_scatter_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    distributed_log.debug(
+    log.debug(
         "reduce_scatter_tensor size: %s, reduce_op: %s, scatter_dim: %d, group: %s, tag: %s",
         self.size(),
         reduceOp,
@@ -483,7 +483,7 @@ def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TY
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    distributed_log.debug(
+    log.debug(
         "all_reduce_coalesced sizes: %s, reduce_op: %s, group: %s, tag: %s",
         [t.size() for t in self],
         reduceOp,
