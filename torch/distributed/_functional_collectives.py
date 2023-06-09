@@ -409,7 +409,7 @@ def all_gather_tensor(
     """
     distributed_log.debug(
         "all_gather_tensor size: %s, gather_dim: %d, group: %s, tag: %s",
-        str(self.size()),
+        self.size(),
         gather_dim,
         group,
         tag
@@ -447,7 +447,7 @@ def reduce_scatter_tensor(
     """
     distributed_log.debug(
         "reduce_scatter_tensor size: %s, reduce_op: %s, scatter_dim: %d, group: %s, tag: %s",
-        str(self.size()),
+        self.size(),
         reduceOp,
         scatter_dim,
         group,
@@ -484,8 +484,8 @@ def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TY
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     distributed_log.debug(
-        "all_reduce_coalesced sizes: [%s], reduce_op: %s, group: %s, tag: %s",
-        ", ".join([str(t.size()) for t in self]),
+        "all_reduce_coalesced sizes: %s, reduce_op: %s, group: %s, tag: %s",
+        [t.size() for t in self],
         reduceOp,
         group,
         tag
