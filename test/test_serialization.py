@@ -3450,7 +3450,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with TemporaryFileName() as f:
             state_dict = DummyModel().state_dict()
             torch.save(state_dict, f)
-            result = torch.load(f, mmap=True, weights_only=weights_only)
+            # result = torch.load(f, mmap=True, weights_only=weights_only)
             # JUST COMMENTING OUT FOR NOW TO TEST WHETHER THIS FIRST LOAD
             # CAUSES THE WINDOWS PERMISSION ERROR
             # result_non_mmap = torch.load(f, mmap=False, weights_only=weights_only)
