@@ -1671,7 +1671,8 @@ class TestOptim(TestCase):
             )
             self.assertEqual(params, prev_params)
 
-    
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required.")
     def test_fused_optimizer_load_state_dict(self):
         # NOTE: The below SIMULATES a fused optimizer with its state moved to CPU, issue 103256
         # How do we get there? Users typically create CUDA models on fused optimizers and then

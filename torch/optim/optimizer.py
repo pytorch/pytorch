@@ -395,8 +395,8 @@ class Optimizer:
         }
 
     @staticmethod
-    def _process_value_according_to_param_policy(
-        param: Tensor, value: Tensor, paramID : int=None, paramGroups : List[Dict[Any, Any]]=None, key=None) -> Tensor:
+    def _process_value_according_to_param_policy(param: Tensor, value: Tensor, paramID: int = None,
+                                                 paramGroups: List[Dict[Any, Any]] = None, key=None) -> Tensor:
         # Floating-point types are a bit special here. They are the only ones
         # that are assumed to always match the type of params.
         # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
