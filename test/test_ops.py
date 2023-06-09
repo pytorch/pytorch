@@ -1004,7 +1004,9 @@ class TestCommon(TestCase):
                 else:
                     out = op_to_test(inputs, *args, **kwargs)
                 self.assertFalse(expectFail)
-            except RuntimeError:
+            except RuntimeError as err:
+                self.assertEqual(
+                    str(err), "dtype argument and out dtype must match in reduction")
                 self.assertTrue(expectFail)
             return out
         samples = op.sample_inputs(device, dtype)
