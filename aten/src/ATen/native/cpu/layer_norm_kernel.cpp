@@ -119,30 +119,32 @@ void layer_norm_kernel_mixed_type(
       rstd_val = float(1) / std::sqrt(rstd_val + eps);
       const float scale = rstd_val;
       const float bias = -rstd_val * mean_val;
-      if (gamma_null || beta_null) {
-        for (const auto j : c10::irange(N)) {
-          const param_t gamma_v = gamma_null ? param_t(1) : gamma_data[j];
-          const param_t beta_v = beta_null ? param_t(0) : beta_data[j];
-          Y_ptr[j] = (X_ptr[j] * scale + bias) * gamma_v + beta_v;
-        }
-      } else {
-        int64_t d = 0;
-        for (; d < N - (N % bVec::size()); d += bVec::size()) {
-          bVec x_bvec = bVec::loadu(X_ptr + d);
-          fVec x_fvec0, x_fvec1;
-          std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
-          fVec gamma_fvec0, gamma_fvec1;
+      int64_t d = 0;
+      for (; d < N - (N % bVec::size()); d += bVec::size()) {
+        bVec x_bvec = bVec::loadu(X_ptr + d);
+        fVec x_fvec0, x_fvec1;
+        std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
+        fVec gamma_fvec0, gamma_fvec1;
+        if (gamma_null) {
+          gamma_fvec0 = gamma_fvec1 = fVec(1);
+        } else {
           std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data + d);
-          fVec beta_fvec0, beta_fvec1;
+        }
+        fVec beta_fvec0, beta_fvec1;
+        if (beta_null) {
+          beta_fvec0 = beta_fvec1 = fVec(0);
+        } else {
           std::tie(beta_fvec0, beta_fvec1) = load2f(beta_data + d);
-          fVec y_fvec0 = (x_fvec0 * fVec(scale) + fVec(bias)) * gamma_fvec0 + beta_fvec0;
-          fVec y_fvec1 = (x_fvec1 * fVec(scale) + fVec(bias)) * gamma_fvec1 + beta_fvec1;
-          bVec y_bvec = convert_from_float<T>(y_fvec0, y_fvec1);
-          y_bvec.store(Y_ptr + d);
         }
-        for (; d < N; d++) {
-          Y_ptr[d] = (X_ptr[d] * scale + bias) * gamma_data[d] + beta_data[d];
-        }
+        fVec y_fvec0 = (x_fvec0 * fVec(scale) + fVec(bias)) * gamma_fvec0 + beta_fvec0;
+        fVec y_fvec1 = (x_fvec1 * fVec(scale) + fVec(bias)) * gamma_fvec1 + beta_fvec1;
+        bVec y_bvec = convert_from_float<T>(y_fvec0, y_fvec1);
+        y_bvec.store(Y_ptr + d);
+      }
+      for (; d < N; d++) {
+        const float gamma_v = gamma_null ? float(1) : float(gamma_data[d]);
+        const float beta_v = beta_null ? float(0) : float(beta_data[d]);
+        Y_ptr[d] = (float(X_ptr[d]) * scale + bias) * gamma_v + beta_v;
       }
       if (!mean_null) {
         mean_data[i] = mean_val;
