@@ -1024,6 +1024,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
             (true_r, true_graph, true_lifted_freevars) = speculate_branch(True)
             true_nn_modules = tx.copy_graphstate().output.nn_modules
+
             (false_r, false_graph, false_lifted_freevars) = speculate_branch(False)
             false_nn_modules = tx.copy_graphstate().output.nn_modules
 

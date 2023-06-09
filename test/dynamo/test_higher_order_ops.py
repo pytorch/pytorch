@@ -315,8 +315,20 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         ref = mod_for_eager(torch.ones(6, 4))
         self.assertEqual(actual, ref)
 
-        # this fails?
-        # actual = mod_for_compile(torch.ones(6, 4))
+        actual = mod_for_compile(torch.ones(3, 4))
+        ref = mod_for_eager(torch.ones(3, 4))
+        self.assertEqual(actual, ref)
+
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    size = l_x_.size();  l_x_ = None
+    getitem = size[0];  size = None
+    gt = getitem > 4;  getitem = None
+    return (gt,)""",
+        )
 
     def test_cond_free_variable_in_both_branches(self):
         backend = EagerAndRecordGraphs()
