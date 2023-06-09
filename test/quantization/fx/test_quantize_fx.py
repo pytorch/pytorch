@@ -9011,6 +9011,43 @@ class TestQuantizeFxOps(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
 
+    def test_pixel_shuffle_module(self) -> None:
+        class MyBias(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(8))
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(8, 8, 1, bias=False)
+                self.ps = nn.PixelShuffle(upscale_factor=2)
+                self.bias = MyBias()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.ps(x)
+                x = x.view(-1, 8, 2, 2)
+                bias = self.bias.bias
+                return x + bias
+
+        backend_config = get_qnnpack_backend_config()
+        qconfig_mapping = get_default_qconfig_mapping("qnnpack")
+        model = MyModel()
+        m = prepare_fx(
+            model,
+            qconfig_mapping=qconfig_mapping,
+            example_inputs=(torch.randn(1, 8, 3, 3),),
+            backend_config=backend_config
+        )
+        m = convert_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 1,
+            ns.call_module(nn.PixelShuffle): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
+
     def test_pixel_unshuffle(self):
         class MyBias(nn.Module):
             def __init__(self):
@@ -9046,6 +9083,46 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_occurrence = {
                 ns.call_function(torch.quantize_per_tensor): 2,
                 ns.call_method("dequantize"): 1,
+            }
+            self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
+
+    def test_pixel_unshuffle_module(self) -> None:
+        class MyBias(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(64))
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(8, 8, 1, bias=False)
+                self.unshuffle = nn.PixelUnshuffle(downscale_factor=2)
+                self.bias = MyBias()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.unshuffle(x)
+                bias = self.bias.bias
+                return x + bias
+
+        for backend in ["fbgemm", "qnnpack"]:
+            if backend == "fbgemm":
+                backend_config = get_fbgemm_backend_config()
+            else:
+                backend_config = get_qnnpack_backend_config()
+            qconfig_mapping = get_default_qconfig_mapping(backend)
+            model = MyModel()
+            m = prepare_fx(
+                model,
+                qconfig_mapping=qconfig_mapping,
+                example_inputs=(torch.randn(1, 8, 6, 6),),
+                backend_config=backend_config
+            )
+            m = convert_fx(m)
+            expected_occurrence = {
+                ns.call_function(torch.quantize_per_tensor): 2,
+                ns.call_method("dequantize"): 1,
+                ns.call_module(nn.PixelUnshuffle): 1,
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
 

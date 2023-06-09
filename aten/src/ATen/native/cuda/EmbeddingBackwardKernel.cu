@@ -196,9 +196,11 @@ __global__ void compute_num_of_partial_segments(const index_t *partials_per_segm
             partials_per_segment_offset[num_of_segments-1];
 }
 
+#if !CUB_SUPPORTS_UNIQUE_BY_KEY()
 __global__ void write_num_of_segments_for_legacy_thrust_path(int64_t *num_of_segments_ptr, int64_t num_of_segments) {
   *num_of_segments_ptr = num_of_segments;
 }
+#endif
 
 } // anon namespace
 

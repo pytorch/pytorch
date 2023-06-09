@@ -8,8 +8,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'ciflow/unstable/*'
   workflow_dispatch:
 
 env:
