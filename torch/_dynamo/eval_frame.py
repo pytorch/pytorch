@@ -936,6 +936,7 @@ def export(
         summarize_dim_constraints=True,
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
+        dynamic_shapes=tracing_mode == "symbolic",
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -945,7 +946,6 @@ def export(
             ),
             export=True,
             export_constraints=constraints,
-            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         try:

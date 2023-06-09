@@ -405,12 +405,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         for i in range(start, end):
             opt_fn(torch.randn(i), torch.randn(i))
 
-        if config.assume_static_by_default:
-            # 2 graph breaks - 1 static, 1 made dynamic via automatic
-            self.assertEqual(cnt_dynamic.frame_count, 2)
-        else:
-            # just one graph
-            self.assertEqual(cnt_dynamic.frame_count, 1)
+        self.assertEqual(cnt_dynamic.frame_count, 1)
 
     def test_dynamic_duck_size(self):
         def fn(a, b):
