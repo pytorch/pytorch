@@ -244,7 +244,7 @@ class CPUReproTests(TestCase):
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
-    def test_conv_transpose2d_packed(self):
+    def test_conv_transpose2d_packed_cpu(self):
         options = itertools.product([[1, 3, 28, 28], [3, 28, 28]], [0, (0,)])
         for x_shape, padding in options:
             mod = torch.nn.Sequential(
