@@ -79,7 +79,7 @@ echo "Benchmark logs will be saved under pytorch/$log_folder"
     --inference \
     --batch_size 1 \
     --compilers dynamo-onnx \
-    --compilers onnx \
+    --compilers torchscript-onnx \
     ${quick:+"$quick"} \
     ${filter:+--extra-args "$filter"} \
     --dashboard-image-uploader None \

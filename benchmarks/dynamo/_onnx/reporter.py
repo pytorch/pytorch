@@ -389,7 +389,9 @@ def parse_args():
         help="The output directory to find the csv logs and save summary logs.",
     )
     parser.add_argument("--suites", action="append", help="huggingface/torchbench/timm")
-    parser.add_argument("--compilers", action="append", help="onnx/dynamo-onnx")
+    parser.add_argument(
+        "--compilers", action="append", help="torchscript-onnx/dynamo-onnx"
+    )
     parser.add_argument(
         "--device", type=str, choices=["cpu", "cuda"], default="cuda", help="cpu/cuda"
     )

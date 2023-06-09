@@ -61,7 +61,7 @@ python benchmarks/dynamo/_onnx/reporter.py \
     --suites=huggingface \
     --suites=timm_models \
     --compilers dynamo-onnx \
-    --compilers onnx \
+    --compilers torchscript-onnx \
     --device "$device" \
     --output-dir=./"$log_folder"
 
