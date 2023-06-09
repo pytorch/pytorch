@@ -173,7 +173,8 @@ if RUN_CPU:
             "test_linear_binary",
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
+            torch.backends.mkldnn.is_available()
+            and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_mm_views"),
