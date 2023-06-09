@@ -143,9 +143,7 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 def is_valid_mm_plus_mm(match: Match):
     mm_nodes = filter_nodes(match.nodes, aten.mm)
     # The dim of matrix multiplication should not match for passthrough
-    if get_arg_value(mm_nodes, 2, "dim") == get_arg_value(mm_nodes, 1, "dim"):
-        return False
-    return True
+    return get_arg_value(mm_nodes, 2, "dim") != get_arg_value(mm_nodes, 1, "dim")
 
 @register_lowering_pattern(
     CallFunction(
