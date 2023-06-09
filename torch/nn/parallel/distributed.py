@@ -239,12 +239,11 @@ class _BufferCommHook:
 # is completed.
 class _DDPSink(Function):
     @staticmethod
-    def forward(ctx, reducer, ddp_state, *inputs):
+    def forward(ctx, ddp_weakref, *inputs):
         # set_materialize_grads(False) will ensure that None gradients stay as
         # None and are not filled with zeros.
         ctx.set_materialize_grads(False)
-        ctx.reducer = reducer
-        ctx.ddp_state = ddp_state
+        ctx.ddp_weakref = ddp_weakref
         ret = tuple(
             inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
         )
@@ -254,12 +253,16 @@ class _DDPSink(Function):
     def backward(ctx, *grad_outputs):
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
-        if ctx.ddp_state["static_graph"] and ctx.ddp_state["num_forward_calls"] == 1:
+        ddp_weakref = ctx.ddp_weakref()
+        reducer = ddp_weakref.reducer
+        static_graph = ddp_weakref.static_graph
+        num_forward_calls = ddp_weakref.num_forward_calls
+        if static_graph and num_forward_calls == 1:
             Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
-                ctx.reducer._delay_all_reduce
+                reducer._delay_all_reduce
             )
 
-        return (None, None, *grad_outputs)
+        return (None, *grad_outputs)
 
 
 class _DDPJoinHook(JoinHook):
@@ -1468,11 +1471,6 @@ class DistributedDataParallel(Module, Joinable):
         if (self.find_unused_parameters and not self.static_graph) or (
             self.static_graph and self.num_forward_calls == 1
         ):
-            ddp_state = {
-                "static_graph": self.static_graph,
-                "num_forward_calls": self.num_forward_calls,
-            }
-
             (
                 output_tensor_list,
                 treespec,
@@ -1491,8 +1489,7 @@ class DistributedDataParallel(Module, Joinable):
             # undefined gradient which the reducer then handles to ensure
             # param.grad field is not touched and we don't error out.
             passthrough_tensor_list = _DDPSink.apply(
-                self.reducer,
-                ddp_state,
+                weakref.ref(self),
                 *output_tensor_list,
             )
             for i in range(len(output_placeholders)):
