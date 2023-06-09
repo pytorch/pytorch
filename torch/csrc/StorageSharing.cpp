@@ -33,7 +33,6 @@
 
 static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCPU) {
@@ -50,7 +49,6 @@ static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_sharedIncref(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   c10::DeviceType device_type = storage.device_type();
   if (device_type == at::kCPU) {
@@ -76,21 +74,17 @@ static PyObject* THPStorage_pyNewFilenameStorage(
 
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
   std::string handle = at::NewProcessWideShmHandle();
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      c10::make_intrusive<at::StorageImpl>(
-          c10::StorageImpl::use_byte_size_t(),
-          size,
-          THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size),
-          /*allocator=*/nullptr,
-          /*resizable=*/false),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  return THPStorage_New(c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      size,
+      THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size),
+      /*allocator=*/nullptr,
+      /*resizable=*/false));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_shareFilename(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   TORCH_CHECK(
       storage.device_type() == at::kCPU,
@@ -171,16 +165,13 @@ static PyObject* THPStorage_newSharedFilename(
   const char* object_handle = PyBytes_AS_STRING(_object_handle);
   int64_t size = THPUtils_unpackLong(_size);
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      c10::make_intrusive<at::StorageImpl>(
-          c10::StorageImpl::use_byte_size_t(),
-          size,
-          THManagedMapAllocator::makeDataPtr(
-              manager_handle, object_handle, flags, size),
-          /*allocator=*/nullptr,
-          /*resizable=*/false),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  return THPStorage_New(c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      size,
+      THManagedMapAllocator::makeDataPtr(
+          manager_handle, object_handle, flags, size),
+      /*allocator=*/nullptr,
+      /*resizable=*/false));
   END_HANDLE_TH_ERRORS
 }
 
@@ -191,16 +182,12 @@ static PyObject* THPStorage_pyNewFdStorage(PyObject* _unused, PyObject* args) {
   if (!PyArg_ParseTuple(args, "L", &size)) {
     return nullptr;
   }
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      at::new_shm_fd_storage(size),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  return THPStorage_New(at::new_shm_fd_storage(size));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_shareFd(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
   TORCH_CHECK(
       storage.device_type() == at::kCPU, "_share_fd_: only available on CPU");
@@ -267,22 +254,17 @@ static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
 
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE |
       at::ALLOCATOR_MAPPED_KEEPFD | at::ALLOCATOR_MAPPED_FROMFD;
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      c10::make_intrusive<at::StorageImpl>(
-          c10::StorageImpl::use_byte_size_t(),
-          size,
-          at::MapAllocator::makeDataPtr(
-              at::WITH_FD, "", fd, flags, size, nullptr),
-          /*allocator=*/nullptr,
-          /*resizable=*/false),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  return THPStorage_New(c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      size,
+      at::MapAllocator::makeDataPtr(at::WITH_FD, "", fd, flags, size, nullptr),
+      /*allocator=*/nullptr,
+      /*resizable=*/false));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
 #ifdef USE_CUDA
   const auto& storage = THPStorage_Unpack(self);
   TORCH_CHECK(
@@ -559,10 +541,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
   base->set_resizable(false);
   base->set_received_cuda(true);
 
-  return THPStorage_NewWithStorage(
-      THPStorageClass,
-      std::move(base),
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
+  return THPStorage_New(std::move(base));
 #else
   TORCH_CHECK(false, "CUDA is not available");
 #endif
@@ -587,7 +566,7 @@ PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
       THPUtils_checkLong(arg), "_new_with_weak_ptr(): arg must be an 'int'");
   c10::StorageImpl* weak_storage = (c10::StorageImpl*)PyLong_AsVoidPtr(arg);
   if (auto* storage = c10::raw::weak_intrusive_ptr::lock(weak_storage)) {
-    return THPStorage_Wrap(
+    return THPStorage_New(
         c10::intrusive_ptr<c10::StorageImpl>::reclaim(storage));
   }
   Py_RETURN_NONE;
@@ -619,7 +598,6 @@ PyObject* THPStorage_expired(PyObject* _unused, PyObject* arg) {
 
 PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
   at::MapAllocator* ctx = nullptr;
   const auto& storage = THPStorage_Unpack(self);
   if (storage.device_type() == at::kCPU) {
