@@ -18,7 +18,6 @@ from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
-import dataclasses
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
@@ -392,8 +391,8 @@ def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, rec
     encounter them, and trace through the graph, only keeping values which take
     in valid proxies. Then, all dead code is eliminated.
     """
-    run_and_save_rng = torch.ops.run_and_save_rng_state
-    run_with_rng_state = torch.ops.run_with_rng_state
+    run_and_save_rng = torch._prims.rng_prims.run_and_save_rng_state
+    run_with_rng_state = torch._prims.rng_prims.run_with_rng_state
     new_graph = fx.Graph()
     env = {}
 
@@ -504,21 +503,21 @@ def get_depth(node, depth_map):
 
     depth_map[node] = max(arg_depths) + 1
     return depth_map[node]
- 
+
 
 def sort_depths(args, depth_map):
     arg_depths = {arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)}
-    return sorted(arg_depths.items(), key=lambda x:x[1], reverse=True)
- 
+    return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
+
 def dfs(node, visited, new_graph, depth_map, env):
     # Memoization
     if node in visited:
         return
 
-    # Base case 
+    # Base case
     if node.op == "placeholder":
         return
-    
+
     # Handle output node
     if node.op == "output":
         args = node.args[0]
@@ -532,7 +531,7 @@ def dfs(node, visited, new_graph, depth_map, env):
                 new_outputs.append(env[output])
             else:
                 new_outputs.append(output)
-            
+
         new_graph.output(new_outputs)
         return
 
@@ -551,7 +550,7 @@ def depth_based_topological_reordering(gm):
     depth_map = {}
     output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
     get_depth(output_node, depth_map)
- 
+
     new_graph = torch.fx.Graph()
     env = {}
     for node in gm.graph.nodes:
@@ -560,7 +559,7 @@ def depth_based_topological_reordering(gm):
             # Can't use node_copy here as we may be turning previous call_function into placeholders
             new_node.meta = node.meta
             env[node] = new_node
- 
+
     visited = set()
     dfs(output_node, visited, new_graph, depth_map, env)
     new_graph.lint()

@@ -1134,12 +1134,12 @@ class TestPrims(TestCase):
 
 
         torch.manual_seed(123)
-        rng_state1, res1 = torch.ops.run_and_save_rng_state(torch.rand, 10, device=device, dtype=dtype)
-        rng_state2, res2 = torch.ops.run_and_save_rng_state(torch.rand, 10, device=device, dtype=dtype)
+        rng_state1, res1 = torch._prims.rng_prims.run_and_save_rng_state(torch.rand, 10, device=device, dtype=dtype)
+        rng_state2, res2 = torch._prims.rng_prims.run_and_save_rng_state(torch.rand, 10, device=device, dtype=dtype)
 
         torch.manual_seed(123)
-        res3 = torch.ops.run_with_rng_state(rng_state1, torch.rand, 10, device=device, dtype=dtype)
-        res4 = torch.ops.run_with_rng_state(rng_state2, torch.rand, 10, device=device, dtype=dtype)
+        res3 = torch._prims.rng_prims.run_with_rng_state(rng_state1, torch.rand, 10, device=device, dtype=dtype)
+        res4 = torch._prims.rng_prims.run_with_rng_state(rng_state2, torch.rand, 10, device=device, dtype=dtype)
 
         self.assertEqual(ref1, res1)
         self.assertEqual(ref2, res2)
