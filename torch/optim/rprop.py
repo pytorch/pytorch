@@ -281,7 +281,7 @@ def _multi_tensor_rprop(
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, prevs, step_sizes])
-    for grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes in grouped_tensors.values():
+    for ((grouped_params, grouped_grads, grouped_prevs, grouped_step_sizes), _) in grouped_tensors.values():
         # Handle complex params
         def _view_complex_as_real(tensor_list):
             return [

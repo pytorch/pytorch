@@ -247,3 +247,26 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
         opt_model(x)
+
+    def test_classmethod(self):
+        class Shake(torch.autograd.Function):
+            @classmethod
+            def forward(cls, ctx, foo):
+                return foo + foo
+
+            @classmethod
+            def backward(cls, ctx, grad_output):
+                return grad_output
+
+        def f(x):
+            return Shake.apply(x)
+
+        x = torch.randn(4, 4, 4, 4, requires_grad=True)
+        opt_m = torch.compile(backend="eager")(f)
+        opt_m(x)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
