@@ -289,7 +289,7 @@ class TensorVariable(VariableTracker):
                 dim = kwargs.pop("dim")
                 constant_result = constant_result.getitem_const(dim)
 
-        elif name == "size" and self.size is None and config.dynamic_shapes:
+        elif name == "size" and self.size is None:
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
