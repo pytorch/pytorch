@@ -453,7 +453,7 @@ jobs:
       - name: Checkout ROCmSoftwarePlatform/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: upstream_rocm5.5_fixes
+          ref: fix_rocm5.4.2_breakage
           submodules: recursive
           repository: ROCmSoftwarePlatform/builder
           path: builder
@@ -554,7 +554,7 @@ jobs:
       - name: Checkout ROCmSoftwarePlatform/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: upstream_rocm5.5_fixes
+          ref: fix_rocm5.4.2_breakage
           submodules: recursive
           repository: ROCmSoftwarePlatform/builder
           path: builder
@@ -1013,7 +1013,7 @@ jobs:
       - name: Checkout ROCmSoftwarePlatform/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: upstream_rocm5.5_fixes
+          ref: fix_rocm5.4.2_breakage
           submodules: recursive
           repository: ROCmSoftwarePlatform/builder
           path: builder
@@ -1114,7 +1114,7 @@ jobs:
       - name: Checkout ROCmSoftwarePlatform/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: upstream_rocm5.5_fixes
+          ref: fix_rocm5.4.2_breakage
           submodules: recursive
           repository: ROCmSoftwarePlatform/builder
           path: builder
@@ -1573,7 +1573,7 @@ jobs:
       - name: Checkout ROCmSoftwarePlatform/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: upstream_rocm5.5_fixes
+          ref: fix_rocm5.4.2_breakage
           submodules: recursive
           repository: ROCmSoftwarePlatform/builder
           path: builder
@@ -1674,7 +1674,7 @@ jobs:
       - name: Checkout ROCmSoftwarePlatform/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: upstream_rocm5.5_fixes
+          ref: fix_rocm5.4.2_breakage
           submodules: recursive
           repository: ROCmSoftwarePlatform/builder
           path: builder
@@ -2133,7 +2133,7 @@ jobs:
       - name: Checkout ROCmSoftwarePlatform/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: upstream_rocm5.5_fixes
+          ref: fix_rocm5.4.2_breakage
           submodules: recursive
           repository: ROCmSoftwarePlatform/builder
           path: builder
@@ -2234,7 +2234,7 @@ jobs:
       - name: Checkout ROCmSoftwarePlatform/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: upstream_rocm5.5_fixes
+          ref: fix_rocm5.4.2_breakage
           submodules: recursive
           repository: ROCmSoftwarePlatform/builder
           path: builder
