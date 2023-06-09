@@ -9727,8 +9727,8 @@ class DistributedTest:
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
-            BACKEND not in DistTestCases.backend_feature["ddp"],
-            f"The {BACKEND} backend does not support DistributedDataParallel",
+            BACKEND != "nccl",
+            "TORCH_NCCL_USE_COMM_NONBLOCKING only applies to NCCL"
         )
         def test_nccl_init_abort(self):
             """

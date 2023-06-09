@@ -805,7 +805,7 @@ void abortCommsFromMap(
 void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   std::lock_guard<std::mutex> lock(mutex_);
   abortCommsFromMap(devNCCLCommMap_, rank_, abortReason);
-  abortCommsFromMap(inProgressCommMap_, rank_, abortReason);
+  abortCommsFromMap(inInitializationCommMap_, rank_, abortReason);
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
@@ -1171,7 +1171,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    inProgressCommMap_.emplace(devicesKey, std::move(ncclComms));
+    inInitializationCommMap_.emplace(devicesKey, std::move(ncclComms));
   }
 
   // [Note 2 ]
@@ -1215,9 +1215,18 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComms);
 
   // Move the NCCL resource to cache
-  devNCCLCommMap_.emplace(
-      devicesKey, std::move(inProgressCommMap_.at(devicesKey)));
-  inProgressCommMap_.erase(devicesKey);
+  auto it = inInitializationCommMap_.find(devicesKey);
+  // A previous thread could've already removed devicesKey from
+  // inInitializationCommMap_ and added it to devNCCLCommMap_
+  if (it != inInitializationCommMap_.end()) {
+    devNCCLCommMap_.emplace(
+        devicesKey, std::move(inInitializationCommMap_.at(devicesKey)));
+    inInitializationCommMap_.erase(devicesKey);
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      devNCCLCommMap_.find(devicesKey) != devNCCLCommMap_.end(),
+      "Communicators not found in cache!");
   return devNCCLCommMap_[devicesKey];
 }
 
