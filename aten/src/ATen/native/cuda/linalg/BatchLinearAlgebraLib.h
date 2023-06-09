@@ -8,8 +8,8 @@
 #include <ATen/native/TransposeType.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
-#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
-#define USE_CUSOLVER
+#if (defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)) || (defined(USE_ROCM) && ROCM_VERSION >= 50300)
+#define USE_LINALG_SOLVER
 #endif
 
 // cusolverDn<T>potrfBatched may have numerical issue before cuda 11.3 release,
@@ -57,7 +57,7 @@ void ldl_solve_cusolver(
 void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots);
 void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose);
 
-#ifdef USE_CUSOLVER
+#if defined(USE_LINALG_SOLVER)
 
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
 void svd_cusolver(const Tensor& A, const bool full_matrices, const bool compute_uv,
@@ -77,7 +77,7 @@ void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tens
 
 void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots);
 
-#endif  // USE_CUSOLVER
+#endif  // USE_LINALG_SOLVER
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
 namespace cuda { namespace detail {

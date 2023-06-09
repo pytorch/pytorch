@@ -69,7 +69,7 @@ void TEWrapper::call(const std::vector<void*>& args) {
   DCHECK(0 && "Invalid call");
 }
 
-std::shared_ptr<TEWrapper> wrapTECompute(
+static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     Tensor out,
     std::vector<CodeGen::BufferArg> args,
@@ -77,7 +77,7 @@ std::shared_ptr<TEWrapper> wrapTECompute(
   return wrap;
 }
 
-std::shared_ptr<TEWrapper> wrapTECompute(
+static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     LoopNest* ln,
     std::vector<CodeGen::BufferArg> args) {

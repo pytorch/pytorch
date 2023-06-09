@@ -9,6 +9,7 @@ basic_gnn_edgecnn,pass,0
 basic_gnn_gcn,pass,6
 basic_gnn_gin,pass,0
 basic_gnn_sage,pass,0
+cm3leon_generate,pass,6
 dcgan,pass,0
 dlrm,pass,0
 doctr_det_predictor,pass,4
@@ -24,6 +25,7 @@ hf_Bert_large,pass,0
 hf_DistilBert,pass,0
 hf_GPT2,pass,0
 hf_Reformer,pass,27
+hf_T5_generate,pass,49
 hf_T5_large,pass_due_to_skip,0
 lennard_jones,pass,0
 llama,pass,0

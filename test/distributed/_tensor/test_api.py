@@ -210,6 +210,31 @@ class DTensorAPITest(DTensorTestBase):
         self.assertTrue(isinstance(param_grad, DTensor))
         self.assertTrue(isinstance(param_grad.placements[0], Replicate))
 
+    @with_comms
+    def test_distribute_module_meta(self):
+        # If  the model is too big, the user may first the create entire model on the meta device and then initialize
+        # it on the device in the partition function.
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        # fully shard all parameters on dim 0
+        module_to_shard = MyModel(5 * self.world_size, 20, device="meta")
+
+        shard_spec = [Shard(0)]
+
+        def shard_fn(name, module, device_mesh):
+            for param_name, param in module._parameters.items():
+                dist_param = distribute_tensor(param, device_mesh, shard_spec)
+                dist_param = torch.empty_like(
+                    dist_param, device=device_mesh.device_type
+                )
+                module.register_parameter(param_name, torch.nn.Parameter(dist_param))
+
+        sharded_module = distribute_module(module_to_shard, device_mesh, shard_fn)
+        for param in sharded_module.parameters():
+            self.assertIsInstance(param, DTensor)
+            self.assertFalse(param.is_meta)
+            self.assertTrue(param.device.type == device_mesh.device_type)
+
 
 if __name__ == "__main__":
     run_tests()

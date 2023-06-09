@@ -62,6 +62,34 @@ from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 from torch.jit._ir_utils import _InsertPoint
 
+__all__ = [
+    'Attribute',
+    'CompilationUnit',
+    'Error',
+    'Future',
+    'ScriptFunction',
+    'ScriptModule',
+    'annotate',
+    'enable_onednn_fusion',
+    'export_opnames',
+    'fork',
+    'freeze',
+    'ignore',
+    'isinstance',
+    'load',
+    'onednn_fusion_enabled',
+    'optimize_for_inference',
+    'save',
+    'script',
+    'script_if_tracing',
+    'set_fusion_strategy',
+    'strict_fusion',
+    'trace',
+    'trace_module',
+    'unused',
+    'wait'
+]
+
 # For backwards compatibility
 _fork = fork
 _wait = wait
