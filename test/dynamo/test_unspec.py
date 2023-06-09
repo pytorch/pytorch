@@ -266,8 +266,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             out = F.conv1d(x, kernel, padding=padding, stride=2)
             return out
 
-        # TODO: NameError: name 's1' is not defined when dynamic=True
-        opt_func = torch.compile(func)
+        opt_func = torch.compile(func, dynamic=True)
 
         x = torch.randn(1, 1, 175)
         opt_func(x)  # passes

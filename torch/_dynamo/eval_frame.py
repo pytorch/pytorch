@@ -189,10 +189,7 @@ def enable_dynamic(enable: bool = True, export: bool = False):
     if not enable:
         yield
         return
-    # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
-    # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
-    # dynamic=True here to mean "fully dynamic from the start".
-    with config.patch(dynamic_shapes=True, assume_static_by_default=False):
+    with config.patch(dynamic_shapes=True):
         yield
 
 
@@ -968,7 +965,6 @@ def export(
         summarize_dim_constraints=True,
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
-        dynamic_shapes=tracing_mode == "symbolic",
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -978,6 +974,7 @@ def export(
             ),
             export=True,
             export_constraints=constraints,
+            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         try:
