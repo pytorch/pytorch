@@ -9760,7 +9760,7 @@ class DistributedTest:
                 import threading
                 t = threading.Thread(target=abort)
                 t.start()
-                with self.assertRaises(torch.distributed.DistBackendError):
+                with self.assertRaises(RuntimeError):
                     # First collective triggers initialization via ncclCommInitRank.
                     torch.distributed.barrier()
                 running = False

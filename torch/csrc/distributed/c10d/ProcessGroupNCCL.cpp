@@ -1171,7 +1171,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    inInitializationCommMap_.emplace(devicesKey, std::move(ncclComms));
+    inInitializationCommMap_.emplace(devicesKey, ncclComms);
   }
 
   // [Note 2 ]
