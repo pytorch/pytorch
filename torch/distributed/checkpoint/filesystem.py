@@ -36,11 +36,12 @@ from .planner import (
     WriteItemType,
 )
 
+from .utils import _create_file_view
+
 from torch.distributed._shard._utils import narrow_tensor_by_index
 
 __all__ = [
     "FileSystemWriter",
-    "SlicedBufferedReader",
     "FileSystemReader",
 ]
 
@@ -439,26 +440,6 @@ class FileSystemWriter(StorageWriter):
         (self.path / ".metadata.tmp").rename(self.path / ".metadata")
 
 
-class SlicedBufferedReader(io.BufferedReader):
-    # TODO override read to handle (-1) correctly
-    def __init__(self, base_stream: io.RawIOBase, offset: int, len: int):
-        super().__init__(base_stream)
-        self.offset = offset
-        self.len = len
-        self.seek(0)
-
-    def seek(self, __offset: int, __whence: int = os.SEEK_SET) -> int:
-        if __whence == os.SEEK_SET:
-            __offset = self.offset + __offset
-        elif __whence == os.SEEK_END:
-            __whence = os.SEEK_SET
-            __offset = (self.offset + self.len) - __offset
-        return super().seek(__offset, __whence)
-
-    def tell(self) -> int:
-        return super().tell() - self.offset
-
-
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
@@ -466,9 +447,7 @@ class FileSystemReader(StorageReader):
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
     def _slice_file(self, file, sinfo: _StorageInfo):
-        return SlicedBufferedReader(
-            io.FileIO(file.fileno(), closefd=False), sinfo.offset, sinfo.length
-        )
+        return _create_file_view(file, sinfo.offset, sinfo.length)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file

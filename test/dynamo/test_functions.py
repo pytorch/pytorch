@@ -414,6 +414,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_ordered_dict_kwargs(x):
+        z = collections.OrderedDict(sample=torch.ones(10))
+        return z
+
+    @make_test
     def test_float(x):
         y = float(1.2)
         y += float("1.2")
@@ -432,6 +437,23 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_get_default_dtype(x):
         if x.dtype == torch.get_default_dtype():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_get_autocast_gpu_dtype(x):
+        dtype = torch.get_autocast_gpu_dtype()
+        return x.type(dtype)
+
+    @make_test
+    def test_get_calculate_correct_fan(x):
+        fan_in = torch.nn.init._calculate_correct_fan(x, "fan_in")
+        return x + fan_in
+
+    @make_test
+    def test_is_complex(x):
+        if torch.is_complex(x):
             return x + 1
         else:
             return x - 1

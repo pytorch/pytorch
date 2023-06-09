@@ -555,9 +555,8 @@ class NamedTupleVariable(TupleVariable):
             if isinstance(method, classmethod):
                 # We need the unbounded cls method to avoid the inline __self__
                 return UserMethodVariable(
-                    method.__func__, variables.UserDefinedClassVariable(
-                        self.tuple_cls, **options
-                    )
+                    method.__func__,
+                    variables.UserDefinedClassVariable(self.tuple_cls, **options),
                 )
             elif isinstance(method, staticmethod):
                 return UserFunctionVariable(method.__func__, **options)
