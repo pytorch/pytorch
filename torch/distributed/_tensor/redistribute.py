@@ -10,7 +10,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-
+dtensor_log = torch._logging.getArtifactLogger(__name__, "dtensor")
 
 _PlacementItem = Tuple[int, Tuple[Placement, Placement]]
 
@@ -79,6 +79,7 @@ def _redistribute_with_local_tensor(
     current_placements: Sequence[Placement],
     target_placements: Sequence[Placement],
 ) -> torch.Tensor:
+    dtensor_log.debug("_redistribute_with_local_tensor")
     new_local_tensor = None
 
     sorted_placements = list(enumerate(zip(current_placements, target_placements)))
