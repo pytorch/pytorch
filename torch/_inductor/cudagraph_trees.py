@@ -554,6 +554,7 @@ class CUDAWarmupNode:
         non_cudagraph_inps = set()
         for i in range(len(new_inputs)):
             if (
+                isinstance(new_inputs[i], torch.Tensor) and
                 new_inputs[i].untyped_storage().data_ptr()
                 not in existing_path_data_ptrs
             ):
