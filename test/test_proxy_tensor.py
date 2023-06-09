@@ -146,7 +146,7 @@ class TestGenericProxyTensor(TestCase):
         r2 = f(*new_inps)
         self.assertEqual(r1, r2)
 
-    def test_pre_autograd_mode_stack(self):
+    def test_pre_dispatch_mode_stack(self):
         def f(a):
             b = torch.ones(4, 4)
             return torch.matmul(a, b)
@@ -155,16 +155,27 @@ class TestGenericProxyTensor(TestCase):
         # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
         # so our mode never sees it - it goes directly to the BackendSelect key.
         inp = torch.ones(4, 4)
-        # Test that make_fx(pre_autograd=True) clears caches properly.
+        # Test that make_fx(pre_dispatch=True) clears caches properly.
         from torch._dispatch.python import enable_python_dispatcher
         with enable_python_dispatcher():
             out1 = f(inp)
-        fx_g = make_fx(f, pre_autograd=True)(inp)
+        fx_g = make_fx(f, pre_dispatch=True)(inp)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, a_1):
     ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
     matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
     return matmul""")
+
+    def test_pre_dispatch_linear(self):
+        def f(a, b, c):
+            return torch.nn.functional.linear(a, b, c)
+        a = torch.ones(4, 4)
+        b = torch.ones(4, 4)
+        c = torch.ones(4)
+        fx_g = make_fx(f, pre_dispatch=True)(a, b, c)
+        out1 = f(a, b, c)
+        out2 = fx_g(a, b, c)
+        self.assertEqual(out1, out2)
 
 
     def test_make_fx_simple(self):
