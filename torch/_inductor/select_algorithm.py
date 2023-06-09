@@ -526,7 +526,6 @@ class ExternKernelChoice:
         self,
         kernel,
         cpp_kernel=None,
-        ordered_kwargs_for_cpp_kernel=(),
         *,
         name=None,
         has_out_variant=True,
@@ -537,7 +536,6 @@ class ExternKernelChoice:
         assert not hasattr(extern_kernels, name), "duplicate extern kernel"
         self.name = name
         self.cpp_kernel = cpp_kernel
-        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
 
