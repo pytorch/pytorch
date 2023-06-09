@@ -6,6 +6,7 @@ import warnings
 import torch
 from torch.nn import Module
 from torch.optim.lr_scheduler import LRScheduler
+from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
 
 __all__ = [
     'AveragedModel',
@@ -184,8 +185,7 @@ class AveragedModel(Module):
         self_param_detached = []
         model_param_detached = []
         for p_averaged, p_model in zip(self_param, model_param):
-            device = p_averaged.device
-            p_model_ = p_model.detach().to(device)
+            p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
             model_param_detached.append(p_model_)
             if self.n_averaged == 0:
@@ -197,7 +197,7 @@ class AveragedModel(Module):
                 for ((device, _), ([self_params, model_params], _)) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
-                    elif device.type == 'cuda':
+                    elif device.type in _get_foreach_kernels_supported_devices():
                         multi_avg_fn = get_swa_multi_avg_fn()
                         multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
                     else:
