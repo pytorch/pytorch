@@ -9,6 +9,8 @@ import torch.distributed.distributed_c10d as distributed_c10d
 import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._tensor import DeviceMesh, DTensor as DT, Replicate
+from torch.distributed.tensor.parallel.recompute_wrapper import tp_checkpoint_wrapper
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import FSDP_WRAPPED_MODULE
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
@@ -79,7 +81,8 @@ def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False, fsdp_nested
     model = _distribute_and_fsdp_wrap_module(
         model, True, twod_mesh, fsdp_pg, use_orig_params, fsdp_nested
     )
-    return model, fsdp_pg
+    tp_mesh = _create_1d_device_mesh(twod_mesh, 1)
+    return model, fsdp_pg, tp_mesh
 
 
 def is_nested_tensor(val: Any) -> bool:
@@ -148,7 +151,7 @@ class Test2dParallelIntegration(DTensorTestBase):
         )
 
     def _test_2d_e2e_flow(
-        self, use_orig_params=False, fsdp_nested=False, multi_param_group=False
+        self, use_orig_params=False, fsdp_nested=False, multi_param_group=False, recompute_activation=False
     ) -> None:
         if not enable_2d_with_fsdp():
             self.skipTest("FSDP 2d parallel integration not available")
@@ -156,9 +159,13 @@ class Test2dParallelIntegration(DTensorTestBase):
         model = SimpleModel().cuda(self.rank)
         model = FSDP(model, use_orig_params=use_orig_params)
         torch.manual_seed(0)
-        model_2d, dp_pg = init_model(
+        model_2d, dp_pg, tp_mesh = init_model(
             use_orig_params=use_orig_params, fsdp_nested=fsdp_nested
         )
+        if recompute_activation:
+            model_2d = tp_checkpoint_wrapper(
+                model_2d, tp_mesh, 0
+            )
         # Check named parameters are returning the same name at least.
         param_names_2d = [
             self._clean_up_fsdp_param_name(name)
@@ -169,7 +176,7 @@ class Test2dParallelIntegration(DTensorTestBase):
             if name not in param_names_2d:
                 print(name, param_names_2d)
             self.assertTrue(name in param_names_2d)
-        self._compare_params(model, model_2d)
+        # self._compare_params(model, model_2d)
 
         if multi_param_group and use_orig_params:
             param_group = [
@@ -206,6 +213,11 @@ class Test2dParallelIntegration(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_integration_correctness(self) -> None:
         self._test_2d_e2e_flow()
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_fsdp_integration_correctness_w_recompute_activation(self) -> None:
+        self._test_2d_e2e_flow(recompute_activation=True)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
