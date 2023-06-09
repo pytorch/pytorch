@@ -259,10 +259,11 @@ class save_on_cpu(saved_tensors_hooks):
 
     """
     def __init__(self, pin_memory=False, device_type="cuda"):
+        device_module = getattr(torch, device_type, torch.cuda)
+
         def pack_to_cpu(tensor):
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
-            device_module = getattr(torch, device_type, torch.cuda)
             packed = torch.empty(
                 tensor.size(),
                 dtype=tensor.dtype,
