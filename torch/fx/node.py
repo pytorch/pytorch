@@ -34,6 +34,7 @@ _side_effectful_functions: Set[Callable] = {
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,
+    _ops.aten._constrain_range_native.default,
     _ops.aten.copy_.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,

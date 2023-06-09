@@ -29,7 +29,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes
-
+from torch.fx.experimental.symbolic_shapes import constrain_range
 from torch.utils._pytree import tree_map
 
 
@@ -299,6 +299,11 @@ def assert_async(val):
 @register_meta(aten._assert_async.msg)
 def assert_async_meta(val, assert_msg):
     return
+
+
+@register_meta(aten._constrain_range_native)
+def constrain_range_native(size, min, max):
+    constrain_range(size, min=min, max=max)
 
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h

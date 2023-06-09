@@ -1,7 +1,11 @@
 from typing import Optional
 
+from torch import ops, SymInt
 from torch._dynamo import allow_in_graph
-from torch.fx.experimental.symbolic_shapes import constrain_range
+from torch.fx.experimental.symbolic_shapes import (
+    constrain_range,
+    constrain_range_non_symint,
+)
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 
@@ -32,3 +36,11 @@ def constrain_as_size(symbol, min: int = 2, max: Optional[int] = None):
             "Unable to set min size to be <= 2 because we specialize on 0/1 sizes."
         )
     return constrain_as_value(symbol, min, max)
+
+@allow_in_graph
+def constrain_range_native(symbol, min: Optional[int] = None, max: Optional[int] = None):
+    if not isinstance(symbol, SymInt):
+        constrain_range_non_symint(symbol, min=min, max=max)
+        return
+
+    ops.aten._constrain_range_native(symbol, min, max)
