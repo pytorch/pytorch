@@ -566,11 +566,11 @@ def explain(f, *args, **kwargs):
 
     reset()
 
-    out_guards = []
-    graphs = []
-    ops_per_graph = []
-    op_count = 0
-    break_reasons = []
+    graphs : List[torch.fx.GraphModule] = []
+    break_reasons : List[Any] = []
+    op_count : int = 0
+    ops_per_graph : List[torch.fx.Node] = []
+    out_guards : List[_guards.Guard] = []
 
     def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
         from .backends.debugging import _explain_graph_detail
