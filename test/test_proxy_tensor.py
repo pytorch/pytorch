@@ -1,5 +1,7 @@
 # Owner(s): ["module: ProxyTensor"]
 
+from typing import cast
+from torch._dynamo.source import LocalSource
 from torch.testing._internal.common_utils import TestCase, run_tests, xfail_inherited_tests
 import torch
 import unittest
@@ -11,7 +13,7 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
-    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
+    ShapeEnv, sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
     constrain_range, guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -1317,6 +1319,42 @@ def forward(self, a_1):
             str(fx_g.shape_env.produce_guards(fx_placeholder_vals(fx_g), [LocalSource("a"), LocalSource("b")], ignore_static=True)),  # noqa: B950
             """["L['a'].size()[0] == 2*L['b'].size()[0]", "2 <= L['b'].size()[0]"]"""  # noqa: B950
         )
+
+    def test_guard_upperbound_range_refinement(self):
+        def f(a):
+            assert a.shape[0] > 5 and a.shape[0] > 12
+            return a.cos()
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
+        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] > 12""")
+
+    def test_guard_lowerbound_range_refinement(self):
+        def f(a):
+            assert a.shape[0] < 20 and a.shape[0] < 30
+            return a.cos()
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
+        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] < 20""")
+
+    def test_guard_upperbound_range_refinement_multivariate(self):
+        def f(a):
+            assert a.shape[0] > 5 and a.shape[0] > 12
+            assert a.shape[1] > 5 and a.shape[1] > a.shape[0]
+            return a.cos()
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 20)))
+        self.assertExpectedInline(show_guards(tensor), """\
+L['a'].size()[1] > L['a'].size()[0]
+L['a'].size()[0] > 12""")
+
+    def test_guard_lowerbound_range_refinement_multivariate(self):
+        def f(a):
+            assert a.shape[0] < 20 and a.shape[0] < 30
+            assert a.shape[1] < 30 and a.shape[1] < a.shape[0]
+            return a.cos()
+        tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 5)))
+        self.assertExpectedInline(
+            show_guards(tensor),
+            """\
+L['a'].size()[1] < L['a'].size()[0]
+L['a'].size()[0] < 20""")
 
     def test_sym_storage_offset(self):
         def f(x, y):
