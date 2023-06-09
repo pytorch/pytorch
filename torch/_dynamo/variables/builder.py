@@ -1176,33 +1176,16 @@ def wrap_fx_proxy_cls(
         from . import UserDefinedObjectVariable
 
         return UserDefinedObjectVariable(example_value)
-    elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
+    elif istype(example_value, (int, bool, float)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable.create(tx, proxy, example_value, **options)
-    elif istype(example_value, torch.Size) and config.dynamic_shapes:
+    elif istype(example_value, torch.Size):
         proxy.node.meta["example_value"] = example_value
         sizes = []
         for i, v in enumerate(example_value):
             proxy_i = proxy[i]
             sizes.append(SymNodeVariable.create(tx, proxy_i, v, **options))
         return SizeVariable(sizes, proxy, **options)
-    elif istype(example_value, int) and proxy.node.target in (
-        torch.seed,
-        operator.mod,
-        # some mac builds are missing torch.distributed.get_rank()
-        getattr(torch.distributed, "get_rank", _missing),
-        getattr(torch.distributed, "get_world_size", _missing),
-    ):
-        if config.dynamic_shapes:
-            proxy.node.meta["example_value"] = example_value
-            return SymNodeVariable.create(tx, proxy, example_value, **options)
-        else:
-            return ConstantVariable(example_value, **options)
-    elif istype(example_value, torch.Size) and all(
-        isinstance(x, int) for x in example_value
-    ):
-        sizes = [ConstantVariable(x) for x in example_value]
-        return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list)):
         proxy.node.meta["example_value"] = example_value
         unpacked = []
@@ -1236,25 +1219,12 @@ def wrap_fx_proxy_cls(
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable(None, **options)
-    elif (
-        isinstance(example_value, int)
-        and proxy.node.target is torch._utils._element_size
-    ):
-        proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif (
-        isinstance(example_value, int)
-        and config.numpy_ndarray_as_tensor
-        and not config.dynamic_shapes
-    ):
-        proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
     elif (
         istype(example_value, torch.Size)
         and all(isinstance(x, int) for x in example_value)
@@ -1263,12 +1233,6 @@ def wrap_fx_proxy_cls(
         return TupleVariable(
             [ConstantVariable(x, **options) for x in example_value], **options
         )
-    elif isinstance(example_value, int) and proxy.node.target in [
-        getattr,
-        operator.getitem,
-    ]:
-        proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
