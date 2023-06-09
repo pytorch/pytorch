@@ -1,3 +1,4 @@
+import logging
 import warnings
 import weakref
 import sys
@@ -26,7 +27,7 @@ else:
         def is_torchdynamo_compiling():
             return False
 
-distributed_log = torch._logging.getArtifactLogger(__name__, "distributed")
+distributed_log = logging.getLogger(__name__)
 
 """
 New traceable, functional collectives.
