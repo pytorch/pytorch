@@ -3712,7 +3712,6 @@ def aot_module_simplified(
         aot_config,
     )
 
-
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
