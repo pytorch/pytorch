@@ -14,6 +14,7 @@ from unittest.mock import patch
 from functorch import make_fx
 
 import torch
+import sympy
 import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -661,6 +662,51 @@ def from_fun(t):
         return t
     torch._sync(t)
     return torch._from_functional_tensor(t)
+
+def _get_hints(exprs):
+    """
+    Get the hints of a list/tuple of int/SymInt.
+    """
+    if isinstance(exprs, (list, tuple)):
+        return type(exprs)(_get_hints(e) for e in exprs)
+    elif isinstance(exprs, torch.SymInt):
+        return exprs.node.shape_env.size_hint(exprs.node.expr)
+    else:
+        return exprs
+
+def _get_fill_order(strides):
+    """
+    fill_order[i] == j means dimension j's stride is the i'th largest.
+    """
+    order = list(range(len(strides)))
+    order.sort(key=strides.__getitem__)
+    return order
+
+def _apply_fill_order(ft: torch.Tensor, fill_order):
+    """
+    Apply stride fill order to a fake tensor.
+    """
+    sizes = ft.size()
+    assert set(range(len(sizes))) == set(fill_order)
+    shape_env = None
+    for sz in sizes:
+        if isinstance(sz, torch.SymInt):
+            shape_env = sz.node.shape_env
+            break
+    new_strides = [None] * len(ft.size())
+    next_stride = sympy.Integer(1)
+    for i in fill_order:
+        new_strides[i] = next_stride
+        next_stride = next_stride * sizes[i]
+
+    # convert sympy exprssion to SymInt
+    for i, stride in enumerate(new_strides):
+        if shape_env:
+            new_strides[i] = shape_env.create_symintnode(new_strides[i], hint=None)
+        else:
+            new_strides[i] = int(new_strides[i])
+
+    return ft.as_strided(sizes, new_strides)
 
 
 # This is a version of functionalization that is specifically designed
@@ -3001,8 +3047,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         real_arg = all_args[i]
                         if not isinstance(ph_arg, torch.Tensor):
                             continue
-                        if ph_arg.stride() != real_arg.stride():
-                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
+
+                        # Comparing ph_arg.stride() with real_arg.stride() directly may
+                        # cause dynamic dimensions in ph_arg being specialized to static
+                        # value. Using the hints to avoid that.
+                        if _get_hints(ph_arg.stride()) != real_arg.stride():
+                            fill_order = _get_fill_order(real_arg.stride())
+                            placeholder_list[i] = _apply_fill_order(ph_arg, fill_order)
 
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
