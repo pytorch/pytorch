@@ -32,6 +32,8 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
+import torch.distributed.fsdp
+import torch.distributed.utils
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
@@ -110,6 +112,7 @@ FILENAME_ALLOWLIST = {
     torch.set_rng_state.__code__.co_filename,
     torch._inductor.test_operators.__file__,
     torch.utils._content_store.__file__,
+    torch.distributed.fsdp.__file__,
     # These are dynamo files!
     external_utils.__file__,
     comptime.__file__,  # Want to inline these helpers
@@ -123,6 +126,68 @@ FILENAME_ALLOWLIST |= {
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.distributed.fsdp.__dict__.values()
+    if inspect.isclass(obj)
+}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.distributed.fsdp._runtime_utils.__dict__.values()
+    if inspect.isfunction(obj)
+}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.distributed.fsdp._utils.__dict__.values()
+    if inspect.isclass(obj) or inspect.isfunction(obj)
+}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.distributed.fsdp._exec_order_utils.__dict__.values()
+    if inspect.isclass(obj)
+}
+
+import torch.nn.parallel.scatter_gather
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.nn.parallel.scatter_gather.__dict__.values()
+    if inspect.isclass(obj)
+}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.distributed.utils.__dict__.values()
+    if inspect.isclass(obj) or inspect.isfunction(obj)
+}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.distributed._composable_state.__dict__.values()
+    if inspect.isclass(obj) or inspect.isfunction(obj)
+}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.distributed.fsdp._fsdp_extensions.__dict__.values()
+    if inspect.isclass(obj)
+}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.distributed.fsdp._traversal_utils.__dict__.values()
+    if inspect.isclass(obj) or inspect.isfunction(obj)
+}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.distributed._composable.contract.__dict__.values()
+    if inspect.isclass(obj) or inspect.isfunction(obj)
+}
 
 # Do trace through match and replace patterns used in PT2E QAT
 # Note: These patterns are comprised of torch ops and for internal use only.

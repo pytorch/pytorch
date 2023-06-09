@@ -83,6 +83,8 @@ class TensorVariable(VariableTracker):
         is_sparse=None,
         class_type=torch.Tensor,
         specialized_value=None,
+        tensor_dict=None,
+        _typed_storage=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -99,6 +101,8 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
+        self.tensor_dict = tensor_dict
+        self._typed_storage = _typed_storage
 
     def as_proxy(self):
         return self.proxy
@@ -130,6 +134,7 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
+            "_typed_storage": value._typed_storage,
         }
         if not free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
@@ -185,6 +190,10 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
+        if name == "_typed_storage":
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: TypedStorageVariable(self._typed_storage())
+            ).add_options(self)
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -234,6 +243,11 @@ class TensorVariable(VariableTracker):
                 )
 
             result = try_generic_attr_handling()
+
+        if self.tensor_dict and name in self.tensor_dict.items:
+            # This is a key from a tensor attribute
+            attr = self.tensor_dict.getitem_const(ConstantVariable(name))
+            return attr
 
         if result is None:
             raise NotImplementedError()
@@ -358,6 +372,8 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
+        elif name == "_typed_storage":
+            return TypedStorageVariable(self._typed_storage)
         else:
             constant_result = None
 
@@ -488,6 +504,8 @@ class TensorVariable(VariableTracker):
             )
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
+        elif name == "__setattr__":
+            unimplemented("Setting on tensors disallowed in compiled graphs.")
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -829,3 +847,68 @@ class FakeItemVariable(TensorVariable):
     @classmethod
     def from_tensor_variable(cls, tensor_variable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
+
+
+class TypedStorageVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        self.value = value
+        super().__init__(**kwargs)
+
+    def reconstruct(self, codegen):
+        return super().reconstruct(codegen)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "_data_ptr":
+            return ConstantVariable(self.value._data_ptr())
+            # return variables.LambdaVariable(
+            #     lambda *args, **kwargs: ConstantVariable(self.value._data_ptr())
+            # ).add_options(self)
+        if name == "_size":
+            if isinstance(self.value._size(), int):
+                return ConstantVariable(self.value._size())
+            sizes = [ConstantVariable(x) for x in self.value._size()]
+            return SizeVariable(sizes)
+        if name == "device":
+            return ConstantVariable(self.value.device)
+        if name == "_resize_":
+            assert len(args) == 1
+            self.value._resize_(args[0].value)
+            return ConstantVariable(None)
+        print("TypedStorageVariable Call method", name, self.value, args)
+        unimplemented(f"typed_storage method calls WIP {name}")
+
+
+class UnTypedStorageVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        self.value = value
+        super().__init__(**kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "_data_ptr":
+            return ConstantVariable(self.value._data_ptr())
+            # return variables.LambdaVariable(
+            #     lambda *args, **kwargs: ConstantVariable(self.value._data_ptr())
+            # ).add_options(self)
+        if name == "_size":
+            if isinstance(self.value._size(), int):
+                return ConstantVariable(self.value._size())
+            sizes = [ConstantVariable(x) for x in self.value._size()]
+            return SizeVariable(sizes)
+        if name == "device":
+            return ConstantVariable(self.value.device)
+        if name == "data_ptr":
+            return ConstantVariable(self.value.data_ptr())
+        print("UnTypedStorageVariable Call method", name, self.value, args)
+        unimplemented(f"untyped_storage method calls WIP {name}")

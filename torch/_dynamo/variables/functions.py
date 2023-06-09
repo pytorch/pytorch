@@ -474,7 +474,10 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         closure_cells = init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
-            assert getattr(self.closure.items[idx], name, name) == name
+            if not getattr(self.closure.items[idx], name, name) == name:
+                unimplemented(
+                    f"{getattr(self.closure.items[idx], name, name)} MISMATCH {name}"
+                )
             assert name not in result
             closure_cells[name] = self.closure.items[idx]
 
@@ -569,6 +572,13 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     def can_rewrite(variable):
         return (
             inspect.isfunction(variable) and variable in _traceable_collective_remaps()
+        )
+
+    @staticmethod
+    def was_rewritten(variable):
+        return (
+            inspect.isfunction(variable)
+            and variable in _traceable_collective_remaps().values()
         )
 
     @staticmethod

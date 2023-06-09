@@ -3,7 +3,6 @@ import inspect
 import logging
 
 import math
-import re
 import types
 from typing import Dict, List, Optional
 
@@ -87,6 +86,7 @@ if torch.distributed.is_available():
 
     from torch.distributed.distributed_c10d import (
         _get_group_tag,
+        get_backend,
         get_process_group_ranks,
     )
 
@@ -94,6 +94,7 @@ if torch.distributed.is_available():
         [
             get_process_group_ranks,
             _get_group_tag,
+            get_backend,
         ]
     )
 
@@ -150,6 +151,9 @@ class TorchVariable(VariableTracker):
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
+        if "all_gather_tensor" in str(value):
+            raise RuntimeError("How?")
+
         if (
             isinstance(value, collections.abc.Hashable)
             and value in tensor_dunder_fns_remap
@@ -524,15 +528,22 @@ class TorchVariable(VariableTracker):
         elif (
             inspect.isfunction(self.value)
             and self.value in constant_processgroup_functions
+            and args
         ):
+            print("PG GUARDING", self.value)
             # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
             # ID_MATCH based on how it was constructed.
 
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
-            assert len(args) == 1, "Expected one arg (pg)"
+            assert len(args) == 1
             assert isinstance(args[0], ProcessGroupVariable)
             return ConstantVariable(self.value(args[0].as_python_constant()))
+        elif (
+            inspect.isfunction(self.value)
+            and self.value in constant_processgroup_functions
+        ):
+            return ConstantVariable(self.value())
         elif self.value == torch.nn.init._calculate_correct_fan:
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
