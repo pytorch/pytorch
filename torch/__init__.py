@@ -1478,7 +1478,7 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config = dict()
+        self.config: Dict[str, Any] = dict()
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
