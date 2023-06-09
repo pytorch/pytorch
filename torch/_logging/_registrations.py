@@ -5,7 +5,6 @@ register_log("aot", "torch._functorch.aot_autograd")
 register_log("inductor", "torch._inductor")
 register_log("dynamic", "torch.fx.experimental.symbolic_shapes")
 register_log("torch", "torch")
-register_log("distributed", "torch.distributed")
 
 register_artifact("guards")
 register_artifact("bytecode", off_by_default=True)
