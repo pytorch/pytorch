@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import unittest
+
 import torch
 
 import torch._dynamo
@@ -49,7 +51,7 @@ class PreDispatchTests(torch._dynamo.test_case.TestCase):
         out_test.sum().backward()
         self.assertEqual(a_ref.grad, a_test.grad)
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA-only test')
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA-only test")
     def test_autocast_simple(self):
         def f(a):
             b = a * 2
