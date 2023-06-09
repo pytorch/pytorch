@@ -11,13 +11,13 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from .. import config, inductor_prims
 from ..pattern_matcher import (
     CallFunctionVarArgs,
-    inference_graph,
+    fwd_only,
     init_once_fakemode,
+    joint_fwd_bwd,
     Match,
     PatternMatcherPass,
     register_graph_pattern,
     register_replacement,
-    training_graph,
 )
 from ..virtualized import V
 
@@ -134,6 +134,7 @@ def replace_random(
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(replacement, [size])
 
+
 @init_once_fakemode
 def lazy_init():
     if not torch.cuda.is_available():
@@ -149,22 +150,28 @@ def lazy_init():
     workaround = {"dropout_p": 0.113377}
 
     register_replacement(
+        # pyrefly: ignore [bad-argument-type]
         _dropout_pattern,
+        # pyrefly: ignore [bad-argument-type]
         _dropout_replacement,
         [t(requires_grad=True), *workaround.values()],
-        inference_graph,
+        # pyrefly: ignore [bad-argument-type]
+        fwd_only,
+        # pyrefly: ignore [bad-argument-type]
         patterns,
         scalar_workaround=workaround,
-        prepend=True,
     )
     register_replacement(
+        # pyrefly: ignore [bad-argument-type]
         _dropout_pattern,
+        # pyrefly: ignore [bad-argument-type]
         _dropout_replacement,
         [t(requires_grad=True), *workaround.values()],
-        training_graph,
+        # pyrefly: ignore [bad-argument-type]
+        joint_fwd_bwd,
+        # pyrefly: ignore [bad-argument-type]
         patterns,
         scalar_workaround=workaround,
-        prepend=True,
     )
 
 
@@ -183,14 +190,15 @@ def _dropout_replacement(x: torch.Tensor, dropout_p: float):
 
     class Dropout(torch.autograd.Function):
         @staticmethod
-        def forward(_, x):
+        def forward(ctx: Any, x: Tensor) -> Tensor:
             return get_bool_mask().to(x.dtype) * x * scale
 
         @staticmethod
-        def backward(_, grad_output):
+        def backward(ctx: Any, grad_output: Tensor) -> Tensor:
             return get_bool_mask().to(grad_output.dtype) * grad_output * scale
 
     return Dropout.apply(x)
+
 
 # pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.randint.low), pass_dict=patterns)

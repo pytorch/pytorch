@@ -40,6 +40,8 @@ debug_assert = False
 
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
+partitioner_aggressive_fusion = False
+
 # See # NOTE [Export custom triton op]
 decompose_custom_triton_ops = True
 
@@ -182,7 +184,7 @@ memory_budget_pareto_dir = os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO_DIR"
 # Sets all of the ban_recompute heuristics to False except ban_recompute_reductions
 # Generally, this will probably result in some memory improvement, but at the
 # cost of some performance
-aggressive_recomputation = False
+aggressive_recomputation = partitioner_aggressive_fusion
 
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
