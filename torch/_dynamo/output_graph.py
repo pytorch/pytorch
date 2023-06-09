@@ -233,7 +233,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
             )
-            if config.dynamic_shapes or config.automatic_dynamic_shapes or not config.assume_static_by_default
+            if config.dynamic_shapes
+            or config.automatic_dynamic_shapes
+            or not config.assume_static_by_default
             else None,
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
