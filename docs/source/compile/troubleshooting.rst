@@ -28,10 +28,10 @@ tools and their typical usage. For additional help see
      - Usage
    * - Info logging
      - View summarized steps of compilation
-     - ``torch._dynamo.config.log_level = logging.INFO``
+     - ``torch._logging.set_logs(dynamo = logging.INFO)``
    * - Debug logging
      - View detailed steps of compilation (print every instruction traced)
-     - ``torch._dynamo.config.log_level = logging.DEBUG`` and
+     - ``torch._logging.set_logs(dynamo = logging.DEBUG)`` and
        ``torch._dynamo.config.verbose = True``
    * - Minifier for any backend
      - Find smallest subgraph which reproduces errors for any backend
@@ -83,7 +83,7 @@ graph lowering (TorchInductor)*. Errors can occur in any component of
 the stack and will provide full stack traces.
 
 You may use info logging
-(``torch._dynamo.config.log_level = logging.INFO``) and look for
+(``torch._logging.set_logs(dynamo = logging.INFO)``) and look for
 ``Step #: ...`` outputs in order to determine in which component the
 error has occurred. Logs are made at the beginning and end of each step,
 so the step that an error should correspond to is the most recent logged
@@ -734,5 +734,5 @@ OS, Python< PyTorch, CUDA, and Triton versions info by running:
 -  The expected behavior
 -  A log (set ``torch._dynamo.config.log_file`` to a valid file name to
    dump the logs to a file and
-   ``torch._dynamo.config.log_level = logging.DEBUG`` and
+   ``torch._logging.set_logs(dynamo = logging.DEBUG)`` and
    ``torch._dynamo.config.verbose = True``)
