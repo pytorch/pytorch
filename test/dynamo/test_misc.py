@@ -5712,6 +5712,21 @@ def ___make_guard_fn():
         foo(inp)
         self.assertEqual(counter.frame_count, 1)
 
+    def test_reconstruct_set_across_graph_break(self):
+        def foo(x, y):
+            setty = set()
+            for t in x:
+                setty.add(t)
+            print("Break!")
+            return y * len(setty)
+
+        x = torch.randn(10, 10)
+        y = torch.randn(2, 2)
+
+        counter = CompileCounter()
+        foo = torch._dynamo.optimize(counter)(foo)
+        result = foo([x, x, x, x, y], y)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

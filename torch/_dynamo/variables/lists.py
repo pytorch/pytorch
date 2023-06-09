@@ -674,10 +674,9 @@ class SetVariable(VariableTracker):
         return set
 
     def reconstruct(self, codegen):
-        breakpoint()
-        create_load_global("set", True)
+        create_load_global("set", False)
         codegen.foreach(self.items)
-        return [create_instruction("CALL_FUNCTION", arg=len(self.items))]
+        return [create_instruction("BUILD_SET", arg=len(self.items))]
 
     # Note - this is only used for producing a set
     def _to_example_values(self, tx, vt):
