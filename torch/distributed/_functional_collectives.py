@@ -11,23 +11,20 @@ from torch.fx.experimental.proxy_tensor import (
     get_innermost_proxy_mode,
 )
 
-"""
-The old check `sys.executable == 'torch_deploy'` for torch::deploy was replaced here:
-https://github.com/pytorch/multipy/pull/138/files#diff-dae4e20139ff6af007a16cc6888d0e3c1d40d297cb7aef89d8e6cc201caacb9eR124
-
-The new check is a bit more hackish, but that's all we have for now.
-
-"""
-def _is_running_under_torch_deploy():
-    return torch._meta_registrations is object
-
-
-if _is_running_under_torch_deploy():
+if torch._running_with_deploy():
     def is_torchdynamo_compiling():
         """Can't import torchdynamo in torchdeploy builds currently."""
         return False
 else:
-    from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
+    try:
+        from torch._dynamo.external_utils import is_compiling as is_torchdynamo_compiling
+    except Exception:
+        warnings.warn(
+            "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
+        )
+
+        def is_torchdynamo_compiling():
+            return False
 
 """
 New traceable, functional collectives.
@@ -82,57 +79,73 @@ As a wise man said once: Don't cross the streams (https://www.youtube.com/watch?
 data_ptr_to_work = dict()
 work_version = 0
 
-def _register_tensor_work(tensor, work):
-    # Note: called directly by inductor codegen currently
-    global data_ptr_to_work
-    global work_version
-    data_ptr_to_work[tensor.data_ptr()] = (work_version, work)
-    work_version += 1
+class _WaitRegistration:
+    def __init__(self, work):
+        global work_version
+        self.work = work
+        self.version = work_version
+        self.ptrs = []
+        self.cleanup_count = 0
+        work_version += 1
 
-def _wait_and_clear_tensor(data_ptr, version):
-    global data_ptr_to_work
-    version_and_work = data_ptr_to_work.get(data_ptr)
+    def _register(self, tensor):
+        global data_ptr_to_work
+        ptr = tensor.data_ptr()
+        data_ptr_to_work[ptr] = self
+        self.ptrs.append(ptr)
+        self.cleanup_count += 1
 
-    if version_and_work is not None and version_and_work[0] == version:
-        version_and_work[1].wait()
-        del data_ptr_to_work[data_ptr]
+    def wait(self):
+        if self.work is not None:
+            self.work.wait()
+            self.work = None
+        self.cleanup()
+
+    def decrement_live_tensor(self, ptr):
+        self.cleanup_count -= 1
+        if self.cleanup_count == 0:
+            self.cleanup()
+        else:
+            if data_ptr_to_work.get(ptr, None) == self:
+                del data_ptr_to_work[ptr]
+
+    def cleanup(self):
+        for ptr in self.ptrs:
+            if data_ptr_to_work.get(ptr, None) == self:
+                del data_ptr_to_work[ptr]
+
+
+def _register_tensor_work(tensor_or_list, work):
+    reg = _WaitRegistration(work)
+    if not isinstance(tensor_or_list, list):
+        tensor_or_list = [tensor_or_list]
+    for tensor in tensor_or_list:
+        reg._register(tensor)
+
+
+def _wait_reg_dec(ptr, wait_reg):
+    wait_reg.decrement_live_tensor(ptr)
 
 def _register_wrapper_tensor(tensor_wrapper, tensor):
     global data_ptr_to_work
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.
     # Instead, backends must call this themselves when implementing traced collectives.
-    version, _ = data_ptr_to_work.get(tensor.data_ptr(), (None, None))
-    if version is None:
+    wait_reg = data_ptr_to_work.get(tensor.data_ptr(), None)
+    if wait_reg is None:
         warnings.warn(
             "Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone"
         )
     else:
         # We force the collective to be waited in the case this tensor goes away to reduce the change of deadlocks.
-        weakref.finalize(tensor_wrapper, _wait_and_clear_tensor, tensor.data_ptr(), version)
+        weakref.finalize(tensor_wrapper, _wait_reg_dec, tensor.data_ptr(), wait_reg)
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     global data_ptr_to_work
     data_ptr = tensor.data_ptr()
-    version_and_work = data_ptr_to_work.get(data_ptr)
-    if version_and_work is not None:
-        _wait_and_clear_tensor(data_ptr, version_and_work[0])
+    wait_reg = data_ptr_to_work.get(data_ptr)
+    if wait_reg is not None:
+        wait_reg.wait()
     return tensor
-
-class WaitHolder:
-    """
-    WaitHolder is an indirection to the tensor that needs to be waited on.
-
-    It decomples the tensor an AsyncCollectiveTensor wraps from
-    the tensor it needs to use with wait_tensor.
-    """
-
-    def __init__(self, lookup_tensor):
-        self.lookup_tensor = lookup_tensor
-
-    def wait_tensor(self):
-        if self.lookup_tensor is not None:
-            wait_tensor(self.lookup_tensor)
-            self.lookup_tensor = None
 
 class AsyncCollectiveTensor(torch.Tensor):
     r"""
@@ -142,19 +155,16 @@ class AsyncCollectiveTensor(torch.Tensor):
     def functional_collective(self, group, tag):
         tag, rankset, group_size = _expand_group(group, tag)
         tensor = torch.ops.c10d_functional.{collective}(self, tag, rankset, group_size)
-        res = AsyncCollectiveTensor(tensor)
-        _register_wrapper_tensor(res, tensor)
-        return res
+        return _maybe_wrap_tensor(tensor)
     """
     elem: torch.Tensor
-    _holder: WaitHolder
 
-    __slots__ = ['elem', '_holder']
+    __slots__ = ['elem']
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
-    def __new__(cls, elem: torch.Tensor, holder: WaitHolder):
+    def __new__(cls, elem: torch.Tensor):
 
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls, elem.size(),
@@ -163,22 +173,20 @@ class AsyncCollectiveTensor(torch.Tensor):
             device=elem.device, requires_grad=False
         )
         r.elem = elem
-        r._holder = holder
         return r
 
     def __repr__(self):
         return f"AsyncCollectiveTensor({self.elem})"
 
     def trigger_wait(self):
-        self._holder.wait_tensor()
+        wait_tensor(self.elem)
         return self
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap(e: AsyncCollectiveTensor):
-            # TODO do we need to insert a wait_tensor op for all tensors or just the first one?
-            # Given only first usage of any of the output tensors needs to wait, for now we emit only one wait
-            e._holder.wait_tensor()
+            # wait_tensor is idepotent and will do stream sync only once
+            wait_tensor(e.elem)
             return e.elem
 
         unwrapped_args = tree_map_only(AsyncCollectiveTensor, unwrap, args)
@@ -215,7 +223,7 @@ def _all_reduce_coalesced(self, reduceOp, tag, ranks, group_size):
 
     inplace_tensor_list = [t.clone(memory_format=torch.contiguous_format) for t in self]
     work = dist.all_reduce_coalesced(inplace_tensor_list, op=op, group=group, async_op=True)
-    _register_tensor_work(inplace_tensor_list[0], work)
+    _register_tensor_work(inplace_tensor_list, work)
 
     return inplace_tensor_list
 
@@ -308,18 +316,14 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     elif isinstance(group, dt.DeviceMesh):
         assert group.ndim == 1, "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         # TODO: it should run collective in the whole mesh instead of dim 0
-        mesh_pg = group.get_dim_groups()[0]
-        rankset = dist.get_process_group_ranks(mesh_pg)
+        tag, rankset = group._dim_group_infos[0]
         group_size = len(rankset)
-        tag = tag or c10d._get_group_tag(mesh_pg)
     elif isinstance(group, tuple):
         if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
             dmesh = group[0]
             dim = group[1]
-            dim_group = dmesh.get_dim_groups()[dim]
-            rankset = dist.get_process_group_ranks(dim_group)
+            tag, rankset = dmesh._dim_group_infos[dim]
             group_size = len(rankset)
-            tag = tag or c10d._get_group_tag(dim_group)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
@@ -335,12 +339,12 @@ def _are_we_tracing() -> bool:
         return False
     return mode.tracer is not None
 
-def _maybe_wrap_tensor(self):
+def _maybe_wrap_tensor(self) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
-    res = AsyncCollectiveTensor(self, WaitHolder(self))
+    res = AsyncCollectiveTensor(self)
     _register_wrapper_tensor(res, self)
-    return res
+    return cast(torch.Tensor, res)
 
 def wait_tensor(tensor):
     """
@@ -371,7 +375,6 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     return _maybe_wrap_tensor(tensor)
-
 
 
 def all_gather_tensor(
@@ -459,20 +462,8 @@ def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TY
     """
     tag, rankset, group_size = _expand_group(group, tag)
     tensor_list = torch.ops.c10d_functional.all_reduce_coalesced(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+    return list(map(_maybe_wrap_tensor, tensor_list))
 
-    if _are_we_tracing():
-        return list(map(wait_tensor, tensor_list))
-
-    res = []
-    lookup_tensor = tensor_list[0]
-    wh = WaitHolder(lookup_tensor)
-    for tensor in tensor_list:
-        act = AsyncCollectiveTensor(tensor, wh)
-        res.append(cast(torch.Tensor, act))
-
-    # FIXME we should register all tensors and ref count when to emit the wait
-    _register_wrapper_tensor(res[0], lookup_tensor)
-    return res
 
 # We now register meta kernels to deal with tracing
 def _all_reduce_meta(self, *args):
@@ -513,7 +504,7 @@ def _register_ops():
         c10_lib_impl.impl(op_name, meta_impl, "Meta")
 
 
-if not _is_running_under_torch_deploy():
+if not torch._running_with_deploy():
     # Library MUST be defined at module scope or it doesn't work
     # Creating a "DEF" Library always crashes torch::deploy so we create our Library instances here
     #   guarded against running inside it
@@ -522,3 +513,47 @@ if not _is_running_under_torch_deploy():
     _register_ops()
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
+
+# We allow torchdynamo to convert calls from legacy inplace APIs into traceable APIs
+# via a pseudo-inplace version (like a decomp) that uses the functional collective
+# and a copy.
+#
+# These schemas intentionally match torch.distributed.distributed_c10d.* ops that we are trying to remap from
+def all_gather_tensor_inplace(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    group,  # TODO add a type,
+    async_op: bool = False,
+    tag: str = "",
+    gather_dim: int = 0
+):
+    assert not async_op, "Can't remap async version of inplace op to functional collective"
+    return output.copy_(all_gather_tensor(input, gather_dim, group, tag))
+
+def reduce_scatter_tensor_inplace(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    op: str = "sum",  # TODO type is actually c10d ReduceOp. is this ok?
+    group=None,  # TODO add a type
+    async_op: bool = False,
+    scatter_dim: int = 0,
+    tag: str = "",
+):
+    assert not async_op, "Can't remap async version of inplace op to functional collective"
+    return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
+
+from torch.distributed.distributed_c10d import (
+    all_gather_into_tensor as legacy_allgather,
+    reduce_scatter_tensor as legacy_reducescatter,
+)
+
+"""
+This dict should contain sets of functions that dynamo is allowed to remap.
+
+Functions in this set should accept the same args/kwargs 1:1 as their mapping.
+"""
+
+traceable_collective_remaps = {
+    legacy_allgather: all_gather_tensor_inplace,
+    legacy_reducescatter: reduce_scatter_tensor_inplace,
+}

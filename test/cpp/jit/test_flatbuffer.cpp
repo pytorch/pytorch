@@ -53,6 +53,23 @@ mobile::Module parse_mobile_module(
 }
 } // namespace
 
+TEST(FlatbufferTest, LoadMalformedModule) {
+  // Manually create some data with Flatbuffer header.
+  std::stringstream bad_data;
+  bad_data << "PK\x03\x04PTMF\x00\x00"
+           << "*}NV\xb3\xfa\xdf\x00pa";
+
+  // Loading module from it should throw an exception.
+  // Check guard at parse_and_initialize_mobile_module_for_jit.
+  ASSERT_THROWS_WITH_MESSAGE(
+      torch::jit::load(bad_data), "Malformed Flatbuffer module");
+
+  // Check guard at parse_and_initialize_mobile_module.
+  ASSERT_THROWS_WITH_MESSAGE(
+      parse_mobile_module(bad_data.str().data(), bad_data.str().size()),
+      "Malformed Flatbuffer module");
+}
+
 TEST(FlatbufferTest, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(

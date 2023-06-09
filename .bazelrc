@@ -96,6 +96,9 @@ build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-parameter
 # likely want to have this disabled for the most part.
 build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-missing-field-initializers
 
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-function
+build --per_file_copt='^//.*\.(cpp|cc)$'@-Wno-unused-variable
+
 build --per_file_copt='//:aten/src/ATen/RegisterCompositeExplicitAutograd\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:aten/src/ATen/RegisterCompositeImplicitAutograd\.cpp$'@-Wno-error=unused-function
 build --per_file_copt='//:aten/src/ATen/RegisterMkldnnCPU\.cpp$'@-Wno-error=unused-function

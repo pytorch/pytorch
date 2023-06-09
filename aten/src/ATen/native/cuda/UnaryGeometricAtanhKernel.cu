@@ -5,19 +5,23 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <limits>
 
 namespace at::native {
 
-CONSTEXPR_EXCEPT_WIN_CUDA char atanh_name[] = "atanh";
+#if AT_USE_JITERATOR()
+CONSTEXPR_EXCEPT_WIN_CUDA char atanh_name[] = "atanh_impl";
+#endif
+
 void atanh_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
-#if AT_USE_JITERATOR
+#if AT_USE_JITERATOR()
     static const auto atanh_string = jiterator_stringify(
-        template <typename T> T atanh(T a) { return std::atanh(a); });
+        template <typename T> T atanh_impl(T a) { return std::atanh(a); });
     AT_DISPATCH_COMPLEX_TYPES_AND(
         kComplexHalf, common_dtype, "atanh_name", [&]() {
           jitted_gpu_kernel<

@@ -44,7 +44,7 @@ def mock_get_comments() -> List[GitHubComment]:
         ),
         # Case 2 - a label err comment
         GitHubComment(
-            body_text=" #" + LABEL_ERR_MSG_TITLE,
+            body_text=" #" + LABEL_ERR_MSG_TITLE.replace("`", ""),
             created_at="",
             author_login=BOT_AUTHORS[1],
             author_association="",

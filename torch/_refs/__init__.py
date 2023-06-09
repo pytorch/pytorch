@@ -186,7 +186,7 @@ __all__ = [
     #
     "clone",
     "copy_to",  # TODO: add OpInfo (or implement .to)
-    "item",  # TODO: add OpInfo
+    "item",
     "to",
     #
     # Reduction ops
@@ -295,7 +295,7 @@ __all__ = [
     # Test-related functions
     #
     "allclose",
-    "equal",  # TODO: add OpInfo
+    "equal",
     #
     # Statistical operations
     #
@@ -4045,7 +4045,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # Tensor.view(a, b, c) or Tensor.view((a, b, c)) Function call torch.view
 # doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
-@register_decomposition(aten.view)
+@register_decomposition(aten.view.default)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
@@ -5021,7 +5021,6 @@ def allclose(
     )
 
 
-# TODO: add OpInfo for torch.equal and refs.equal
 def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     utils.check_same_device(a, b, allow_cpu_scalar_tensors=False)
     utils.check_same_dtype(a, b)
