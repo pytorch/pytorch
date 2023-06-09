@@ -1676,8 +1676,11 @@ import torch.fx.experimental.symbolic_shapes
 from torch import func as func
 from torch.func import vmap
 
+
 # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
 from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
+from torch import compiler as compiler
+
 
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
@@ -1707,7 +1710,6 @@ if not _running_with_deploy():
 
             return cls.ops_table[(op_key, dispatch_key)]
 
-from torch import compiler as compiler
 
 from . import _logging
 _logging._init_logs()
