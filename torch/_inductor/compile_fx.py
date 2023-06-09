@@ -5,7 +5,6 @@ import logging
 import sys
 import warnings
 
-from copy import deepcopy
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
@@ -17,8 +16,8 @@ import torch._functorch.config as functorch_config
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
-from torch._dynamo.utils import defake, detect_fake_mode
-from torch._functorch.aot_autograd import make_boxed_func
+from torch._dynamo.utils import detect_fake_mode
+from torch._functorch.aot_autograd import flatten_parameters, make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
@@ -192,7 +191,6 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                     **kwargs,
                     "aot_mode": False,
                     "cpp_wrapper": False,
-                    "cudagraphs": False,
                 }
                 # clone_graph(gm) makes sure no graph modification from the first pass will
                 # leak to the second pass. It does increase memory pressure, but the problem
@@ -200,27 +198,25 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 compiled = inner_compile(
                     clone_graph(gm), example_inputs, **kwargs_patched
                 )
-                if detect_fake_mode(example_inputs):
 
-                    def materialize(x):
-                        if isinstance(x, (torch.SymInt, torch.SymFloat)):
-                            # Need concrete value to run dynamic shapes and tune the result
-                            return x.node.hint
-                        else:
-                            # TODO: the defaked value may be problematic in some cases
-                            return defake(x)
+                def materialize(x):
+                    if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                        # Need concrete value to run dynamic shapes and tune the result
+                        return x.node.hint
+                    else:
+                        assert not isinstance(x, FakeTensor)
+                        return x
 
-                    with torch.utils._python_dispatch._disable_current_modes():
-                        inputs_real = [materialize(t) for t in example_inputs]
-                else:
-                    inputs_real = deepcopy(example_inputs)
+                real_inputs = [materialize(x) for x in V.get_real_inputs()]
 
                 with torch.utils._python_dispatch._disable_current_modes():
-                    compiled(inputs_real)
-                del inputs_real
+                    compiled(real_inputs)
+
+                real_inputs = None
+                V.set_real_inputs(None)
 
                 # second pass
-                kwargs_patched = {**kwargs, "cpp_wrapper": True, "cudagraphs": False}
+                kwargs_patched = {**kwargs, "cpp_wrapper": True}
                 return inner_compile(gm, example_inputs, **kwargs_patched)
 
     return wrapper
@@ -657,12 +653,15 @@ def compile_fx(
             )
 
     if config.cpp_wrapper:
-        # CudaWrapperCodeGen relies on kernel name to find the autotuned cubin file
+        _, params_and_buffer_flat, _ = flatten_parameters(model_)
+        V.set_real_inputs(params_and_buffer_flat + example_inputs_)
         with config.patch(
             {
                 "cpp_wrapper": False,
-                "triton.unique_kernel_names": True,
                 "triton.autotune_cublasLt": False,
+                "triton.cudagraphs": False,
+                # CudaWrapperCodeGen relies on kernel name to find the autotuned cubin file
+                "triton.unique_kernel_names": True,
             }
         ):
             return compile_fx(

@@ -191,6 +191,13 @@ def setup_stacktrace_preservation_hooks(roots: List):
         )
         node.register_hook(get_posthook(special_stack))
 
+def flatten_parameters(mod: torch.fx.GraphModule):
+    params_and_buffers = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
+    params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
+    return params_and_buffers, params_and_buffers_flat, params_spec
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3629,14 +3636,8 @@ def aot_module_simplified(
     :func:`aot_module_simplified` removes these overheads.
     """
 
-    params = {
-        **dict(mod.named_parameters(remove_duplicate=False)),
-        **dict(mod.named_buffers(remove_duplicate=False)),
-    }
-    params_flat, params_spec = pytree.tree_flatten(params)
-    params_flat = tuple(params_flat)
-    params_len = len(params_flat)
-
+    params_and_buffers, params_and_buffers_flat, params_spec = flatten_parameters(mod)
+    params_len = len(params_and_buffers_flat)
     functional_call = create_functional_call(mod, params_spec, params_len)
 
     if bw_compiler is None:
@@ -3648,7 +3649,7 @@ def aot_module_simplified(
 
     full_args = []
     # First, the params
-    full_args.extend(params_flat)
+    full_args.extend(params_and_buffers_flat)
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
@@ -3657,7 +3658,7 @@ def aot_module_simplified(
         # We now know this came from dynamo, and (1) we care about guards,
         # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
-        for name in params.keys():
+        for name in params_and_buffers.keys():
             assert name in mod._param_name_to_source, f"{name} not found."
             source = mod._param_name_to_source[name]
             assert source not in seen_sources, source
@@ -3716,7 +3717,7 @@ def aot_module_simplified(
     # convention.  This should get fixed...
     def forward(*runtime_args):
         full_args = []
-        full_args.extend(params_flat)
+        full_args.extend(params_and_buffers_flat)
         full_args.extend(runtime_args)
         return compiled_fn(full_args)
 
@@ -3771,14 +3772,8 @@ def aot_export_module(
     """
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
-    params_and_buffers = {
-        **dict(named_parameters),
-        **dict(named_buffers),
-    }
-    params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
-    params_and_buffers_flat = tuple(params_and_buffers_flat)
+    _, params_and_buffers_flat, params_spec = flatten_parameters(mod)
     params_len = len(params_and_buffers_flat)
-
     functional_call = create_functional_call(mod, params_spec, params_len)
 
     num_fw_outs = None
