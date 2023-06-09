@@ -2885,7 +2885,7 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
         unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
         for input_size in input_sizes:
             input_tensor = make_arg(input_size, noncontiguous=noncontiguous)
-            if np.product(size) == 0:
+            if np.prod(size) == 0:
                 boundary_tensor = unsorted_tensor
                 sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
             else:
