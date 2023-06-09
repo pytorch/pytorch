@@ -39,7 +39,7 @@ void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   torch::jit::EliminateDeadCode(graph);
 }
 
-Operation createStaticSubgraphRuntime(const Node* node) {
+static Operation createStaticSubgraphRuntime(const Node* node) {
   auto g = node->g(attr::Subgraph);
   auto module = std::make_shared<torch::jit::StaticModule>(g);
   auto num_inputs = module->num_inputs();
@@ -72,7 +72,7 @@ RegisterOperators StaticSubgraphOps({torch::jit::Operator(
     return false;                           \
   }
 
-bool canHandle(Node* node) {
+static bool canHandle(Node* node) {
   for (Value* input : node->inputs()) {
     bool is_tensor = !!input->type()->cast<TensorType>();
     auto list_type = input->type()->cast<ListType>();
@@ -114,7 +114,7 @@ bool canHandle(Node* node) {
   return getOutOfPlaceOperation(node) != nullptr;
 }
 
-bool canMerge(Node* consumer, Node* producer, AliasDb* aliasDb) {
+static bool canMerge(Node* consumer, Node* producer, AliasDb* aliasDb) {
   // Only fuse within a block
   REQ(consumer->owningBlock() == producer->owningBlock());
 
@@ -137,7 +137,7 @@ bool canMerge(Node* consumer, Node* producer, AliasDb* aliasDb) {
   return true;
 }
 
-Node* getOrCreateStaticSubgraph(Node* n, AliasDb* aliasDb) {
+static Node* getOrCreateStaticSubgraph(Node* n, AliasDb* aliasDb) {
   if (n->hasAttribute(attr::Subgraph) && n->kind() == prim::StaticSubgraph) {
     return n;
   }
@@ -146,7 +146,7 @@ Node* getOrCreateStaticSubgraph(Node* n, AliasDb* aliasDb) {
       n, prim::StaticSubgraph, *aliasDb);
 }
 
-value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
+static value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
   value_list result;
   for (auto i : inputs) {
     if (i->node()->owningBlock() == b) {
@@ -169,7 +169,7 @@ static void debugDumpFusionGroup(const std::string& msg, Node* n) {
   }
 }
 
-c10::optional<Node*> tryMerge(
+static c10::optional<Node*> tryMerge(
     Node* fusion_group,
     Node* to_merge,
     AliasDb* aliasDb) {
@@ -208,7 +208,7 @@ c10::optional<Node*> tryMerge(
   return fusion_group;
 }
 
-std::pair<graph_node_list::iterator, bool> createFusionGroup(
+static std::pair<graph_node_list::iterator, bool> createFusionGroup(
     Node* fusion_node,
     AliasDb* aliasDb) {
   fusion_node = getOrCreateStaticSubgraph(fusion_node, aliasDb);
@@ -231,7 +231,9 @@ std::pair<graph_node_list::iterator, bool> createFusionGroup(
   return std::make_pair(++fusion_node->reverseIterator(), false);
 }
 
-std::pair<graph_node_list::iterator, bool> scanNode(Node* n, AliasDb* aliasDb) {
+static std::pair<graph_node_list::iterator, bool> scanNode(
+    Node* n,
+    AliasDb* aliasDb) {
   GRAPH_DEBUG("Considering node:", *n);
 
   if (!canHandle(n)) {
@@ -241,7 +243,7 @@ std::pair<graph_node_list::iterator, bool> scanNode(Node* n, AliasDb* aliasDb) {
   return createFusionGroup(n, aliasDb);
 }
 
-bool inlineIfTooSmall(Node* n, size_t min_size) {
+static bool inlineIfTooSmall(Node* n, size_t min_size) {
   if (n->kind() != prim::StaticSubgraph) {
     return false;
   }
@@ -258,7 +260,7 @@ bool inlineIfTooSmall(Node* n, size_t min_size) {
   return false;
 }
 
-void inlineSmallFusionGroups(Block* block, size_t min_size) {
+static void inlineSmallFusionGroups(Block* block, size_t min_size) {
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
       inlineSmallFusionGroups(b, min_size);
@@ -323,7 +325,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   inlineSmallFusionGroups(block, min_size);
 }
 
-void inlineFallbackGraphs(std::shared_ptr<Graph> graph) {
+static void inlineFallbackGraphs(std::shared_ptr<Graph> graph) {
   DepthFirstGraphNodeIterator it(graph);
 
   Node* n = nullptr;

@@ -3,7 +3,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
                         _differentiable_doc, _foreach_doc, _default_to_fused_or_foreach)
 from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['NAdam', 'nadam']
 
@@ -291,8 +290,7 @@ def _multi_tensor_nadam(params: List[Tensor],
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs,
-                                                          mu_products, state_steps])
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps])
     for (grouped_params, grouped_grads, grouped_exp_avgs,
          grouped_exp_avg_sqs, grouped_mu_products, grouped_state_steps) in grouped_tensors.values():
 

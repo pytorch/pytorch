@@ -345,7 +345,9 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(1, 3, 28, 28)
             self._test_common(mod, (v,), 0, 0)
 
-    def test_conv2d_binary_inplace_fusion_pass(self):
+    def test_conv2d_binary_inplace_fusion_pass_cpu(
+        self, include_ops=None, exclude_ops=None
+    ):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -362,8 +364,12 @@ class TestPaternMatcher(TestCase):
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
         ]
         mod = Model().to(memory_format=torch.channels_last).eval()
-        include_ops = ["mkldnn._convolution_pointwise_.binary"]
-        exclude_ops = ["mkldnn._convolution_pointwise.binary"]
+
+        if include_ops is None:
+            include_ops = ["mkldnn._convolution_pointwise_.binary"]
+        if exclude_ops is None:
+            exclude_ops = ["mkldnn._convolution_pointwise.binary"]
+
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
     def test_conv2d_binary_inplace_fusion_failed_cpu(
