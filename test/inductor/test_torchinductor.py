@@ -2385,8 +2385,6 @@ class CommonTemplate:
         expl, out_guards, graphs, _, _, verbose = torch._dynamo.explain(aot_fn, x, target)
         for idx, graph in enumerate(graphs):
             print(f"Graph {idx} listing {graph}")
-        
-
 
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
