@@ -1172,6 +1172,7 @@ def main():
         'include/torch/csrc/jit/codegen/cuda/scheduler/*.h',
         'include/torch/csrc/onnx/*.h',
         'include/torch/csrc/profiler/*.h',
+        'include/torch/csrc/profiler/unwind/*.h',
         'include/torch/csrc/profiler/orchestration/*.h',
         'include/torch/csrc/profiler/stubs/*.h',
         'include/torch/csrc/utils/*.h',
