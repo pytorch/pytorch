@@ -1,6 +1,7 @@
 import logging
 
 import torch
+from .. import config as inductor_config
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -146,7 +147,11 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     choices = [
         aten_addmm.bind((inp_expanded, mat1, mat2), layout, alpha=alpha, beta=beta)
     ]
-    if inp_expanded.get_stride()[0] == 0 and inp_expanded.get_device().type == "cuda":
+    if (
+        inp_expanded.get_stride()[0] == 0
+        and inp_expanded.get_device().type == "cuda"
+        and inductor_config.triton.autotune_cublasLt
+    ):
         # unexpand inp to make sure fused addmm from cublasLt is used
         choices.insert(
             0,

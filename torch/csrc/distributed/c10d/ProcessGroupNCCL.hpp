@@ -44,9 +44,17 @@ constexpr const char* NCCL_DESYNC_DEBUG = "NCCL_DESYNC_DEBUG";
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
-// TearDown mode: tear down process upon error, see `WorkNCCL::handleException`
-// Soft mode: just clean up collectives and abort communicators without tearing down process
-enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2 };
+// NoHandling: do not handle asynchronous NCCL errors
+// TearDown: tear down process upon error, see `WorkNCCL::handleException`
+// CleanUpOnly: just clean up collectives and abort communicators without tearing down process
+// SkipCleanUp: (this is a temporary option and can be removed in future) tear
+// down process without cleaning up NCCL communicators. This should be used as a
+// last resort in case `ncclCommAbort` itself is hanging
+enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2, SkipCleanUp = 3 };
+
+#define SHOULD_CLEAN_UP(a) (a != NoHandling && a != SkipCleanUp)
+
+#define SHOULD_TEAR_DOWN(a) (a != NoHandling && a != CleanUpOnly)
 
 // If set, ProcessGroupNCCL doesn't use recordStream calls to ensure
 // caching allocator safety for tensors used on both user-facing and
@@ -192,6 +200,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Indicates if the nccl start event has been updated to the store trace.
     // This will be used by desync debug.
     bool startTraceUpdated_{false};
+
+    // Record collective sizes for debug. We only record the size on the first
+    // device as multi-device per process is deprecated
+    size_t numelIn_ = -1;
+    size_t numelOut_ = -1;
 
     // Wrapper method for the static checkForNCCLErrors which can be overridden
     // for tests.

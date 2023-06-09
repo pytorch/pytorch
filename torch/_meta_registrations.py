@@ -704,6 +704,47 @@ def linalg_lu_solve_meta(
     return result
 
 
+@register_meta(aten.lu_unpack)
+@out_wrapper("P", "L", "U")
+def lu_unpack_meta(
+    LU: Tensor,
+    pivots: Tensor,
+    unpack_data: bool = True,
+    unpack_pivots: bool = True,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    torch._check(
+        LU.ndim >= 2,
+        lambda: f"torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: {LU.shape} instead",
+    )
+    if unpack_pivots:
+        torch._check(
+            pivots.dtype == torch.int32,
+            lambda: (
+                "torch.lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype.\n"
+                "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor"
+            ),
+        )
+    sizes = list(LU.shape)
+    m = sizes[-2]
+    n = sizes[-1]
+    k = min(m, n)
+    sizes[-1] = m
+    if unpack_pivots:
+        P = LU.new_empty(sizes)
+    else:
+        P = LU.new_empty([0])
+    if unpack_data:
+        sizes[-1] = k
+        L = LU.new_empty(sizes)
+        sizes[-2] = k
+        sizes[-1] = n
+        U = LU.new_empty(sizes)
+    else:
+        L = LU.new_empty([0])
+        U = LU.new_empty([0])
+    return P, L, U
+
+
 # parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
 def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
     if mode == "reduced":
@@ -755,6 +796,24 @@ def linalg_qr_meta(
     R = A.new_empty(R_shape)
     R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))
     return Q, R
+
+
+@register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
+@out_wrapper("sign", "logabsdet", "LU", "pivots")
+def _linalg_slogdet(A: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    squareCheckInputs(A, "linalg.slogdet")
+    checkFloatingOrComplex(A, "linalg.slogdet", False)
+    shape = A.shape
+    sign = A.new_empty(shape[:-2])
+    logabsdet = A.new_empty(shape[:-2], dtype=toRealValueType(A.dtype))
+    LU = torch.empty_strided(
+        size=shape,
+        stride=make_contiguous_strides_for(shape, False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+    pivots = A.new_empty(shape[:-1], dtype=torch.int32)
+    return sign, logabsdet, LU, pivots
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -829,6 +888,74 @@ def _linalg_broadcast_batch_dims_name(
         arg2 if arg2_expand_size == arg2.shape else arg2.expand(arg2_expand_size)
     )
     return arg1_broadcasted, arg2_broadcasted
+
+
+def linalg_solve_is_vector_rhs(input: Tensor, other: Tensor) -> bool:
+    expected_batched_rhs_shape = input.shape[:-1]
+    vector_case = other.ndim == 1 or (
+        input.ndim - 1 == other.ndim and other.shape == expected_batched_rhs_shape
+    )
+    return vector_case
+
+
+@register_meta(aten._linalg_solve_ex)
+def _linalg_solve_ex(
+    A: Tensor,
+    B: Tensor,
+    *,
+    left: bool = True,
+    check_errors: bool = False,
+    result: Optional[Tensor] = None,
+    LU: Optional[Tensor] = None,
+    pivots: Optional[Tensor] = None,
+    info: Optional[Tensor] = None,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    checkFloatingOrComplex(A, "linalg.solve")
+    torch._check(
+        A.dtype == B.dtype,
+        lambda: (
+            f"linalg.solve: Expected A and B to have the same dtype, but found A of type "
+            f"{A.dtype} and B of type {B.dtype} instead"
+        ),
+    )
+    vector_case = linalg_solve_is_vector_rhs(A, B)
+    B_ = B.unsqueeze(-1) if vector_case else B
+    checkInputsSolver(A, B_, left, "linalg.solve")
+    B_broad_shape, _ = _linalg_broadcast_batch_dims(B_, A)
+    torch._check(
+        left or not vector_case,
+        lambda: (
+            "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. "
+            "In this case linalg.solve is equivalent to B / A.squeeze(-1)"
+        ),
+    )
+    result_shape = B_broad_shape[:-1] if vector_case else B_broad_shape
+    result_ = torch.empty_strided(
+        size=result_shape,
+        stride=make_contiguous_strides_for(result_shape, not left),
+        dtype=B.dtype,
+        device=B.device,
+    )
+    shape = A.shape
+    ndim = A.ndim
+    LU_ = torch.empty_strided(
+        size=shape,
+        stride=make_contiguous_strides_for(shape, False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+    pivots_ = A.new_empty(shape[:-1], dtype=torch.int32)
+    info_ = A.new_empty(shape[:-2], dtype=torch.int32)
+    out = (result, LU, pivots, info)
+    res = (result_, LU_, pivots_, info_)
+    if all(x is not None for x in out):
+        for r, o in zip(res, out):
+            # resize and copy operations are done in-place
+            _maybe_resize_out(o, r.shape)  # type: ignore[arg-type]
+            # strides are not copied in out_wrapper
+            o.as_strided_(r.shape, r.stride())  # type: ignore[union-attr]
+            _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=False)  # type: ignore[arg-type]
+    return res
 
 
 @register_meta([aten.linalg_solve_triangular.default, aten.linalg_solve_triangular.out])
@@ -1491,7 +1618,10 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
     )
-    return self.new_empty(self.shape)
+    memory_format = torch.contiguous_format
+    if is_channels_last(self):
+        memory_format = torch.channels_last
+    return self.new_empty(self.shape).to(memory_format=memory_format)
 
 
 @register_meta(aten.repeat_interleave.Tensor)
@@ -1508,6 +1638,11 @@ def meta_complex(real, imag):
     assert imag.dtype.is_floating_point
     out_shape = _broadcast_shapes(real.shape, imag.shape)
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
+
+
+@register_meta(aten.view.dtype)
+def view_dtype(self, dtype):
+    return utils.clone_preserve_strides(self).to(dtype)
 
 
 @register_meta(aten.vdot.default)
@@ -2899,9 +3034,9 @@ def meta__scaled_dot_product_flash(
     else:
         debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
-    # note: device for seed and offset below depends on whether we are
+    # Note [Seed and Offset]: device for seed and offset below depends on whether we are
     # capturing or not, but at the time of tracing we don't know if we
-    # are going to use cudagraphs or not, so we return cpu tensors here
+    # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
 
     return (
@@ -2935,8 +3070,8 @@ def meta__scaled_dot_product_flash_backward(
     max_k: int,
     dropout_p: float,
     is_causal: bool,
-    philox_seed: int,
-    philox_offset: int,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
     scale: Optional[float] = None,
 ):
     batch_size = query.size(0)
@@ -2975,6 +3110,7 @@ def meta__scaled_dot_product_efficient(
     key: Tensor,
     value: Tensor,
     compute_log_sumexp: bool,
+    dropout_p=0.0,
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
@@ -3000,7 +3136,11 @@ def meta__scaled_dot_product_efficient(
 
     res = res.transpose(1, 2)
 
-    return res, logsum_exp
+    # See Note [Seed and Offset]:
+    seed = torch.empty((), dtype=torch.long, device="meta")
+    offset = torch.empty((), dtype=torch.long, device="meta")
+
+    return res, logsum_exp, seed, offset
 
 
 @register_meta(
@@ -3015,39 +3155,39 @@ def meta__scaled_dot_product_efficient_backward(
     value: Tensor,
     out: Tensor,
     logsumexp: Tensor,
+    philox_seed: Tensor,
+    philox_offset: Tensor,
+    dropout_p: float,
     is_causal: bool = False,
-    chunk_grad_outputs=False,
     scale: Optional[float] = None,
 ):
-    grad_out = grad_out.transpose(1, 2)
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    max_q = query.size(2)
+    head_dim = query.size(3)
 
-    B = query.size(0)
-    M = query.size(1)
-    N = key.size(1)
-    nH = query.size(2)
-    K = query.size(3)
+    max_k = key.size(2)
 
-    grad_kv_needs_init = is_causal and N > M
+    grad_q = torch.empty_permuted(
+        (batch_size, num_heads, max_q, head_dim),
+        (0, 2, 1, 3),
+        dtype=query.dtype,
+        device=query.device,
+    )
+    grad_k = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=key.dtype,
+        device=key.device,
+    )
+    grad_v = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=value.dtype,
+        device=value.device,
+    )
 
-    grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
-    grad_k = (
-        torch.zeros(key.shape, dtype=key.dtype, device=key.device)
-        if grad_kv_needs_init
-        else torch.empty(key.shape, dtype=key.dtype, device=key.device)
-    )
-    grad_v = (
-        torch.zeros(value.shape, dtype=value.dtype, device=value.device)
-        if grad_kv_needs_init
-        else torch.empty(value.shape, dtype=value.dtype, device=value.device)
-    )
-    return (
-        grad_q.transpose(1, 2),
-        grad_k.transpose(1, 2),
-        grad_v.transpose(1, 2),
-    )
+    return grad_q, grad_k, grad_v
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
