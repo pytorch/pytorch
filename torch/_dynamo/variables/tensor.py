@@ -14,7 +14,7 @@ from .. import config, variables
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource, GetItemSource
+from ..source import AttrSource
 from ..utils import (
     fqn,
     get_fake_value,
@@ -507,7 +507,9 @@ class TensorVariable(VariableTracker):
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
         elif name == "__setattr__":
-            self.tensor_dict = self.tensor_dict.call_method(tx, "__setitem__", args, kwargs)
+            self.tensor_dict = self.tensor_dict.call_method(
+                tx, "__setitem__", args, kwargs
+            )
             return ConstantVariable(None)
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),

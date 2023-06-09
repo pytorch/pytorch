@@ -188,7 +188,6 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
-        from_proxy = None,
     ):
         assert source is not None
         assert TracingContext.get() is not None, "Expected active TracingContext"
@@ -196,8 +195,6 @@ class VariableBuilder:
         self.tx = tx
         self.source = source
         self.name = source.name()
-        # Should this be a context instead?
-        self.from_proxy = from_proxy
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
@@ -381,7 +378,7 @@ class VariableBuilder:
 
             result = {
                 k: VariableBuilder(
-                    self.tx, GetItemSource(self.get_source(), index_source(k)), from_proxy=self.from_proxy
+                    self.tx, GetItemSource(self.get_source(), index_source(k))
                 )(value[k]).add_guards(guards)
                 for k in value.keys()
             }
@@ -857,13 +854,9 @@ class VariableBuilder:
         # then the relevant SubgraphTracer will lift it to being an input of
         # the subgraph.
         # See NOTE [HigherOrderOperator tracing design] for more details.
-        if self.from_proxy is None:
-            tensor_proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
-            )
-        else:
-            assert self.source.index
-            tensor_proxy = getattr(self.from_proxy, self.source.index)
+        tensor_proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+        )
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
@@ -1142,10 +1135,12 @@ def wrap_fx_proxy_cls(
             kwargs["source"] = options["source"]
 
             if not isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
-                # Non fake tensors get their properties stored in a dict, but we 
-                # delegate this to VariableBuilder to ensure that all underlying structures 
+                # Non fake tensors get their properties stored in a dict, but we
+                # delegate this to VariableBuilder to ensure that all underlying structures
                 # are correctly produced
-                tensor_dict = VariableBuilder(tx, AttrSource(options["source"], "__dict__"), from_proxy=proxy)(example_value.__dict__)
+                tensor_dict = VariableBuilder(
+                    tx, AttrSource(options["source"], "__dict__")
+                )(example_value.__dict__)
                 assert isinstance(tensor_dict, ConstDictVariable)
                 options["tensor_dict"] = tensor_dict
             example_value = wrap_to_fake_tensor_and_record(
@@ -1417,7 +1412,9 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    if isinstance(e, (torch.Tensor, torch.nn.Parameter)):
+    if type(e) in (torch.Tensor, torch.nn.Parameter) or (
+        ignore_subclass and isinstance(e, torch.Tensor)
+    ):
         assert source is not None
         static_shapes, reason = tensor_always_has_static_shape(
             e, is_tensor, guard_source=source.guard_source()

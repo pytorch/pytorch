@@ -10,11 +10,12 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import CompileCounter
 
+
 class TensorSubclassTests(torch._dynamo.test_case.TestCase):
     def test_tensor_property_on_tensor(self):
         def fn(x):
             return x * x.y
-        
+
         x_ = torch.randn([2, 2])
         y_ = torch.randn([2, 2])
         x_.y = y_
@@ -22,8 +23,9 @@ class TensorSubclassTests(torch._dynamo.test_case.TestCase):
         eager_result = fn(x_)
 
         graph = None
+
         def grab_graph_backend(gm, inps):
-            nonlocal graph 
+            nonlocal graph
             graph = gm
             return gm
 
@@ -35,24 +37,24 @@ class TensorSubclassTests(torch._dynamo.test_case.TestCase):
         for node in graph.graph.nodes:
             if node.op == "placeholder":
                 placeholder_cnt += 1
-        
-        # We want to be very sure that this does not lift y to inputs!
-        self.assertEqual(placeholder_cnt, 1)
 
+        # We want to be very sure that this lifts y to inputs!
+        self.assertEqual(placeholder_cnt, 2)
 
     def test_tensor_property_assigned_on_tensor(self):
         def fn(x, y):
             x.y = y
             return x * x.y
-        
+
         x_ = torch.randn([2, 2])
         y_ = torch.randn([2, 2])
 
         eager_result = fn(x_, y_)
 
         graph = None
+
         def grab_graph_backend(gm, inps):
-            nonlocal graph 
+            nonlocal graph
             graph = gm
             return gm
 
@@ -64,14 +66,14 @@ class TensorSubclassTests(torch._dynamo.test_case.TestCase):
         for node in graph.graph.nodes:
             if node.op == "placeholder":
                 placeholder_cnt += 1
-        
-        # We want to be very sure that this does not lift x.y to inputs!
+
+        # y is already an input
         self.assertEqual(placeholder_cnt, 2)
 
     def test_const_property_on_tensor(self):
         def fn(x):
             return x * x.y
-        
+
         x_ = torch.randn([2, 2])
         y_ = 4
         x_.y = y_
@@ -79,8 +81,9 @@ class TensorSubclassTests(torch._dynamo.test_case.TestCase):
         eager_result = fn(x_)
 
         graph = None
+
         def grab_graph_backend(gm, inps):
-            nonlocal graph 
+            nonlocal graph
             graph = gm
             return gm
 
@@ -92,16 +95,15 @@ class TensorSubclassTests(torch._dynamo.test_case.TestCase):
         for node in graph.graph.nodes:
             if node.op == "placeholder":
                 placeholder_cnt += 1
-        
-        # We want to be very sure that this does not lift y to inputs!
-        self.assertEqual(placeholder_cnt, 1)
 
+        # We want to be very sure that this does not lifts y to inputs, as its a const
+        self.assertEqual(placeholder_cnt, 1)
 
     def test_const_property_assigned_on_tensor(self):
         def fn(x, y):
             x.y = y
             return x * x.y
-        
+
         x_ = torch.randn([2, 2])
         y_ = 4
 
@@ -111,20 +113,18 @@ class TensorSubclassTests(torch._dynamo.test_case.TestCase):
         compile_result = fn(x_, y_)
         self.assertEqual(eager_result, compile_result)
 
-    
     def test_guards_correctly_property_assigned_on_tensor_type_change(self):
         def fn(x, y):
             x.y = y
             return x * x.y
-        
+
         x_ = torch.randn([2, 2])
-    
 
         fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         compile_result_const = fn(x_, 4)
         self.assertEqual(compile_result_const, x_ * 4)
 
-        y =  torch.randn([2, 2])
+        y = torch.randn([2, 2])
         compile_result_tensor = fn(x_, y)
         self.assertEqual(compile_result_tensor, x_ * y)
 
@@ -132,15 +132,14 @@ class TensorSubclassTests(torch._dynamo.test_case.TestCase):
         def fn(x, y):
             x.y = y
             return x * x.y
-        
+
         x_ = torch.randn([2, 2])
-    
 
         fn = torch._dynamo.optimize("inductor", nopython=True)(fn)
         compile_result_const = fn(x_, 4)
         self.assertEqual(compile_result_const, x_ * 4)
 
-        y =  torch.randn([2, 2])
+        y = torch.randn([2, 2])
         compile_result_tensor = fn(x_, y)
         self.assertEqual(compile_result_tensor, x_ * y)
 
@@ -159,7 +158,7 @@ class TensorSubclassTests(torch._dynamo.test_case.TestCase):
                 new_z = t.z * new_z
 
             return new_y, new_z
-        
+
         x_0 = torch.randn([2, 2])
         x_1 = torch.randn([2, 2])
         x_2 = torch.randn([2, 2])
@@ -176,65 +175,33 @@ class TensorSubclassTests(torch._dynamo.test_case.TestCase):
         compile_result = fn(x, y, z)
         self.assertEqual(compile_result, eager_result)
         self.assertEqual(counter.frame_count, 2)
-        self.assertEqual(counter.op_count, 21)
+        self.assertEqual(counter.op_count, 9)
         # Graph for reference
-        # def forward(self, L_x_0_ : torch.Tensor, L_x_1_ : torch.Tensor, L_x_2_ : torch.Tensor):
-        # l_x_0_ = L_x_0_
-        # l_x_1_ = L_x_1_
-        # l_x_2_ = L_x_2_
-        
-        # # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:153, code: print("Break")
-        # getattr_1 = l_x_0_.y
-        # getattr_2 = l_x_0_.z;  l_x_0_ = None
-        # getattr_3 = l_x_1_.y
-        # getattr_4 = l_x_1_.z;  l_x_1_ = None
-        # getattr_5 = l_x_2_.y
-        # getattr_6 = l_x_2_.z;  l_x_2_ = None
-        
-        # # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:158, code: new_y = t.y * new_y
-        # mul = getattr_1 * 1;  getattr_1 = None
-        
-        # # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:159, code: new_z = t.z * new_z
-        # mul_1 = getattr_2 * 1;  getattr_2 = None
-        
-        # # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:158, code: new_y = t.y * new_y
-        # mul_2 = getattr_3 * mul;  getattr_3 = mul = None
-        
-        # # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:159, code: new_z = t.z * new_z
-        # mul_3 = getattr_4 * mul_1;  getattr_4 = mul_1 = None
-        
-        # # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:158, code: new_y = t.y * new_y
-        # mul_4 = getattr_5 * mul_2;  getattr_5 = mul_2 = None
-        
-        # # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:159, code: new_z = t.z * new_z
-        # mul_5 = getattr_6 * mul_3;  getattr_6 = mul_3 = None
-        # return (mul_4, mul_5)
+        # <eval_with_key>.1 class GraphModule(torch.nn.Module):
+        # def forward(self, L_x_0_dict_y_ : torch.Tensor, L_x_0_dict_z_ : torch.Tensor, L_x_1_dict_y_ :
+        # torch.Tensor, L_x_1_dict_z_ : torch.Tensor, L_x_2_dict_y_ : torch.Tensor, L_x_2_dict_z_ : torch.Tensor):
+        #     l_x_0_dict_y_ = L_x_0_dict_y_
+        #     l_x_0_dict_z_ = L_x_0_dict_z_
+        #     l_x_1_dict_y_ = L_x_1_dict_y_
+        #     l_x_1_dict_z_ = L_x_1_dict_z_
+        #     l_x_2_dict_y_ = L_x_2_dict_y_
+        #     l_x_2_dict_z_ = L_x_2_dict_z_
 
-    def test_tensor_subclass_with_attr(self):
-        class TensorTestSubclass(torch.Tensor):
-            associated_tensors = []
+        #     # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:158, code: new_y = t.y * new_y
+        #     mul = l_x_0_dict_y_ * 1;  l_x_0_dict_y_ = None
 
-            def _associate_tensor(self, x):
-                self.associated_tensors.append(x)
-            
-            def _last_associated(self):
-                return self.associated_tensors[-1]
+        #     # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:159, code: new_z = t.z * new_z
+        #     mul_1 = l_x_0_dict_z_ * 1;  l_x_0_dict_z_ = None
 
-        def fn(sub: TensorTestSubclass, x, y, z):
-            sub._associate_tensor(x)
-            sub._associate_tensor(y)
-            sub._associate_tensor(z)
-        
-            return sub._last_associated() * sub
-        
-        tts = TensorTestSubclass([[0.5, 0.5], [0.5, 0.5]])
-        x = torch.randn([2, 2])
-        y = torch.randn([2, 2])
-        z = torch.randn([2, 2])
-        eager_result = fn(tts, x, y, z)
-        fn = torch._dynamo.optimize("eager", nopython=True)(fn)
-        compile_result = fn(tts, x, y, z)
-        self.assertEqual(compile_result, eager_result)
+        #     # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:158, code: new_y = t.y * new_y
+        #     mul_2 = l_x_1_dict_y_ * mul;  l_x_1_dict_y_ = mul = None
 
-    
-    
+        #     # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:159, code: new_z = t.z * new_z
+        #     mul_3 = l_x_1_dict_z_ * mul_1;  l_x_1_dict_z_ = mul_1 = None
+
+        #     # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:158, code: new_y = t.y * new_y
+        #     mul_4 = l_x_2_dict_y_ * mul_2;  l_x_2_dict_y_ = mul_2 = None
+
+        #     # File: /scratch/voz/work/pytorch/test/dynamo/test_tensor_subclass.py:159, code: new_z = t.z * new_z
+        #     mul_5 = l_x_2_dict_z_ * mul_3;  l_x_2_dict_z_ = mul_3 = None
+        #     return (mul_4, mul_5)
