@@ -84,7 +84,7 @@ def assume_constant_result(fn):
 
     Example::
         >>> # xdoctest: +SKIP
-        >>> marked_function = torch.compiler.assume_constant_result(my_function) 
+        >>> marked_function = torch.compiler.assume_constant_result(my_function)
 
     .. warning::
         `assume_constant_result` can if invalid cause safety and soundness issues, :func:`torch.compile`
@@ -104,7 +104,7 @@ def disable(fn=None, recursive=True):
         recursive (optional): A boolean value indicating whether the disabling should be recursive.
 
     Example::
-    
+
         >>> # xdoctest: +SKIP
         >>> # The decorator without recursive disabling
         >>> @torch.compiler.disable(recursive=False)
