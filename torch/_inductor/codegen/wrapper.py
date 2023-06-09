@@ -1103,6 +1103,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return DTYPE_TO_ATEN[val]
+        elif isinstance(val, float) and val in [float("inf"), float("-inf")]:
+            if val == float("inf"):
+                return "std::numeric_limits<float>::infinity()"
+            else:
+                return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
             return f"{{{', '.join(list(map(self.val_to_str, val)))}}}"
         else:

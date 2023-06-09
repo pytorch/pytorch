@@ -163,6 +163,7 @@ if RUN_CPU:
             condition=torch._C.has_mkldnn,
             slow=True,
         ),
+        BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
