@@ -1697,6 +1697,7 @@ torch.backends.mps._init()
 
 if not _running_with_deploy():
     from torch import compiler as compiler
+
     class _TritonLibrary(object):
         lib = torch.library.Library("triton", "DEF")
         ops_table: Dict[Tuple[str, str], Callable] = {}
