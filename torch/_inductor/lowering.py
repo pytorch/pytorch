@@ -1611,8 +1611,8 @@ make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
 
-make_fallback(torch.ops.run_and_save_rng_state)
-make_fallback(torch.ops.run_with_rng_state)
+make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
+make_fallback(torch._prims.rng_prims.run_with_rng_state)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
