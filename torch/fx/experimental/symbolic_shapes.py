@@ -2877,6 +2877,8 @@ Failed inputs:
         def is_dim(src):
             return isinstance(src, TensorPropertySource) and src.prop is TensorProperty.SIZE
 
+        concrete_sources = set()
+
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
         # variable.  If there is no such input, this is an error in our
@@ -2939,6 +2941,7 @@ Failed inputs:
 
                 input_guards.append((source, s))
             else:
+                concrete_sources.add(source.name())
                 s = sympy.Integer(val)
                 input_guards.append((source, s))
                 constraint_violated = False
@@ -2990,6 +2993,8 @@ Failed inputs:
                     if srcname in self.source_to_symbol:
                         r = sympy.Eq(self.source_to_symbol[srcname], expr)
                         self._add_output_guard(r)
+                    elif srcname not in concrete_sources:
+                        self.log.warning("source not found: %s (== %s)", srcname, expr)
 
                 # Small optimization
                 if (
