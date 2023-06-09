@@ -699,7 +699,7 @@ def _apply_fill_order(ft: torch.Tensor, fill_order):
         new_strides[i] = next_stride
         next_stride = next_stride * sizes[i]
 
-    # convert sympy exprssion to SymInt
+    # convert sympy expression to SymInt
     for i, stride in enumerate(new_strides):
         if shape_env:
             new_strides[i] = shape_env.create_symintnode(new_strides[i], hint=None)
