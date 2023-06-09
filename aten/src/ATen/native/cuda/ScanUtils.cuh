@@ -81,20 +81,14 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
       }
       __syncthreads();
 
-      // Parallel reduction (up-sweep).
-      for (int s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
-        if (row < num_rows && threadIdx.x < s) {
-          int offset = (2 * threadIdx.x + 1) * d - 1;
-          binary_op_update(row_buf[offset], row_buf[offset + d], row_idx_buf[offset], row_idx_buf[offset + d], binary_op);
-        }
-        __syncthreads();
-      }
-
-      // Down-sweep.
-      for (int s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
-        if (row < num_rows && threadIdx.x < s - 1) {
-          int offset = 2 * (threadIdx.x + 1) * d - 1;
-          binary_op_update(row_buf[offset], row_buf[offset + d], row_idx_buf[offset], row_idx_buf[offset + d], binary_op);
+      // Parallel reduction with Sklansky method. The diagram can be seen on this paper:
+      // https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
+      for (uint32_t s = 1; s <= num_threads_x; s <<= 1) {
+        if (row < num_rows) {
+          uint32_t a = (threadIdx.x / s) * (2 * s) + s;
+          uint32_t ti = a + (threadIdx.x % s);
+          uint32_t si = a - 1;
+          binary_op_update(row_buf[si], row_buf[ti], row_idx_buf[si], row_idx_buf[ti], binary_op);
         }
         __syncthreads();
       }
@@ -309,20 +303,14 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
       }
       __syncthreads();
 
-      // Parallel reduction (up-sweep).
-      for (uint32_t s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
-        if (row < num_rows && threadIdx.x < s) {
-          uint32_t offset = (2 * threadIdx.x + 1) * d - 1;
-          row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
-        }
-        __syncthreads();
-      }
-
-      // Down-sweep.
-      for (uint32_t s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
-        if (row < num_rows && threadIdx.x < s - 1) {
-          uint32_t offset = 2 * (threadIdx.x + 1) * d - 1;
-          row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
+      // Parallel reduction with Sklansky method. The diagram can be seen on this paper:
+      // https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
+      for (uint32_t s = 1; s <= num_threads_x; s <<= 1) {
+        if (row < num_rows) {
+          uint32_t a = (threadIdx.x / s) * (2 * s) + s;
+          uint32_t ti = a + (threadIdx.x % s);
+          uint32_t si = a - 1;
+          row_buf[ti] = binary_op(row_buf[ti], row_buf[si]);
         }
         __syncthreads();
       }
