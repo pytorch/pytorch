@@ -1219,15 +1219,14 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // A previous thread could've already removed devicesKey from
   // inInitializationCommMap_ and added it to devNCCLCommMap_
   if (it != inInitializationCommMap_.end()) {
-    devNCCLCommMap_.emplace(
-        devicesKey, std::move(inInitializationCommMap_.at(devicesKey)));
+    devNCCLCommMap_.emplace(devicesKey, std::move(it->second));
     inInitializationCommMap_.erase(devicesKey);
   }
 
+  it = devNCCLCommMap_.find(devicesKey);
   TORCH_INTERNAL_ASSERT(
-      devNCCLCommMap_.find(devicesKey) != devNCCLCommMap_.end(),
-      "Communicators not found in cache!");
-  return devNCCLCommMap_[devicesKey];
+      it != devNCCLCommMap_.end(), "Communicators not populated in cache!");
+  return it->second;
 }
 
 namespace {
