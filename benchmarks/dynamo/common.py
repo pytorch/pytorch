@@ -2559,9 +2559,7 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        inductor_config.triton.cudagraphs = (
-            not args.disable_cudagraphs and not args.dynamic_shapes
-        )
+        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
         )
