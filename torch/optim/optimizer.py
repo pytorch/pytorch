@@ -390,11 +390,11 @@ class Optimizer:
 
     @staticmethod
     def _group_tensors_by_device_and_dtype(
-        tensorlistlist: List[List[torch.Tensor]],
+        tensorlistlist: List[List[Optional[torch.Tensor]]],
         with_indices: bool = False,
     ) -> Union[
-        Dict[Tuple[None, None], List[Union[List[torch.Tensor], List[int]]]],
-        Dict[Tuple[torch.device, torch.dtype], List[Union[List[torch.Tensor], List[int]]]],
+        Dict[Tuple[None, None], Tuple[List[List[Optional[torch.Tensor]]], List[int]]],
+        Dict[Tuple[torch.device, torch.dtype], Tuple[List[List[Optional[torch.Tensor]]], List[int]]],
     ]:
         """Groups a list of lists of tensors by device and dtype.
         Skips this step if we are compiling since this will occur during inductor lowering."""
