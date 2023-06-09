@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import torch
 from torch import Tensor
@@ -64,7 +64,6 @@ class Adam(Optimizer):
         if not step_is_tensor:
             for s in state_values:
                 s['step'] = torch.tensor(float(s['step']))
-
 
     def _init_group(
         self,
