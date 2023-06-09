@@ -3437,6 +3437,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertTrue(torch.equal(tensor_be_no_bom, tensor_be_bom))
 
     @parametrize('weights_only', (True, False))
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     def test_serialization_mmap_loading(self, weights_only):
         class DummyModel(torch.nn.Module):
             def __init__(self):
@@ -3450,19 +3451,18 @@ class TestSerialization(TestCase, SerializationMixin):
         with TemporaryFileName() as f:
             state_dict = DummyModel().state_dict()
             torch.save(state_dict, f)
-            # result = torch.load(f, mmap=True, weights_only=weights_only)
-            # JUST COMMENTING OUT FOR NOW TO TEST WHETHER THIS FIRST LOAD
-            # CAUSES THE WINDOWS PERMISSION ERROR
-            # result_non_mmap = torch.load(f, mmap=False, weights_only=weights_only)
+            result = torch.load(f, mmap=True, weights_only=weights_only)
+            result_non_mmap = torch.load(f, mmap=False, weights_only=weights_only)
 
-            # model_mmap_state_dict = DummyModel()
-            # model_mmap_state_dict.load_state_dict(result)
-            # model_non_mmap_state_dict = DummyModel()
-            # model_non_mmap_state_dict.load_state_dict(result_non_mmap)
-            # input = torch.randn(4, 3)
-            # self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
+        model_mmap_state_dict = DummyModel()
+        model_mmap_state_dict.load_state_dict(result)
+        model_non_mmap_state_dict = DummyModel()
+        model_non_mmap_state_dict.load_state_dict(result_non_mmap)
+        input = torch.randn(4, 3)
+        self.assertEqual(model_mmap_state_dict(input), model_non_mmap_state_dict(input.clone()))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not torch.cuda.is_available() or IS_WINDOWS,
+                     "CUDA is unavailable or NamedTemporaryFile on Windows")
     def test_serialization_mmap_loading_with_map_location(self):
         class DummyModel(torch.nn.Module):
             def __init__(self):
