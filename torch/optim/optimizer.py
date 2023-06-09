@@ -255,12 +255,12 @@ class Optimizer:
     """
 
     OptimizerPreHook: TypeAlias = Callable[
-        [Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]]
+        [Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]]  # type: ignore[valid-type]
     ]
-    OptimizerPostHook: TypeAlias = Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None]
+    OptimizerPostHook: TypeAlias = Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None]  # type: ignore[valid-type]
 
-    _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]  # type: ignore[valid-type]
-    _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]  # type: ignore[valid-type]
+    _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]
+    _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]
 
     def __init__(self, params: params_t, defaults: Dict[str, Any]) -> None:
         torch._C._log_api_usage_once("python.optimizer")
