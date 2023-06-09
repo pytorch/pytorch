@@ -29,6 +29,7 @@ file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
         core/impl/*.cpp
+        core/impl/cow/*.cpp
         mobile/*.cpp
         macros/*.cpp
         util/*.cpp
@@ -37,6 +38,7 @@ file(GLOB C10_HEADERS
         *.h
         core/*.h
         core/impl/*.h
+        core/impl/cow/*.h
         mobile/*.h
         macros/*.h
         util/*.h
@@ -52,6 +54,26 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
+
+option(C10_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
+if(C10_USE_IWYU)
+  find_program(iwyu NAMES include-what-you-use)
+  if(iwyu)
+    set(iwyu_cmd
+        "include-what-you-use"
+        "-Xiwyu"
+        "--transitive_includes_only"
+        "-Xiwyu"
+        "--no_fwd_decls"
+        "-Xiwyu"
+        "--prefix_header_includes=keep"
+        "-Xiwyu"
+        "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
+        )
+    set_property(TARGET c10 PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
+  endif()
+endif()
+
 if(WERROR)
   target_compile_options_if_supported(c10 PRIVATE "-Werror=sign-compare")
   target_compile_options_if_supported(c10 PRIVATE "-Werror=shadow")

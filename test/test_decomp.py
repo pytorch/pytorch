@@ -8,6 +8,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
@@ -305,6 +306,9 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "empty_like"),
     (None, None, "empty"),
 
+    # AssertionError: False is not true : aten.item was not decomposed, saw calls for: aten._local_scalar_dense.default.
+    (None, None, "item"),
+
     # It's the only in-place op without an out-of-place equivalent in the Python API
     # Its OpInfo wrongly registers it as `torch.zero_(x.clone())`.
     (None, None, "zero_"),
@@ -333,6 +337,8 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "native_batch_norm"),
 
     (None, None, "_upsample_bilinear2d_aa"),
+
+    (None, None, "empty_strided"),  # aten.empty_strided was not decomposed
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -428,6 +434,7 @@ class TestDecomp(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
+    @tf32_off()
     # only tests RNNs since we have py dispsatcher decomps for them
     @modules(filter(lambda m: m.module_cls in (torch.nn.RNN, torch.nn.LSTM, torch.nn.GRU), module_db))
     def test_rnn_decomp_module(self, device, dtype, module_info, training):
@@ -449,6 +456,17 @@ class TestDecomp(TestCase):
             # without this check, incorrect decomps at the python dispatcher level can still pass because
             # they're checking aten decomps at the torch_dispatch level
             self.assertEqual(decomp_out, non_decomp_out)
+
+    def test_batch_norm_unflatten_weight_bias(self, device):
+        # https://github.com/pytorch/pytorch/issues/100970
+        shape = (1, 3, 2, 2)
+        input = torch.randn(shape, device=device)
+        weight = torch.randn((3, 1, 1, 1), device=device)
+        bias = torch.randn(3, device=device)
+        mean = torch.randn(3, device=device)
+        var = torch.randn(3, device=device)
+        res = torch._decomp.decompositions.native_batch_norm(input, weight, bias, mean, var, False, 1, 1e-05)
+        self.assertEqual(shape, res[0].shape)
 
     class DecompCrossRefMode(TorchDispatchMode):
         def __init__(self, test_case, saved_precision, saved_rel_tol, dtype, run_all):

@@ -387,7 +387,6 @@ randint
 randint_like
 randn
 randn_like
-randn_like
 random_
 randperm
 range

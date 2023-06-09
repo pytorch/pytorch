@@ -36,6 +36,7 @@ struct PyTensorType {
   THPDtype* dtype;
   THPLayout* layout;
   bool is_cuda;
+  bool is_xpu;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char name[64];
   int backend;
@@ -134,6 +135,14 @@ static PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
   }
 }
 
+static PyObject* Tensor_is_xpu(PyTensorType* self, void* unused) {
+  if (self->is_xpu) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 static PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
   if (self->layout->layout == at::Layout::Strided) {
     Py_RETURN_FALSE;
@@ -162,6 +171,7 @@ static struct PyGetSetDef metaclass_properties[] = {
     {"dtype", (getter)Tensor_dtype, nullptr, nullptr, nullptr},
     {"layout", (getter)Tensor_layout, nullptr, nullptr, nullptr},
     {"is_cuda", (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
+    {"is_xpu", (getter)Tensor_is_xpu, nullptr, nullptr, nullptr},
     {"is_sparse", (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
     {"is_sparse_csr", (getter)Tensor_is_sparse_csr, nullptr, nullptr, nullptr},
     {nullptr}};
@@ -255,6 +265,8 @@ static void set_type(
   type_obj.dtype = torch::getTHPDtype(scalarType);
   type_obj.is_cuda =
       (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
+  type_obj.is_xpu =
+      (backend == at::Backend::XPU || backend == at::Backend::SparseXPU);
 }
 
 static void set_name(PyTensorType& type_obj, const std::string& name) {
