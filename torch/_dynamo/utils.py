@@ -448,7 +448,7 @@ def istensor(obj):
         *config.traceable_tensor_subclasses,
     )
     tensor_list = tensor_list + (torch._subclasses.FakeTensor,)
-    return istype(obj, tensor_list)
+    return isinstance(obj, tensor_list)
 
 
 def is_lazy_module(mod):

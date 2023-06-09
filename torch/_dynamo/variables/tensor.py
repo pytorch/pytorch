@@ -14,7 +14,7 @@ from .. import config, variables
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource
+from ..source import AttrSource, GetItemSource
 from ..utils import (
     fqn,
     get_fake_value,
@@ -84,6 +84,7 @@ class TensorVariable(VariableTracker):
         is_sparse=None,
         class_type=torch.Tensor,
         specialized_value=None,
+        tensor_dict=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -100,6 +101,7 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
+        self.tensor_dict = tensor_dict
 
     def as_proxy(self):
         return self.proxy
@@ -235,6 +237,11 @@ class TensorVariable(VariableTracker):
                 )
 
             result = try_generic_attr_handling()
+
+        if name in self.tensor_dict.items:
+            # This is a key from a tensor attribute
+            attr = self.tensor_dict.getitem_const(ConstantVariable(name))
+            return attr
 
         if result is None:
             raise NotImplementedError()
@@ -499,6 +506,9 @@ class TensorVariable(VariableTracker):
             )
             result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
             return result.call_method(tx, "item", [], {})
+        elif name == "__setattr__":
+            self.tensor_dict = self.tensor_dict.call_method(tx, "__setitem__", args, kwargs)
+            return ConstantVariable(None)
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
