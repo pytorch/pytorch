@@ -51,7 +51,8 @@ runs:
 
           rm -rf ./*
 
-    - name: Debug locked files
+    - name: Print all processes locking the runner workspace
+      continue-on-error: true
       shell: powershell
       run: |
         handle C:\actions-runner\_work\

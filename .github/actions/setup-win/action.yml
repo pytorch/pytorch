@@ -96,9 +96,8 @@ runs:
         Set-MpPreference -DisableRealtimeMonitoring $True
 
     - name: Install sysinternals handle tool
+      continue-on-error: true
       shell: powershell
       run: |
         choco install handle -y
-
-        # Testing
         handle C:\actions-runner\_work\
