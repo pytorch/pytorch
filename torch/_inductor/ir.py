@@ -3225,8 +3225,11 @@ class FallbackKernel(ExternKernelAlloc):
                 if V.graph.cpp_wrapper
                 else f"aten.{kernel.__name__}"
             )
-        elif getattr(torch.ops, kernel.__name__, None) is kernel:
-            self.kernel = f"torch.ops.{kernel.__name__}"
+        elif (
+            isinstance(kernel, torch._ops.HigherOrderOperator)
+            and getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel
+        ):
+            self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
         else:
             if V.graph.cpp_wrapper:
                 from torch._inductor.codegen.wrapper import (
