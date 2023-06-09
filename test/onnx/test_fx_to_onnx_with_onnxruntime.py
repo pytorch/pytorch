@@ -268,15 +268,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             MNISTModel(), (tensor_x,)
         )
 
-    @pytorch_test_common.xfail(
-        "assert len(flattened_torch_outputs) == len(flattened_function_outputs)"
-    )
-    @pytorch_test_common.xfail(
-        "onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : "
-        "10 : INVALID_GRAPH : This is an invalid model. Type Error: Type 'tensor(float)' "
-        "of input parameter (1) of operator (aten_getitem) in node (aten_getitem_4) is "
-        "invalid."
-    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -296,9 +287,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randn(2)
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(Model(), (input,))
 
-    @pytorch_test_common.xfail(
-        "RuntimeError: Unknown call_function target: aten.mean.dim"
-    )
     @pytorch_test_common.skip_min_ort_version(
         reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
         version="1.15",
@@ -502,9 +490,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             MutationModel(), (torch.randn(12),), has_mutation=True
         )
 
-    # TODO(justinchuby): A known limitation in aten::arange support.
-    @pytorch_test_common.xfail(
-        "arange overload does not support positional 'end' argument"
+    @pytorch_test_common.skip_min_ort_version(
+        reason="ORT doesn't support dynamic fx exporter yet making SegFault flaky test",
+        version="1.15",
+        dynamic_only=False,
     )
     def test_arange(self):
         class ArangeModel(torch.nn.Module):
@@ -755,6 +744,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             )
             # ORT outputs.
             args_not_none = export_output.adapt_torch_inputs_to_onnx(*args)
+
+            # Drop Parameters and buffers added by fx_serialization.save_model_with_external_data
+            args_not_none = args_not_none[: len(args) - len(kwargs)]
+
             ort_outputs = onnx_test_common.run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 args_not_none,

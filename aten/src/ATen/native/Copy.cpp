@@ -21,6 +21,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from.h>
+#include <ATen/ops/_propagate_xla_data.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/expand_copy.h>

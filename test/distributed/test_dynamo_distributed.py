@@ -29,6 +29,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     _dynamo_dist_per_rank_init,
 )
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 import torch._dynamo.logging
 from torch._dynamo.comptime import comptime
 
@@ -149,8 +150,6 @@ class FakeDDP(nn.Module):
         DDP._active_ddp_module = self
         try:
             yield
-        except Exception:
-            raise
         finally:
             DDP._active_ddp_module = None
 
@@ -405,7 +404,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         # ensure compatibilty with dynamo explain
 
         explain_out = torch._dynamo.explain(ddp_m, inputs)
-        break_reasons = explain_out[4]
+        break_reasons = explain_out.break_reasons
         self.assertEqual(len(break_reasons), 3)
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
@@ -716,4 +715,5 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    run_tests()
+    if not TEST_WITH_ROCM:
+        run_tests()

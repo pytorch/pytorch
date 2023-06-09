@@ -106,12 +106,16 @@ void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 #define INTERPRETER_DISPATCH(type, method) \
   switch (key()) { \
     case TransformType::Vmap: \
+      TORCH_INTERNAL_ASSERT(c10::holds_alternative<VmapInterpreterMeta>(this->meta()));\
       return VmapInterpreterPtr(this). method; \
     case TransformType::Grad: \
+      TORCH_INTERNAL_ASSERT(c10::holds_alternative<GradInterpreterMeta>(this->meta()));\
       return GradInterpreterPtr(this). method; \
     case TransformType::Jvp: \
+      TORCH_INTERNAL_ASSERT(c10::holds_alternative<JvpInterpreterMeta>(this->meta()));\
       return JvpInterpreterPtr(this). method; \
     case TransformType::Functionalize: \
+      TORCH_INTERNAL_ASSERT(c10::holds_alternative<FunctionalizeInterpreterMeta>(this->meta()));\
       return FunctionalizeInterpreterPtr(this). method; \
     default: \
       TORCH_INTERNAL_ASSERT(false, "Unrecognized transform"); \
