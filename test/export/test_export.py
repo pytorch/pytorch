@@ -3,7 +3,7 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export, dynamic_dim
+from torch._export import export, dynamic_dim, unlift_exported_program_lifted_states
 from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -213,6 +213,45 @@ class TestExport(TestCase):
             "on a value which we evaluated to have a static value of 3. "
         ):
             export(f, example_inputs, constraints)
+
+    def test_export_unlift(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x):
+                return x.cos() + self.buffer.sin()
+
+        ep = export(Foo(), (torch.ones(6, 4),), _add_runtime_assertions=False)
+        gm = unlift_exported_program_lifted_states(ep)
+        self.assertEqual(gm(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
+
+        class FooContainerInputOutput(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x):
+                return x[0][0].cos() + x[0][1].sin() + self.buffer.sin()
+
+        inp = ((torch.ones(6, 4), torch.ones(6, 4)),)
+        ep = export(FooContainerInputOutput(), (inp,), _add_runtime_assertions=False)
+        gm = unlift_exported_program_lifted_states(ep)
+        self.assertEqual(gm(inp), FooContainerInputOutput()(inp))
+
+        class FooContainerInputOutputV2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x, y):
+                return x[0].cos() + y[0].sin() + self.buffer.sin()
+
+        inp = ((torch.ones(6, 4),), (torch.ones(6, 4),))
+        ep = export(FooContainerInputOutputV2(), inp, _add_runtime_assertions=False)
+        gm = unlift_exported_program_lifted_states(ep)
+        self.assertEqual(gm(*inp), FooContainerInputOutputV2()(*inp))
 
 
 if __name__ == '__main__':

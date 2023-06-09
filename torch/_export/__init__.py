@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import weakref
 import re
@@ -93,6 +94,42 @@ class ExportDynamoConfig:
 
 DECOMP_TABLE = core_aten_decompositions()
 
+def unlift_exported_program_lifted_states(ep: ExportedProgram):
+    new_gm = copy.deepcopy(ep.graph_module)
+
+    for name, stuff in ep.state_dict.items():
+        if name in ep.graph_signature.buffers:
+            new_gm.register_buffer(name, stuff)
+        elif name in ep.graph_signature.parameters:
+            new_gm.register_parameter(name, stuff)
+        else:
+            assert False, "encountered not registered param/buffer"
+
+    names = []
+    for node in new_gm.graph.nodes:
+        if node.op == "placeholder":
+            if node.name in ep.graph_signature.inputs_to_buffers:
+                with new_gm.graph.inserting_after(node):
+                    getattr_node = new_gm.graph.get_attr(ep.graph_signature.inputs_to_buffers[node.name])
+                    node.replace_all_uses_with(getattr_node)
+                    new_gm.graph.erase_node(node)
+            else:
+                names.append(node.name)
+
+
+    new_gm.graph.lint()
+    total_args = len(ep.call_spec.in_spec.children_specs)
+    names = [f"arg_{i}" for i in range(total_args)]
+
+    new_gm.graph._codegen = _PyTreeCodeGen(
+        _PyTreeInfo(
+            names,
+            ep.call_spec.in_spec,
+            ep.call_spec.out_spec,
+        )
+    )
+    new_gm.recompile()
+    return new_gm
 
 def export(
     f: Callable,
