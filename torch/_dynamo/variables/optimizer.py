@@ -1,6 +1,8 @@
 from typing import Dict, List
 
 import torch
+
+from ..guards import GuardBuilder
 from ..source import AttrSource, GetItemSource, GlobalWeakRefSource
 from ..utils import global_key_name
 
@@ -13,6 +15,10 @@ from .user_defined import UserDefinedObjectVariable
 
 
 class ArgMappingException(Exception):
+    pass
+
+
+class GuardInstallException(Exception):
     pass
 
 
@@ -32,8 +38,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 self.install_guards(tx)
                 self.update_list_args(tx, args, kwargs, py_args, py_kwargs)
                 return ConstantVariable(None)
-            except ArgMappingException:
-                # trace normally if we can't map args
+            except (ArgMappingException, GuardInstallException) as _:
+                # trace normally if we can't map args or install guards correctly
                 pass
 
         return super().call_method(tx, name, args, kwargs)
@@ -82,10 +88,34 @@ class OptimizerVariable(UserDefinedObjectVariable):
     def install_guards(self, tx):
         from .builder import VariableBuilder
 
-        state_dict_var = VariableBuilder(tx, AttrSource(self.source, "state"))(
-            self.value.state
-        )
-        tx.output.guards.update(state_dict_var.guards)
+        # state guards take a long time to generate
+        # so we manually generate them here
+        guards = set()
+        state_source = AttrSource(self.source, "state")
+        guards.add(state_source.make_guard(GuardBuilder.DICT_KEYS))
+        for p, value in self.value.state.items():
+            tx.store_dict_key(global_key_name(p), p)
+            p_state_source = GetItemSource(
+                state_source, GlobalWeakRefSource(global_key_name(p))
+            )
+            guards.add(p_state_source.make_guard(GuardBuilder.DICT_KEYS))
+            for k, v in value.items():
+                if isinstance(v, torch.Tensor):
+                    guards.add(
+                        GetItemSource(p_state_source, k).make_guard(
+                            GuardBuilder.TENSOR_MATCH
+                        )
+                    )
+                elif v is None or isinstance(v, (bool, int, float, str)):
+                    guards.add(
+                        GetItemSource(p_state_source, k).make_guard(
+                            GuardBuilder.CONSTANT_MATCH
+                        )
+                    )
+                else:
+                    raise GuardInstallException()
+
+        tx.output.guards.update(guards)
 
         group_guards = VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
             self.value.param_groups
@@ -116,5 +146,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 tensor_vars = ListVariable(
                     [self.wrap_tensor(tx, t) for t in py_arg],
                     mutable_local=MutableLocal(),
+                    recursively_contains={},
                 )
-                arg.call_method(tx, "extend", (tensor_vars,), {})
+                tx.replace_all(arg, tensor_vars)
