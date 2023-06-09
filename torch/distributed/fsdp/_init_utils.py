@@ -253,12 +253,12 @@ def _init_ignored_module_states(
     ), "Can not pass `ignored_modules` and `ignored_states` at the same time. \
         Please either pass `ignored_modules` or `ignored_states`."
     ignored_parameters = None
-    if ignored_states:
-        ignored_states_set = set(ignored_states)
-        if isinstance(next(iter(ignored_states), None), torch.nn.Parameter):
-            ignored_parameters = ignored_states_set
+    ignored_states_list = list(ignored_states) if ignored_states is not None else []
+    if ignored_states_list and len(ignored_states_list) > 0:
+        if isinstance(ignored_states_list[0], torch.nn.Parameter):
+            ignored_parameters = ignored_states_list
         else:
-            ignored_modules = ignored_states_set
+            ignored_modules = ignored_states_list
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
     state._ignored_params = _get_ignored_params(
         module,

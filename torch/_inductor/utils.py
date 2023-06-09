@@ -1092,3 +1092,33 @@ def triton_config_to_hashable(cfg):
     items.append(("num_warps", cfg.num_warps))
     items.append(("num_stages", cfg.num_stages))
     return tuple(items)
+
+
+HAS_COLORAMA = True
+try:
+    import colorama
+except ImportError:
+    HAS_COLORAMA = False
+
+
+def _color_text(msg, color):
+    if not HAS_COLORAMA:
+        return msg
+
+    return getattr(colorama.Fore, color.upper()) + msg + colorama.Fore.RESET
+
+
+def green_text(msg):
+    return _color_text(msg, "green")
+
+
+def yellow_text(msg):
+    return _color_text(msg, "yellow")
+
+
+def red_text(msg):
+    return _color_text(msg, "red")
+
+
+def blue_text(msg):
+    return _color_text(msg, "blue")
