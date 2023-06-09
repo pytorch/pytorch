@@ -3,7 +3,7 @@ import operator
 import sys
 from enum import Enum
 from functools import partial, reduce
-from itertools import product
+from itertools import chain, product
 from typing import Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
@@ -2656,19 +2656,11 @@ def get_tensor_state(tensors, func):
     return {func(t) for t in tensors}
 
 
-def flatten_params(params):
-    flat_params = []
-    for param in params:
-        for item in param:
-            flat_params.append(item)
-    return flat_params
-
-
 def use_mkldnn(input, hx, params):
     if not torch._C.has_mkldnn:
         return False
 
-    tensors = [input] + list(hx) + flatten_params(params)
+    tensors = [input] + list(hx) + list(chain.from_iterable(params))
     devices = get_tensor_state(tensors, lambda x: x.device)
     if len(devices) != 1:
         return False
