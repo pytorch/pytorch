@@ -60,21 +60,25 @@ def is_float(s: str):
 
 
 def convert_arg_type(python_type):
-    from .cpp import PYTHON_TO_CPP
+    from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
 
     if python_type == "Tensor":
         # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
         return f"at::{python_type} const&"
 
-    # Convert arg of type Optional[*]
-    optional_match = re.findall(r"Optional\[([a-zA-Z_]+)]", python_type)
-    if len(optional_match) == 1:
-        optional_type = optional_match[0]
-        assert (
-            optional_type in PYTHON_TO_CPP
-        ), f"unsupported optional type in convert_arg_type: {optional_type}"
-        cpp_optional_type = PYTHON_TO_CPP[optional_type]
-        return f"c10::optional<{cpp_optional_type}>"
+    if python_type in PYTHON_TO_CPP:
+        return PYTHON_TO_CPP[python_type]
+
+    # Convert args of container types e.g. Optional[*]
+    for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
+        container_match = re.findall(py_container + r"\[([a-zA-Z_]+)]", python_type)
+        if len(container_match) == 1:
+            contained_type = container_match[0]
+            assert (
+                contained_type in PYTHON_TO_CPP
+            ), f"unsupported {py_container} type in convert_arg_type: {contained_type}"
+            cpp_contained_type = PYTHON_TO_CPP[contained_type]
+            return f"{cpp_container}<{cpp_contained_type}>"
 
     raise AssertionError(f"unsupport python_type: {python_type}")
 
@@ -89,7 +93,8 @@ def convert_return_type(python_type):
 
 
 def get_cpp_op_schema(kernel):
-    arg_types = [repr(x.type) for x in kernel._schema.arguments]
+    # use x.real_type instead of x.type so that we get ScalarType instead of int
+    arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
     arg_names = [x.name for x in kernel._schema.arguments]
     # TODO: only support len(returns) == 1 for now.
     returns = [repr(x.type) for x in kernel._schema.returns]
@@ -108,6 +113,7 @@ def get_cpp_op_schema(kernel):
 
 SUPPORTED_FALLBACK_CPP_WRAPPER = [
     "repeat_interleave.Tensor",
+    "convert_element_type.default",  # can appear as a fallback if it has a complex input
 ]
 
 

@@ -60,6 +60,7 @@ DTYPE_TO_CPP = {
     torch.uint8: "unsigned char",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
+    torch.complex64: "complex64",
 }
 
 DTYPE_TO_ATEN = {
@@ -73,6 +74,7 @@ DTYPE_TO_ATEN = {
     torch.uint8: "at::kByte",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
+    torch.complex64: "at::kComplexFloat",
 }
 
 DEVICE_TO_ATEN = {
@@ -97,6 +99,12 @@ PYTHON_TO_CPP = {
     "int": "long",
     "float": "double",
     "bool": "bool",
+    "ScalarType": "c10::ScalarType",
+}
+
+CONTAINER_PYTHON_TO_CPP = {
+    "List": "std::vector",
+    "Optional": "c10::optional",
 }
 
 
