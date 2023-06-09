@@ -105,7 +105,7 @@ _ops_and_refs = op_db + python_ref_db
 
 def reduction_dtype_filter(op):
     if(not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
-       or not (torch.int16 in op.dtypes)):
+       or torch.int16 not in op.dtypes):
         return False
 
     argspec = inspect.getfullargspec(op.op)
@@ -1020,7 +1020,7 @@ class TestCommon(TestCase):
                 sample.kwargs['dtype'] = torch.int32
                 helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
                 helper(True, False, op, sample.input, *sample.args, **sample.kwargs)
-            else:                
+            else:
                 helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
                 helper(True, sample.kwargs['dtype'] != torch.int32, op, sample.input,
                        *sample.args, **sample.kwargs)
