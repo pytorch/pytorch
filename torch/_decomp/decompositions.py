@@ -2684,7 +2684,6 @@ def use_mkldnn(input, hx, params):
     if dtype not in [torch.float, torch.bfloat16]:
         return False
 
-    # TODO: check why params require_grad == True
     if input.requires_grad:
         return False
 

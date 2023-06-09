@@ -102,7 +102,6 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   }
 }
 
-// TODO: same as get_mkldnn_tensor in RNN.cpp
 ideep::tensor itensor_view_from_dense(
     const at::Tensor& tensor,
     const ideep::tensor::desc& desc) {
@@ -115,10 +114,8 @@ ideep::tensor itensor_view_from_dense(
   TORCH_CHECK(
       tensor.scalar_type() == at::ScalarType::Float ||
           tensor.scalar_type() == at::ScalarType::BFloat16 ||
-          tensor.scalar_type() == at::ScalarType::Half ||
-          tensor.scalar_type() == at::ScalarType::QInt8 ||
-          tensor.scalar_type() == at::ScalarType::QUInt8,
-      "itensor_view_from_dense expects float, bfloat16 or int8 tensor input");
+          tensor.scalar_type() == at::ScalarType::Half,
+      "itensor_view_from_dense expects float, bfloat16 or half tensor input");
   return {desc, tensor.data_ptr()};
 }
 
