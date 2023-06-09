@@ -35,14 +35,15 @@ from torch.utils._foreach_utils import (_get_fused_kernels_supported_devices,
 from torch._utils import is_compiling
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
-OptimizerPreHook: TypeAlias = Callable[
+GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]]
 ]
-OptimizerPostHook: TypeAlias = Callable[["Optimizer", Tuple[Any, ...], Dict[str, Any]], None]
+GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Tuple[Any, ...], Dict[str, Any]], None]
+
 
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
-_global_optimizer_pre_hooks: Dict[int, OptimizerPreHook] = OrderedDict()
-_global_optimizer_post_hooks: Dict[int, OptimizerPostHook] = OrderedDict()
+_global_optimizer_pre_hooks: Dict[int, GlobalOptimizerPreHook] = OrderedDict()
+_global_optimizer_post_hooks: Dict[int, GlobalOptimizerPostHook] = OrderedDict()
 _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
 class _RequiredParameter:
@@ -195,7 +196,7 @@ _maximize_doc = r"""maximize (bool, optional): maximize the params based on the
             objective, instead of minimizing (default: False)"""
 
 
-def register_optimizer_step_pre_hook(hook: OptimizerPreHook) -> RemovableHandle:
+def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:
     r"""Register a pre hook common to all optimizers. The hook should have the following
     signature::
 
@@ -214,7 +215,7 @@ def register_optimizer_step_pre_hook(hook: OptimizerPreHook) -> RemovableHandle:
     return handle
 
 
-def register_optimizer_step_post_hook(hook: OptimizerPostHook) -> RemovableHandle:
+def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> RemovableHandle:
     r"""Register a post hook common to all optimizers. The hook should have the following
     signature::
 
@@ -252,6 +253,14 @@ class Optimizer:
             options (used when a parameter group doesn't specify them).
     """
 
+    OptimizerPreHook: TypeAlias = Callable[
+        [Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]]
+    ]
+    OptimizerPostHook: TypeAlias = Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None]
+
+    _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]  # type: ignore[valid-type]
+    _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]  # type: ignore[valid-type]
+
     def __init__(
         self,
         params: Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]],
@@ -259,12 +268,8 @@ class Optimizer:
     ) -> None:
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
-        self._optimizer_step_pre_hooks: Dict[  # type: ignore[valid-type]
-            int, Callable[[Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]]
-        ] = OrderedDict()
-        self._optimizer_step_post_hooks: Dict[  # type: ignore[valid-type]
-            int, Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None]
-        ] = OrderedDict()
+        self._optimizer_step_pre_hooks = OrderedDict()
+        self._optimizer_step_post_hooks = OrderedDict()
 
         self._patch_step_function()
 
@@ -410,10 +415,7 @@ class Optimizer:
             self.__class__.step = self.profile_hook_step(self.__class__.step)  # type: ignore[assignment]
             self.__class__.step.hooked = True  # type: ignore[attr-defined]
 
-    def register_step_pre_hook(
-        self,
-        hook: Callable[[Self, Tuple[Any, ...], Dict[str, Any]], Optional[Tuple[Any, Dict[str, Any]]]],  # type: ignore[valid-type]
-    ) -> RemovableHandle:
+    def register_step_pre_hook(self, hook: OptimizerPreHook) -> RemovableHandle:  # type: ignore[valid-type]
         r"""Register an optimizer step pre hook which will be called before
         optimizer step. It should have the following signature::
 
@@ -435,10 +437,7 @@ class Optimizer:
         self._optimizer_step_pre_hooks[handle.id] = hook
         return handle
 
-    def register_step_post_hook(
-        self,
-        hook: Callable[[Self, Tuple[Any, ...], Dict[str, Any]], None],  # type: ignore[valid-type]
-    ) -> RemovableHandle:
+    def register_step_post_hook(self, hook: OptimizerPostHook) -> RemovableHandle:  # type: ignore[valid-type]
         r"""Register an optimizer step post hook which will be called after optimizer step.
         It should have the following signature::
 
