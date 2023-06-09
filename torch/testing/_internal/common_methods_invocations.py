@@ -10787,8 +10787,7 @@ op_db: List[OpInfo] = [
            supports_out=True,
            supports_forward_ad=True),
     OpInfo('cumsum',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
