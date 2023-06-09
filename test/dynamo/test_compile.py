@@ -6,7 +6,6 @@ import unittest
 from unittest import mock
 
 import torch
-import torch.compiler
 from torch._dynamo import reset
 from torch._dynamo.backends.debugging import explain
 from torch._dynamo.testing import CompileCounter
@@ -111,7 +110,7 @@ class ExplainCompilerTests(unittest.TestCase):
         torch._dynamo.config.explain_print_graphs = True
         opt_fn = torch._dynamo.optimize(explain)(fn)
         self.assertAlmostEqual(0.7581, opt_fn(torch.ones([1])).item(), places=4)
-        self.assertEqual(12, mock_print.call_count)
+        self.assertEqual(12, mock_print.call_count)  # 4 graph breaks + 8 nodes
         torch._dynamo.config.explain_print_graphs = False
 
     @mock.patch("builtins.print")
@@ -119,11 +118,11 @@ class ExplainCompilerTests(unittest.TestCase):
         reset()
         opt_fn = torch._dynamo.optimize(explain)(fn)
         self.assertAlmostEqual(0.7581, opt_fn(torch.ones([1])).item(), places=4)
-        self.assertEqual(4, mock_print.call_count)
+        self.assertEqual(4, mock_print.call_count)  # 4 graph breaks
 
     @mock.patch("builtins.print")
     def test_explain_print_call_registration(self, mock_print):
         reset()
         opt_fn = torch._dynamo.optimize("explain")(fn)
         self.assertAlmostEqual(0.7581, opt_fn(torch.ones([1])).item(), places=4)
-        self.assertEqual(4, mock_print.call_count)
+        self.assertEqual(4, mock_print.call_count)  # 4 graph breaks
