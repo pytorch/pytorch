@@ -2318,6 +2318,11 @@ def get_default_op_list() -> OpTypes:
     ]  # noqa: E501,B950
     # Natalia said that we should allow recomputing indexing :)
     default_recomputable_ops += [aten.index, aten.gather]
+
+    # this takes in a seed, so it's deterministic, and we can recompute it
+    default_recomputable_ops += [prims.inductor_random]
+    random_ops += [prims.inductor_seeds, prims.inductor_seed]
+
     default_recomputable_ops += view_ops
 
     default_recomputable_ops += pointwise_ops()

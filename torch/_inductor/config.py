@@ -803,6 +803,9 @@ deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 # non-representative inputs.
 min_num_split = int(os.environ.get("TORCHINDUCTOR_MIN_NUM_SPLIT", 0))
 
+# Only save random seed for backwards rather than full mask
+lowmem_dropout = True
+
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 # Enable constant and index_expr folding
