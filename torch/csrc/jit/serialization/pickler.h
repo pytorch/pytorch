@@ -303,9 +303,9 @@ using BackendMetaPtr = std::function<
 
 // A allowlist of device type, currently available is PrivateUse1
 inline std::unordered_set<c10::DeviceType>& GetBackendMetaAllowlist() {
-    static std::unordered_set<c10::DeviceType> DeviceTypeAllowlist{
-        c10::DeviceType::PrivateUse1};
-    return DeviceTypeAllowlist;
+  static std::unordered_set<c10::DeviceType> DeviceTypeAllowlist{
+      c10::DeviceType::PrivateUse1};
+  return DeviceTypeAllowlist;
 }
 
 // Dynamically obtain serialization function pairs
