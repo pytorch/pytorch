@@ -106,7 +106,13 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     cat_node = match.nodes[0]
     graph = match.graph
     tensors = get_arg_value(cat_node, 0, "tensors")
-    cat_dim = get_arg_value(cat_node, 1, "dim") or 0
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    if cat_dim is None:
+        cat_axis = cat_node.kwargs.get("axis")
+        if cat_axis is not None:
+            cat_dim = cat_axis
+        else:
+            cat_dim = 0
     if tensors is None or cat_dim is None:
         log.info("couldn't find cat args")
         return
