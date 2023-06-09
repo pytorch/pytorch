@@ -70,9 +70,9 @@ PyObject* THPDevice_pynew(
           "was passed explicitly: " +
           device_type);
     }
-    int64_t device_index = -1;
+    c10::DeviceIndex device_index = -1;
     if (!r.isNone(1)) {
-      device_index = r.toInt64(1);
+      device_index = static_cast<c10::DeviceIndex>(r.toInt64(1));
       // -1 is allowed in ATen/C++, to mean the default device, but not in
       // Python.
       TORCH_CHECK(device_index >= 0, "Device index must not be negative");
