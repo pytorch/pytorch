@@ -1361,20 +1361,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
             if v.mutable_local:
                 new_rec_contains.add(v.mutable_local)
-
-        nitems = set(obj.items)
-        nitems.add(v)
-        obj.items = list(nitems)
-        self.replace_all(
-            obj,
-            SetVariable(
-                obj.items,
-                mutable_local=obj.mutable_local,
-                recursively_contains=new_rec_contains,
-                regen_guards=False,
-                **VariableTracker.propagate([obj, v]),
-            ),
-        )
+        return obj.call_method(self, "add", [v], {})
 
     def LIST_APPEND(self, inst):
         v = self.pop()
