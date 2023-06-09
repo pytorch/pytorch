@@ -1314,6 +1314,7 @@ struct AttentionBackwardKernel {
     curandStatePhilox4_32_10_t rng_state_init;
 
     if (kApplyDropout) {
+      // See Note [Seed and Offset Device]
       auto seeds = at::cuda::philox::unpack(p.rng_engine_inputs);
       // each element of the attention matrix P with shape
       // (batch_sz, n_heads, n_queries, n_keys) is associated with a single
@@ -1329,7 +1330,6 @@ struct AttentionBackwardKernel {
           std::get<1>(seeds) + p.dropout_batch_head_rng_offset,
           &rng_state_init);
     }
-
     CUTLASS_PRAGMA_UNROLL
     for (; key_start < p.num_keys;
          key_start += p.num_splits_key_device() * kBlockSizeJ) {
