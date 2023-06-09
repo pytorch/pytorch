@@ -414,6 +414,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return z
 
     @make_test
+    def test_ordered_dict_kwargs(x):
+        z = collections.OrderedDict(sample=torch.ones(10))
+        return z
+
+    @make_test
     def test_float(x):
         y = float(1.2)
         y += float("1.2")
@@ -449,6 +454,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_is_complex(x):
         if torch.is_complex(x):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_get_privateuse1_name(x):
+        if torch._C._get_privateuse1_backend_name() == "privateuseone":
             return x + 1
         else:
             return x - 1

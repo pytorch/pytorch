@@ -77,6 +77,7 @@ constant_fold_functions = [
     torch.is_complex,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
+    torch._C._get_privateuse1_backend_name,
 ]
 
 constant_processgroup_functions = []
@@ -184,6 +185,10 @@ class TorchVariable(VariableTracker):
 
     def __repr__(self):
         return f"TorchVariable({self.value})"
+
+    def call_hasattr(self, tx, name):
+        result = hasattr(self.value, name)
+        return variables.ConstantVariable(result).add_options(self)
 
     def unique_var_name(self):
         name = torch_get_name(self.value, f"allowed_fn_{id(self.value)}")
