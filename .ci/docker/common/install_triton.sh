@@ -4,6 +4,12 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
+if [ -n "${CONDA_CMAKE}" ]; then
+  # Keep the current cmake and numpy version here, so we can reinstall them later
+  CMAKE_VERSION=$(get_conda_version cmake)
+  NUMPY_VERSION=$(get_conda_version numpy)
+fi
+
 if [ -n "${ROCM_VERSION}" ]; then
   TRITON_REPO="https://github.com/ROCmSoftwarePlatform/triton"
   TRITON_TEXT_FILE="triton-rocm"
@@ -17,12 +23,6 @@ TRITON_PINNED_COMMIT=$(get_pinned_commit ${TRITON_TEXT_FILE})
 
 apt update
 apt-get install -y gpg-agent
-
-if [ -n "${CONDA_CMAKE}" ]; then
-  # Keep the current cmake and numpy version here, so we can reinstall them later
-  CMAKE_VERSION=$(get_conda_version cmake)
-  NUMPY_VERSION=$(get_conda_version numpy)
-fi
 
 if [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
   # Triton needs at least gcc-9 to build
