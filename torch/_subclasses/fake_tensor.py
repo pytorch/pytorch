@@ -15,6 +15,7 @@ import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
+    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -833,7 +834,9 @@ def get_fast_op_impls():
 def init_cuda_context():
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        torch.empty(1, device="cuda")
+        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
+            1, device="cuda"
+        )
 
 
 @contextlib.contextmanager
@@ -1492,7 +1495,7 @@ class FakeTensorMode(TorchDispatchMode):
                 ) = FakeTensor._find_common_device(func, args, kwargs)
 
             if isinstance(e, FakeTensor):
-                torch._check(
+                check(
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
