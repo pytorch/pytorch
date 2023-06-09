@@ -279,6 +279,9 @@ class triton:
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
 
+    # max autotune gemm with cublasLt
+    autotune_cublasLt = True
+
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
@@ -319,7 +322,13 @@ class triton:
     # register.
     # Settting it to a larger value allows a config spilling a small amount
     # of registers being benchmarked.
-    spill_threshold = 0
+    #
+    # NOTE: triton will always report >0 register spills for kernels using sin/cos.
+    # (check this issue https://github.com/openai/triton/issues/1756 )
+    # So far we see a fixed 8 spilled registers for kernels using sin/cos.
+    # Raise the threshold to 16 to be safe.
+    # We should revisit this once we understand more of the source of register spills.
+    spill_threshold: int = 16
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.

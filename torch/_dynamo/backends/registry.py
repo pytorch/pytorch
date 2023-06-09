@@ -64,7 +64,7 @@ def lookup_backend(compiler_fn):
     return compiler_fn
 
 
-def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
+def list_backends(exclude_tags=("debug", "experimental")):
     """
     Return valid strings that can be passed to:
 

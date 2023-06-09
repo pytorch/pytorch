@@ -689,7 +689,6 @@ meta_function_skips = {
     torch.nn.functional.interpolate : {bf16, f64, f32, u8},
     torch.nn.functional.nll_loss : {bf16, f64, f32},
     torch.linalg.cond : {c128, c64, f32, f64},
-    torch.linalg.vander: {c128, c64, f32, f64, i16, i32, i64, i8, u8},
     torch.linalg.vecdot : {bf16, f64, f32, f16},
     torch.empty : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
