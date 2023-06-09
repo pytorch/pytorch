@@ -1,4 +1,5 @@
 #include <torch/csrc/profiler/combined_traceback.h>
+#include <atomic>
 
 namespace torch {
 
