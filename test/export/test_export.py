@@ -195,25 +195,6 @@ class TestExport(TestCase):
         # There should be nonzero view nodes in the graph
         self.assertTrue(view_count > 0)
 
-    def test_export_constrain_static(self):
-        def f(x, y):
-            b = x.item()
-            constrain_as_size(b, min=2, max=5)
-            c = y.dim()
-            constrain_as_value(c, min=1, max=3)
-            z = y[0:c]
-            return torch.empty((b, y.shape[0])), z
-
-        x = torch.tensor([3])
-        y = torch.randn([8, 8, 6])
-        example_inputs = (x, y)
-        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, "It appears that you're trying to set a constraint " +
-            "on a value which we evaluated to have a static value of 3. "
-        ):
-            export(f, example_inputs, constraints)
-
     def test_export_mod_constraints(self):
         class BasicDynamiShapeModel(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -237,6 +218,24 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(RuntimeError, "\\[1\\] is specialized at 4"):
             em(x)
 
+    def test_export_constrain_static(self):
+        def f(x, y):
+            b = x.item()
+            constrain_as_size(b, min=2, max=5)
+            c = y.dim()
+            constrain_as_value(c, min=1, max=3)
+            z = y[0:c]
+            return torch.empty((b, y.shape[0])), z
+
+        x = torch.tensor([3])
+        y = torch.randn([8, 8, 6])
+        example_inputs = (x, y)
+        constraints = [dynamic_dim(y, 0) >= 6, dynamic_dim(y, 0) <= 10]
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError, "It appears that you're trying to set a constraint " +
+            "on a value which we evaluated to have a static value of 3. "
+        ):
+            export(f, example_inputs, constraints)
 
 
 if __name__ == '__main__':
