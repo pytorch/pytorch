@@ -338,6 +338,15 @@ void index_func_meta_impl(
               func, "_(): Number of indices (", numel, ") should be equal to source.size(dim): (",
               source.size(dim), "), for dim: ", dim);
 
+  if (source.dim() != 0) {
+    auto self_sizes = self.sizes().vec();
+    auto source_sizes = source.sizes().vec();
+    self_sizes.erase(self_sizes.begin() + dim);
+    source_sizes.erase(source_sizes.begin() + dim);
+    TORCH_CHECK(self_sizes == source_sizes,
+    "source tensor shape must match self tensor shape, excluding the specified dimension. Got self.shape = ", self.sizes(), " source.shape = ", source.sizes());
+  }
+
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
   meta.set_output_raw_strided(0, self.sizes(), {}, self.options());

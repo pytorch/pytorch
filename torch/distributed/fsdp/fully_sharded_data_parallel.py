@@ -792,7 +792,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             args, kwargs = _root_pre_forward(self, self, args, kwargs)
             unused = None
             args, kwargs = _pre_forward(
-                self, self._handles, _pre_forward_unshard, self._fsdp_wrapped_module, args, kwargs
+                self,
+                self._handles,
+                _pre_forward_unshard,
+                self._fsdp_wrapped_module,
+                args,
+                kwargs,
             )
             for handle in self._handles:
                 _p_assert(
@@ -801,7 +806,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     f"{self.compute_device} but got {handle.flat_param.device}",
                 )
             output = self._fsdp_wrapped_module(*args, **kwargs)
-            return _post_forward(self, self._handles, _post_forward_reshard, self, unused, output)
+            return _post_forward(
+                self, self._handles, _post_forward_reshard, self, unused, output
+            )
 
     @staticmethod
     @contextlib.contextmanager
