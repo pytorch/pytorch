@@ -254,7 +254,7 @@ class _DDPSink(Function):
     def backward(ctx, *grad_outputs):
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
-        if ctx.ddp_state["static_graph"] and ctx.ddp_state["num_iterations"] == 1:
+        if ctx.ddp_state["static_graph"] and ctx.ddp_state["num_forward_calls"] == 1:
             Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 ctx.reducer._delay_all_reduce
             )
@@ -1047,7 +1047,7 @@ class DistributedDataParallel(Module, Joinable):
         (4) Logging construction-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
-        self.num_iterations = 0
+        self.num_forward_calls = 0
         # Notice, the parameters order is not in the order in which they are used,
         # especially in models with control flow.
         #
@@ -1381,7 +1381,7 @@ class DistributedDataParallel(Module, Joinable):
         if torch.is_grad_enabled() and self.require_backward_grad_sync:
             assert self.logger is not None
             self.logger.set_runtime_stats_and_log()
-            self.num_iterations += 1
+            self.num_forward_calls += 1
             self.reducer.prepare_for_forward()
 
         # Notify the join context that this process has not joined, if
@@ -1466,11 +1466,11 @@ class DistributedDataParallel(Module, Joinable):
         # TODO: DDPSink is currently enabled for unused parameter detection and
         # static graph training for first iteration.
         if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and self.num_iterations == 1
+            self.static_graph and self.num_forward_calls == 1
         ):
             ddp_state = {
                 "static_graph": self.static_graph,
-                "num_iterations": self.num_iterations,
+                "num_forward_calls": self.num_forward_calls,
             }
 
             (
