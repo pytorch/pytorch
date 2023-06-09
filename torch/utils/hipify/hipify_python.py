@@ -624,10 +624,6 @@ def is_cusparse_file(rel_filepath):
         return "sparse" in rel_filepath.lower()
     return False
 
-def is_cusolver_file(rel_filepath):
-    if is_pytorch_file(rel_filepath):
-        return "linalg" in rel_filepath.lower()
-    return False
 
 def is_special_file(rel_filepath):
     if is_pytorch_file(rel_filepath):
@@ -719,7 +715,6 @@ PYTORCH_MAP: Dict[str, object] = {}
 # When a file contains "sparse" in the filename, a mapping marked with API_SPARSE is preferred over other choices.
 # Similarly, "linalg" files require rocBLAS -> hipSOLVER so they also need special handling.
 PYTORCH_SPECIAL_MAP = {}
-PYTORCH_SPARSE_MAP = {}
 
 for mapping in CUDA_TO_HIP_MAPPINGS:
     assert isinstance(mapping, Mapping)
@@ -732,10 +727,6 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
             # do not overwrite PYTORCH_MAP, store dst separately
             if constants.API_SPECIAL in meta_data and PYTORCH_MAP.get(src, ""):
                 PYTORCH_SPECIAL_MAP[src] = dst
-            # if src is already in PYTORCH_MAP and dst belongs to API_SPARSE
-            # do not overwrite PYTORCH_MAP, store dst separately
-            elif constants.API_SPARSE in meta_data and PYTORCH_MAP.get(src, ""):
-                PYTORCH_SPARSE_MAP[src] = dst
             else:
                 PYTORCH_MAP[src] = dst
         if constants.API_PYTORCH not in meta_data:
@@ -795,10 +786,6 @@ def preprocessor(
     def pt_special_repl(m):
         # checks SPECIAL map first, and if a miss occurs, falls back to pytorch mappings
         return PYTORCH_SPECIAL_MAP.get(m.group(0), pt_repl(m))
-    
-    def pt_sparse_repl(m):
-        # checks SPARSE map first, and if a miss occurs, falls back to pytorch mappings
-        return PYTORCH_SPARSE_MAP.get(m.group(0), pt_repl(m))
 
 
     if is_pytorch_extension:
@@ -806,8 +793,6 @@ def preprocessor(
     else:
         if is_special_file(rel_filepath):
             output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_special_repl, output_source)
-        elif is_cusparse_file(rel_filepath):
-            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_sparse_repl, output_source)
         elif is_pytorch_file(rel_filepath):
             output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
         else:
