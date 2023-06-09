@@ -69,6 +69,12 @@ autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
 )
+coordinate_descent_check_all_directions = (
+    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS") == "1"
+)
+coordinate_descent_search_radius = int(
+    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
+)
 
 layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
 
@@ -322,7 +328,13 @@ class triton:
     # register.
     # Settting it to a larger value allows a config spilling a small amount
     # of registers being benchmarked.
-    spill_threshold = 0
+    #
+    # NOTE: triton will always report >0 register spills for kernels using sin/cos.
+    # (check this issue https://github.com/openai/triton/issues/1756 )
+    # So far we see a fixed 8 spilled registers for kernels using sin/cos.
+    # Raise the threshold to 16 to be safe.
+    # We should revisit this once we understand more of the source of register spills.
+    spill_threshold: int = 16
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
