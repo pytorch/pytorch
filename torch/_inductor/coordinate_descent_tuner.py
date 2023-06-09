@@ -131,7 +131,7 @@ class CoordescTuner:
 
     def check_all_tuning_directions(
         self,
-        func: Callable[[triton.Config], float],
+        func: Callable[["triton.Config"], float],
         best_config,
         best_timing,
     ):
