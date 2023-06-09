@@ -609,7 +609,6 @@ class BuiltinVariable(VariableTracker):
                     "Calling round() on symbolic value is not supported. "
                     "You can use floor() to implement this functionality",
                 )
-        breakpoint()
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, *args):
