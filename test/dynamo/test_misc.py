@@ -5191,8 +5191,8 @@ def fn():
             validator,
         ) = self._prepare_for_translation_validator()
 
-        validator.add_input(s0 > 5)
-        validator.add_input(s1 / 2 > s0)
+        validator.add_input(z0 > 5)
+        validator.add_input(z1 / 2 > z0)
 
         # Solutions for output is a subset of the solutions for the input.
         validator.add_output(s0 > 20)
@@ -5211,8 +5211,8 @@ def fn():
             validator,
         ) = self._prepare_for_translation_validator()
 
-        validator.add_input(s0 > 5)
-        validator.add_input(s1 / 2 > s0)
+        validator.add_input(z0 > 5)
+        validator.add_input(z1 / 2 > z0)
 
         # Solutions for output is a subset of the solutions for the input.
         validator.add_output(s0 > 20)

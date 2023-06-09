@@ -3306,7 +3306,11 @@ Failed inputs:
         else:
             concrete_val = sympy.sympify(hint)
 
-        if _translation_validator_enabled() and fxnode is not None:
+        if (
+                _translation_validator_enabled()
+                and fxnode is not None
+                and not self._suppress_guards_tls()
+        ):
             if concrete_val is sympy.true:
                 self.create_fx_call_function(torch._assert, (fxnode,))
             elif concrete_val is sympy.false:
