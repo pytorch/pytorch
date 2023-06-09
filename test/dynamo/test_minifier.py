@@ -60,6 +60,18 @@ inner(torch.randn(20, 20).to("{device}"))
             "cuda", "relu_accuracy_error_TESTING_ONLY", "AccuracyError"
         )
 
+    def test_after_dynamo_non_leaf_compile_error(self):
+        run_code = """\
+@torch._dynamo.optimize("non_leaf_compile_error_TESTING_ONLY")
+def inner(x):
+    return x + 1
+
+inner(torch.randn(20, 20, requires_grad=True) + 1)
+"""
+        self._run_full_test(
+            run_code, "dynamo", "TestingOnlyCompileError", isolate=False
+        )
+
     # Ensure that the testing backends pass when relu is not present.
     def _test_after_dynamo_backend_passes(self, device, backend):
         @torch._dynamo.optimize(backend)
@@ -195,9 +207,9 @@ class Repro(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, cos, sin_19):
+    def forward(self, sin_19):
         relu = torch.relu(sin_19);  sin_19 = None
-        return (cos,)""",
+        return (relu,)""",
         )
 
 

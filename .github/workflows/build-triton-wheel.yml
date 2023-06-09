@@ -9,12 +9,14 @@ on:
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton-rocm.txt
   pull_request:
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton-rocm.txt
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -28,10 +30,12 @@ jobs:
       fail-fast: false
       matrix:
         py_vers: [ "3.8", "3.9", "3.10", "3.11" ]
+        device: ["cuda", "rocm"]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
+      BUILD_DEVICE: ${{ matrix.device }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -84,9 +88,14 @@ jobs:
             ;;
           esac
 
-          docker exec -t "${container_name}" yum install -y zlib-devel
+          BUILD_ROCM=""
+          if [[ "$BUILD_DEVICE" == "rocm" ]]; then
+            BUILD_ROCM="--build-rocm"
+          fi
+
+          docker exec -t "${container_name}" yum install -y zlib-devel zip
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py $BUILD_ROCM
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
       - uses: actions/upload-artifact@v3

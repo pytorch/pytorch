@@ -1480,7 +1480,7 @@ class TestMemoryProfilerE2E(TestCase):
 
             # We generally don't care about tiny allocations during memory
             # profiling and they add a lot of noise to the unit test.
-            if size >= 256
+            if size > 512
         ]
 
         self.assertExpectedInline(
@@ -1551,6 +1551,54 @@ class TestMemoryProfilerE2E(TestCase):
             destroy                    GRADIENT                    16(v0)          128 kB
             destroy                    GRADIENT                    17(v0)            2 kB
             destroy                    GRADIENT                    13(v0)         1024 kB""")
+
+    def test_memory_timeline_no_id(self) -> None:
+        # On CPU the default behavior is to simply forward to malloc. That
+        # means that when we free `x` the allocator doesn't actually know how
+        # many bytes are in the allocation, and thus there's no point to
+        # calling `c10::reportMemoryUsageToProfiler`. So in order to test that
+        # memory profiler processes this case correctly we need to use CUDA
+        # where we do always keep a record.
+        x = torch.ones((1024,), device="cuda" if torch.cuda.is_available() else "cpu")
+
+        with profile() as prof:
+            # We never see `x` used so we don't know the storage is for a
+            # Tensor, but we do still see the free event.
+            del x
+
+            # For empty we see the allocation and free, but not any use.
+            # So this also cannot be identified as a Tensor.
+            y = torch.empty((64,))
+            del y
+
+            z = torch.empty((256,))
+            z.view_as(z)  # Show `z` to the profiler
+            del z
+
+        memory_profile = prof._memory_profile()
+
+        expected = [
+            # x
+            (_memory_profiler.Action.PREEXISTING, 4096),
+            (_memory_profiler.Action.DESTROY, 4096),
+            #
+            # y
+            (_memory_profiler.Action.CREATE, 256),
+            (_memory_profiler.Action.DESTROY, 256),
+            #
+            # z
+            (_memory_profiler.Action.CREATE, 1024),
+            (_memory_profiler.Action.DESTROY, 1024),
+        ]
+
+        # See above.
+        if not torch.cuda.is_available():
+            expected = expected[2:]
+
+        self.assertEqual(
+            [(action, size) for _, action, _, size in memory_profile.timeline],
+            expected,
+        )
 
 
 if __name__ == "__main__":

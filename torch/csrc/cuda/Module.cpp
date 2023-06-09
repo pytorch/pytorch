@@ -2,6 +2,7 @@
 #include <ATen/CachedTensorUtils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -917,6 +918,14 @@ static void registerCudaDeviceProperties(PyObject* module) {
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
   });
+
+  m.def("_cuda_get_conv_benchmark_empty_cache", []() {
+    return at::native::_cudnn_get_conv_benchmark_empty_cache();
+  });
+
+  m.def("_cudnn_set_conv_benchmark_empty_cache", [](bool enable) {
+    return at::native::_cudnn_set_conv_benchmark_empty_cache(enable);
+  });
 }
 
 // We choose to ignore certain blocks that are currently allocated
@@ -1085,6 +1094,11 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         alloc->raw_deleter(), c10::detail::deleteNothing);
     TORCH_CHECK("Expected standard deleter");
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
+  });
+
+  m.def("_set_storage_access_error_msg", [](at::Tensor t, std::string s) {
+    t.unsafeGetTensorImpl()
+        ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
   });
 
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {

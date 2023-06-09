@@ -146,14 +146,35 @@ class Repro(torch.nn.Module):
         return (relu,)""",
         )
 
+    @inductor_config.patch("cpp.inject_relu_bug_TESTING_ONLY", "accuracy")
+    def test_offload_to_disk(self):
+        # Just a smoketest, this doesn't actually test that memory
+        # usage went down.  Test case is carefully constructed to hit
+        # delta debugging.
+        run_code = """\
+@torch.compile()
+def inner(x):
+    x = torch.sin(x)
+    x = torch.sin(x)
+    x = torch.cos(x)
+    x = torch.relu(x)
+    return x
+
+inner(torch.randn(20, 20))
+"""
+        self._run_full_test(
+            run_code,
+            "aot",
+            "AccuracyError",
+            isolate=False,
+            minifier_args=["--offload-to-disk"],
+        )
+
 
 if __name__ == "__main__":
-    import sys
-
     from torch._dynamo.test_case import run_tests
 
     # Skip CI tests on mac since CPU inductor does not seem to work due to C++ compile errors,
     # also skip on ASAN due to https://github.com/pytorch/pytorch/issues/98262
-    # also skip on Py 3.11+ since unhandled exceptions can cause segfaults
-    if not IS_MACOS and not TEST_WITH_ASAN and sys.version_info < (3, 11):
+    if not IS_MACOS and not TEST_WITH_ASAN:
         run_tests()

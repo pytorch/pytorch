@@ -194,13 +194,28 @@ pyop_namespace = {}
 
 
 class HigherOrderOperator(OperatorBase):
-    def __init__(self, name):
+    def __init__(self, name, module=None):
         super().__init__()
         self._name = name
 
-        # Make _OPNamespace not scream, this whole name based association needs a good hard look
+        # Set __name__ and __module__ so that the HigherOrderOperator
+        # looks like a function. This is necessary for make_fx tracing
+        # to work correctly (because it stores the string name of an
+        # operator)
         self.__name__ = name
+        if module is not None:
+            self.__module__ = module
+        else:
+            # Get module from calling frame
+            frame = inspect.stack()[1]
+            mod = inspect.getmodule(frame[0])
+            assert mod is not None, "Can't infer module, please pass it in"
+            self.__module__ = mod.__name__
+
+        # TODO: excise this in a couple of days.
+        # HigherOrderOperator should not be registered to appear under torch.ops
         pyop_namespace[name] = self
+
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
     def fallthrough(self, dispatch_key):
@@ -776,7 +791,7 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
-        if sys.executable == "torch_deploy":
+        if torch._running_with_deploy():
             return
 
         path = _utils_internal.resolve_library_path(path)
