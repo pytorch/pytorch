@@ -26,7 +26,7 @@ def reset() -> None:
 
     Example::
 
-        >>> import torch
+        >>> # xdoctest: +SKIP
         >>> torch.compiler.reset()
         >>> torch.compile(...)
         >>> torch.compiler.reset()
@@ -66,8 +66,8 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
         exclude_tags(optional): A tuple of strings representing tags to exclude.
 
     Example::
-
-        >>> valid_backends = torch.compiler.list_backends(exclude_tags=("debug", "experimental"))
+        >>> # xdoctest: +SKIP
+        >>> valid_backends = torch.compiler.list_backends()
 
     """
 
@@ -83,8 +83,8 @@ def assume_constant_result(fn):
         fn: The function to be marked as having a constant result.
 
     Example::
-
-            >>> marked_function = torch.compiler.assume_constant_result(my_function)
+        >>> # xdoctest: +SKIP
+        >>> marked_function = torch.compiler.assume_constant_result(my_function) 
 
     .. warning::
         `assume_constant_result` can if invalid cause safety and soundness issues, :func:`torch.compile`
@@ -104,7 +104,8 @@ def disable(fn=None, recursive=True):
         recursive (optional): A boolean value indicating whether the disabling should be recursive.
 
     Example::
-
+    
+        >>> # xdoctest: +SKIP
         >>> # The decorator without recursive disabling
         >>> @torch.compiler.disable(recursive=False)
         >>> def my_function():
