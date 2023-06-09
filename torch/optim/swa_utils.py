@@ -194,7 +194,7 @@ class AveragedModel(Module):
         if self.n_averaged > 0:
             if self.multi_avg_fn is not None or self.avg_fn is None:
                 grouped_tensors = _group_tensors_by_device_and_dtype([self_param_detached, model_param_detached])
-                for ((device, _), [self_params, model_params]) in grouped_tensors.items():
+                for ((device, _), ([self_params, model_params], _)) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(self_params, model_params, self.n_averaged.to(device))
                     elif device.type == 'cuda':
