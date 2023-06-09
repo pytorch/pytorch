@@ -6,6 +6,7 @@ import itertools
 import logging
 import math
 import operator
+import pickle, os
 from typing import Dict, Iterable, List, Set
 
 import sympy
@@ -24,6 +25,7 @@ from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseScheduling
 from ..triton_heuristics import AutotuneHint
+from ..autotuner.model import AutotunerRawData, get_reads_writes, autotuner_predict
 from ..utils import (
     DeferredLineBase,
     get_fused_kernel_name,
@@ -1775,14 +1777,18 @@ class TritonKernel(Kernel):
 
         return result
 
-    def codegen_kernel(self, name=None):
+    def codegen_kernel(
+        self, name=None, get_autotuner_dict=False, inject_autotuner_config=None
+    ):
         from triton import next_power_of_2
 
         code = IndentedBuffer()
+        autotuner_dict = dict()
 
         size_hints = [
             next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
         ]
+
         if self.persistent_reduction:
             assert self.inside_reduction
             heuristics = "persistent_reduction"
@@ -1862,6 +1868,8 @@ class TritonKernel(Kernel):
                 # )
                 # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
         triton_meta["configs"] = [config_of(signature)]
+        if inject_autotuner_config is not None:
+            triton_meta["autotuner_configs"] = inject_autotuner_config
 
         for tree in self.range_trees:
             if tree.prefix == "r" and (
@@ -1883,6 +1891,10 @@ class TritonKernel(Kernel):
                 )
                 @triton.jit
             """
+            autotuner_dict["size_hints"] = size_hints
+            autotuner_dict["reduction_hint"] = reduction_hint
+            autotuner_dict["meta"] = triton_meta
+            autotuner_dict["heuristics"] = heuristics
         else:
             tile_hint = ""
             if len(size_hints) == 2:
@@ -1894,6 +1906,11 @@ class TritonKernel(Kernel):
                 @{heuristics}(size_hints={size_hints!r}, {tile_hint}filename=__file__, meta={triton_meta!r})
                 @triton.jit
             """
+            autotuner_dict["size_hints"] = size_hints
+            autotuner_dict["tile_hint"] = tile_hint
+            autotuner_dict["meta"] = triton_meta
+            autotuner_dict["heuristics"] = heuristics
+
         code.splice(heuristics_line)
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
         self.codegen_body()
@@ -1909,6 +1926,8 @@ class TritonKernel(Kernel):
         if name is not None:
             return code.getvalue()
 
+        if get_autotuner_dict:
+            return code.getvalue(), autotuner_dict
         return code.getvalue()
 
     def codegen_static_numels(self, code):
@@ -2072,6 +2091,9 @@ class TritonKernel(Kernel):
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)
+
+
+KERNEL_DICT = dict()
 
 
 class TritonScheduling(BaseScheduling):
@@ -2360,10 +2382,67 @@ class TritonScheduling(BaseScheduling):
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        src_code = kernel.codegen_kernel()
+        if (
+            config.triton.dump_autotuner_data
+            or config.triton.autotuner_path is not None
+        ):
+            src_code, autotuner_dict = kernel.codegen_kernel(get_autotuner_dict=True)
+            nodes = list(
+                filter(
+                    lambda n: n not in (EnableReduction, DisableReduction),
+                    node_schedule,
+                )
+            )
+            if len(nodes) == 1:
+                node = nodes[0]
+            else:
+                node = scheduler.FusedSchedulerNode(self.scheduler, nodes)
+            autotuner_raw_data = AutotunerRawData(
+                io_deps=get_reads_writes(self.scheduler, node, src_code),
+                read_write=node.read_writes,
+                src_code=src_code,
+                autotuner_dict=autotuner_dict,
+            )
+
+            if config.triton.autotuner_path is not None:
+                # autotuner inference
+                if src_code in KERNEL_DICT:
+                    # we have already generated autotuner config for this kernel
+                    src_code = KERNEL_DICT[src_code]
+                else:
+                    # we have not generated autotuner config for this kernel
+                    src_code_before = src_code
+                    configs = autotuner_predict(
+                        autotuner_raw_data, config.triton.autotuner_path
+                    )
+                    src_code = kernel.codegen_kernel(
+                        inject_autotuner_config=[
+                            (cfg.kwargs, cfg.num_warps) for cfg in configs
+                        ]
+                    )
+                    KERNEL_DICT[src_code_before] = src_code
+            else:
+                src_code = kernel.codegen_kernel()
+        else:
+            src_code = kernel.codegen_kernel()
+
         kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
+
+        if config.triton.dump_autotuner_data:
+            # autotuner training data dump
+            tuning_metadata_path = self.kernel_path_ + ".pkl"
+            if not os.path.exists(os.path.dirname(tuning_metadata_path)):
+                os.makedirs(os.path.dirname(tuning_metadata_path))
+            if not os.path.exists(tuning_metadata_path):
+                # only dump if the file does not exist
+                # otherwise we will overwrite the existing file with possibly a different kernel
+                log.debug("Kernel path : " + self.kernel_path_)
+                log.debug("Metadata path : " + tuning_metadata_path)
+                log.debug(str(autotuner_raw_data))
+                with open(tuning_metadata_path, "wb") as f:
+                    pickle.dump(autotuner_raw_data, f)
 
         if config.warn_mix_layout:
             kernel.warn_mix_layout(kernel_name)
@@ -2436,6 +2515,7 @@ class TritonScheduling(BaseScheduling):
             src_code = src_code.replace("#pragma CMT", "#")
 
             basename, _, kernel_path = get_path(code_hash(src_code), "py")
+            self.kernel_path_ = kernel_path
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
