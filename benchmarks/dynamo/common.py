@@ -35,8 +35,7 @@ from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.nn.parallel import DistributedDataParallel as DDP
+
 from torch.utils._pytree import tree_map, tree_map_only
 
 from tqdm.auto import tqdm, trange
@@ -1390,8 +1389,18 @@ class BenchmarkRunner:
         def deepcopy_and_maybe_ddp(model):
             model = self.deepcopy_model(model)
             if self.args.ddp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use DDP without a distributed enabled build"
+                from torch.nn.parallel import DistributedDataParallel as DDP
+
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use FSDP without a distributed enabled build"
+                from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
                 model = FSDP(model, use_orig_params=True)
                 if torch._inductor.config.triton.cudagraphs:
                     log.warning("Disabling cudagraphs for FSDP compatibility")
