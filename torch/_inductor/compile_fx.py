@@ -312,8 +312,16 @@ def compile_fx_inner(
             (not graph.mutated_inputs, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
-            (all(isinstance(t, (torch.Tensor, torch.SymInt)) for t in example_inputs), "non-Tensor inputs"),
-            ((len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees), "multiple device indices without cudagraph_trees"),
+            (
+                all(
+                    isinstance(t, (torch.Tensor, torch.SymInt)) for t in example_inputs
+                ),
+                "non-Tensor inputs",
+            ),
+            (
+                (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees),
+                "multiple device indices without cudagraph_trees",
+            ),
         ]
         cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
 
@@ -683,9 +691,7 @@ def compile_fx(
 
     assert not config._raise_error_for_testing
     num_example_inputs = len(example_inputs_)
-    cudagraphs = BoxedBool(
-        config.triton.cudagraphs
-    )
+    cudagraphs = BoxedBool(config.triton.cudagraphs)
     forward_device = BoxedDeviceIndex(None)
 
     graph_id = next(_graph_counter)
