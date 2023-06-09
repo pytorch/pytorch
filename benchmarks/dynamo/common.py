@@ -308,8 +308,20 @@ class GroupMap:
                 return group.name
         return None
 
+    @classmethod
+    def assert_single_group(cls, groups: List[ModelGroup]):
+        model_to_group = {}
+        for group in groups:
+            for model in group.models:
+                if model in model_to_group:
+                    raise ValueError(
+                        f"Model {model} appears in multiple groups, {model_to_group[model]} and {group.name}"
+                    )
+                model_to_group[model] = group.name
+        return cls(groups)
 
-ALL_MODEL_GROUPS = GroupMap([BLUEBERRY_MODELS])
+
+ALL_MODEL_GROUPS = GroupMap.assert_single_group([BLUEBERRY_MODELS])
 
 
 def model_specified_by_path(path_and_class_str):
