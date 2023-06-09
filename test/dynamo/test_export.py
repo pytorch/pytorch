@@ -1584,22 +1584,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     def test_export_with_cond_closure(self):
         from functorch.experimental.control_flow import cond
 
-        class ModuleAccidentallyPassingError(torch.nn.Module):
-            # error
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, pred, x):
-                def true_fn(val):
-                    return x * 2
-
-                def false_fn(val):
-                    return x - 2
-
-                return cond(pred, true_fn, false_fn, [x])
-
-        class ModuleAccidentallyPassingFixed(torch.nn.Module):
-            # error
+        class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -1612,22 +1597,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 return cond(pred, true_fn, false_fn, [x])
 
-        class ModuleNoAccidentError(torch.nn.Module):
-            # error
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, pred, x):
-                def true_fn(val):
-                    return x * 2
-
-                def false_fn(val):
-                    return x - 2
-
-                return cond(pred, true_fn, false_fn, [x + 1])
-
-        class ModuleNoAccidentFixed(torch.nn.Module):
-            # error
+        class Bar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -1640,25 +1610,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 return cond(pred, true_fn, false_fn, [x + 1])
 
-        class ModuleClosureReproError(torch.nn.Module):
-            # error
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-
-            def forward(self, pred, x):
-                y = x + x
-
-                def true_fn(val):
-                    return self.linear(val) * (x + y)
-
-                def false_fn(val):
-                    return val * (y - x)
-
-                return cond(pred, true_fn, false_fn, [x])
-
-        class ModuleClosureReproFixed(torch.nn.Module):
-            # error
+        class FooBar(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(3, 3)
@@ -1674,11 +1626,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
                 return cond(pred, true_fn, false_fn, [x, y])
 
-        for Module in [
-            ModuleAccidentallyPassingFixed,
-            ModuleNoAccidentFixed,
-            ModuleClosureReproFixed,
-        ]:
+        for Module in [Foo, Bar, FooBar]:
             mod = Module()
             x = torch.randn([3, 3])
             pred = torch.tensor(x[0][0].item() < 0)
@@ -3228,6 +3176,75 @@ def forward(self, x):
 
         out_graph, _ = torch._dynamo.export(mod, pred_x, x)
         self.assertEqual(real_result, out_graph(pred_y, y))
+
+    def test_cond_free_variables_overlapping(self):
+        from functorch.experimental.control_flow import cond
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, pred, x):
+                a = torch.ones(6, 4)
+                b = torch.ones(6, 4)
+                c = torch.ones(6, 4)
+                d = torch.ones(6, 4)
+
+                def true_fn(x):
+                    return x + x + a.cos() + b.cos() + d.cos()
+
+                def false_fn(x):
+                    return x * x + a.sin() + b.sin() + c.sin()
+
+                return cond(pred, true_fn, false_fn, [x])
+
+        mod = Module()
+        x = torch.ones(6, 4)
+        pred_x = torch.tensor(True)
+
+        out_graph, _ = torch._dynamo.export(mod, pred_x, x)
+        self.assertExpectedInline(
+            out_graph.code.strip(),
+            """\
+def forward(self, pred, x):
+    arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+    ones = torch.ones(6, 4)
+    ones_1 = torch.ones(6, 4)
+    ones_2 = torch.ones(6, 4)
+    ones_3 = torch.ones(6, 4)
+    cond_true_0 = self.cond_true_0
+    cond_false_0 = self.cond_false_0
+    cond = torch.ops.cond(arg0, cond_true_0, cond_false_0, [arg1, ones, ones_1, ones_3, ones, ones_1, ones_2]);  arg0 = cond_true_0 = cond_false_0 = arg1 = ones = ones_1 = ones_3 = ones_2 = None
+    return pytree.tree_unflatten([cond], self._out_spec)""",  # noqa: B950,E122
+        )
+
+        self.assertExpectedInline(
+            out_graph.cond_true_0.code.strip(),
+            """\
+def forward(self, l_x_, ones, ones_1, ones_3, ones_2_false_branch, ones_1_false_branch, ones_false_branch):
+    add = l_x_ + l_x_;  l_x_ = None
+    cos = ones.cos();  ones = None
+    add_1 = add + cos;  add = cos = None
+    cos_1 = ones_1.cos();  ones_1 = None
+    add_2 = add_1 + cos_1;  add_1 = cos_1 = None
+    cos_2 = ones_3.cos();  ones_3 = None
+    add_3 = add_2 + cos_2;  add_2 = cos_2 = None
+    return add_3""",
+        )
+
+        self.assertExpectedInline(
+            out_graph.cond_false_0.code.strip(),
+            """\
+def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch, ones, ones_1, ones_2):
+    mul = l_x_ * l_x_;  l_x_ = None
+    sin = ones.sin();  ones = None
+    add = mul + sin;  mul = sin = None
+    sin_1 = ones_1.sin();  ones_1 = None
+    add_1 = add + sin_1;  add = sin_1 = None
+    sin_2 = ones_2.sin();  ones_2 = None
+    add_2 = add_1 + sin_2;  add_1 = sin_2 = None
+    return add_2""",
+        )
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

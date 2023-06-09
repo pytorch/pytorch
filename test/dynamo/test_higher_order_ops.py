@@ -311,9 +311,12 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
         mod_for_eager = Foo()
 
-        self.assertEqual(
-            mod_for_compile(torch.ones(6, 4)), mod_for_eager(torch.ones(6, 4))
-        )
+        actual = mod_for_compile(torch.ones(6, 4))
+        ref = mod_for_eager(torch.ones(6, 4))
+        self.assertEqual(actual, ref)
+
+        # this fails?
+        # actual = mod_for_compile(torch.ones(6, 4))
 
     def test_cond_free_variable_in_both_branches(self):
         backend = EagerAndRecordGraphs()
@@ -331,7 +334,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
                     return x.sum() + self.buffer.sum() + z.sum()
 
                 def false_fn(x):
-                    return x.sum() - self.buffer.sum() - z.sum()
+                    return x.sum() - z.sum() - self.buffer.sum()
 
                 return control_flow.cond(y, true_fn, false_fn, [x])
 

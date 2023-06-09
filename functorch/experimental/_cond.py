@@ -138,7 +138,7 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
         if requires_grad:
             # cond can only return one value
             err_fn = torch._C._functions.DelayedError(
-                b"trying to differentiate buffers inside torch.cond",
+                b"NYI: torch.cond doesn't support autograd",
                 1,
             )
             # Create aliases of the output that has requires_grad=True. We need

@@ -1023,45 +1023,17 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 return ret_val, ret_graph, ret_lifted_freevars
 
             (true_r, true_graph, true_lifted_freevars) = speculate_branch(True)
-
-            state_after_true_branch = tx.copy_graphstate()
-            true_guards = state_after_true_branch.output.guards
-            true_nn_modules = state_after_true_branch.output.nn_modules
-            true_cmp = get_comparable_state(state_after_true_branch)
-
+            true_nn_modules = tx.copy_graphstate().output.nn_modules
             (false_r, false_graph, false_lifted_freevars) = speculate_branch(False)
+            false_nn_modules = tx.copy_graphstate().output.nn_modules
 
-            state_after_false_branch = tx.copy_graphstate()
-            false_guards = state_after_false_branch.output.guards
-            false_nn_modules = state_after_false_branch.output.nn_modules
-            false_cmp = get_comparable_state(state_after_false_branch)
-
-            true_tracked_fakes = true_cmp.output.tracked_fakes
-            false_tracked_fakes = false_cmp.output.tracked_fakes
-
-            tx.output.tracked_fakes = list({*false_tracked_fakes, *true_tracked_fakes})
-            true_tensor_weakref_to_sizes_strides = (
-                true_cmp.output.tensor_weakref_to_sizes_strides
-            )
-            false_tensor_weakref_to_sizes_strides = (
-                false_cmp.output.tensor_weakref_to_sizes_strides
-            )
-
-            # Add guards
-            tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
-            tx.output.tracing_context.guards_context.dynamo_guards |= true_guards
-
-            # Add tracking
-            tx.output.tensor_weakref_to_sizes_strides.update(
-                true_tensor_weakref_to_sizes_strides
-            )
-            tx.output.tensor_weakref_to_sizes_strides.update(
-                false_tensor_weakref_to_sizes_strides
-            )
-
-            # FIXME (tmanlaibaatar) this is probably wrong?
-            tx.output.side_effects = true_cmp.output.side_effects
-
+            # TODO (tmanlaibaatar) deduplicate this later
+            # Let's say we capture cond(pred, true_fn, false_fn, x)
+            # and true_fn has lifted variables a, b, c
+            # and false_fn has lifted variables a, b, d
+            # Then each branch graph will receive:
+            # true_fn(x, a, b, c, a_false, b_false, d_false)
+            # false_fn(x, a_true, b_true, c_true, a, b, d)
             def fixup_branch_inps(graph, add_after, new_args, suffix) -> None:
                 inp_count = 0
                 for node in graph.nodes:
@@ -1140,26 +1112,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 checkpoint,
             )
 
-            state_after_body = tx.copy_graphstate()
-            body_guards = state_after_body.output.guards
-            body_nn_modules = state_after_body.output.nn_modules
-            body_cmp = get_comparable_state(state_after_body)
-
-            # We don't support side effects inside a map loop body for simplicity.
-            parent_cmp = get_comparable_state(checkpoint)
-            parent_tracked_fakes = parent_cmp.output.tracked_fakes
-            body_tracked_fakes = body_cmp.output.tracked_fakes
-            tx.output.tracked_fakes = list({*parent_tracked_fakes, *body_tracked_fakes})
-            body_tensor_weakref_to_sizes_strides = (
-                body_cmp.output.tensor_weakref_to_sizes_strides
-            )
-
-            # Add guards
-            tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
-            # Add tracking
-            tx.output.tensor_weakref_to_sizes_strides.update(
-                body_tensor_weakref_to_sizes_strides
-            )
+            body_nn_modules = tx.copy_graphstate().output.nn_modules
 
             body_name = add_subgraph(
                 "map_body",
