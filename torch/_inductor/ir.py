@@ -3298,8 +3298,9 @@ class FallbackKernel(ExternKernelAlloc):
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
-                if "cuda" in device.type:
+                if device.type == "cuda":
                     return device
+            return devices[0]
         return None
 
     def codegen(self, wrapper):

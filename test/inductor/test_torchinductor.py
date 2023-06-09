@@ -4807,27 +4807,27 @@ class CommonTemplate:
         # minifiers, we have ensure that they work with make_fx. This test uses
         # make_fx to do the testing. In future, we can move on torch.compile.
         def fn():
-            rng_state1, a1 = torch.ops.run_and_save_rng_state(
+            rng_state1, a1 = torch._prims.rng_prims.run_and_save_rng_state(
                 torch.ops.aten.rand.default,
                 [4, 4],
                 dtype=torch.float32,
                 device=self.device,
             )
-            rng_state2, a2 = torch.ops.run_and_save_rng_state(
+            rng_state2, a2 = torch._prims.rng_prims.run_and_save_rng_state(
                 torch.ops.aten.rand.default,
                 [4, 4],
                 dtype=torch.float32,
                 device=self.device,
             )
 
-            b1 = torch.ops.run_with_rng_state(
+            b1 = torch._prims.rng_prims.run_with_rng_state(
                 rng_state1,
                 torch.ops.aten.rand.default,
                 [4, 4],
                 dtype=torch.float32,
                 device=self.device,
             )
-            b2 = torch.ops.run_with_rng_state(
+            b2 = torch._prims.rng_prims.run_with_rng_state(
                 rng_state2,
                 torch.ops.aten.rand.default,
                 [4, 4],
