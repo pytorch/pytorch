@@ -4068,6 +4068,14 @@ def fn():
         x, y = opt_fn()
         self.assertEqual(x, y)
 
+    def test_torch_distributions_lazy_property(self):
+        def fn(x):
+            return torch.distributions.Categorical(probs=x).entropy()
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        x = torch.rand([4, 4])
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
@@ -5353,6 +5361,28 @@ def fn():
         self.assertTrue(s == s2)
         self.assertTrue(s != s3)
 
+    def test_inline_dict_function(self):
+        def _result_type_dict(dtype):
+            return {bool: torch.float32}[dtype]
+
+        @torch.compile
+        def f():
+            return torch.ones(3, dtype=_result_type_dict(bool))
+
+        self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
+
+    def test_inline_dict_function_passed_as_arg(self):
+        @torch.compile
+        def fn(d, x, y):
+            if d[x] is torch.float32:
+                return y.cos()
+            else:
+                return y.sin()
+
+        dd = {bool: torch.float32, int: torch.int64}
+        self.assertEqual(fn(dd, bool, torch.ones(4)), torch.ones(4).cos())
+        self.assertEqual(fn(dd, int, torch.ones(4)), torch.ones(4).sin())
+
     def test_add_sizes(self):
         def func(x):
             y = x.size()
@@ -5595,6 +5625,19 @@ def ___make_guard_fn():
         opt_model = torch._dynamo.optimize("eager")(MyModule())
         opt_out = opt_model(x)
         self.assertTrue(same(orig_out, opt_out))
+
+    def test_torch_variable_hasattr(self):
+        def fn(x):
+            if hasattr(torch.nn, "Module"):
+                return x * x
+            return x + 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.rand([4, 4])
+        fn_out = fn(x)
+        compiled_out = compiled_fn(x)
+        self.assertTrue(same(fn_out, compiled_out))
 
 
 class TestTracer(JitTestCase):

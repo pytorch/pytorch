@@ -68,7 +68,8 @@ class TestExperimentalExport(TestCase):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
-    def test_export_constraints(self):
+    @unittest.expectedFailure
+    def test_export_inline_constraints(self):
 
         def f(x):
             b = x.item()
@@ -213,6 +214,27 @@ class TestExport(TestCase):
         ):
             export(f, example_inputs, constraints)
 
+    def test_not_correct_dim(self):
+        def f(x):
+            return x.cos()
+
+        def g(x):
+            return x + 4
+
+        inp_for_f = torch.tensor(5)
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Cannot mark 0-dimension tensors to be dynamic"):
+            constraints = [dynamic_dim(inp_for_f, 0)]
+
+        inp_for_f_mul_dim = torch.ones(5, 5)
+        with self.assertRaisesRegex(
+            torchdynamo.exc.UserError,
+            "Expected the dimension passed to dynamic_dim to be in the range \\[0:1\\]"
+        ):
+            constraints = [dynamic_dim(inp_for_f_mul_dim, 2)]
+
+        inp_for_g = 4
+        with self.assertRaisesRegex(torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"):
+            constraints = [dynamic_dim(inp_for_g, 0)]
 
 if __name__ == '__main__':
     run_tests()

@@ -729,6 +729,47 @@ class ConvTransposeCallForwardDirectly(torch.nn.Module):
         return self.layer.forward(x)
 
 
+class ConvCallSuperForwardDirectly(torch.nn.Conv1d):
+    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+        super(ConvCallSuperForwardDirectly, self).__init__(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            **kwargs,
+        )
+
+    def forward(self, inputs, mask=None):
+        outputs = super(ConvCallSuperForwardDirectly, self).forward(inputs)
+        return outputs
+
+
+class ConvTransposeCallSuperForwardDirectly(torch.nn.ConvTranspose2d):
+    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+        super(ConvTransposeCallSuperForwardDirectly, self).__init__(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            **kwargs,
+        )
+
+    def forward(self, x):
+        if x.numel() > 0:
+            return super(ConvTransposeCallSuperForwardDirectly, self).forward(x)
+        output_shape = [
+            ((i - 1) * d - 2 * p + (di * (k - 1) + 1) + op)
+            for i, p, di, k, d, op in zip(
+                x.shape[-2:],
+                self.padding,
+                self.dilation,
+                self.kernel_size,
+                self.stride,
+                self.output_padding,
+            )
+        ]
+        output_shape = [x.shape[0], self.bias.shape[0]] + output_shape
+        return _NewEmptyTensorOp.apply(x, output_shape)
+
+
 class ModuleNameString(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1321,6 +1362,22 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    def test_conv_call_super_forward_directly(self):
+        x = torch.randn(4, 4)
+        m = ConvCallSuperForwardDirectly(4, 4, 4)
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    def test_conv_transpose_call_super_forward_directly(self):
+        x = torch.randn(4, 4, 4)
+        m = ConvTransposeCallSuperForwardDirectly(4, 4, 4)
+        ref = m(x)
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
 
 class MockModule(torch.nn.Module):
     def __init__(self):
@@ -1397,6 +1454,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager")(get_parameter_dtype)
         out_dtype = opt_mod(mod)
         self.assertEqual(out_dtype, torch.float32)
+
+    def test_dir(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.register_buffer("buf0", torch.randn(10, 10))
+                self.register_parameter(
+                    name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
+                )
+
+            def forward(self, x):
+                return self.r(torch.sin(x)) + self.buf0
+
+        mod = MockModule()
+        mod_keys = dir(mod)
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+        opt_mod_keys = dir(opt_mod)
+
+        # Check user-defined attributes, parameters and buffers
+        self.assertIn("linear", opt_mod_keys)
+        self.assertIn("buf0", opt_mod_keys)
+        self.assertIn("param0", opt_mod_keys)
+
+        # Check all attributes, parameters and buffers
+        self.assertTrue(len(set(mod_keys).difference(opt_mod_keys)) == 0)
 
     def test_recursion(self):
         mod = MockModule()
@@ -1841,6 +1924,33 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_no_graphbreak_builtin_equal(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer0 = torch.nn.Linear(10, 10)
+                self.layer1 = torch.nn.Linear(10, 10)
+                self.layer2 = torch.nn.Linear(10, 10)
+
+            @property
+            def encoder_layers(self):
+                return [self.layer0, self.layer1, self.layer2]
+
+            def forward(self, x):
+                for layer in self.encoder_layers:
+                    output = layer(x)
+                    if layer == self.layer0:
+                        output = F.relu6(output)
+                    else:
+                        output = F.relu(output)
+                return output
+
+        x = torch.randn(10, 10)
+
+        m = MyModule()
+
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
 
 
 if __name__ == "__main__":
