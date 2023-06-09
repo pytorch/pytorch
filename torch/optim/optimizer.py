@@ -233,6 +233,7 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
     _global_optimizer_post_hooks[handle.id] = hook
     return handle
 
+params_t: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]]
 
 _P = ParamSpec("_P")
 R = TypeVar("R")
@@ -261,11 +262,7 @@ class Optimizer:
     _optimizer_step_pre_hooks: Dict[int, OptimizerPreHook]  # type: ignore[valid-type]
     _optimizer_step_post_hooks: Dict[int, OptimizerPostHook]  # type: ignore[valid-type]
 
-    def __init__(
-        self,
-        params: Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]],
-        defaults: Dict[str, Any],
-    ) -> None:
+    def __init__(self, params: params_t, defaults: Dict[str, Any]) -> None:
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
         self._optimizer_step_pre_hooks = OrderedDict()
