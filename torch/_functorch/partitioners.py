@@ -18,6 +18,7 @@ from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
+import dataclasses
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
@@ -474,16 +475,101 @@ def _extract_graph_with_inputs_outputs_special(joint_graph, inputs, outputs, rec
     new_graph.lint()
     return new_graph, extra_rand_states
 
+def get_depth(node, depth_map):
+    # Memoization
+    if node in depth_map:
+        return depth_map[node]
 
-def reorder(gm):
-    # Reorder the ops such that tangents are used as soon as possible
-    tangent_inputs = list(filter(_is_tangent, gm.graph.nodes))
-    non_tangent_inputs = list(filter(lambda x: _is_not_a_tangent(x), gm.graph.nodes))
-    # print(gm)
+    # Base case
+    if node.op == "placeholder":
+        depth_map[node] = 0
+        # if "tangents" in node.name:
+        #     depth_map[node] = 1000
 
+        return depth_map[node]
+
+    # Handle output node
+    if node.op == "output":
+        args = node.args[0]
+        for arg in args:
+            if isinstance(arg, torch.fx.node.Node):
+                get_depth(arg, depth_map)
+        return
+
+    # Get the depth of args and set the depth of this node
+    arg_depths = [get_depth(arg, depth_map) for arg in node.all_input_nodes if isinstance(arg, torch.fx.node.Node)]
+    # factory ops like full, rand might not have any input args
+    if len(arg_depths) == 0:
+        arg_depths = [0]
+
+    depth_map[node] = max(arg_depths) + 1
+    return depth_map[node]
+ 
+
+def sort_depths(args, depth_map):
+    arg_depths = {arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)}
+    return sorted(arg_depths.items(), key=lambda x:x[1], reverse=True)
+ 
+def dfs(node, visited, new_graph, depth_map, env):
+    # Memoization
+    if node in visited:
+        return
+
+    # Base case 
+    if node.op == "placeholder":
+        return
+    
+    # Handle output node
+    if node.op == "output":
+        args = node.args[0]
+        sorted_arg_depths = sort_depths(args, depth_map)
+        for arg_node, _ in sorted_arg_depths:
+            dfs(arg_node, visited, new_graph, depth_map, env)
+
+        new_outputs = []
+        for output in args:
+            if isinstance(output, torch.fx.node.Node):
+                new_outputs.append(env[output])
+            else:
+                new_outputs.append(output)
+            
+        new_graph.output(new_outputs)
+        return
+
+    # Sort all the args on the basis of depth in descenging manner
+    sorted_arg_depths = sort_depths(node.all_input_nodes, depth_map)
+    # print("Sorted node", node, sorted_arg_depths)
+    for arg_node, _ in sorted_arg_depths:
+        dfs(arg_node, visited, new_graph, depth_map, env)
+
+    env[node] = new_graph.node_copy(node, lambda x: env[x])
+    visited.add(node)
+    return
+
+def depth_based_topological_reordering(gm):
+    # Preprocess - get a depth map for nodes in the fx graph
+    depth_map = {}
+    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
+    get_depth(output_node, depth_map)
+ 
+    new_graph = torch.fx.Graph()
+    env = {}
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            new_node = new_graph.placeholder(node.name)
+            # Can't use node_copy here as we may be turning previous call_function into placeholders
+            new_node.meta = node.meta
+            env[node] = new_node
+ 
+    visited = set()
+    dfs(output_node, visited, new_graph, depth_map, env)
+    new_graph.lint()
+    new_gm = torch.fx.GraphModule(gm, new_graph)
+    return new_gm
+
+def tangent_driven_topological_reordering(gm):
     new_graph = fx.Graph()
     env = {}
-
 
     # Add new placeholder nodes in the order specified by the inputs
     for node in gm.graph.nodes:
@@ -493,60 +579,52 @@ def reorder(gm):
             new_node.meta = node.meta
             env[node] = new_node
 
-    def insert_the_graph_for(node):
+
+    def insert_node_in_graph(node):
         if node in env:
             return env[node]
 
         if node.op == "output":
             raise RuntimeError("Should not be here")
 
-        for arg in node.args:
-            if isinstance(arg, torch.fx.node.Node):
-                env[arg] = insert_the_graph_for(arg)
+        for arg in node.all_input_nodes:
+            env[arg] = insert_node_in_graph(arg)
 
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
         return env[node]
 
+    tangent_inputs = list(filter(_is_tangent, gm.graph.nodes))
+    q = deque(tangent_inputs)
 
-    def build(priority_inputs):
-        q = deque(priority_inputs)
-        inserted = set()
-        while len(q):
-            node = q.popleft()
-            # print(torch.fx.GraphModule(gm,new_graph))
-            # print("starting the work for ", node)
-            # print("#######", flush=True)
-            insert_the_graph_for(node)
-            for user in node.users:
-                should_append = user not in inserted and user.op != "output"
-                # print(node, "->", user, should_append)
-                if should_append:
-                    q.append(user)
-                    inserted.add(user)
-
-    build(tangent_inputs)
-    # Run the remaining ones - Why do we even need these?
-    build(non_tangent_inputs)
-
-    output_values = []
-
-    for node in gm.graph.nodes:
-        if node.op == "output":
-            all_outputs = node.args[0]
-            for o in all_outputs:
-                if o is None:
-                    output_values.append(None)
-                else:
-                    output_values.append(env[o])
+    seen = set()
+    while len(q):
+        node = q.popleft()
+        insert_node_in_graph(node)
+        for user in node.users:
+            # Check if the node is alredy visited
+            if user not in seen and user.op != "output":
+                q.append(user)
+                seen.add(user)
 
 
 
-    new_graph.output(output_values)
+    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
+
+    new_outputs = []
+    for output in output_node.args[0]:
+        if isinstance(output, torch.fx.node.Node):
+            new_outputs.append(insert_node_in_graph(output))
+        else:
+            new_outputs.append(output)
+
+    new_graph.output(new_outputs)
     new_gm = torch.fx.GraphModule(gm, new_graph)
-
-    # print(new_gm)
     return new_gm
+
+
+def reorder(gm):
+    return tangent_driven_topological_reordering(gm)
 
 
 def _extract_fwd_bwd_modules_special(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
@@ -578,6 +656,7 @@ def _extract_fwd_bwd_modules_special(joint_module: fx.GraphModule, saved_values,
         recomputable_rng_ops_map,
         is_fwd=False,
     )
+
     fwd_module = fx.GraphModule(joint_module, fwd_graph)
     bwd_module = fx.GraphModule(joint_module, bwd_graph)
 
@@ -706,11 +785,13 @@ def min_cut_rematerialization_partition(
     fx_g = joint_module.graph
 
     #  add the CSE pass
-    if config.cse:
+    if config.cse and not config.functionalize_rng_ops:
         cse_graph = fx_graph_cse(fx_g)
         joint_module.graph = cse_graph
     full_bw_graph = joint_module.graph
 
+    # for node in joint_module.graph.nodes:
+    #     print("->", node, is_recomputable(node))
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
@@ -938,7 +1019,10 @@ def min_cut_rematerialization_partition(
     else:
         fw_module, bw_module = _extract_fwd_bwd_modules(
             joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
-    bw_module = reorder(bw_module)
+    # fw_module.print_readable()
+    # bw_module.print_readable()
+    if not config.functionalize_rng_ops:
+        bw_module = reorder(bw_module)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
         fw_module_nodes = {node.name for node in fw_module.graph.nodes if node.op == 'call_function'}

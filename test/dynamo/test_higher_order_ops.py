@@ -951,14 +951,14 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     @torch._inductor.config.patch(fallback_random=True)
-    def test_tags_rand_recomputed(self):
+    def test_tags_recomputed_rand(self):
         def gn(x, y):
             return torch.sigmoid(torch.rand_like(x) * y) * x
 
         def fn(x, y):
             x = torch.sin(x)
-            z = torch.utils.checkpoint.checkpoint(gn, x, y)
-            x = torch.sin(z)
+            x = torch.utils.checkpoint.checkpoint(gn, x, y)
+            x = torch.sin(x)
             z = torch.utils.checkpoint.checkpoint(gn, x, y)
             return z
 
@@ -979,16 +979,14 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         def gn(x, y):
             x = torch.mm(x, y)
             x = torch.mm(x, y)
-            # x = torch.mm(x, y)
-            # x = torch.mm(x, y)
             return x
 
         def fn(x, y):
             x = torch.sin(x)
-            z = torch.utils.checkpoint.checkpoint(gn, x, y)
-            # x = toch.sin(z)
-            z = torch.utils.checkpoint.checkpoint(gn, z, y)
-            return z
+            x = torch.utils.checkpoint.checkpoint(gn, x, y)
+            x = torch.sin(x)
+            # x = torch.utils.checkpoint.checkpoint(gn, x, y)
+            return x
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
         y = torch.randn(4, 4, device="cuda", requires_grad=True)
