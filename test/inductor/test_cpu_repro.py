@@ -397,6 +397,26 @@ class CPUReproTests(TestCase):
             (torch.randn(1, 32, 4, 4).bfloat16(),),
         )
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_fp32_load_with_to_bf16(self):
+        # From llama model.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cache_k = torch.zeros(8, 4, 2, 2)
+
+            def forward(self, x, xk):
+                bsz, seqlen, _ = x.shape
+                self.cache_k = self.cache_k.to(x)
+                self.cache_k[:bsz, 1 : 1 + seqlen] = xk
+                return self.cache_k
+
+        ref_model = Model().eval()
+        opt_model = torch.compile()(Model().eval())
+        x = torch.randn(4, 2, 2).bfloat16()
+        xk = torch.randn(4, 2, 2, 2).bfloat16()
+        self.assertEqual(opt_model(x, xk), ref_model(x, xk))
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )

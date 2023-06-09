@@ -98,7 +98,6 @@ class TestFSDPFineTune(FSDPTest):
             "torch.distributed.fsdp._runtime_utils._post_backward_reshard",
             _post_backward_reshard_with_count,
         ):
-            post_backward_reshard_count = 0
             inp = torch.randn((8, 5), device="cuda", requires_grad=inp_requires_grad)
             seq(inp).sum().backward()
             # If the input does not require gradient, then the 0th frozen

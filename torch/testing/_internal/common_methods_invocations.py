@@ -27,8 +27,7 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
-    _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_SDPA,
-    SM80OrLater
+    _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_SDPA
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
@@ -2886,7 +2885,7 @@ def sample_inputs_searchsorted(op_info, device, dtype, requires_grad, **kwargs):
         unsorted_tensor = make_arg(size, noncontiguous=noncontiguous)
         for input_size in input_sizes:
             input_tensor = make_arg(input_size, noncontiguous=noncontiguous)
-            if np.product(size) == 0:
+            if np.prod(size) == 0:
                 boundary_tensor = unsorted_tensor
                 sorter = make_tensor(size, dtype=torch.int64, device=device, noncontiguous=noncontiguous)
             else:
@@ -13265,9 +13264,11 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
             # OpInfo was implemented with a lambda
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            # See [Note] SDPA_flash's meta function returns incorrect Philox seed and offset
+            # See [Note] SDPA returns Philox Offset and Seed as tensors that will live on CPU when not in cuda graph capture
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp',
-                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA and SM80OrLater),
+                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
+                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA),
             # TODO Need to understand what this is testing and why it doesn't work
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),
