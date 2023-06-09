@@ -1215,7 +1215,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComms);
 
   // Move the NCCL resource to cache
-  devNCCLCommMap_.emplace(devicesKey, std::move(ncclComms));
+  devNCCLCommMap_.emplace(
+      devicesKey, std::move(inProgressCommMap_.at(devicesKey)));
   inProgressCommMap_.erase(devicesKey);
   return devNCCLCommMap_[devicesKey];
 }
