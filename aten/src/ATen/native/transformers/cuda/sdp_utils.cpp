@@ -114,17 +114,6 @@ bool check_tensor_dtype(
   return true;
 }
 
-bool check_for_non_zero_dropout(sdp_params params, bool debug) {
-  if (params.dropout != 0.0) {
-    if (debug) {
-      TORCH_WARN(
-          "Mem_efficient does not support non_zero dropout. Dropout_p: ",
-          params.dropout);
-    }
-    return false;
-  }
-  return true;
-}
 
 bool try_broadcast_param_size(
     const c10::SymInt q_size,
@@ -595,8 +584,7 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
-      check_for_seq_len_0_nested_tensor,
-      check_for_non_zero_dropout);
+      check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
