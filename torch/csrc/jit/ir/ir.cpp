@@ -122,13 +122,15 @@ static std::ostream& printValueRefs(
 // Can't make these two overloads directly a template, it'll be ambiguous with
 // the global printer for operator<<.
 
-std::ostream& operator<<(
+static std::ostream& operator<<(
     std::ostream& out,
     const at::ArrayRef<const Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
-std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*> nodes) {
+static std::ostream& operator<<(
+    std::ostream& out,
+    const at::ArrayRef<Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
@@ -141,7 +143,7 @@ struct const_value_list_with_types {
       : values(values), delim(std::move(delim_)) {}
 };
 
-std::ostream& operator<<(
+static std::ostream& operator<<(
     std::ostream& out,
     const const_value_list_with_types& l) {
   size_t i = 0;
@@ -967,7 +969,7 @@ void Value::replaceAllUsesDominatedByNodeWith(
       uses_.end());
 }
 
-size_t findArgument(
+static size_t findArgument(
     const FunctionSchema& the_schema,
     const std::string& unqualName) {
   for (const auto i : c10::irange(the_schema.arguments().size())) {
@@ -980,7 +982,7 @@ size_t findArgument(
       std::string("Couldn't find an argument called ") + unqualName);
 }
 
-size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
+static size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   const auto unqualName = name.toUnqualString();
   return findArgument(the_schema, unqualName);
 }
@@ -1283,13 +1285,20 @@ void Node::assignTopoPosition() {
 
     // insert between two existing nodes
   } else {
-    const auto posBetween = prevPos + (nextPos - prevPos) / 2;
-    if (posBetween == prevPos) {
+    int64_t remaining = nextPos - prevPos;
+    AT_ASSERT(remaining > 0);
+    if (remaining == 1) {
       // There was no room
       owningBlock()->reIndexTopology();
       return;
     }
-    topo_position_ = posBetween;
+    int64_t predicted_future_insertions = 0;
+    if (next() == graph_->insertPoint()) {
+      predicted_future_insertions = graph_->predicted_insert_count_++;
+    }
+    topo_position_ = prevPos +
+        std::max(int64_t(1), remaining / (2 + predicted_future_insertions));
+    AT_ASSERT(prevPos < topo_position_ && topo_position_ < nextPos);
   }
 }
 
@@ -2047,7 +2056,7 @@ void inlineCallStackOfNode(
     Node* to_replace,
     c10::optional<ModuleInstanceInfo> m_info);
 
-void inlineCallStackOfBlock(
+static void inlineCallStackOfBlock(
     Block* b,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,

@@ -524,8 +524,10 @@ class BuildExtension(build_ext):
             if 'nvcc_dlink' in extension.extra_compile_args:
                 assert self.use_ninja, f"With dlink=True, ninja is required to build cuda extension {extension.name}."
 
-        # Register .cu, .cuh and .hip as valid source extensions.
+        # Register .cu, .cuh, .hip, and .mm as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh', '.hip']
+        if torch.backends.mps.is_built():
+            self.compiler.src_extensions += ['.mm']
         # Save the original _compile method for later.
         if self.compiler.compiler_type == 'msvc':
             self.compiler._cpp_extensions += ['.cu', '.cuh']
@@ -1695,7 +1697,13 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             if CUDNN_HOME is not None:
                 extra_ldflags.append(f'/LIBPATH:{os.path.join(CUDNN_HOME, "lib", "x64")}')
         elif not IS_HIP_EXTENSION:
-            extra_ldflags.append(f'-L{_join_cuda_home("lib64")}')
+            extra_lib_dir = "lib64"
+            if (not os.path.exists(_join_cuda_home(extra_lib_dir)) and
+                    os.path.exists(_join_cuda_home("lib"))):
+                # 64-bit CUDA may be installed in "lib"
+                # Note that it's also possible both don't exist (see _find_cuda_home) - in that case we stay with "lib64"
+                extra_lib_dir = "lib"
+            extra_ldflags.append(f'-L{_join_cuda_home(extra_lib_dir)}')
             extra_ldflags.append('-lcudart')
             if CUDNN_HOME is not None:
                 extra_ldflags.append(f'-L{os.path.join(CUDNN_HOME, "lib64")}')
@@ -2019,8 +2027,9 @@ def _write_ninja_file_to_build_library(path,
             cuda_flags += extra_cuda_cflags
             if not any(flag.startswith('-std=') for flag in cuda_flags):
                 cuda_flags.append('-std=c++17')
-            if os.getenv("CC") is not None:
-                cuda_flags = ['-ccbin', os.getenv("CC")] + cuda_flags
+            cc_env = os.getenv("CC")
+            if cc_env is not None:
+                cuda_flags = ['-ccbin', cc_env] + cuda_flags
     else:
         cuda_flags = None
 

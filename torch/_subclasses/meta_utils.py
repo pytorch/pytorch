@@ -381,6 +381,12 @@ class MetaConverter:
                                 mid.requires_grad = t.requires_grad
                                 with torch.enable_grad(), maybe_suppress():
                                     r = mid.as_strided(sizes, strides, storage_offset)
+                        # The CreationMeta influences whether or not inplace
+                        # mutation is an error or not.  So we need to make
+                        # sure we properly propagate this as well.
+                        torch._C._autograd._set_creation_meta(
+                            r, torch._C._autograd._get_creation_meta(t)
+                        )
                     finally:
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude

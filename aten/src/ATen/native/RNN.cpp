@@ -9,6 +9,8 @@
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <c10/core/GradMode.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -1807,7 +1809,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
                          std::move(std::get<2>(results)));
 }
 
-std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
+static std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
     const Tensor& data,
     const Tensor& batch_sizes,
     c10::List<at::Tensor> hx_,

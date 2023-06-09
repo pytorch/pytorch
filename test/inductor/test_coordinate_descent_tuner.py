@@ -4,7 +4,7 @@ import sys
 import unittest
 
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 try:
@@ -29,9 +29,17 @@ class TestCoordinateDescentTuner(TestCase):
             return abs(config.kwargs["XBLOCK"] - 15)
 
         best_config = tuner.autotune(func, baseline_config)
-        self.assertTrue(best_config.kwargs.get("XBLOCK") == 16)
+        self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
+
+    def test_get_neighbour_values(self):
+        tuner = CoordescTuner()
+
+        neighbours = tuner.get_neighbour_values("num_stages", 2, radius=2)
+        self.assertEqual(set(neighbours), {1, 3, 4})
+        neighbours = tuner.get_neighbour_values("num_warps", 2, radius=2)
+        self.assertEqual(set(neighbours), {1, 4, 8})
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
         run_tests()

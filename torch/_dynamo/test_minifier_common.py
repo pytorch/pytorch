@@ -13,6 +13,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch.utils._traceback import report_compile_source_on_error
 
 
 @dataclasses.dataclass
@@ -107,8 +108,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                     prev_cwd = os.getcwd()
                     if cwd is not None:
                         os.chdir(cwd)
-                    with patch("sys.argv", args):
-                        exec(code, {"__name__": "__main__"})
+                    with patch("sys.argv", args), report_compile_source_on_error():
+                        exec(code, {"__name__": "__main__", "__compile_source__": code})
                     rc = 0
                 except Exception:
                     rc = 1

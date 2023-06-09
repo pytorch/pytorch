@@ -80,19 +80,14 @@ function get_exit_code() {
 }
 
 function get_bazel() {
-  if [[ $(uname) == "Darwin" ]]; then
-    # download bazel version
-    retry curl https://github.com/bazelbuild/bazel/releases/download/4.2.1/bazel-4.2.1-darwin-x86_64  -Lo tools/bazel
-    # verify content
-    echo '74d93848f0c9d592e341e48341c53c87e3cb304a54a2a1ee9cff3df422f0b23c  tools/bazel' | shasum -a 256 -c >/dev/null
-  else
-    # download bazel version
-    retry curl https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64 -o tools/bazel
-    # verify content
-    echo '1a4f3a3ce292307bceeb44f459883859c793436d564b95319aacb8af1f20557c  tools/bazel' | shasum -a 256 -c >/dev/null
-  fi
-
-  chmod +x tools/bazel
+  # Download and use the cross-platform, dependency-free Python
+  # version of Bazelisk to fetch the platform specific version of
+  # Bazel to use from .bazelversion.
+  retry curl --location --output tools/bazel \
+    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py
+  shasum --algorithm=1 --check \
+    <(echo 'd4369c3d293814d3188019c9f7527a948972d9f8  tools/bazel')
+  chmod u+x tools/bazel
 }
 
 # This function is bazel specific because of the bug
@@ -139,9 +134,12 @@ function install_torchaudio() {
 }
 
 function install_torchtext() {
-  local commit
-  commit=$(get_pinned_commit text)
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${commit}"
+  local data_commit
+  local text_commit
+  data_commit=$(get_pinned_commit data)
+  text_commit=$(get_pinned_commit text)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/data.git@${data_commit}"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${text_commit}"
 }
 
 function install_torchvision() {
@@ -185,11 +183,11 @@ function test_torch_deploy(){
 }
 
 function install_huggingface() {
-  local commit
-  commit=$(get_pinned_commit huggingface)
+  local version
+  version=$(get_pinned_commit huggingface)
   pip_install pandas
   pip_install scipy
-  pip_install "git+https://github.com/huggingface/transformers.git@${commit}#egg=transformers"
+  pip_install "transformers==${version}"
 }
 
 function install_timm() {
