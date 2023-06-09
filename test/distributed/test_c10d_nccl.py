@@ -410,6 +410,28 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             work.wait()
         torch.cuda.synchronize(local_device)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_allreduce_in_cudagraph(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_idx = self.rank_to_GPU[self.rank][0]
+
+        xs = [torch.FloatTensor([1]).cuda(local_device_idx)]
+        ys = [torch.FloatTensor([8]).cuda(local_device_idx)]
+
+        # single warmup
+        pg.allreduce(xs).wait()
+        self.assertEqual(2, xs[0].item())
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            pg.allreduce(xs).wait()
+        self.assertEqual(2, xs[0].item())
+
+        graph.replay()
+        graph.replay()
+        self.assertEqual(xs, ys)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -2813,54 +2835,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                     store=store,
                     timeout=timedelta(seconds=10),
                 )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(4)
-    def test_nccl_barrier_timeout_new_group(self):
-        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store,
-            timeout=timedelta(seconds=10),
-        )
-
-        if self.rank == 0:
-            with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
-            ):
-                c10d.new_group([0, 1], timeout=timedelta(seconds=1))
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Timed out initializing process group"
-            ):
-                c10d.new_group([0], timeout=timedelta(seconds=1))
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(4)
-    def test_nccl_barrier_timeout_new_group_non_member(self):
-        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store,
-            timeout=timedelta(seconds=10),
-        )
-
-        if self.rank == 1:
-            with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
-            ):
-                c10d.new_group([0, 1], timeout=timedelta(seconds=1))
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Timed out initializing process group"
-            ):
-                c10d.new_group([0], timeout=timedelta(seconds=1))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)

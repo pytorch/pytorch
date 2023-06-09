@@ -59,6 +59,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         # See Note [resize_ in Functionalization]
         "resize_",
         "resize_as_",
+        # This function is used as for testing purposes only.
+        "_fill_mem_eff_dropout_mask_",
     ]
 )
 
@@ -703,7 +705,10 @@ def gen_functionalization_registration(
         view_str = []
         if not g.view.has_composite_implicit_autograd_kernel:
             view_str.append(emit_registration_helper(g.view))
-        if g.view_inplace is not None and not g.view_inplace.has_composite_implicit_autograd_kernel:
+        if (
+            g.view_inplace is not None
+            and not g.view_inplace.has_composite_implicit_autograd_kernel
+        ):
             assert g.view_inplace.is_view_op
             view_str.append(emit_registration_helper(g.view_inplace))
         return view_str
