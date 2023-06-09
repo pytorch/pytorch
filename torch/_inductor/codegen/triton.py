@@ -58,6 +58,9 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
 
+    def _helper_sqrt(self, expr):
+        return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
@@ -125,6 +128,10 @@ class TritonOverrides(OpOverrides):
             # that produces 0's for negative values
             return f"{x}.to(tl.int8).to(tl.uint8)"
         return f"{x}.to({triton_compute_type(dtype)})"
+
+    @staticmethod
+    def to_dtype_bitcast(x, dtype: torch.dtype):
+        return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
 
     @staticmethod
     def constant_val(val):

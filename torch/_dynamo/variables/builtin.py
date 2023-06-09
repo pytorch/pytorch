@@ -63,7 +63,6 @@ class BuiltinVariable(VariableTracker):
             pow,
             repr,
             round,
-            set,
             str,
             str.format,
             sum,
@@ -610,6 +609,7 @@ class BuiltinVariable(VariableTracker):
                     "Calling round() on symbolic value is not supported. "
                     "You can use floor() to implement this functionality",
                 )
+        breakpoint()
         return super().call_function(tx, args, kwargs)
 
     def _call_min_max(self, tx, *args):
@@ -778,6 +778,7 @@ class BuiltinVariable(VariableTracker):
     call_iter = _call_iter_tuple_list
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
+    call_set = _call_iter_tuple_list
 
     @staticmethod
     def is_supported_call_dict_arg(tx, arg):
@@ -813,9 +814,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):
-        if arg is None:
+        if arg is None or isinstance(arg, dict):
             return ConstDictVariable(
-                {}, user_cls, mutable_local=MutableLocal()
+                arg if arg is not None else {}, user_cls, mutable_local=MutableLocal()
             ).add_options(options)
         elif isinstance(arg, variables.ConstDictVariable):
             return arg.clone(
@@ -1215,6 +1216,7 @@ class BuiltinVariable(VariableTracker):
         from . import (
             BaseListVariable,
             ConstantVariable,
+            NNModuleVariable,
             TensorVariable,
             UserFunctionVariable,
         )
@@ -1228,6 +1230,13 @@ class BuiltinVariable(VariableTracker):
 
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
+
+        if (
+            isinstance(left, NNModuleVariable)
+            and isinstance(right, NNModuleVariable)
+            and op in supported_const_comparison_ops
+        ):
+            self.push(ConstantVariable(op(left, right)))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():

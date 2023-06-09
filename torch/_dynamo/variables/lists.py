@@ -648,20 +648,66 @@ class TupleIteratorVariable(ListIteratorVariable):
     pass
 
 
-class SetVariable(CommonListMethodsVariable):
+class SetVariable(VariableTracker):
+    def __init__(
+        self,
+        items: List[VariableTracker],
+        recursively_contains=None,
+        regen_guards=True,
+        **kwargs,
+    ):
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
+        # Note - Set is still backed by a list, because we want set behavior over the contents,
+        assert isinstance(items, list)
+        assert all(isinstance(x, VariableTracker) for x in items)
+
+        # Sometimes, we know that we have passed in the guards from the items in the set
+        if regen_guards:
+            self.guards.update(VariableTracker.propagate(items)["guards"])
+
+        self.items: List[VariableTracker] = items
+
+    def as_proxy(self):
+        return [x.as_proxy() for x in self.items]
+
     def python_type(self):
-        return list
+        return set
 
     def reconstruct(self, codegen):
-        import sys
+        breakpoint()
+        create_load_global("set", True)
+        codegen.foreach(self.items)
+        return [create_instruction("CALL_FUNCTION", arg=len(self.items))]
 
-        if sys.version_info >= (3, 11):
-            codegen.foreach(self.items)
-            return [create_instruction("BUILD_SET", arg=len(self.items))]
-        else:
-            create_load_global("set", True)
-            codegen.foreach(self.items)
-            return [create_instruction("CALL_FUNCTION", arg=len(self.items))]
+    # Note - this is only used for producing a set
+    def _to_example_values(self, tx, vt):
+        from .base import VariableTracker
+        from .tensor import TensorVariable
+
+        assert isinstance(vt, VariableTracker)
+
+        if isinstance(vt, TensorVariable):
+            return vt.as_proxy().node.meta["example_value"]
+        if isinstance(vt, ConstantVariable):
+            return vt.value
+
+        if vt.has_unpack_var_sequence(tx):
+            unimplemented("Sets with nested structures NYI")
+
+        unimplemented(f"Sets with {type(vt)} NYI")
+
+    def _add(self, tx, new_item):
+        bookeeping_set = set()
+        new_items = []
+        self.items.append(new_item)
+        for item in self.items:
+            ev = self._to_example_values(tx, item)
+            if ev in bookeeping_set:
+                # collision, don't store this item
+                continue
+            bookeeping_set.add(ev)
+            new_items.append(item)
+        return new_items
 
     def call_method(
         self,
@@ -671,18 +717,31 @@ class SetVariable(CommonListMethodsVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
-        if name == "add" and args:
+        # Somewhat duplicative of CommonListMethodsVariable - but better than to violate substitution
+        # principles and end up with things like direct item access attempts on a set, or
+        # getitem sources.
+        if name == "add" and args and self.mutable_local:
             assert not kwargs
             item = args[0]
-            items = set(self.items)
-            items.add(item)
             result = SetVariable(
-                list(items),
+                self._add(tx, item),
                 mutable_local=self.mutable_local,
                 regen_guards=False,
                 **options,
             )
-            return tx.replace_all(self, result)
+            tx.replace_all(self, result)
+            return ConstantVariable(None)
+        elif name == "pop" and self.mutable_local:
+            assert not kwargs
+            items = list(self.items)
+            result = items.pop(*[a.as_python_constant() for a in args])
+            tx.replace_all(
+                self,
+                SetVariable(items, regen_guards=False, **options),
+            )
+            return result
+        elif name == "__len__":
+            return ConstantVariable(len(self.items))
         else:
             return super().call_method(tx, name, args, kwargs)
 

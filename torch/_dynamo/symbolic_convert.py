@@ -1064,6 +1064,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     supported_const_comparison_ops[op](object(), right.value), **options
                 )
             )
+
         elif (
             left.is_python_constant()
             and right.is_python_constant()
@@ -1284,7 +1285,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, (ConstantVariable, EnumVariable)) or (
+            assert isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable)) or (
                 isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 
