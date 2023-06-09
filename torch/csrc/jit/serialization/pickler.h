@@ -298,12 +298,16 @@ uint64_t getStorageKey(const at::Tensor& tensor);
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls);
 
 // Declare BackendMeta serialization and deserialization function pointer types.
-using BackendMetaPtr =
-    std::function<void(const at::Tensor&, std::unordered_map<std::string, bool>&)>;
+using BackendMetaPtr =std::function<
+    void(const at::Tensor&, std::unordered_map<std::string, bool>&)>;
 
 // A allowlist of device type, currently available is PrivateUse1
-static std::unordered_set<c10::DeviceType> DeviceTypeAllowlist{
-    c10::DeviceType::PrivateUse1};
+inline std::unordered_set<c10::DeviceType>&
+GetBackendMetaAllowlist() {
+    static std::unordered_set<c10::DeviceType> DeviceTypeAllowlist{
+        c10::DeviceType::PrivateUse1};
+    return DeviceTypeAllowlist;
+}
 
 // Dynamically obtain serialization function pairs
 // that require the corresponding backend.
@@ -329,6 +333,7 @@ TORCH_API inline void TensorBackendMetaRegistry(
   // allowlist verification
   // Only if the devicetype is in the allowlist,
   // we allow the serialization extension to be registered for backendmeta data.
+  const auto& DeviceTypeAllowlist = GetBackendMetaAllowlist();
   TORCH_CHECK(
       DeviceTypeAllowlist.find(t) != DeviceTypeAllowlist.end(),
       "It is not allowed to register the serialization method ",
