@@ -3717,7 +3717,6 @@ def aot_module_simplified(
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
-
     def forward(*runtime_args):
         full_args = []
         full_args.extend(params_flat)
