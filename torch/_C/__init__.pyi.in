@@ -1118,11 +1118,11 @@ def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT a
 
 has_openmp: _bool
 has_mkl: _bool
-has_mps: _bool
+_has_mps: _bool
 has_lapack: _bool
-has_cuda: _bool
-has_mkldnn: _bool
-has_cudnn: _bool
+_has_cuda: _bool
+_has_mkldnn: _bool
+_has_cudnn: _bool
 has_spectral: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool
 default_generator: Generator
