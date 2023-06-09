@@ -5409,9 +5409,7 @@ def ___make_guard_fn():
         self.assertEqual(expected, pycode)
 
     def test_torch_objects_as_keys(self):
-        remap = {
-            torch.float16: torch.float32
-        }
+        remap = {torch.float16: torch.float32}
 
         def fn():
             return torch.randn(3, dtype=remap[torch.float16])

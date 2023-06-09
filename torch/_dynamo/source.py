@@ -60,7 +60,9 @@ def is_input_source(source):
     ]
 
 
-def reconstruct_getitem(source: Union["GetItemSource", "ODictGetItemSource"], codegen, index_is_slice):
+def reconstruct_getitem(
+    source: Union["GetItemSource", "ODictGetItemSource"], codegen, index_is_slice
+):
     instrs = source.base.reconstruct(codegen)
 
     if isinstance(source.index, Source):
@@ -318,7 +320,7 @@ class GetItemSource(Source):
     def reconstruct(self, codegen):
         return [
             *reconstruct_getitem(self, codegen, index_is_slice=self.index_is_slice),
-            create_instruction("BINARY_SUBSCR")
+            create_instruction("BINARY_SUBSCR"),
         ]
 
     def guard_source(self):
