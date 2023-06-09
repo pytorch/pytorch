@@ -40,6 +40,9 @@ def constrain_as_size(symbol, min: int = 2, max: Optional[int] = None):
 @allow_in_graph
 def constrain_range_native(symbol, min: Optional[int] = None, max: Optional[int] = None):
     if not isinstance(symbol, SymInt):
+        # This is needed to check if an input value (as a real numeric value, or
+        # an value derived from numeric input) for exporting is within range or
+        # not.
         constrain_range_non_symint(symbol, min=min, max=max)
         return
 
