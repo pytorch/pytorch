@@ -579,8 +579,11 @@ def clone_inputs(example_inputs):
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
-            assert isinstance(value, torch.Tensor)
-            res[key] = clone_input(value)
+            if isinstance(value, tuple):
+                res[key] = clone_inputs(value)
+            else:
+                assert isinstance(value, torch.Tensor), type(value)
+                res[key] = clone_input(value)
         return res
 
     res = list(example_inputs)
@@ -819,11 +822,15 @@ def enum_repr(value, local):
 
 
 def dict_param_key_ids(value):
-    return {id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)}
+    return {
+        id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))
+    }
 
 
 def dict_const_keys(value):
-    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
+    return {
+        k for k in value.keys() if not isinstance(k, (torch.nn.Parameter, torch.Tensor))
+    }
 
 
 def dict_const_keys_repr(const_keys, *, local):
