@@ -490,6 +490,8 @@ def min_cut_rematerialization_partition(
             if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
         }
         ops_ignored = joint_module_ops - {str(i) for i in recomputable_ops}
+        print("Ops banned from rematerialization: ", ops_ignored)
+        print()
 
     AGGRESSIVE_RECOMPUTATION = False
 
