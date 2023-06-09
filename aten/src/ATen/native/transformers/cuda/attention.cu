@@ -10,6 +10,7 @@
 #include <c10/util/bit_cast.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/NonSymbolicBC.h>
@@ -17,6 +18,13 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/PersistentSoftmax.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -700,11 +708,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Ten
   return std::make_tuple(attention, log_sumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
-std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     bool compute_log_sumexp,
+    double dropout_p,
     bool is_causal,
     c10::optional<double> scale) {
   // Used for tracking usage statistics
@@ -720,8 +729,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
       ? sdp::CustomMaskType::CausalFromTopLeft
       : sdp::CustomMaskType::NoCustomMask;
 
-  Tensor attention, log_sumexp;
-  std::tie(attention, log_sumexp) = at::_efficient_attention_forward(
+  auto [attention, log_sumexp, seed, offset] = at::_efficient_attention_forward(
       q_t,
       k_t,
       v_t,
@@ -729,13 +737,13 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
       c10::nullopt,
       c10::nullopt,
       c10::nullopt,
-      0.0 /*dropout_p*/,
+      dropout_p /*dropout_p*/,
       static_cast<int64_t>(custom_mask_type),
       compute_log_sumexp,
       scale);
 
   attention = attention.transpose(1, 2);
-  return std::make_tuple(std::move(attention), std::move(log_sumexp));
+  return std::make_tuple(std::move(attention), std::move(log_sumexp), std::move(seed), std::move(offset));
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
@@ -774,8 +782,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   at::Tensor output = at::empty_like(query);
 
-  Tensor logsumexp, debug_attn_mask, philox_seed, philox_offset;
-  std::tie(logsumexp, philox_seed, philox_offset, debug_attn_mask) = fmha::mha_fwd(
+  auto [logsumexp, philox_seed, philox_offset, debug_attn_mask] = fmha::mha_fwd(
       query,
       key,
       value,
@@ -791,7 +798,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
       return_debug_mask, /*return_softmax (this is used for testing)*/
       num_splits);
 
-  debug_attn_mask = return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
+  debug_attn_mask =
+      return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
 
   return std::make_tuple(output, logsumexp, philox_seed, philox_offset, debug_attn_mask);
 #endif
@@ -799,7 +807,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
   return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
 }
 
-std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
+std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
     const at::Tensor& query, // [b, seqlen, num_heads, K]
     const at::Tensor& key, // [b, seqlen, num_heads, K]
     const at::Tensor& value, // [b, seqlen, num_heads, Kv]
@@ -875,18 +883,47 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
 
   at::Tensor res;
   at::Tensor logsumexp;
+  at::Tensor seed_t, offset_t;
 
   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
-  at::PhiloxCudaState rng_engine_inputs;
-  if (use_dropout) {
-    at::CUDAGeneratorImpl* gen =
-        at::get_generator_or_default<at::CUDAGeneratorImpl>(
-            c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
+  // Note [Seed and Offset Device]
+  // If we are currently in graph capture mode, we need to create the seed and offset tensors on the device.
+  // This is necessary for CUDA graph-safe random number generation, which requires the seed and offset tensors
+  // to be single element tensors on device. During graph capture, when the seed and offset tensors are passed
+  // the pointers act as scratch space for storing the RNG state for the backwards pass.
+  // When calling backwards, we either construct a PhiloxState with the pointers or the actual values.
+  // For more information on CUDA graph-safe RNG states, see Note [CUDA Graph-safe RNG states].
+
+  at::PhiloxCudaState philox_state;
+  const bool in_capture_stream =
+      at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;
+  auto device = in_capture_stream ? at::kCUDA : at::kCPU;
+  if (use_dropout) {
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+        c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+
+    // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     // if using dropout, we produce 1 random number for each element of the
     // attention tensor
-    rng_engine_inputs = gen->philox_cuda_state(B * num_heads * M * N);
+    philox_state = gen->philox_cuda_state(B * num_heads * M * N);
+
+    if (in_capture_stream) {
+      // The seed and offset will be populated by the kernel
+      seed_t = at::empty({}, at::dtype(at::kLong).device(device));
+      offset_t = at::empty({}, at::dtype(at::kLong).device(device));
+    } else {
+      auto [seed, offset] = at::cuda::philox::unpack(philox_state);
+      seed_t = at::scalar_tensor(
+          at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
+      offset_t = at::scalar_tensor(
+          at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+    }
+  } else {
+    // Not using dropout
+    seed_t = at::empty({}, at::dtype(at::kLong).device(device));
+    offset_t = at::empty({}, at::dtype(at::kLong).device(device));
   }
 
   cudaDeviceProp* p = at::cuda::getDeviceProperties(query.device().index());
@@ -940,7 +977,6 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
          num_heads,
          compute_logsumexp ? ceil_div(max_seqlen_q, kAlignLSE) * kAlignLSE : 0},
         query.options().dtype(at::ScalarType::Float));
-
     typename Kernel::Params p;
     p.query_ptr = (scalar_t*)query.data_ptr();
     p.key_ptr = (scalar_t*)key.data_ptr();
@@ -1018,8 +1054,10 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
 
     p.use_dropout = use_dropout;
     if (p.use_dropout) {
-      p.rng_engine_inputs = rng_engine_inputs;
+      p.rng_engine_inputs = philox_state;
       p.dropout_prob = dropout_p;
+      p.seed = seed_t.data_ptr<int64_t>();
+      p.extragraph_offset = offset_t.data_ptr<int64_t>();
     }
 
     if (smem_bytes > 0xc000) {
@@ -1043,19 +1081,14 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
   TORCH_CHECK(kernel_launched, "cutlassF: no kernel found to launch!");
   AT_CUDA_CHECK(cudaGetLastError());
 
-  // !!TODO_DRISS: We are throwing this away for now and need to change how its done
-  // uint64_t -> int64_t bitwise casting as PyTorch don't support uint64_t
-  // so just fake it as a int64_t
-  int64_t seed, offset;
-  if (use_dropout) {
-    std::memcpy(&seed, &rng_engine_inputs.seed_, sizeof(seed));
-    std::memcpy(&offset, &rng_engine_inputs.offset_.val, sizeof(offset));
-  }
-
-  return std::make_tuple(res, logsumexp);
+  return std::make_tuple(
+      std::move(res),
+      std::move(logsumexp),
+      std::move(seed_t),
+      std::move(offset_t));
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor{}, Tensor{});
+  return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
 }
 
 Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tensor& v, double dropout_p){
@@ -1083,6 +1116,93 @@ bool _chunk_grad_outputs_efficient_attention(
   return chunk_grad_outputs;
 }
 
+#ifdef USE_FLASH_ATTENTION
+namespace {
+/**
+ * simple kernel that populates a tensor with rand uniform values.
+ * currently only used for testing purposes, not much attention
+ * is paid to performance.
+ *
+ * problem is partitioned as follows:
+ * - (batch, head) is given by block coordinates
+ * - each thread handles a row for a given (batch, head)
+ */
+template <typename mask_t>
+__global__ void rand_uniform_kernel(
+    int64_t n_heads,
+    int64_t n_queries,
+    int64_t n_keys,
+    float dropout_prob,
+    at::PhiloxCudaState rng_engine_inputs,
+    mask_t* mask_out,
+    int64_t mask_numel) {
+  const int64_t batch_id = blockIdx.x;
+  const int64_t head_id = blockIdx.y;
+  const int64_t query_idx = threadIdx.x;
+
+  const auto seeds = at::cuda::philox::unpack(rng_engine_inputs);
+
+  const int dropout_seq_start = batch_id * (n_heads * n_queries * n_keys) +
+      head_id * (n_queries * n_keys);
+  const int64_t query_start_idx = query_idx * n_keys;
+
+  curandStatePhilox4_32_10_t curand_state;
+  curand_init(
+      std::get<0>(seeds),
+      0,
+      std::get<1>(seeds) + dropout_seq_start + query_start_idx,
+      &curand_state);
+
+  for (int key_start_idx = 0; key_start_idx < n_keys; key_start_idx += 4) {
+    float4 rand_quad = curand_uniform4(&curand_state);
+
+#pragma unroll
+    for (int i = 0; i < 4; ++i) {
+      const int64_t linear_idx = dropout_seq_start + query_start_idx + key_start_idx + i;
+      if (linear_idx < mask_numel) {
+        mask_out[linear_idx] = (&rand_quad.x)[i];
+      }
+    }
+  }
+}
+} // namespace
+#endif
+/**
+ * fill tensor with random uniform values. only used for testing, not much
+ * attention is paid to performance
+ */
+at::Tensor& _fill_mem_eff_dropout_mask_(
+    Tensor& self,
+    double dropout_p,
+    const int64_t seed,
+    const int64_t offset) {
+  TORCH_CHECK(self.is_contiguous());
+  TORCH_CHECK(self.dtype() == at::ScalarType::Float);
+  const int64_t batch_sz = self.size(0);
+  const int64_t n_heads = self.size(1);
+  const int64_t n_queries = self.size(2);
+  const int64_t n_keys = self.size(3);
+#if defined(USE_FLASH_ATTENTION)
+
+  at::PhiloxCudaState rng_engine_inputs;
+  rng_engine_inputs = at::PhiloxCudaState(seed, offset);
+  at::cuda::CUDAGuard device_guard(self.device());
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  rand_uniform_kernel<float><<<dim3(batch_sz, n_heads), n_queries, 0, stream>>>(
+      n_heads,
+      n_queries,
+      n_keys,
+      dropout_p,
+      rng_engine_inputs,
+      reinterpret_cast<float*>(self.data_ptr()),
+      self.numel());
+
+  return self;
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return self;
+}
 
 } // namespace native
 } // namespace at
