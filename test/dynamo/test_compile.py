@@ -126,3 +126,12 @@ class ExplainCompilerTests(unittest.TestCase):
         opt_fn = torch._dynamo.optimize("explain")(fn)
         self.assertAlmostEqual(0.7581, opt_fn(torch.ones([1])).item(), places=4)
         self.assertEqual(4, mock_print.call_count)  # 4 graph breaks
+
+    @mock.patch("builtins.print")
+    def test_explain_with_composable_backend(self, mock_print):
+        reset()
+        torch._dynamo.config.explain_composable_backend = "inductor"
+        opt_fn = torch._dynamo.optimize("explain")(fn)
+        self.assertAlmostEqual(0.7581, opt_fn(torch.ones([1])).item(), places=4)
+        self.assertEqual(4, mock_print.call_count)  # 4 graph breaks
+        torch._dynamo.config.explain_composable_backend = None

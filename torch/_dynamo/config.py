@@ -113,6 +113,12 @@ print_graph_breaks = False
 # for debugging-purposes
 explain_print_graphs = False
 
+# This string flag will determine the backend
+# as the composable backend for
+# explain debugging backend
+# Default: None - not using composable backend
+explain_composable_backend = None
+
 # Show a warning for every specialization
 print_specializations = False
 

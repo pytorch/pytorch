@@ -7,9 +7,10 @@ from functorch.compile import min_cut_rematerialization_partition
 import torch
 from torch._functorch.compilers import ts_compile
 from .. import config
+from ..exc import InvalidBackend
 from ..utils import compilation_metrics
 from .common import aot_autograd
-from .registry import register_debug_backend as register_backend
+from .registry import lookup_backend, register_debug_backend as register_backend
 
 """
 This file contains TorchDynamo backends intended for debugging uses.
@@ -28,6 +29,7 @@ def explain(gm: torch.fx.GraphModule, example_inputs):
     This function prints the graph structure if `config.explain_print_graphs` is set to True.
     It uses the `tabulate` library to display the node information in a table format.
     If `tabulate` is not installed, it prints an error message suggesting to install it using `pip install tabulate`.
+    Composable backend can be enabled by setting `config.explain_composable_backend` to a valid backend e.g. `eager`, `inductor`.
 
     In case of any graph break while compilation,
     it prints the break reason and the formatted stack trace for debugging-purposes.
@@ -72,8 +74,12 @@ def explain(gm: torch.fx.GraphModule, example_inputs):
             f"Graph Break\nBreak reason {len(compilation_metrics['OutputGraph.call_user_compiler'])+1}:\n",
             msg,
         )
-
-    return gm.forward
+    if config.explain_composable_backend is None:
+        return gm.forward
+    elif config.explain_composable_backend in torch._dynamo.list_backends():
+        return lookup_backend(config.explain_composable_backend)(gm, example_inputs)
+    else:
+        raise InvalidBackend(name=config.explain_composable_backend)
 
 
 @register_backend
