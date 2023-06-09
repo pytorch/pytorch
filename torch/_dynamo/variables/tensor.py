@@ -241,9 +241,7 @@ class TensorVariable(VariableTracker):
         return result
 
     def has_unpack_var_sequence(self, tx):
-        return (self.size is not None and len(self.size) > 0) or (
-            self.size is None and config.dynamic_shapes
-        )
+        return self.ndim > 0
 
     def unpack_var_sequence(self, tx, idxes=None):
         from .builder import wrap_fx_proxy
