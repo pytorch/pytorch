@@ -360,7 +360,7 @@ class Optimizer:
             self.__class__.step = self.profile_hook_step(self.__class__.step)  # type: ignore[assignment]
             self.__class__.step.hooked = True  # type: ignore[attr-defined]
 
-    def register_step_pre_hook(self, hook: OptimizerPreHook) -> RemovableHandle:  # type: ignore[valid-type]
+    def register_step_pre_hook(self, hook: OptimizerPreHook) -> RemovableHandle:
         r"""Register an optimizer step pre hook which will be called before
         optimizer step. It should have the following signature::
 
@@ -382,7 +382,7 @@ class Optimizer:
         self._optimizer_step_pre_hooks[handle.id] = hook
         return handle
 
-    def register_step_post_hook(self, hook: OptimizerPostHook) -> RemovableHandle:  # type: ignore[valid-type]
+    def register_step_post_hook(self, hook: OptimizerPostHook) -> RemovableHandle:
         r"""Register an optimizer step post hook which will be called after optimizer step.
         It should have the following signature::
 
