@@ -3710,15 +3710,13 @@ def aot_module_simplified(
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
         for i, node in enumerate(mod.graph.nodes):
-            if node.op == "placeholder":
-                if hasattr(node, "_dynamo_source"):
-                    # ... but not here!
-                    if aot_autograd_arg_pos_to_source is None:
-                        aot_autograd_arg_pos_to_source = []
-                    source = node._dynamo_source
-                    assert source not in seen_sources, source
-                    seen_sources.add(source)
-                    aot_autograd_arg_pos_to_source.append(source)
+            if node.op == "placeholder" and node.meta.get("grapharg", None):
+                if aot_autograd_arg_pos_to_source is None:
+                    aot_autograd_arg_pos_to_source = []
+                source = node.meta["grapharg"].source
+                assert source not in seen_sources, source
+                seen_sources.add(source)
+                aot_autograd_arg_pos_to_source.append(source)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
