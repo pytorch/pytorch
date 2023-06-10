@@ -497,7 +497,6 @@ struct ConvParams {
            && input.is_cuda()
            && input.dim() <= MIOPEN_DIM_MAX
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
-           && !(input.scalar_type() == at::kBFloat16 && bias_defined) // MIOpen currently doesn't support bias with bfloat16
            && cudnn_enabled
            ;
   }
