@@ -663,6 +663,13 @@ def from_fun(t):
     torch._sync(t)
     return torch._from_functional_tensor(t)
 
+def _stride_equal(sizes, strides_lhs, strides_rhs):
+    for size, stride_lhs, stride_rhs in zip(sizes, strides_lhs, strides_rhs):
+        if size > 1 and stride_lhs != stride_rhs:
+            return False
+
+    return True
+
 def _get_hints(exprs):
     """
     Get the hints of a list/tuple of int/SymInt.
@@ -3051,7 +3058,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         # Comparing ph_arg.stride() with real_arg.stride() directly may
                         # cause dynamic dimensions in ph_arg being specialized to static
                         # value. Using the hints to avoid that.
-                        if _get_hints(ph_arg.stride()) != real_arg.stride():
+                        if not _stride_equal(real_arg.size(), _get_hints(ph_arg.stride()), real_arg.stride()):
                             fill_order = _get_fill_order(real_arg.stride())
                             placeholder_list[i] = _apply_fill_order(ph_arg, fill_order)
 
