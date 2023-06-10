@@ -8,25 +8,30 @@
 PyTorch documentation
 ===================================
 
-PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
+PyTorch is a powerful library used for deep learning on GPUs and CPUs. 
+In this documentation, the features are divided into different release 
+statuses to provide clarity on their stability and compatibility.
 
-Features described in this documentation are classified by release status:
+Stable: These features are well-established and will be supported in the long term. 
+They have comprehensive documentation and are optimized for performance. 
+While minor updates and bug fixes may occur, there are generally no major limitations. 
+Backwards compatibility is maintained, but there may be rare instances where 
+breaking changes are necessary. In such cases, advance notice will be 
+given in the release documentation.
 
-  *Stable:*  These features will be maintained long-term and there should generally
-  be no major performance limitations or gaps in documentation.
-  We also expect to maintain backwards compatibility (although
-  breaking changes can happen and notice will be given one release ahead
-  of time).
+Beta: Features in the Beta stage have undergone initial development 
+and are available for use. However, the API may still evolve based on user feedback 
+or performance improvements. The coverage across different operators or functionalities 
+might not be complete. Although these features are intended to become Stable in the future, 
+they do not guarantee backwards compatibility. Users should be aware that changes 
+may occur before the final Stable release.
 
-  *Beta:*  These features are tagged as Beta because the API may change based on
-  user feedback, because the performance needs to improve, or because
-  coverage across operators is not yet complete. For Beta features, we are
-  committing to seeing the feature through to the Stable classification.
-  We are not, however, committing to backwards compatibility.
-
-  *Prototype:*  These features are typically not available as part of
-  binary distributions like PyPI or Conda, except sometimes behind run-time
-  flags, and are at an early stage for feedback and testing.
+Prototype: Prototype features are in the early stages of development and testing. 
+They are not typically included in standard binary distributions like PyPI or Conda, 
+except in some cases where they may be accessible through runtime flags. 
+Prototypes are made available for feedback and experimentation, allowing users 
+to provide input and report issues. These features are not considered production-ready 
+and are subject to significant changes before they reach Stable status.
 
 .. toctree::
    :glob:
