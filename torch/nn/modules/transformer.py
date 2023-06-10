@@ -262,9 +262,9 @@ class TransformerEncoder(Module):
 
         output = src
         convert_to_nested = False
+        src_key_padding_mask_for_layers = src_key_padding_mask
         if self.num_layers > 0:
             first_layer = self.layers[0]
-            src_key_padding_mask_for_layers = src_key_padding_mask
             why_not_sparsity_fast_path = ''
             str_first_layer = "self.layers[0]"
             if not hasattr(self, "use_nested_tensor"):
