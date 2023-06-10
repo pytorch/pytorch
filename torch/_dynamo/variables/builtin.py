@@ -453,15 +453,6 @@ class BuiltinVariable(VariableTracker):
         assert isinstance(args, (list, tuple))
         assert isinstance(kwargs, dict)
 
-        if (
-            self.fn is operator.getitem
-            and len(args) == 2
-            and isinstance(args[1], variables.TensorVariable)
-            and args[1].dtype == torch.bool
-            and not config.dynamic_shapes
-        ):
-            unimplemented("dynamic Tensor.__getitem__(bool[])")
-
         # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
             args[0], variables.TensorVariable
