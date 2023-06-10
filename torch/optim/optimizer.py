@@ -9,20 +9,15 @@ from typing import (
     Callable,
     DefaultDict,
     Dict,
-    Generic,
     Hashable,
     Iterable,
-    Iterator,
     List,
     Optional,
-    Protocol,
     Set,
     Tuple,
     TypeVar,
     Union,
-    cast,
     overload,
-    runtime_checkable,
 )
 
 from typing_extensions import ParamSpec, Self, TypeAlias
@@ -53,54 +48,6 @@ class _RequiredParameter:
 
 required = _RequiredParameter()
 
-T = TypeVar("T")
-
-@runtime_checkable
-class _ConstructableIterable(Generic[T], Protocol):  # type: ignore[misc]
-    def __init__(self, __iterable: Iterable[T]) -> None:
-        ...
-
-    def __iter__(self) -> Iterator[T]:
-        ...
-
-S = TypeVar("S")
-
-@overload
-def _cast(param: torch.Tensor, value: torch.Tensor, key: Hashable = ...) -> torch.Tensor:
-    ...
-
-@overload
-def _cast(param: torch.Tensor, value: Dict[Any, Any], key: Hashable = ...) -> Dict[Any, Any]:
-    ...
-
-@overload
-def _cast(param: torch.Tensor, value: _ConstructableIterable[Any], key: Hashable = ...) -> _ConstructableIterable[Any]:
-    ...
-
-@overload
-def _cast(param: torch.Tensor, value: S, key: Hashable = ...) -> S:
-    ...
-
-def _cast(
-    param: torch.Tensor,
-    value: Union[torch.Tensor, Dict[Any, Any], _ConstructableIterable[Any], S],
-    key: Hashable = None,
-) -> Union[torch.Tensor, Dict[Any, Any], _ConstructableIterable[Any], S]:
-    r"""Make a deep copy of value, casting all tensors to device of param."""
-    if isinstance(value, torch.Tensor):
-        # Floating-point types are a bit special here. They are the only ones
-        # that are assumed to always match the type of params.
-        # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-        if (key != "step"):
-            if param.is_floating_point():
-                value = value.to(param.dtype)
-            value = value.to(param.device)
-        return value
-    if isinstance(value, dict):
-        return {k: _cast(param, v, key=k) for k, v in value.items()}
-    if isinstance(value, _ConstructableIterable):
-        return type(value)(_cast(param, v) for v in value)
-    return value
 
 def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
@@ -237,6 +184,7 @@ params_t: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]]
 
 _P = ParamSpec("_P")
 R = TypeVar("R")
+T = TypeVar("T")
 
 
 class Optimizer:
@@ -485,6 +433,48 @@ class Optimizer:
             'param_groups': param_groups,
         }
 
+    @overload
+    @staticmethod
+    def _cast(param: torch.Tensor, value: torch.Tensor, key: Hashable = ...) -> torch.Tensor:
+        ...
+
+    @overload
+    @staticmethod
+    def _cast(param: torch.Tensor, value: Dict[Any, Any], key: Hashable = ...) -> Dict[Any, Any]:
+        ...
+
+    @overload
+    @staticmethod
+    def _cast(param: torch.Tensor, value: Iterable[Any], key: Hashable = ...) -> Iterable[Any]:
+        ...
+
+    @overload
+    @staticmethod
+    def _cast(param: torch.Tensor, value: T, key: Hashable = ...) -> T:
+        ...
+
+    @staticmethod
+    def _cast(
+        param: torch.Tensor,
+        value: Union[torch.Tensor, Dict[Any, Any], Iterable[Any], T],
+        key: Hashable = None,
+    ) -> Union[torch.Tensor, Dict[Any, Any], Iterable[Any], T]:
+        r"""Make a deep copy of value, casting all tensors to device of param."""
+        if isinstance(value, torch.Tensor):
+            # Floating-point types are a bit special here. They are the only ones
+            # that are assumed to always match the type of params.
+            # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
+            if (key != "step"):
+                if param.is_floating_point():
+                    value = value.to(param.dtype)
+                value = value.to(param.device)
+            return value
+        if isinstance(value, dict):
+            return {k: Optimizer._cast(param, v, key=k) for k, v in value.items()}
+        if isinstance(value, Iterable):
+            return type(value)(Optimizer._cast(param, v) for v in value)  # type: ignore[call-arg]
+        return value
+
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""Loads the optimizer state.
 
@@ -518,7 +508,7 @@ class Optimizer:
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = _cast(param, v)
+                state[param] = Optimizer._cast(param, v)
             else:
                 state[k] = v
 
