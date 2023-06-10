@@ -837,7 +837,7 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
       false);
 }
 
-Tensor& embedding_bag_2bit_rowwise_offsets_out(
+static Tensor& embedding_bag_2bit_rowwise_offsets_out(
     Tensor& output,
     const Tensor& weight,
     const Tensor& indices,
