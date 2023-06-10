@@ -85,6 +85,8 @@ class BoxedDeviceIndex:
 # we can select one element from that dimension and write to it
 # to achieve writing to all values of that dimension of the input tensor
 def get_expanded_dims(t):
+    if not isinstance(t, torch.Tensor):
+        return None
     return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
 
 
@@ -546,13 +548,17 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
 
     # allocate static tensor inputs
     static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x.detach()
+        x
+        if not isinstance(x, torch.Tensor)
+        else static_input(x)
+        if idx not in static_input_idxs
+        else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
     # copy over input values for fresh allocations
     for idx, (x, expanded_dims) in enumerate(zip(inputs, inps_expanded_dims)):
-        if idx not in static_input_idxs:
+        if isinstance(x, torch.Tensor) and idx not in static_input_idxs:
             index_expanded_dims_and_copy_(static_inputs[idx], x, expanded_dims)
 
     # warmup

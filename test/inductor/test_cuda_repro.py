@@ -186,6 +186,33 @@ class CudaReproTests(TestCase):
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
+    @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes=True,
+        assume_static_by_default=False,
+    )
+    def test_dynamic_to_static_cudagraphs(self):
+        for b in [False, True]:
+            with config.patch({"triton.cudagraph_trees": b}):
+
+                @torch._dynamo.optimize("inductor")
+                def fn(x, y):
+                    r = x + y
+                    return r, r.size(0)
+
+                inputs = (
+                    torch.randn((5, 5), device="cuda"),
+                    torch.randn((5, 5), device="cuda"),
+                )
+                self.assertTrue(same(fn(*inputs), (inputs[0] + inputs[1], 5)))
+
+                inputs = (
+                    torch.randn((6, 6), device="cuda"),
+                    torch.randn((6, 6), device="cuda"),
+                )
+                self.assertTrue(same(fn(*inputs), (inputs[0] + inputs[1], 6)))
+
     # TODO: Abstract this out, test more extensively
     @torch._dynamo.config.patch(dynamic_shapes=True, assume_static_by_default=False)
     def test_dynamic_shapes(self):

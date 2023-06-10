@@ -1578,7 +1578,12 @@ def compile(model: Optional[Callable] = None, *,
     Args:
        model (Callable): Module/function to optimize
        fullgraph (bool): Whether it is ok to break model into several subgraphs
-       dynamic (bool): Use dynamic shape tracing
+       dynamic (bool): Use dynamic shape tracing.  When this is True, we will up-front attempt
+        to generate a kernel that is as dynamic as possible to avoid recompilations when
+        sizes change.  This may not always work as some operations/optimizations will
+        force specialization; use TORCH_LOGS=dynamic to debug overspecialization.
+        In particular, if you use "reduce-overhead", this will force sizes to be static
+        even with dynamic=True.
        backend (str or Callable): backend to be used
         - "inductor" is the default backend, which is a good balance between performance and overhead
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
