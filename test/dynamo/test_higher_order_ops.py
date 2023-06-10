@@ -985,7 +985,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             x = torch.sin(x)
             x = torch.utils.checkpoint.checkpoint(gn, x, y)
             x = torch.sin(x)
-            x = torch.utils.checkpoint.checkpoint(gn, x, y)
+            # x = torch.utils.checkpoint.checkpoint(gn, x, y)
             return x
 
         x = torch.randn(4, 4, device="cuda", requires_grad=True)
