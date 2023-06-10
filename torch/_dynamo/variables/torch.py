@@ -366,8 +366,6 @@ class TorchVariable(VariableTracker):
                 )
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
-        elif not config.dynamic_shapes and self.is_dynamic_shapes(args, kwargs):
-            unimplemented(f"dynamic shapes: {self.value.__name__}")
         elif len(args) > 0 and isinstance(args[0], TensorWithTFOverrideVariable):
             # This code block implements inlining the __torch_function__
             # override of a tensor.
@@ -640,38 +638,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     unimplemented(f"out variant of {type(kwargs['out'])}")
 
             return tensor_variable
-
-    def is_dynamic_shapes(self, args, kwargs):
-        """Check for dynamic shapes when shape specialization is enabled"""
-        # TODO(jansel): need to get a complete list
-        if self.value in (
-            torch.nonzero,
-            torch.unique,
-            torch.unique_consecutive,
-        ) or self.value.__name__ in ("nms",):
-            return True
-
-        if self.value is torch.where and len(args) + len(kwargs) == 1:
-            return True
-
-        if self.value in (
-            torch.arange,
-            torch.repeat_interleave,
-        ):
-            none = variables.ConstantVariable(None)
-
-            def has_non_const(it):
-                return not all(x.is_python_constant() for x in it)
-
-            def arange(start=none, end=none, step=none, **kwargs):
-                return has_non_const([start, end, step])
-
-            def repeat_interleave(input, repeats, dim=none, **kwargs):
-                return has_non_const([repeats])
-
-            return locals()[self.value.__name__](*args, **kwargs)
-
-        return False
 
     def _call_cross_entropy_loss(self, tx, args, kwargs, options):
         """
