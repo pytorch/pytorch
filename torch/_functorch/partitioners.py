@@ -130,9 +130,7 @@ def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
     return fwd_outputs, bwd_outputs
 
 
-def _extract_fwd_bwd_modules(
-    joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs
-):
+def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
@@ -210,12 +208,12 @@ def _extract_fwd_bwd_modules(
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs + saved_values + saved_sym_nodes,
+        fwd_outputs + saved_values + saved_sym_nodes
     )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
-        bwd_outputs,
+        bwd_outputs
     )
 
     fwd_module = fx.GraphModule(joint_module, fwd_graph)
@@ -572,7 +570,6 @@ def min_cut_rematerialization_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-
     try:
         import networkx as nx
     except ImportError as e:
@@ -778,7 +775,6 @@ def min_cut_rematerialization_partition(
         # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
-
         if is_symint_node(node):
             weight = 1
         elif is_sym_node(node):
@@ -817,10 +813,8 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
-
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
-
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
