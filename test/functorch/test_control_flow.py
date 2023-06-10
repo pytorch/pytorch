@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
 
 def _fake_map(f, x, *args):
-    from torch._higher_order_ops._map import _stack_pytree, _unstack_pytree
+    from functorch.experimental._map import _stack_pytree, _unstack_pytree
     x_pytrees = _unstack_pytree(x)
     zs = []
     for xp in x_pytrees:
@@ -608,28 +608,36 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         graph = make_fx(f)(x, torch.tensor(False), torch.tensor(False))
 
-        self.assertExpectedInline(graph.code.strip(), """\
-def forward(self, x_1, pred_1, pred2_1):
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    conditional = torch._higher_order_ops._cond.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
-    true_graph_1 = self.true_graph_1
-    false_graph_1 = self.false_graph_1
-    conditional_1 = torch._higher_order_ops._cond.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-    add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
-    return add""")  # noqa: B950
+        # Brittle, yet, delicious
+        out = """
+        def forward(self, x_1, pred_1, pred2_1):
+            true_graph_0 = self.true_graph_0
+            false_graph_0 = self.false_graph_0
+            conditional = torch.ops.cond(pred_1, true_graph_0, false_graph_0, [x_1]);
+            pred_1 = true_graph_0 = false_graph_0 = None
+            true_graph_1 = self.true_graph_1
+            false_graph_1 = self.false_graph_1
+            conditional_1 = torch.ops.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);
+            pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+            add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+            return add
+        """
+        code = graph.code
+        # Normalization hack, cause .code makes some weird whitespace
+        code = "".join(code.split())
+        out = "".join(out.split())
+        self.assertEqual(code, out)
 
         code = graph.true_graph_0.code
-        self.assertExpectedInline(graph.code.strip(), """\
-def forward(self, x_1, pred_1, pred2_1):
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    conditional = torch._higher_order_ops._cond.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
-    true_graph_1 = self.true_graph_1
-    false_graph_1 = self.false_graph_1
-    conditional_1 = torch._higher_order_ops._cond.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-    add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
-    return add""")  # noqa: B950
+        out = """
+        def forward(self, y_1):
+            mul = torch.ops.aten.mul.Tensor(y_1, y_1);  y_1 = None
+            return mul
+        """
+        # Normalization hack, cause .code makes some weird whitespace
+        code = "".join(code.split())
+        out = "".join(out.split())
+        self.assertEqual(code, out)
 
     def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
@@ -768,22 +776,35 @@ def forward(self, x_1, pred_1, pred2_1):
         graph = make_fx(f, tracing_mode="fake")(x, torch.tensor(False), torch.tensor(False))
 
         # Brittle, yet, delicious
-        self.assertExpectedInline(graph.code.strip(), """\
-def forward(self, x_1, pred_1, pred2_1):
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    conditional = torch._higher_order_ops._cond.cond(pred_1, true_graph_0, false_graph_0, [x_1]);  pred_1 = true_graph_0 = false_graph_0 = None
-    true_graph_1 = self.true_graph_1
-    false_graph_1 = self.false_graph_1
-    conditional_1 = torch._higher_order_ops._cond.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-    add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
-    return add""")  # noqa: B950
+        out = """
+        def forward(self, x_1, pred_1, pred2_1):
+            true_graph_0 = self.true_graph_0
+            false_graph_0 = self.false_graph_0
+            conditional = torch.ops.cond(pred_1, true_graph_0, false_graph_0, [x_1]);
+            pred_1 = true_graph_0 = false_graph_0 = None
+            true_graph_1 = self.true_graph_1
+            false_graph_1 = self.false_graph_1
+            conditional_1 = torch.ops.cond(pred2_1, true_graph_1, false_graph_1, [x_1, x_1]);
+            pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+            add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+            return add
+        """
+        code = graph.code
+        # Normalization hack, cause .code makes some weird whitespace
+        code = "".join(code.split())
+        out = "".join(out.split())
+        self.assertEqual(code, out)
 
         code = graph.true_graph_0.code
-        self.assertExpectedInline(code.strip(), """\
-def forward(self, y_1):
-    mul = torch.ops.aten.mul.Tensor(y_1, y_1);  y_1 = None
-    return mul""")
+        out = """
+        def forward(self, y_1):
+            mul = torch.ops.aten.mul.Tensor(y_1, y_1);  y_1 = None
+            return mul
+        """
+        # Normalization hack, cause .code makes some weird whitespace
+        code = "".join(code.split())
+        out = "".join(out.split())
+        self.assertEqual(code, out)
 
     def test_raise_error_on_mismatch_type_size_fake_tensor(self):
         def true_fn(x):
