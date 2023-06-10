@@ -14,7 +14,6 @@ from unittest.mock import patch
 from functorch import make_fx
 
 import torch
-import sympy
 import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -663,13 +662,6 @@ def from_fun(t):
     torch._sync(t)
     return torch._from_functional_tensor(t)
 
-def _stride_equal(sizes, strides_lhs, strides_rhs):
-    for size, stride_lhs, stride_rhs in zip(sizes, strides_lhs, strides_rhs):
-        if size > 1 and stride_lhs != stride_rhs:
-            return False
-
-    return True
-
 def _get_hints(exprs):
     """
     Get the hints of a list/tuple of int/SymInt.
@@ -680,41 +672,6 @@ def _get_hints(exprs):
         return exprs.node.shape_env.size_hint(exprs.node.expr)
     else:
         return exprs
-
-def _get_fill_order(strides):
-    """
-    fill_order[i] == j means dimension j's stride is the i'th largest.
-    """
-    order = list(range(len(strides)))
-    order.sort(key=strides.__getitem__)
-    return order
-
-def _apply_fill_order(ft: torch.Tensor, fill_order):
-    """
-    Apply stride fill order to a fake tensor.
-    """
-    sizes = ft.size()
-    assert set(range(len(sizes))) == set(fill_order)
-    shape_env = None
-    for sz in sizes:
-        if isinstance(sz, torch.SymInt):
-            shape_env = sz.node.shape_env
-            break
-    new_strides = [None] * len(ft.size())
-    next_stride = sympy.Integer(1)
-    for i in fill_order:
-        new_strides[i] = next_stride
-        next_stride = next_stride * sizes[i]
-
-    # convert sympy expression to SymInt
-    for i, stride in enumerate(new_strides):
-        if shape_env:
-            new_strides[i] = shape_env.create_symintnode(new_strides[i], hint=None)
-        else:
-            new_strides[i] = int(new_strides[i])
-
-    return ft.as_strided(sizes, new_strides)
-
 
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
@@ -3058,9 +3015,23 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         # Comparing ph_arg.stride() with real_arg.stride() directly may
                         # cause dynamic dimensions in ph_arg being specialized to static
                         # value. Using the hints to avoid that.
-                        if not _stride_equal(real_arg.size(), _get_hints(ph_arg.stride()), real_arg.stride()):
-                            fill_order = _get_fill_order(real_arg.stride())
-                            placeholder_list[i] = _apply_fill_order(ph_arg, fill_order)
+                        if _get_hints(ph_arg.stride()) != real_arg.stride():
+                            # Note that here we use the stride of the real tensor to
+                            # restride a FakeTensor. This does not cause trouble
+                            # for dynamic shape since this code path only get
+                            # executed if layout optimization is enabled. And we
+                            # disable layout optimization for dynamic shape right
+                            # now.
+                            #
+                            # A solution that decide stride order based on real
+                            # tensor's stride and then apply that stride order to
+                            # the FakeTensor does not work smoothly since some
+                            # tensor's layout is not 'dense'. E.g. mixnet_l has a
+                            # tensor with size [8, 64, 112, 112] and strides
+                            # (2408448, 1, 21504, 192). The solution mentioned will
+                            # decide a stride of (802816, 1, 7168, 64) for this
+                            # tensor which is wrong.
+                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
 
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
