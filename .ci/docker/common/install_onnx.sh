@@ -24,7 +24,7 @@ pip_install \
   transformers==4.25.1
 
 # TODO: change this when onnx-script is on testPypi
-pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@64e51dc8315e0838da5d34d511bff7d0d9ed98a2"
+pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@a3caa39b14e8ee187573f6cb607e4fe4b9fe1f2f"
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
