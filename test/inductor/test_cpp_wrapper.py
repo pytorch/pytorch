@@ -140,7 +140,7 @@ if RUN_CPU:
             "test_conv2d_binary_inplace_fusion_failed",
             "cpu",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            condition=torch._C.has_mkldnn,
+            condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["op_convolution_pointwise_binary.call"],
                 ["op_convolution_pointwise_binary_.call"],
@@ -150,7 +150,7 @@ if RUN_CPU:
             "test_conv2d_binary_inplace_fusion_pass",
             "cpu",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            condition=torch._C.has_mkldnn,
+            condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["op_convolution_pointwise_binary_.call"],
                 ["op_convolution_pointwise_binary.call"],
@@ -160,7 +160,7 @@ if RUN_CPU:
             "test_conv2d_unary",
             "cpu",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            condition=torch._C.has_mkldnn,
+            condition=torch.backends.mkldnn.is_available(),
             slow=True,
         ),
         BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
@@ -174,7 +174,8 @@ if RUN_CPU:
             "test_linear_binary",
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
+            torch.backends.mkldnn.is_available()
+            and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_mm_views"),
