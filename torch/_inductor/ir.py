@@ -3238,9 +3238,7 @@ class FallbackKernel(ExternKernelAlloc):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
                 self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
             else:
-                raise NotImplementedError(
-                    "Unable to find HigherOrderOperator kernel name"
-                )
+                raise NotImplementedError("Unable to find HigherOrderOperator kernel name")
         else:
             if V.graph.cpp_wrapper:
                 from torch._inductor.codegen.wrapper import (
