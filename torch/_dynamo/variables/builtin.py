@@ -32,6 +32,7 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SetVariable,
     SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
@@ -1257,6 +1258,11 @@ class BuiltinVariable(VariableTracker):
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
             return BaseListVariable.list_compare(tx, op, left, right)
+
+        if isinstance(left, SetVariable):
+            if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
+                _unimplemented()
+            return ConstantVariable(op(left._underlying_items, right._underlying_items))
 
         if isinstance(left, TensorVariable):
             from .builder import wrap_fx_proxy

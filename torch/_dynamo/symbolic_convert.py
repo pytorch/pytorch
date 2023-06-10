@@ -1262,9 +1262,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def BUILD_SET(self, inst):
         items = self.popn(inst.argval)
         options = VariableTracker.propagate(items)
-        new_set = SetVariable([], mutable_local=MutableLocal(), **options)
-        for item in items:
-            new_set.call_method(self, "add", [item], {})
+        new_set = SetVariable(items, mutable_local=MutableLocal(), **options)
         self.push(new_set)
 
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):

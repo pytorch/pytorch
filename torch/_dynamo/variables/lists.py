@@ -1,3 +1,4 @@
+import builtins
 import collections
 import functools
 import operator
@@ -7,13 +8,8 @@ import torch
 import torch.fx
 
 from .. import config, variables
-from ..bytecode_transformation import (
-    create_call_function,
-    create_instruction,
-    create_load_global,
-)
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
-from ..source import GetItemSource
 from ..utils import check_constant_args, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -656,6 +652,7 @@ class SetVariable(VariableTracker):
         regen_guards=True,
         **kwargs,
     ):
+        underlying_items = kwargs.pop("_underlying_items", set())
         super().__init__(recursively_contains=recursively_contains, **kwargs)
         # Note - Set is still backed by a list, because we want set behavior over the contents,
         assert isinstance(items, list)
@@ -665,7 +662,12 @@ class SetVariable(VariableTracker):
         if regen_guards:
             self.guards.update(VariableTracker.propagate(items)["guards"])
 
-        self.items: List[VariableTracker] = items
+        self.items = []
+        self._underlying_items = underlying_items
+        if underlying_items:
+            self.items = items
+        else:
+            self._add(items)
 
     def as_proxy(self):
         return [x.as_proxy() for x in self.items]
@@ -674,12 +676,13 @@ class SetVariable(VariableTracker):
         return set
 
     def reconstruct(self, codegen):
-        create_load_global("set", False)
+        codegen.create_load_python_module(builtins, True)
+        codegen.create_load_global("set", False)
         codegen.foreach(self.items)
         return [create_instruction("BUILD_SET", arg=len(self.items))]
 
     # Note - this is only used for producing a set
-    def _to_example_values(self, tx, vt):
+    def _to_example_values(self, vt):
         from .base import VariableTracker
         from .tensor import TensorVariable
 
@@ -690,30 +693,26 @@ class SetVariable(VariableTracker):
         if isinstance(vt, ConstantVariable):
             return vt.value
 
-        if vt.has_unpack_var_sequence(tx):
-            unimplemented("Sets with nested structures NYI")
-
         unimplemented(f"Sets with {type(vt)} NYI")
 
-    def _add(self, tx, new_item):
-        bookeeping_set = set()
-        new_items = []
-        self.items.append(new_item)
-        for item in self.items:
-            ev = self._to_example_values(tx, item)
-            if ev in bookeeping_set:
-                # collision, don't store this item
-                continue
-            bookeeping_set.add(ev)
-            new_items.append(item)
-        return new_items
+    def _add(self, item):
+        if isinstance(item, (list, set)):
+            for i in item:
+                self._add(i)
+            return self.items
+
+        ev = self._to_example_values(item)
+        if ev not in self._underlying_items:
+            self._underlying_items.add(ev)
+            self.items.append(item)
+        return self.items
 
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         # Somewhat duplicative of CommonListMethodsVariable - but better than to violate substitution
@@ -723,7 +722,7 @@ class SetVariable(VariableTracker):
             assert not kwargs
             item = args[0]
             result = SetVariable(
-                self._add(tx, item),
+                self._add(item),
                 mutable_local=self.mutable_local,
                 regen_guards=False,
                 **options,
@@ -732,8 +731,9 @@ class SetVariable(VariableTracker):
             return ConstantVariable(None)
         elif name == "pop" and self.mutable_local:
             assert not kwargs
+            assert not args
             items = list(self.items)
-            result = items.pop(*[a.as_python_constant() for a in args])
+            result = items.pop()
             tx.replace_all(
                 self,
                 SetVariable(items, regen_guards=False, **options),
