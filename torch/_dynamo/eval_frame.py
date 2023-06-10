@@ -836,7 +836,7 @@ def export(
     f: Callable[..., Any],
     *args,
     aten_graph: bool = False,
-    pre_autograd: bool = False,
+    pre_dispatch: bool = False,
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
@@ -856,9 +856,10 @@ def export(
         aten_graph (bool): If True, exports a graph with ATen operators.
         If False, exports a graph with Python operators. Default is False.
 
-        pre_autograd (bool): If True, exports a graph with ATen operators,
-        but before autograd has run. This can be useful if you want to apply further tranformations
-        on a graph before running it through autograd.
+        pre_dispatch (bool): If True, exports a graph with ATen operators,
+        but before any logic in the PyTorch dispatcher has run.
+        This can be useful if you want to apply further tranformations on a graph before running it
+        through autograd, autocast, or any other functionalities that are integrated into the dispatcher.
         This flag is only valid if aten_graph=True is set.
         Default is False.
 
@@ -888,8 +889,8 @@ def export(
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-    if pre_autograd:
-        assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
+    if pre_dispatch:
+        assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
     f = innermost_fn(f)
     call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
     original_signature = inspect.signature(call_to_inspect)
@@ -993,15 +994,25 @@ def export(
         assert dim_constraints is not None
         dim_constraints.solve()
         msg = dim_constraints.prettify_results(original_signature)
+        forced_specializations = dim_constraints.forced_specializations()
+        if forced_specializations:
+            msg = (
+                "Some dynamic dimensions need to be specialized because "
+                "the constraints inferred for them are too complex to specify.\n"
+                f"{forced_specializations}\n{msg}"
+            )
         if constraint_violation_error:
             constraint_violation_error.args = (
                 constraint_violation_error.args[0] + msg,
             )
         else:
-            log.info(
-                "Summary of dimension constraints:%s",
-                msg,
-            )
+            if forced_specializations:
+                constraint_violation_error = ConstraintViolationError(msg)
+            else:
+                log.info(
+                    "Summary of dimension constraints:%s",
+                    msg,
+                )
 
         # Error if we have any constraints on static values
         for k in shape_env.var_to_range.keys():
@@ -1044,7 +1055,7 @@ def export(
                     decomposition_table=decomposition_table,
                     tracing_mode="real",
                     _allow_non_fake_inputs=True,
-                    pre_autograd=pre_autograd,
+                    pre_dispatch=pre_dispatch,
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error

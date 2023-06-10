@@ -27,7 +27,11 @@
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_csr_prod_native.h>
+#include <ATen/ops/_sparse_csr_sum_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
@@ -346,7 +350,7 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
 // TODO: Check what happens with MKL, the output error reported with non square
 // matrices tends to be high See:
 // https://github.com/pytorch/pytorch/issues/58770
-bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
+static bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
@@ -802,7 +806,7 @@ Tensor& add_sparse_csr_(
   return at::add_out(self, self, other, alpha); // redispatch!
 }
 
-void add_out_dense_sparse_csr_cpu(
+static void add_out_dense_sparse_csr_cpu(
     const Tensor& out,
     const Tensor& dense,
     const SparseCsrTensor& src,
