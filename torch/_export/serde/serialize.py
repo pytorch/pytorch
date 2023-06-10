@@ -61,6 +61,9 @@ def _reverse_map(d: Dict[Any, Enum]):
     return {v.value: k for k, v in d.items()}
 
 
+MetaType = Union[FakeTensor, int, torch.SymInt, bool, torch.SymBool]
+
+
 _TORCH_TO_SERIALIZE_DTYPE = {
     torch.uint8: ScalarType.BYTE,
     torch.int8: ScalarType.CHAR,
@@ -686,7 +689,7 @@ class ExportedProgramSerializer:
 class GraphModuleDeserializer:
     def __init__(self):
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
-        self.serialized_name_to_meta: Dict[str, Union[FakeTensor, int, torch.SymInt, bool, torch.SymBool]] = {}
+        self.serialized_name_to_meta: Dict[str, MetaType] = {}
         self.graph = torch.fx.Graph()
 
     def deserialize_sym_int(self, s: SymInt) -> Union[int, torch.SymInt]:

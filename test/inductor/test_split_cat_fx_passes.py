@@ -258,6 +258,12 @@ class TestSplitCatFxPasses(TestCase):
         def simple_split_cat_argspec2(x):
             return torch.cat(tensors=torch.split(x, 4, dim=1), dim=1)
 
+        def simple_split_cat_argspec3(x):
+            return torch.cat(torch.split(x, 4, dim=1), -2)
+
+        def simple_split_cat_argspec4(x):
+            return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
+
         def simple_split_stack(x):
             return torch.stack(torch.split(x, 4, dim=1), dim=1)
 
@@ -502,6 +508,8 @@ class TestSplitCatFxPasses(TestCase):
             (simple_split_cat, 0, 1, 0, 1, 7, default_args),
             (simple_split_cat_argspec1, 0, 1, 0, 1, 7, default_args),
             (simple_split_cat_argspec2, 0, 1, 0, 1, 7, default_args),
+            (simple_split_cat_argspec3, 0, 1, 0, 1, 7, default_args),
+            (simple_split_cat_argspec4, 0, 1, 0, 1, 7, default_args),
             (simple_split_stack, 0, 1, 0, 1, 7, default_args),
             (simple_split_stack_argspec1, 0, 1, 0, 1, 7, default_args),
             (simple_split_stack_argspec2, 0, 1, 0, 1, 7, default_args),
