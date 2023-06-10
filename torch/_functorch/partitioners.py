@@ -26,19 +26,19 @@ def is_symint_node(node):
     assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
     return "val" in node.meta and isinstance(node.meta['val'], torch.SymInt)
 
-def is_recomputable(node):
+def must_recompute(node):
     return "recompute" in node.meta and node.meta["recompute"]
 
 def has_recomputable_ops(fx_g):
     found = False
     for node in fx_g.graph.nodes:
-        if is_recomputable(node):
+        if must_recompute(node):
             return True
     return False
 
 def has_recomputable_rng_ops(fx_g):
     for node in fx_g.graph.nodes:
-        if is_recomputable(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
+        if must_recompute(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
             return True
     return False
 
@@ -52,7 +52,7 @@ counter = itertools.count()
 
 
 
-def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs, is_fwd=None, recomputable_rng_ops_map=None):
+def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
     """
     Given a graph, extracts out a subgraph that takes the specified nodes as
     inputs and returns the specified outputs.
@@ -85,12 +85,6 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs, is_fwd=None
                 env[node] = InvalidNode
                 continue
             env[node] = new_graph.node_copy(node, lambda x: env[x])
-
-            # Record the node to new node mapping if it is a recomputable rng op
-            if recomputable_rng_ops_map and node in recomputable_rng_ops_map:
-                attr = "fwd" if is_fwd else "bwd"
-                recomputable_rng_ops_map[node][attr] = env[node]
-
         elif node.op == 'get_attr':
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == 'output':
@@ -137,7 +131,7 @@ def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
 
 
 def _extract_fwd_bwd_modules(
-    joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), recomputable_rng_ops_map=None, *, num_fwd_outputs
+    joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs
 ):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
@@ -217,15 +211,11 @@ def _extract_fwd_bwd_modules(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
         fwd_outputs + saved_values + saved_sym_nodes,
-        is_fwd=True,
-        recomputable_rng_ops_map=recomputable_rng_ops_map,
     )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
         bwd_outputs,
-        is_fwd=False,
-        recomputable_rng_ops_map=recomputable_rng_ops_map,
     )
 
     fwd_module = fx.GraphModule(joint_module, fwd_graph)
@@ -443,7 +433,7 @@ def tangent_driven_topological_reordering(gm):
     return new_gm
 
 
-def functionalize_rng_ops(joint_module, fw_module, bw_module, recomputable_rng_ops_map):
+def functionalize_rng_ops(joint_module, fw_module, bw_module):
     # We will use functionalize wrappers to wrap the random ops and share rng
     # state between the fwd and bwd graphs. The map contains the pair of nodes
     # that should run with same rng state.
@@ -457,6 +447,31 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, recomputable_rng_o
     # 1) Add the input nodes just before the tangents for the stashed rng states
     # 2) Replace rand with run_with_save_rng_state wrappers
     # 3) Use the stashed states as inputs to these ops
+    def get_random_nodes(gmod):
+        random_nodes = {}
+        for node in gmod.graph.nodes:
+            if (
+                node.op == "call_function"
+                and hasattr(node.target, "tags")
+                and torch.Tag.nondeterministic_seeded in node.target.tags
+            ):
+                random_nodes[node.name] = node
+        return random_nodes
+
+    joint_graph_rng_ops = get_random_nodes(joint_module)
+    fw_graph_rng_ops = get_random_nodes(fw_module)
+    bw_graph_rng_ops = get_random_nodes(bw_module)
+    recomputable_rng_ops_map = dict()
+    for node in joint_module.graph.nodes:
+        if (
+            must_recompute(node)
+            and hasattr(node.target, "tags")
+            and torch.Tag.nondeterministic_seeded in node.target.tags
+        ):
+            base_node = joint_graph_rng_ops[node.name]
+            fw_node = fw_graph_rng_ops[node.name]
+            bw_node = bw_graph_rng_ops[node.name]
+            recomputable_rng_ops_map[base_node] = {"fwd": fw_node, "bwd": bw_node}
 
     run_and_save_rng = torch._prims.rng_prims.run_and_save_rng_state
     run_with_rng_state = torch._prims.rng_prims.run_with_rng_state
@@ -513,37 +528,20 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, recomputable_rng_o
     return fw_module, bw_module
 
 
-def _extract_fwd_bwd_modules_with_functionalized_rng(
-    joint_module: fx.GraphModule, saved_values, saved_sym_nodes=(), *, num_fwd_outputs
-):
-    recomputable_rng_ops_map = dict()
-    for node in joint_module.graph.nodes:
-        if (
-            is_recomputable(node)
-            and hasattr(node.target, "tags")
-            and torch.Tag.nondeterministic_seeded in node.target.tags
-        ):
-            recomputable_rng_ops_map[node] = {"fwd": InvalidNode, "bwd": InvalidNode}
-
-    fw_module, bw_module = _extract_fwd_bwd_modules(
-        joint_module,
-        saved_values,
-        saved_sym_nodes=saved_sym_nodes,
-        num_fwd_outputs=num_fwd_outputs,
-        recomputable_rng_ops_map=recomputable_rng_ops_map,
-    )
-
-    return functionalize_rng_ops(
-        joint_module, fw_module, bw_module, recomputable_rng_ops_map
-    )
-
 def cleanup_recompute_tags(joint_module):
+    """
+    If there are two consecutive checkpointed blocks with no operator in
+    between, we would still want to stash the tensor at the boundary of
+    checkpointed blocks. The following pass makes the last output node
+    non-recomputable to allow for that.
+    """
     for node in joint_module.graph.nodes:
-        if is_recomputable(node):
+        if must_recompute(node):
             for user in node.users:
-                if is_recomputable(user) and user.meta["recompute"] > node.meta["recompute"]:
+                if must_recompute(user) and user.meta["recompute"] > node.meta["recompute"]:
                     node.meta["recompute"] = 0
     return joint_module
+
 
 def min_cut_rematerialization_partition(
     joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None,
@@ -587,20 +585,15 @@ def min_cut_rematerialization_partition(
     fx_g = joint_module.graph
 
     #  add the CSE pass
-    if config.cse and not config.functionalize_rng_ops:
+    if config.cse:
         cse_graph = fx_graph_cse(fx_g)
         joint_module.graph = cse_graph
     full_bw_graph = joint_module.graph
 
-    # for node in joint_module.graph.nodes:
-    #     print("->", node, is_recomputable(node))
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
         joint_module = cleanup_recompute_tags(joint_module)
-
-    # for node in joint_module.graph.nodes:
-    #     print(node, -1 if "recompute" not in node.meta else node.meta["recompute"])
 
     name_to_node = {}
     for node in joint_module.graph.nodes:
@@ -700,13 +693,21 @@ def min_cut_rematerialization_partition(
         return False
 
     def ban_recomputation(node):
-        if graph_has_recomputable_ops:
-            return not is_recomputable(node)
+        # if graph_has_recomputable_ops:
+        #     return not must_recompute(node)
+        if must_recompute(node):
+            return False
         elif AGGRESSIVE_RECOMPUTATION:
             return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
         else:
             if node.op != 'call_function':
                 return False
+
+            # Ban recomputation if one of the users is a must recompute node
+            for user in node.users:
+                if must_recompute(user):
+                    return True
+
             if get_aten_target(node) not in recomputable_ops:
                 return True
             if node.target == operator.getitem:
@@ -777,6 +778,7 @@ def min_cut_rematerialization_partition(
         # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
+
         if is_symint_node(node):
             weight = 1
         elif is_sym_node(node):
@@ -816,15 +818,16 @@ def min_cut_rematerialization_partition(
     saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
-    if graph_has_recomputable_rng_ops:
-        fw_module, bw_module = _extract_fwd_bwd_modules_with_functionalized_rng(
-            joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
-    else:
-        fw_module, bw_module = _extract_fwd_bwd_modules(
-            joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+    fw_module, bw_module = _extract_fwd_bwd_modules(
+        joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+
 
     if graph_has_recomputable_ops:
-        bw_module = tangent_driven_topological_reordering(gm)
+        if graph_has_recomputable_rng_ops:
+            fw_module, bw_module = functionalize_rng_ops(
+                joint_module, fw_module, bw_module
+            )
+        bw_module = tangent_driven_topological_reordering(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
