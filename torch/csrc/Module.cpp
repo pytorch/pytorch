@@ -287,6 +287,24 @@ PyObject* THPModule_setDefaultDtype(PyObject* _unused, PyObject* dtype) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_setDefaultArgumentDeviceType(
+    PyObject* _unused,
+    PyObject* device_type) {
+  HANDLE_TH_ERRORS
+  torch::tensors::py_set_default_argument_device_type(device_type);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_getDefaultArgumentDevice(
+    PyObject* _unused,
+    PyObject* device_type) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(c10::DeviceTypeName(
+      torch::tensors::py_get_default_argument_device_type(), true));
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
   // adds a __doc__ string to a function, similar to numpy's arr_add_docstring
   static std::vector<std::string> all_docs;
@@ -1039,6 +1057,14 @@ static PyMethodDef TorchMethods[] = {
      METH_O,
      nullptr},
     {"_set_default_dtype", THPModule_setDefaultDtype, METH_O, nullptr},
+    {"_set_default_argument_device_type",
+     THPModule_setDefaultArgumentDeviceType,
+     METH_O,
+     nullptr},
+    {"_get_default_argument_device",
+     THPModule_getDefaultArgumentDevice,
+     METH_NOARGS,
+     nullptr},
     {"_infer_size", THPModule_inferSize, METH_VARARGS, nullptr},
     {"_crash_if_csrc_asan", THPModule_crashIfCsrcASAN, METH_O, nullptr},
     {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},

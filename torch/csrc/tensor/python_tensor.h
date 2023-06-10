@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DefaultDevice.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/ScalarType.h>
@@ -21,6 +22,13 @@ void py_set_default_tensor_type(PyObject* type_obj);
 
 // Same as py_set_default_tensor_type, but only changes the dtype (ScalarType).
 void py_set_default_dtype(PyObject* dtype_obj);
+
+// set default backend argument for operators if not given device argument,
+// cannot be `cpu`.
+void py_set_default_argument_device_type(PyObject* device_obj);
+
+// get default backend argument for operators if not given device argument.
+c10::DeviceType py_get_default_argument_device_type();
 
 // Gets the DispatchKey for the default tensor type.
 //

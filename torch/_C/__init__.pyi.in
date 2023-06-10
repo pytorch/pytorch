@@ -984,6 +984,8 @@ def _add_docstr(obj: T, doc_obj: str) -> T: ...  # THPModule_addDocStr
 def _init_names(arg: Sequence[Type]) -> None: ...  # THPModule_initNames
 def _has_distributed() -> _bool: ...  # THPModule_hasDistributed
 def _set_default_tensor_type(type) -> None: ...  # THPModule_setDefaultTensorType
+def _set_default_argument_device_type(type: str) -> None: ...  # THPModule_setDefaultArgumentDeviceType
+def _get_default_argument_device() -> str: ...  # THPModule_getDefaultArgumentDevice
 def _set_default_dtype(d: _dtype) -> None: ...  # THPModule_setDefaultDtype
 def _infer_size(arg1: Size, arg2: Size) -> Size: ...  # THPModule_inferSize
 def _crash_if_csrc_asan() -> _int: ...  # THPModule_crashIfCsrcASAN

@@ -101,7 +101,7 @@ _fork_rng_warned_already = False
 
 
 @contextlib.contextmanager
-def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices", device_type="cuda") -> Generator:
+def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="devices", device_type=None) -> Generator:
     """
     Forks the RNG, so that when you return, the RNG is reset
     to the state that it was previously in.
@@ -118,7 +118,8 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         deivce_type (str): device type str, default is `cuda`. As for custom device,
             see details in [Note: support the custom device with privateuse1]
     """
-
+    if device_type is None:
+        device_type = torch._C._get_default_argument_device()
     device_type = torch.device(device_type).type
     device_mod = getattr(torch, device_type, None)
     if device_mod is None:

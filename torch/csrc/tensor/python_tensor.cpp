@@ -469,6 +469,21 @@ void py_set_default_dtype(PyObject* obj) {
   set_default_tensor_type(/*backend=*/c10::nullopt, scalar_type);
 }
 
+void py_set_default_argument_device_type(PyObject* obj) {
+  TORCH_CHECK_TYPE(
+      THPUtils_checkString(obj),
+      "invalid device string, only device type except cpu is supported as default argument device.");
+  auto device_type = at::Device(THPUtils_unpackString((obj))).type();
+  TORCH_CHECK(
+      device_type != c10::DeviceType::CPU,
+      "only device type except cpu is supported as default argument device.");
+  at::set_default_argument_device_type(device_type);
+}
+
+c10::DeviceType py_get_default_argument_device_type() {
+  return at::get_default_argument_device_type();
+}
+
 c10::DispatchKey get_default_dispatch_key() {
   return backendToDispatchKey(default_backend);
 }

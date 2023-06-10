@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Backend.h>
+#include <c10/core/DefaultDevice.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
