@@ -289,6 +289,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             },
         )
 
+    @torch._dynamo.config.patch(
+        assume_static_by_default=True,
+        dynamic_shapes=True,
+    )
     def test_cond_graph_break_in_one_branch(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -433,7 +437,8 @@ def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
         mod_for_eager = Module()
 
         res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
-        self.assertEqual(len(backend.graphs), 2)
+        # There is graph break right when we enter body of map
+        self.assertEqual(len(backend.graphs), 0)
         self.assertEqual(
             res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         )
