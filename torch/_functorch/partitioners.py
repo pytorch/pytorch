@@ -471,6 +471,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
                 random_nodes[node.name] = node
         return random_nodes
 
+    # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
     joint_graph_rng_ops = get_rng_ops(joint_module)
     fw_graph_rng_ops = get_rng_ops(fw_module)
     bw_graph_rng_ops = get_rng_ops(bw_module)
@@ -496,6 +497,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
 
     fw_rng_state_outputs = []
     for base_node, node_pair in recomputable_rng_ops_map.items():
+        # Step 2 - Modify the fwd pass such that
         fw_node = node_pair["fwd"]
         bw_node = node_pair["bwd"]
         fw_graph = fw_module.graph
@@ -513,6 +515,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
             fw_rng_state_outputs.append(state)
 
 
+        # Step 3 - Modify the bwd pass such that
         bw_graph = bw_module.graph
         with bw_graph.inserting_before(bw_tangent_start_node):
             state_name = f"rng_state_output_{next(uid)}"
