@@ -611,7 +611,7 @@ class Optimizer:
             if not isinstance(param, torch.Tensor):
                 raise TypeError("optimizer can only optimize Tensors, "
                                 "but one of the params is " + torch.typename(param))
-            # TODO: https://github.com/pytorch/pytorch/issues/30788
+            # TODO: expose Tensor.retains_grad in Python API https://github.com/pytorch/pytorch/issues/30788
             if not self.defaults.get('differentiable', None) and not (param.is_leaf or param.retains_grad):  # type: ignore[attr-defined]
                 raise ValueError("can't optimize a non-leaf Tensor")
 
