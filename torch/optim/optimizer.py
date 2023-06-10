@@ -35,7 +35,6 @@ GlobalOptimizerPreHook: TypeAlias = Callable[
 ]
 GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Tuple[Any, ...], Dict[str, Any]], None]
 
-
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, GlobalOptimizerPreHook] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, GlobalOptimizerPostHook] = OrderedDict()
