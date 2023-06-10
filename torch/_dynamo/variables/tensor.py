@@ -410,14 +410,6 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
-        elif (
-            name == "item"
-            and config.capture_scalar_outputs
-            and not config.dynamic_shapes
-        ):
-            raise AssertionError(
-                "To capture_scalar_outputs, you must also set dynamic_shapes = True"
-            )
         elif name == "__len__":
             return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":

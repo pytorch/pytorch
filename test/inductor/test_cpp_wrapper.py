@@ -81,6 +81,16 @@ test_failures_cpp_wrapper = {
     ),
 }
 
+# see https://github.com/pytorch/pytorch/issues/103194
+test_failures_cuda_wrapper = {
+    "test_fft_real_input_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",)
+    ),
+    "test_fft_real_input_real_output_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",)
+    ),
+}
+
 
 def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
     test_name = f"{name}_{device}" if device else name
@@ -257,6 +267,8 @@ if RUN_CUDA:
             device=None,
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
+        BaseTest("test_fft_real_input"),
+        BaseTest("test_fft_real_input_real_output"),
     ]:
         make_test_case(item.name, item.device, item.tests)
 
@@ -270,6 +282,7 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperTemplate,
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
+        test_failures_cuda_wrapper,
     )
 
 if __name__ == "__main__":

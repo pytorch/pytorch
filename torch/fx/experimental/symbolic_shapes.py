@@ -2063,6 +2063,9 @@ class ShapeEnv:
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint))
 
+    def create_symboolnode(self, sym: "sympy.Expr"):
+        return SymBool(SymNode(sym, self, bool, None))
+
     def create_unbacked_symfloat(self):
         symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
@@ -2073,13 +2076,13 @@ class ShapeEnv:
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
-        return SymInt(SymNode(symbol, self, int, None))
+        return self.create_symintnode(symbol, hint=None)
 
     def create_unbacked_symbool(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
-        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
+        return self.create_symboolnode(sympy.Eq(symbol, 1))
 
     def create_symbol(
         self,

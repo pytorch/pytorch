@@ -5639,6 +5639,15 @@ def ___make_guard_fn():
         compiled_out = compiled_fn(x)
         self.assertTrue(same(fn_out, compiled_out))
 
+    def test_torch_objects_as_keys(self):
+        remap = {torch.float16: torch.float32}
+
+        def fn():
+            return torch.randn(3, dtype=remap[torch.float16])
+
+        opt = torch._dynamo.optimize("eager")(fn)
+        opt()
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
