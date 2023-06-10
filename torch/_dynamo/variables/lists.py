@@ -1,5 +1,6 @@
 import collections
 import functools
+import inspect
 import operator
 from typing import Dict, List, Optional
 
@@ -13,6 +14,7 @@ from ..source import GetItemSource
 from ..utils import check_constant_args, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 
 
 class BaseListVariable(VariableTracker):
@@ -547,9 +549,28 @@ class NamedTupleVariable(TupleVariable):
         ] + create_call_function(1, True)
 
     def var_getattr(self, tx, name):
+        def check_and_create_method():
+            options = VariableTracker.propagate(self)
+            method = inspect.getattr_static(self.tuple_cls, name, None)
+            if isinstance(method, classmethod):
+                # We need the unbounded cls method to avoid the inline __self__
+                return UserMethodVariable(
+                    method.__func__,
+                    variables.UserDefinedClassVariable(self.tuple_cls, **options),
+                )
+            elif isinstance(method, staticmethod):
+                return UserFunctionVariable(method.__func__, **options)
+            elif inspect.isfunction(method):
+                return UserMethodVariable(method, self, **options)
+            else:
+                return None
+
         fields = namedtuple_fields(self.tuple_cls)
         if name not in fields:
-            unimplemented(f"NamedTupleVariable.{name}")
+            method = check_and_create_method()
+            if not method:
+                unimplemented(f"NamedTupleVariable.{name}")
+            return method
         return self.items[fields.index(name)].add_options(self)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
