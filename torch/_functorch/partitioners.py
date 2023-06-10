@@ -48,8 +48,6 @@ class InvalidNodeBase:
 
 
 InvalidNode = InvalidNodeBase()
-counter = itertools.count()
-
 
 
 def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
@@ -376,6 +374,17 @@ def pointwise_ops():
 
 
 def tangent_driven_topological_reordering(gm):
+    """
+    This reordering reorders the graph while prioritizing the users of tangents.
+    This approximately represents what happens in the autograd engine and eager
+    checkpointing. Autograd engine w/ eager checkpointing recomputes activations
+    only when they are required in the bwd pass.
+
+    This pass is required because the current version of duplication of nodes
+    outputs a graph with tensors having way longer life time than necessary. It
+    is certainly possible that in future we harden TorchInductor stack such that
+    it subsumes this reordering optimization as well.
+    """
     new_graph = fx.Graph()
     env = {}
 
@@ -432,20 +441,26 @@ def tangent_driven_topological_reordering(gm):
 
 
 def functionalize_rng_ops(joint_module, fw_module, bw_module):
-    # We will use functionalize wrappers to wrap the random ops and share rng
-    # state between the fwd and bwd graphs. The map contains the pair of nodes
-    # that should run with same rng state.
+    # During user-driven activation checkpointing, we have to ensure that a rng
+    # op in fwd yields the same output as the recomputed rng op in the bwd.  To
+    # do this, we use functionalize wrappers to wrap the random ops and share
+    # rng state between the fwd and bwd graphs.
 
-    # To make this tranformation, in the fwd pass
-    # 1) Replace rand with run_and_save_rng_state wrapper
-    # 2) Replace the users of the original op with the output[1] of this op.
-    # 3) Collect all the rng_state - output[0] of each op, and make them output nodes.
+    # There are 3 main steps to do this
+    # Step 1 - Construct a mapping of rng node between the fwd and its counterpart in bwd.
+    # Step 2 - Modify the fwd pass such that
+    #   1) Replace rand with run_and_save_rng_state wrapper
+    #   2) Replace the users of the original op with the output[1] of this op.
+    #   3) Collect all the rng_state - output[0] of each op, and make them output nodes.
+    # Step 3 - Modify the bwd pass such that
+    #   1) Add the input nodes just before the tangents for the stashed rng states
+    #   2) Replace rand with run_with_save_rng_state wrappers
+    #   3) Use the stashed states as inputs to these ops
 
-    # In the bwd pass
-    # 1) Add the input nodes just before the tangents for the stashed rng states
-    # 2) Replace rand with run_with_save_rng_state wrappers
-    # 3) Use the stashed states as inputs to these ops
-    def get_random_nodes(gmod):
+    # Unique id to generate name
+    uid = itertools.count()
+
+    def get_rng_ops(gmod):
         random_nodes = {}
         for node in gmod.graph.nodes:
             if (
@@ -456,9 +471,9 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
                 random_nodes[node.name] = node
         return random_nodes
 
-    joint_graph_rng_ops = get_random_nodes(joint_module)
-    fw_graph_rng_ops = get_random_nodes(fw_module)
-    bw_graph_rng_ops = get_random_nodes(bw_module)
+    joint_graph_rng_ops = get_rng_ops(joint_module)
+    fw_graph_rng_ops = get_rng_ops(fw_module)
+    bw_graph_rng_ops = get_rng_ops(bw_module)
     recomputable_rng_ops_map = dict()
     for node in joint_module.graph.nodes:
         if (
@@ -500,7 +515,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module):
 
         bw_graph = bw_module.graph
         with bw_graph.inserting_before(bw_tangent_start_node):
-            state_name = f"rng_state_output_{next(counter)}"
+            state_name = f"rng_state_output_{next(uid)}"
             bw_rng_state_node = bw_graph.placeholder(state_name)
             bw_rng_state_node.meta["val"] = torch.cuda.get_rng_state()
 
@@ -690,21 +705,13 @@ def min_cut_rematerialization_partition(
         return False
 
     def ban_recomputation(node):
-        # if graph_has_recomputable_ops:
-        #     return not must_recompute(node)
-        if must_recompute(node):
-            return False
+        if "recompute" in node.meta:
+            return node.meta["recompute"] == 0
         elif AGGRESSIVE_RECOMPUTATION:
             return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
         else:
             if node.op != 'call_function':
                 return False
-
-            # Ban recomputation if one of the users is a must recompute node
-            for user in node.users:
-                if must_recompute(user):
-                    return True
-
             if get_aten_target(node) not in recomputable_ops:
                 return True
             if node.target == operator.getitem:
