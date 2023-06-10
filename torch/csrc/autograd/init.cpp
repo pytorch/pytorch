@@ -37,6 +37,7 @@
 #include <unordered_set>
 #include <utility>
 
+using torch::impl::py_context_manager;
 using torch::impl::py_context_manager_DEPRECATED;
 
 namespace {
@@ -95,6 +96,11 @@ struct EnablePythonDispatcher {
     c10::impl::PythonDispatcherTLS::set_state(old_);
   }
   c10::impl::PyInterpreter* old_;
+};
+
+struct EnablePreDispatch {
+  EnablePreDispatch() : guard_(c10::DispatchKey::PreDispatch) {}
+  c10::impl::IncludeDispatchKeyGuard guard_;
 };
 
 } // namespace
@@ -180,6 +186,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("Lazy", c10::DeviceType::Lazy)
       .value("IPU", c10::DeviceType::IPU)
       .value("PrivateUse1", c10::DeviceType::PrivateUse1);
+
+  using torch::autograd::CreationMeta;
+  py::enum_<CreationMeta>(m, "CreationMeta")
+      .value("DEFAULT", CreationMeta::DEFAULT)
+      .value("IN_CUSTOM_FUNCTION", CreationMeta::IN_CUSTOM_FUNCTION)
+      .value("MULTI_OUTPUT_NODE", CreationMeta::MULTI_OUTPUT_NODE)
+      .value("NO_GRAD_MODE", CreationMeta::NO_GRAD_MODE)
+      .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
 
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
@@ -374,6 +388,20 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     torch::autograd::PyDefaultSavedVariableHooks::pop_hooks();
   });
 
+  m.def("_get_creation_meta", [](const at::Tensor& t) {
+    auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+    TORCH_CHECK(meta != nullptr);
+    return meta->get_creation_meta();
+  });
+
+  m.def(
+      "_set_creation_meta",
+      [](const at::Tensor& t, CreationMeta new_creation_meta) {
+        auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+        TORCH_CHECK(meta != nullptr);
+        meta->set_creation_meta(new_creation_meta);
+      });
+
   _C_m.def(
       "_register_py_class_for_device",
       [](const std::string& device, py::object python_type_class) {
@@ -385,7 +413,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   py_context_manager_DEPRECATED<c10::InferenceMode, bool>(
       _C_m, "_InferenceMode");
-  py_context_manager_DEPRECATED<at::impl::RestorePythonTLSSnapshot>(
+  py_context_manager<at::impl::RestorePythonTLSSnapshot>(
       _C_m, "_RestorePythonTLSSnapshot");
 
   py_context_manager_DEPRECATED<torch::DisableTorchDispatch>(
@@ -394,14 +422,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_EnableTorchFunction");
   py_context_manager_DEPRECATED<EnablePythonDispatcher>(
       _C_m, "_EnablePythonDispatcher");
-  py_context_manager_DEPRECATED<c10::impl::DisablePythonDispatcher>(
+  py_context_manager<c10::impl::DisablePythonDispatcher>(
       _C_m, "_DisablePythonDispatcher");
+  py_context_manager<EnablePreDispatch>(_C_m, "_EnablePreDispatch");
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
   py_context_manager_DEPRECATED<MultithreadingEnabled, bool>(
       _C_m, "_MultithreadingEnabled");
-  py_context_manager_DEPRECATED<DisableAutocast>(_C_m, "_DisableAutocast");
-  py_context_manager_DEPRECATED<ViewReplayEnabled, bool>(
-      _C_m, "_ViewReplayEnabled");
+  py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
+  py_context_manager<ViewReplayEnabled, bool>(_C_m, "_ViewReplayEnabled");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
