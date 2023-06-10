@@ -580,7 +580,9 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
             for idx, (dst, src, expanded_dims) in enumerate(
                 zip(static_inputs, new_inputs, inps_expanded_dims)
             ):
-                if idx in static_input_idxs:
+                if not isinstance(dst, torch.Tensor):
+                    pass
+                elif idx in static_input_idxs:
                     assert dst.data_ptr() == src.data_ptr()
                 else:
                     # TODO - could make one single op of multiple slices
