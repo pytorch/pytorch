@@ -298,3 +298,46 @@ operators:
             valid_tags=set(),
         )
         self.assertTrue(selector.is_native_function_selected(native_function))
+
+
+class TestExecuTorchSelectiveBuild(unittest.TestCase):
+    def test_et_kernel_selected(self):
+        yaml_config = """
+et_kernel_metadata:
+  aten::add.out:
+   - "v1/6;0,1|6;0,1|6;0,1|6;0,1"
+  aten::sub.out:
+   - "v1/6;0,1|6;0,1|6;0,1|6;0,1"
+"""
+        selector = SelectiveBuilder.from_yaml_str(yaml_config)
+        self.assertTrue(
+            selector.is_et_kernel_selected(
+                "aten::add.out", "v1/6;0,1|6;0,1|6;0,1|6;0,1"
+            )
+        )
+        self.assertTrue(
+            selector.is_et_kernel_selected(
+                "aten::sub.out", "v1/6;0,1|6;0,1|6;0,1|6;0,1"
+            )
+        )
+        self.assertFalse(
+            selector.is_et_kernel_selected(
+                "aten::mul.out", "v1/6;0,1|6;0,1|6;0,1|6;0,1"
+            )
+        )
+        self.assertFalse(
+            selector.is_et_kernel_selected(
+                "aten::add.out", "v1/3;0,1|3;0,1|3;0,1|3;0,1"
+            )
+        )
+        self.assertFalse(
+            selector.is_et_kernel_selected(
+                "aten::add.out", "v1/6;1,0|6;0,1|6;0,1|6;0,1"
+            )
+        )
+        # We don't use version for now.
+        self.assertTrue(
+            selector.is_et_kernel_selected(
+                "aten::add.out", "v2/6;0,1|6;0,1|6;0,1|6;0,1"
+            )
+        )

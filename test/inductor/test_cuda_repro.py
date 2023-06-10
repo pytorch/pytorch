@@ -5,6 +5,7 @@ import unittest
 
 import torch
 import torch._dynamo
+import torch._dynamo.config as dynamo_config
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided
@@ -145,6 +146,7 @@ class CudaReproTests(TestCase):
         assert compiled([])[0].device.type == "cuda"
 
     @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -172,6 +174,7 @@ class CudaReproTests(TestCase):
         self.common(Repro(), ())
 
     @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -206,6 +209,7 @@ class CudaReproTests(TestCase):
         torch._dynamo.reset()
 
     @config.patch({"triton.cudagraphs": True, "size_asserts": False})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs_no_size_asserts(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -220,6 +224,7 @@ class CudaReproTests(TestCase):
     # TODO: enable
     @config.patch({"triton.cudagraph_trees": False})
     @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_inplace_updates_cudagraphs(self):
         class Repro(torch.nn.Module):
             def __init__(self):

@@ -146,7 +146,7 @@ class TestGenericProxyTensor(TestCase):
         r2 = f(*new_inps)
         self.assertEqual(r1, r2)
 
-    def test_pre_autograd_mode_stack(self):
+    def test_pre_dispatch_mode_stack(self):
         def f(a):
             b = torch.ones(4, 4)
             return torch.matmul(a, b)
@@ -155,16 +155,27 @@ class TestGenericProxyTensor(TestCase):
         # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
         # so our mode never sees it - it goes directly to the BackendSelect key.
         inp = torch.ones(4, 4)
-        # Test that make_fx(pre_autograd=True) clears caches properly.
+        # Test that make_fx(pre_dispatch=True) clears caches properly.
         from torch._dispatch.python import enable_python_dispatcher
         with enable_python_dispatcher():
             out1 = f(inp)
-        fx_g = make_fx(f, pre_autograd=True)(inp)
+        fx_g = make_fx(f, pre_dispatch=True)(inp)
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, a_1):
     ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
     matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
     return matmul""")
+
+    def test_pre_dispatch_linear(self):
+        def f(a, b, c):
+            return torch.nn.functional.linear(a, b, c)
+        a = torch.ones(4, 4)
+        b = torch.ones(4, 4)
+        c = torch.ones(4)
+        fx_g = make_fx(f, pre_dispatch=True)(a, b, c)
+        out1 = f(a, b, c)
+        out2 = fx_g(a, b, c)
+        self.assertEqual(out1, out2)
 
 
     def test_make_fx_simple(self):
@@ -929,6 +940,35 @@ def forward(self, x_1, y_1):
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
         self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] < 20""")
 
+    def test_repeat_interleave(self):
+        def f(src_tokens, beam_size_src):
+            return src_tokens.repeat_interleave(beam_size_src.size(0), 0)
+
+        prompt_size = 64
+        vocab_size = 64
+        batch_size = 4
+        src_tokens = torch.randint(1, vocab_size, (batch_size, prompt_size))
+        gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
+        self.assertEqual(len(gm.shape_env.guards), 0)
+
+    def test_adv_index_batch(self):
+        def f(src_tokens):
+            bsz, src_len = src_tokens.size()[:2]
+            start_step = src_tokens.shape[1]
+            beam_size = 1
+            generate_size = 64
+            max_len = src_len + generate_size
+            tokens = torch.zeros(bsz * beam_size, max_len).to(src_tokens).long().fill_(0)
+            tokens[:, :start_step] = src_tokens.repeat_interleave(beam_size, 0)
+            return tokens
+
+        prompt_size = 64
+        vocab_size = 64
+        batch_size = 4
+        src_tokens = torch.randint(1, vocab_size, (batch_size, prompt_size))
+        gm = make_fx(f, tracing_mode="symbolic")(src_tokens)
+        self.assertEqual(len(gm.shape_env.guards), 0)
+
     @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
     def test_cpu_scalar_cuda(self):
         # Extracted from wave2vec2
@@ -1452,14 +1492,7 @@ symbolic_tensor_failures = {
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.multi_dot', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.slogdet', ''),  # aten._linalg_slogdet.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.solve', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.solve_ex', ''),  # aten._linalg_solve_ex.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.tensorsolve', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('linalg.vander', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
-    xfail('logdet', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('lu_unpack', ''),  # aten.lu_unpack.default - couldn't find symbolic meta function/decomposition
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decomposition
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decomposition
     xfail('median', ''),  # Could not run 'aten::median' with arguments from the 'Meta' backend. This could be becau...

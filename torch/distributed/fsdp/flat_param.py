@@ -1384,7 +1384,7 @@ class FlatParamHandle:
         if flat_param.grad is None:
             # In the case that only some ranks have `None` gradient, we use
             # zeros to approximate as a best effort attempt
-            if self._debug_level == dist.DebugLevel.DETAIL:
+            if self._debug_level == dist.DebugLevel.INFO:
                 warnings.warn(
                     f"[Rank {self.rank}] Only some but not all ranks have a "
                     "`None` `FlatParameter` gradient, so FSDP is using zeros to "
@@ -2177,7 +2177,7 @@ class FlatParamHandle:
             len(expected_shape) == 1,
             f"Expects a 1D expected shape but got {expected_shape}",
         )
-        if self._debug_level == dist.DebugLevel.DETAIL:
+        if self._debug_level == dist.DebugLevel.INFO:
             rank = self.rank if hasattr(self, "rank") else dist.get_rank()
             src_shape = src_tensor.shape if src_tensor is not None else None
             src_device = src_tensor.device if src_tensor is not None else None

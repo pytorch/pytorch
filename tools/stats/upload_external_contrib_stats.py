@@ -11,7 +11,14 @@ from urllib.request import Request, urlopen
 
 from tools.stats.upload_stats_lib import upload_to_s3
 
-FILTER_OUT_USERS = {"pytorchmergebot", "facebook-github-bot", "pytorch-bot[bot]"}
+FILTER_OUT_USERS = {
+    "pytorchmergebot",
+    "facebook-github-bot",
+    "pytorch-bot[bot]",
+    "pytorchbot",
+    "pytorchupdatebot",
+    "dependabot[bot]",
+}
 
 
 def _fetch_url(
