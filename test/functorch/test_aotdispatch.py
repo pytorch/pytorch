@@ -2809,7 +2809,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
-    xfail('nn.functional.avg_pool3d', ''),  # aten.avg_pool3d.default - couldn't find symbolic meta function/...
     skip('nn.functional.batch_norm', ''),  # '0 is not tracked with proxy for <torch.fx.experimental.proxy_te..
     xfail('nn.functional.bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
@@ -3054,10 +3053,8 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.AdaptiveMaxPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.GroupNorm,  # in native_group_norm_backward cpg, _rem = divmod(C, group)
                          # TypeError: unsupported operand type(s) for divmod(): 'SymInt' and 'int'
-    torch.nn.LocalResponseNorm,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.FractionalMaxPool2d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
-    torch.nn.AvgPool3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.MaxPool1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.MaxPool3d,  # torch._subclasses.fake_tensor.UnsupportedOperatorException:
                          # aten.max_pool3d_with_indices.default
