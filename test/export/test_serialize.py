@@ -12,7 +12,16 @@ from torch._export.serde.serialize import (
 import torch.utils._pytree as pytree
 from torch.testing._internal.common_utils import run_tests, TestCase
 
-
+TEST_UPGRADERS = {
+    "aten::div__Scalar_0_3": (
+        "div.Scalar(Tensor self, Scalar other) -> Tensor",
+        """
+def div_Scalar_0_3(self: torch.Tensor, other: torch.Scalar) -> torch.Tensor:
+  if (self.is_floating_point() or isinstance(other, float)):
+    return self.true_divide(other)
+  return self.divide(other, rounding_mode='trunc')
+        """)
+}
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
     def test_serialize_multiple_returns_from_node(self) -> None:
@@ -199,6 +208,16 @@ class TestDeserialize(TestCase):
         inputs = (torch.ones([512], requires_grad=True),)
         self.check_graph(MyModule(), inputs)
 
+class TestOpUpgrader(TestCase):
+    def test_upgrade_div(self):
+        def fn(a: torch.Tensor, b):
+            return torch.ops.aten.div.Scalar(a, b)
+
+        inputs = (torch.ones([2, 3]) * 4, 2)
+        ep = export(fn, inputs, [])
+
+        compiler_opset_version = {"aten": 4}
+        model_opset_version = {"aten": 3}
 
 if __name__ == '__main__':
     run_tests()

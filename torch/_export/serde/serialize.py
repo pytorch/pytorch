@@ -47,6 +47,7 @@ __all__ = [
 
 from ...fx.node import Target
 from ...fx.passes.graph_manipulation import replace_target_nodes_with
+from ...library import Library
 
 log = logging.getLogger(__name__)
 
@@ -670,19 +671,30 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
         self,
         compiler_opset_version: Optional[Dict[str, int]] = None,
         model_opset_version: Optional[Dict[str, int]] = None,
+        op_upgraders: Optional[Dict[str, Tuple[str]]] = None,  # can add a new TS API: torch._C._get_upgraders_entry_map()
     ):
-        op_upgraders = {}  # can add a new TS API: torch._C._get_upgraders_entry_map()
         self.compiler_opset_version = compiler_opset_version
         self.model_opset_version = model_opset_version
         # key is version number, value is a list of upgraders, keyed on op name
-        self.upgraders: Dict[int, List[Tuple[str, str]]] = self._parse_upgraders(op_upgraders)
+        self.upgraders: List[Tuple[str]] = self._parse_upgraders(op_upgraders)
         self._register_old_ops()
 
         self.upgrader_passes: List[GraphModuleOpUpgrader.UpgraderPass] = self._populate_passes()
 
-    def _parse_upgraders(self, op_upgraders: Dict[str, str] = None) -> Dict[int, List[Tuple[str, str]]]:
+    def _parse_upgraders(self, op_upgraders: Dict[str, Tuple[str]] = None) -> List[Tuple[str]]:
         """reorder op_upgraders by version number."""
-        pass
+        model_ver = self.model_opset_version["aten"]
+        curr_ver = self.compiler_opset_version["aten"]
+        def get_target_version(versioned_upgrader_name: str) -> int:
+            """div_Scalar_0_3 is the name of the upgrader, meaning it applies to opset version 0 to 3 and is upgrading to version 4."""
+            return int(versioned_upgrader_name.split('_')[-1]) + 1
+        versioned_upgraders: Dict[int, Tuple[str]] = {get_target_version(name): v for name, v in op_upgraders.items()}
+        target_upgraders: List[Tuple[str]] = []
+        for ver in range(model_ver, curr_ver+1):
+            target_upgraders.append(versioned_upgraders[ver])
+
+        return target_upgraders
+
 
     def _register_old_ops(self):
         """use torch.Library API to register old ops. Op name will be <name>_<valid_from_ver>_<valid_till_ver>. Register upgarders as CompositeImplicitAutograd kernels.
@@ -694,12 +706,22 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
         impl_lib = Library("aten", "IMPL")
         impl_lib.impl("div__Scalar_0_3", div__Scalar_0_3, "CompositeImplicitAutograd")
         """
-        pass
+        lib = Library("aten", "FRAGMENT")
+        impl_lib = Library("aten", "IMPL")
+
+        for schema, upgrader_str in self.upgraders:
+            upgrader_name = upgrader_str.split('(')[0].split(' ')[-1]
+            op_name = schema.split('(')[0].split("::")[-1]
+            lib.define(schema.replace(op_name, upgrader_name))
+            exec(upgrader_str)
+            impl_lib.impl(upgrader_name, locals()[upgrader_name], "CompositeImplicitAutograd")
 
     def _populate_passes(self) -> List[UpgraderPass]:
         """Given a list of upgraders, loop through it from lower version to higher version and create passes for all upgraders.
         """
         pass
+        # for schema, upgrader_str in self.upgraders:
+        #     up_pass = GraphModuleOpUpgrader.UpgraderPass()
 
     def upgrade(self, fx_module: torch.fx.GraphModule):
         """Apply upgraders one by one on GraphModule"""
