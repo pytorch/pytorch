@@ -395,8 +395,6 @@ class TensorVariable(VariableTracker):
             )
         elif name in ("tolist", "backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
-        elif name == "nonzero" and not config.dynamic_shapes:
-            unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
         elif name == "__len__":
