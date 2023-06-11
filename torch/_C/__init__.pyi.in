@@ -54,6 +54,7 @@ from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunction
 
 T = TypeVar("T")
 S = TypeVar("S", bound="torch.Tensor")
+Self = TypeVar("Self", bound="_TensorBase")  # replacement of PEP-673 Self
 
 # Defined in torch/csrc/Device.cpp
 class device:

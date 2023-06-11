@@ -146,7 +146,6 @@ binary_ops = (
     "sub",
     "mul",
     "div",
-    "pow",
     "lshift",
     "rshift",
     "mod",
@@ -154,29 +153,28 @@ binary_ops = (
     "matmul",
     "floordiv",
     "radd",
-    "rsub",
-    "rmul",
-    "rtruediv",
-    "rfloordiv",
-    "rpow",  # reverse arithmetic
+    "rmul",  # reverse arithmetic
     "and",
     "or",
     "xor",
     "rand",
     "ror",
     "rxor",  # logic
+)
+inplace_binary_ops = (
     "iadd",
-    "iand",
+    "isub",
+    "imul",
     "idiv",
     "ilshift",
-    "imul",
-    "ior",
     "irshift",
-    "isub",
-    "ixor",
+    "imod",
     "ifloordiv",
-    "imod",  # inplace ops
+    "iand",
+    "ior",
+    "ixor",  # inplace ops
 )
+binary_ops = binary_ops + inplace_binary_ops
 symmetric_comparison_ops = ("eq", "ne")
 asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
 comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
@@ -1023,6 +1021,19 @@ def gen_pyi(
 
     tensor_method_hints = []
     for name, hints in sorted(unsorted_tensor_method_hints.items()):
+        if (
+            name.startswith("__")
+            and name.endswith("__")
+            and name.strip("_") in inplace_binary_ops
+        ) or (
+            not name.startswith("_") and not name.endswith("__") and name.endswith("_")
+        ):
+            # _TensorBase.__iadd__() etc and _TensorBase.idd_() etc should return self
+            # TODO `self: Self` is not needed when PEP-673 Self is supported
+            hints = [
+                h.replace("self", "self: Self", 1).replace("-> Tensor", "-> Self")
+                for h in hints
+            ]
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
         tensor_method_hints += hints
