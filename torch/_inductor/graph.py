@@ -492,10 +492,7 @@ class GraphLowering(torch.fx.Interpreter):
         # symbolic shapes.
         if (
             config.static_weight_shapes
-            and (
-                len(self.graph_inputs) < self.num_static_inputs
-                or not dynamo_config.dynamic_shapes
-            )
+            and len(self.graph_inputs) < self.num_static_inputs
             and not example._has_symbolic_sizes_strides
         ):
             # the first N inputs are weights
