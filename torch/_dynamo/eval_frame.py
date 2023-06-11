@@ -988,10 +988,10 @@ def export(
     remove_from_cache(f)
 
     if (
-        shape_env := getattr(fake_mode, "shape_env", None)
-    ) is not None and not skipfiles.check(inspect.getsourcefile(call_to_inspect)):
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
+        (shape_env := getattr(fake_mode, "shape_env", None)) is not None
+        and (dim_constraints := shape_env.dim_constraints) is not None
+        and not skipfiles.check(inspect.getsourcefile(call_to_inspect))
+    ):
         dim_constraints.solve()
         msg = dim_constraints.prettify_results(original_signature)
         forced_specializations = dim_constraints.forced_specializations()
