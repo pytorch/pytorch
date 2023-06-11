@@ -55,9 +55,9 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
     // all blocks processed so far.
     for (int block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
       // Load data into shared memory (two values per thread).
+      int col1 = block_col + threadIdx.x;
+      int col2 = block_col + num_threads_x + threadIdx.x;
       if (row < num_rows) {
-        int col1 = block_col + threadIdx.x;
-        int col2 = block_col + num_threads_x + threadIdx.x;
         if (col1 < row_size) {
           row_buf[threadIdx.x] = c10::load(&row_self[col1]);
           row_idx_buf[threadIdx.x] = col1;
@@ -78,19 +78,23 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
         if (threadIdx.x == 0) {
           binary_op_update(block_total, row_buf[0], block_idx_final, row_idx_buf[0], binary_op);
         }
-        __syncthreads();
+      }
+      __syncthreads();
 
-        // Parallel reduction with Sklansky method. The diagram can be seen on this paper:
-        // https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
-        for (uint32_t s = 1; s <= num_threads_x; s <<= 1) {
+      // Parallel reduction with Sklansky method. The diagram can be seen on this paper:
+      // https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
+      for (uint32_t s = 1; s <= num_threads_x; s <<= 1) {
+        if (row < num_rows) {
           uint32_t a = (threadIdx.x / s) * (2 * s) + s;
           uint32_t ti = a + (threadIdx.x % s);
           uint32_t si = a - 1;
           binary_op_update(row_buf[si], row_buf[ti], row_idx_buf[si], row_idx_buf[ti], binary_op);
-          __syncthreads();
         }
+        __syncthreads();
+      }
 
-        // Write back to output.
+      // Write back to output.
+      if (row < num_rows) {
         if (col1 < row_size){
           row_values[col1] = row_buf[threadIdx.x];
           row_indices[col1] = row_idx_buf[threadIdx.x];
@@ -277,9 +281,9 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
     // all blocks processed so far.
     for (uint32_t block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
       // Load data into shared memory (two values per thread).
+      uint32_t col1 = block_col + threadIdx.x;
+      uint32_t col2 = block_col + num_threads_x + threadIdx.x;
       if (row < num_rows) {
-        uint32_t col1 = block_col + threadIdx.x;
-        uint32_t col2 = block_col + num_threads_x + threadIdx.x;
         if (col1 < row_size) {
           row_buf[threadIdx.x] = row_src[col1];
         } else {
@@ -296,19 +300,23 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
         if (threadIdx.x == 0) {
           row_buf[0] = binary_op(row_buf[0], block_total);
         }
-        __syncthreads();
+      }
+      __syncthreads();
 
-        // Parallel reduction with Sklansky method. The diagram can be seen on this paper:
-        // https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
-        for (uint32_t s = 1; s <= num_threads_x; s <<= 1) {
+      // Parallel reduction with Sklansky method. The diagram can be seen on this paper:
+      // https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
+      for (uint32_t s = 1; s <= num_threads_x; s <<= 1) {
+        if (row < num_rows) {
           uint32_t a = (threadIdx.x / s) * (2 * s) + s;
           uint32_t ti = a + (threadIdx.x % s);
           uint32_t si = a - 1;
           row_buf[ti] = binary_op(row_buf[ti], row_buf[si]);
-          __syncthreads();
         }
+        __syncthreads();
+      }
 
-        // Write back to output.
+      // Write back to output.
+      if (row < num_rows) {
         if (col1 < row_size) row_tgt[col1] = row_buf[threadIdx.x];
         if (col2 < row_size) row_tgt[col2] = row_buf[num_threads_x + threadIdx.x];
       }
