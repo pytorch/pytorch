@@ -36,7 +36,7 @@ class FakeTensorProp(torch.fx.Interpreter):
             if isinstance(obj, FakeTensor):
                 return snapshot_fake(obj)
             elif isinstance(obj, torch.Tensor):
-                return snapshot_fake(self._mode.from_tensor(obj))
+                assert False, "should be run under fake tensor mode"
             elif isinstance(obj, py_sym_types):
                 return obj
             else:
