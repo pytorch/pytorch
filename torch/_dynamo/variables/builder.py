@@ -200,7 +200,20 @@ class VariableBuilder:
         if value in self.tx.output.side_effects:
             # TODO(jansel): add guard for alias relationship
             return self.tx.output.side_effects[value]
-        return self._wrap(value).clone(**self.options())
+        vt = self._wrap(value).clone(**self.options())
+        # TODO - this can't land like this, it's time to refactor sources into a proper tree
+        # so we can call something like self.source.is_from_local_source()
+        if isinstance(self.source, LocalSource) or (
+            isinstance(self.source, GetItemSource)
+            and isinstance(self.source.base, LocalSource)
+        ):
+            # For local source, we associate the real value. We use this real value
+            # for implementing getattr fallthrough on the variable tracker base class.
+            vt.associate(value)
+            vt = self.tx.output.side_effects.track_object_existing(
+                self.source, value, vt
+            )
+        return vt
 
     @staticmethod
     @functools.lru_cache(None)

@@ -163,6 +163,12 @@ class VariableTracker(metaclass=HasPostInit):
         """
         return self
 
+    def associate(self, real_value):
+        self.real_value = real_value
+
+    def _input_associated_real_value(self):
+        return self.real_value
+
     def can_make_guard(self):
         try:
             self.make_guard(None)
@@ -185,9 +191,33 @@ class VariableTracker(metaclass=HasPostInit):
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError()
 
+    def dynamic_getattr(self, tx, name):
+        if not self.source:
+            raise NotImplementedError()
+
+        _input_associated_real_value = self._input_associated_real_value()
+        if _input_associated_real_value is None:
+            raise NotImplementedError()
+
+        from .builder import VariableBuilder
+
+        real_value = getattr(self._input_associated_real_value(), name)
+        return VariableBuilder(tx, AttrSource(self.source, name))(real_value)
+
+    def dynamic_setattr(self, tx, name):
+        if not self.source:
+            raise NotImplementedError()
+
+        _input_associated_real_value = self._input_associated_real_value()
+        if not _input_associated_real_value:
+            raise NotImplementedError()
+
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)
+        value = self.dynamic_getattr(tx, name)
+        if value:
+            return value
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError()
@@ -258,6 +288,7 @@ class VariableTracker(metaclass=HasPostInit):
         source: Source = None,
         mutable_local: MutableLocal = None,
         recursively_contains: Optional[Set] = None,
+        real_value=None,
     ):
         super().__init__()
         self.guards = guards or set()
@@ -266,6 +297,7 @@ class VariableTracker(metaclass=HasPostInit):
         self.recursively_contains = (
             recursively_contains  # provides hint to replace_all when replacing vars
         )
+        self.real_value = real_value
 
     def __post_init__(self, *args, **kwargs):
         if self.recursively_contains is None:
