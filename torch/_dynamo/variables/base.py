@@ -204,14 +204,6 @@ class VariableTracker(metaclass=HasPostInit):
         real_value = getattr(self._input_associated_real_value(), name)
         return VariableBuilder(tx, AttrSource(self.source, name))(real_value)
 
-    def dynamic_setattr(self, tx, name):
-        if not self.source:
-            raise NotImplementedError()
-
-        _input_associated_real_value = self._input_associated_real_value()
-        if not _input_associated_real_value:
-            raise NotImplementedError()
-
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)

@@ -243,3 +243,41 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         # call_function  mul_4    <built-in function mul>  (l_x_2_y, mul_2)   {}
         # call_function  mul_5    <built-in function mul>  (l_x_2_z, mul_3)   {}
         # output         output   output                   ((mul_4, mul_5),)  {}
+
+    def test_complex_attr_access_with_inline_reconstruct(self):
+        def inline_test_fn(x, y, z):
+            print("f")
+            return x.a + y.a + z.a
+
+        def fn(x, y, z):
+            x.a = 1
+            y.a = 2
+            z.a = 3
+
+            mult = inline_test_fn(x, y, z)
+            y = y * mult
+            x = x * mult
+            return x, y
+
+        x = torch.randn([2, 2])
+        y = torch.randn([2, 2])
+        z = torch.randn([2, 2])
+
+        eager_result = fn(x, y, z)
+
+        counter = CompileCounter()
+
+        fn = torch._dynamo.optimize(counter, nopython=False)(fn)
+
+        compile_result = fn(x, y, z)
+        self.assertEqual(compile_result, eager_result)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 2)
+        # Graph for reference
+        # __compiled_fn_2 <eval_with_key>.0 opcode         name    target                   args             kwargs
+        # -------------  ------  -----------------------  ---------------  --------
+        # placeholder    l_x_    L_x_                     ()               {}
+        # placeholder    l_y_    L_y_                     ()               {}
+        # call_function  mul     <built-in function mul>  (l_y_, 6)        {}
+        # call_function  mul_1   <built-in function mul>  (l_x_, 6)        {}
+        # output         output  output                   ((mul_1, mul),)  {}
