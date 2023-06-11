@@ -1338,6 +1338,11 @@ def _automatic_dynamic(e, tx, name, static_shapes):
                     constraint.shared.dim, constraint.constraint_range
                 )
 
+    if config.automatic_dynamic_shapes:
+        assert config.dynamic_shapes
+    if not config.assume_static_by_default:
+        assert config.dynamic_shapes
+
     dynamic_dims = None
     constraint_dims = None
     if tx.fake_mode.shape_env is not None:
