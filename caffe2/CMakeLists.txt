@@ -824,6 +824,22 @@ if(BUILD_CAFFE2 AND NOT MSVC)
   target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
 endif()
 
+target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
+target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
+set(ignored_files "${CMAKE_CURRENT_SOURCE_DIR}/utils/proto_wrap.cc")
+foreach(generated_file IN LISTS GENERATED_CXX_TORCH ignored_files)
+  message(WARNING "set property for ${generated_file}")
+  set_source_files_properties(${generated_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+endforeach()
+foreach(source_file IN LISTS Caffe2_CPU_SRCS)
+  string(FIND "${source_file}" "${CMAKE_BINARY_DIR}" res)
+  if(res GREATER -1)
+    message(WARNING "set property for ${source_file} in ${CMAKE_BINARY_DIR}")
+    set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+  endif()
+endforeach()
+set_property(DIRECTORY "${CMAKE_BINARY_DIR}" PROPERTY COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
+
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
 
