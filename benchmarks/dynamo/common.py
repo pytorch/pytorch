@@ -1226,6 +1226,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def failing_torchinductor_models(self):
+        return set()
+
+    @property
     def failing_fx2trt_models(self):
         return set()
 
