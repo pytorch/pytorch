@@ -1336,51 +1336,49 @@ def _automatic_dynamic(e, tx, name, static_shapes):
                     constraint.shared.dim, constraint.constraint_range
                 )
 
-    dynamic_dims = None
-    constraint_dims = None
-    if tx.fake_mode.shape_env is not None:
-        dynamic_dims = []
-        constraint_dims = []
-        for i in range(e.dim()):
-            # NB: mark dynamic has precedence over static
-            marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
-            marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
-            marked_static = i in getattr(e, "_dynamo_static_indices", set())
+    dynamic_dims = []
+    constraint_dims = []
+    for i in range(e.dim()):
+        # NB: mark dynamic has precedence over static
+        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+        marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
+        marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
-            # NB: both static and dynamic have precedence over
-            automatic_dynamic = config.automatic_dynamic_shapes and (
-                frame_state_entry.size is None or frame_state_entry.size[i] is None
-            )
+        # NB: both static and dynamic have precedence over
+        automatic_dynamic = config.automatic_dynamic_shapes and (
+            frame_state_entry.size is None or frame_state_entry.size[i] is None
+        )
 
-            # Reflect the user directive in the frame_state
-            # For dynamic, apply None always
-            if frame_state_entry.size and marked_dynamic:
-                frame_state_entry.size[i] = None
+        # Reflect the user directive in the frame_state
+        # For dynamic, apply None always
+        if frame_state_entry.size and marked_dynamic:
+            frame_state_entry.size[i] = None
 
-            # We will process constraints first, as they will imply that we
-            # have a dynamic dimension
-            # Precedence: export constraints > eager constraints
-            constraint = dim2constraint.get(i)
-            if constraint is None:
-                if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                    constraint = RelaxedUnspecConstraint(warn_only=False)
-                elif not marked_static and automatic_dynamic:
-                    constraint = RelaxedUnspecConstraint(warn_only=True)
-            constraint_dims.append(constraint)
+        # We will process constraints first, as they will imply that we
+        # have a dynamic dimension
+        # Precedence: export constraints > eager constraints
+        constraint = dim2constraint.get(i)
+        if constraint is None:
+            if marked_dynamic and not config.allow_ignore_mark_dynamic:
+                constraint = RelaxedUnspecConstraint(warn_only=False)
+            elif not marked_static and automatic_dynamic:
+                constraint = RelaxedUnspecConstraint(warn_only=True)
+        constraint_dims.append(constraint)
 
-            # Now, figure out if the dim is dynamic/duck/static
-            if constraint is not None or marked_dynamic or marked_weak_dynamic:
-                # NB: We could assert static_shapes is False here, but it
-                # seems better to allow the user to override policy in this
-                # case
-                dynamic = DimDynamic.DYNAMIC
-            elif static_shapes or config.assume_static_by_default or marked_static:
-                dynamic = DimDynamic.STATIC
-            else:
-                dynamic = DimDynamic.DUCK
-            dynamic_dims.append(dynamic)
+        # Now, figure out if the dim is dynamic/duck/static
+        if constraint is not None or marked_dynamic or marked_weak_dynamic:
+            # NB: We could assert static_shapes is False here, but it
+            # seems better to allow the user to override policy in this
+            # case
+            dynamic = DimDynamic.DYNAMIC
+        elif static_shapes or config.assume_static_by_default or marked_static:
+            dynamic = DimDynamic.STATIC
+        else:
+            dynamic = DimDynamic.DUCK
 
-        tx.output.frame_state[name] = frame_state_entry
+        dynamic_dims.append(dynamic)
+
+    tx.output.frame_state[name] = frame_state_entry
 
     return dynamic_dims, constraint_dims
 
