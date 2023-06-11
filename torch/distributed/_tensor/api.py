@@ -52,7 +52,7 @@ class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input: "DTensor"):  # type: ignore[override]
         ctx.dtensor_spec = input._spec
-        return input._local_tensor.detach()
+        return input._local_tensor
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
@@ -198,7 +198,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # detach local tensor from autograd graph as we initialize the
         # distributed tensor and autograd will be working on top of
         # the wrapper tensor directly instead of local torch.Tensor
-        r._local_tensor = local_tensor.detach()
+        r._local_tensor = local_tensor
         return r
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
