@@ -15,6 +15,11 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
+def count_ops(gm, args, freq, op):
+    assert [node.target for node in gm.graph.nodes].count(op) == freq
+    return gm
+
+
 class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
