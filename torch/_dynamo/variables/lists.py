@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 import torch
 import torch.fx
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
