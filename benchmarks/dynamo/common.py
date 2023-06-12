@@ -2366,7 +2366,12 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
             # See https://github.com/pytorch/pytorch/issues/102814
-            torch._dynamo.config.assume_static_by_default = False
+            if torch._dynamo.config.dynamic_shapes:
+                torch._dynamo.config.assume_static_by_default = False
+            if not torch._dynamo.config.automatic_dynamic_shapes:
+                log.warning(
+                    "hf_T5_generate compiles extremely slowly without dynamic shapes; consider lowering cache_size_limit"
+                )
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
