@@ -75,7 +75,7 @@ DLDataType getDLDataType(const Tensor& t) {
   return dtype;
 }
 
-DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
+static DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
   DLDevice ctx;
   ctx.device_id = device_id;
   switch (tensor.device().type()) {

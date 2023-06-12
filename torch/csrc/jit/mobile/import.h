@@ -23,7 +23,8 @@ constexpr const char* kArchiveNameVersion = "version";
 TORCH_API mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
-    ExtraFilesMap& extra_files);
+    ExtraFilesMap& extra_file,
+    uint64_t module_load_options = kDefaultMobileLoadOptions);
 
 TORCH_API mobile::Module _load_for_mobile(
     const std::string& filename,
