@@ -666,7 +666,7 @@ class ParameterList(Module):
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
-                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                device_str = '' if p.device.type == "cpu" else ' ({})'.format(p.device())
                 parastr = '{} containing: [{} of size {}{}]'.format(
                     "Parameter" if isinstance(p, Parameter) else "Tensor",
                     p.dtype, size_str, device_str)
@@ -890,7 +890,7 @@ class ParameterDict(Module):
         for k, p in self.items():
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
-                device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+                device_str = '' if p.device.type == "cpu" else ' ({})'.format(p.device())
                 parastr = '{} containing: [{} of size {}{}]'.format(
                     "Parameter" if isinstance(p, Parameter) else "Tensor",
                     torch.typename(p), size_str, device_str)
