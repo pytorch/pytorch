@@ -4,6 +4,7 @@
 #include <exception>
 #include <mutex>
 #include <ATen/CachedTensorUtils.h>
+#include <c10/util/flat_hash_map.h>
 
 namespace at {
 namespace autocast {
@@ -195,7 +196,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
 Banned functions
 *******************************/
 
-Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t) {
+static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t) {
   AT_ERROR("torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
            "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
            "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"

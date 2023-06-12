@@ -431,7 +431,7 @@ def _replace_observer_with_quantize_dequantize_node(
 # TODO: DeQuantStubs are currently inserted only after custom module LSTM, while observers are inserted
 # after all other custom modules. In the future, we should simply insert QuantStubs before and DeQuantStubs
 # after custom modules in general, and replace these with "quantize" and "dequantize" nodes respectively.
-def _replace_observer_or_dequant_stub_with_dequantize_node(node: Node, graph: Graph):
+def _replace_observer_or_dequant_stub_with_dequantize_node(node: Node, graph: Graph) -> None:
     call_custom_module_node = node.args[0]
     assert isinstance(call_custom_module_node, Node), \
         f"Expecting the for call custom module node to be a Node, but got {call_custom_module_node}"
@@ -479,7 +479,7 @@ def _run_weight_observers(observed: GraphModule, backend_config: BackendConfig) 
                 # run the weight observer
                 weight_observer_module()
 
-def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph):
+def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> None:
     """ If the arg is a dequantize Node, or a list/tuple/dict of dequantize Node,
     we'll recursively remove the dequantize Node
     """
@@ -502,7 +502,7 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph):
 def _get_module_path_and_prefix(
         obs_node: Node,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        node_name_to_qconfig: Dict[str, QConfigAny]):
+        node_name_to_qconfig: Dict[str, QConfigAny]) -> Tuple[str, str]:
     """ Given and observer node, get the `Scope` or the fully qualified name for
     the submodule containing the observed node, also return a prefix of "_input"
     when the observed node is an input of a F.linear op, and not the output of another
@@ -549,7 +549,7 @@ def _get_module_path_and_prefix(
 
 def _insert_dequantize_node(
         node: Node,
-        graph: Graph):
+        graph: Graph) -> None:
     """ Inserts dequantize node for `node` in `graph`
     """
     with graph.inserting_after(node):
@@ -578,7 +578,7 @@ def convert_standalone_module(
         modules: Dict[str, torch.nn.Module],
         model: torch.fx.GraphModule,
         is_reference: bool,
-        backend_config: Optional[BackendConfig]):
+        backend_config: Optional[BackendConfig]) -> None:
     """ Converts a observed standalone module to a quantized standalone module by calling
     the fx convert api, currently using the same `is_reference` flag as parent, but we may
     changing this behavior in the future (e.g. separating quantization and lowering for
@@ -641,7 +641,7 @@ def convert_weighted_module(
         observed_node_names: Set[str],
         node_name_to_qconfig: Dict[str, QConfigAny],
         backend_config: BackendConfig,
-        is_decomposed: bool = False):
+        is_decomposed: bool = False) -> None:
     """ Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
     a float module.
@@ -746,7 +746,7 @@ def convert_weighted_module(
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name, ref_qmodule)
 
-def _remove_previous_dequantize_in_custom_module(node: Node, prev_node: Node, graph: Graph):
+def _remove_previous_dequantize_in_custom_module(node: Node, prev_node: Node, graph: Graph) -> None:
     """
     Given a custom module `node`, if the previous node is a dequantize, reroute the custom as follows:
 
@@ -768,7 +768,7 @@ def convert_custom_module(
         graph: Graph,
         modules: Dict[str, torch.nn.Module],
         custom_module_class_mapping: Dict[QuantType, Dict[Type, Type]],
-        statically_quantized_custom_module_nodes: Set[Node]):
+        statically_quantized_custom_module_nodes: Set[Node]) -> None:
     """ Converts an observed custom module to a quantized custom module based on
     `custom_module_class_mapping`
     For static quantization, we'll also remove the previous `dequantize` node and
@@ -853,7 +853,7 @@ def convert(
         _remove_qconfig_flag: bool = True,
         qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
         backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
-        is_decomposed: bool = False) -> torch.nn.Module:
+        is_decomposed: bool = False) -> GraphModule:
     """
     We will convert an observed model (a module with observer calls) to a reference
     quantized model, the rule is simple:

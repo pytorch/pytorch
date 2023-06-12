@@ -1,20 +1,19 @@
 import collections
 import functools
 import warnings
+from functools import partial
 from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
 
 import torch
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
-from torch.distributed.fsdp._utils import (
-    _contains_batchnorm,
-    _override_batchnorm_mixed_precision,
-)
+from torch.distributed.fsdp._utils import _override_module_mixed_precision
+
 from torch.distributed.fsdp.wrap import (
     _FSDPPolicy,
     _or_policy,
     _recursive_wrap,
-    _wrap_batchnorm_individually,
+    _wrap_module_cls_individually,
 )
 
 
@@ -57,10 +56,21 @@ def _auto_wrap(
                 "if using an `auto_wrap_policy`"
             )
     mixed_precision = fsdp_kwargs["mixed_precision"]
-    if mixed_precision is not None and _contains_batchnorm(root_module):
-        _override_batchnorm_mixed_precision(root_module)
+    if mixed_precision is not None:
+        for mp_module_to_override in mixed_precision._module_classes_to_ignore:
+            # Make modules of this particular type run in fp32 by wrapping them in their own
+            # FSDP unit.
+            _override_module_mixed_precision(root_module, mp_module_to_override)
+
         auto_wrap_policy = functools.partial(
-            _or_policy, policies=[_wrap_batchnorm_individually, auto_wrap_policy]
+            _or_policy,
+            policies=[
+                auto_wrap_policy,
+                partial(
+                    _wrap_module_cls_individually,
+                    module_classes=mixed_precision._module_classes_to_ignore,
+                ),
+            ],
         )
         warnings.warn(
             "Both mixed precision and an `auto_wrap_policy` were specified "

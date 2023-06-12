@@ -14,6 +14,9 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
 )
+from torch.testing._internal.custom_op_db import custom_op_db
+from torch.testing._internal.common_device_type import ops
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
@@ -26,6 +29,7 @@ import copy
 import torch._functorch.config
 from unittest.mock import patch
 
+from torch import distributed as dist
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
@@ -35,6 +39,16 @@ class FakeTensorTest(TestCase):
         self.assertTrue(isinstance(t, FakeTensor))
         self.assertEqual(t.device.type, device_str)
         self.assertEqual(list(t.size()), size)
+
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_initialized(self):
+        # doesnt error
+        with FakeTensorMode():
+            p = torch.randn(4, 2, requires_grad=True, device='cuda')
+            x = torch.randn(8, 4, device='cuda')
+            y = torch.mm(x, p).square().sum()
+            y.backward()
 
     def test_basic(self):
         x = torch.empty(2, 2, device="cpu")
@@ -63,6 +77,16 @@ class FakeTensorTest(TestCase):
             x = torch.rand([4])
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
+
+    @unittest.skipIf(not dist.is_available(), "requires distributed")
+    def test_fsdp_flat_param(self):
+        from torch.distributed.fsdp.flat_param import FlatParameter
+        with FakeTensorMode() as m:
+            data = torch.randn(2, 2)
+            param = FlatParameter(data, requires_grad=True)
+        self.assertIsInstance(param, FlatParameter)
+        self.assertIsInstance(param, torch.nn.Parameter)
+        self.assertIsInstance(param, FakeTensor)
 
     def test_non_parameter_grad(self):
         mode = FakeTensorMode()
@@ -285,6 +309,19 @@ class FakeTensorTest(TestCase):
             out = torch.nn.functional.conv2d(inputs, filters, padding=1)
             self.assertEqual(out.device.type, "cuda")
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_out_multi_device(self):
+        with FakeTensorMode():
+            x = torch.rand([4])
+            y = torch.rand([4], device="cuda")
+
+            with self.assertRaisesRegex(Exception, "found two different devices"):
+                torch.sin(x, out=y)
+
+            with self.assertRaisesRegex(Exception, "found two different devices"):
+                x.add_(y)
+
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_normalize_device(self):
@@ -642,6 +679,26 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     )
 
 
+class FakeTensorOpInfoTest(TestCase):
+    @ops(custom_op_db, dtypes=OpDTypes.any_one)
+    def test_fake(self, device, dtype, op):
+        data_dependent_outputs = {
+            'NumpyNMSCustomOp',
+            'NumpyNonzeroCustomOp',
+        }
+
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in sample_inputs_itr:
+            args = (sample_input.input,) + sample_input.args
+            kwargs = sample_input.kwargs
+        with torch._subclasses.CrossRefFakeMode():
+            try:
+                op(*args, **kwargs)
+            except DynamicOutputShapeException:
+                if op.name not in data_dependent_outputs:
+                    raise
+
+
 class FakeTensorConverterTest(TestCase):
     def test_memoized_conversion_to_meta(self):
         x = torch.rand(2, 2, 2)
@@ -994,6 +1051,9 @@ class FakeTensorPropTest(TestCase):
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
 instantiate_parametrized_tests(FakeTensorTest)
+
+only_for = ("cpu", "cuda")
+instantiate_device_type_tests(FakeTensorOpInfoTest, globals(), only_for=only_for)
 
 if __name__ == "__main__":
     run_tests()

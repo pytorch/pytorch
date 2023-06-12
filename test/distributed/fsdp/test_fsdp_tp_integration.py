@@ -16,8 +16,8 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.tensor.parallel import (
     PairwiseParallel,
-    PairwiseSequenceParallel,
     parallelize_module,
+    SequenceParallel,
 )
 from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -253,7 +253,7 @@ class TestTPFSDPIntegration(FSDPTest):
         )
         # Shard with TP and then wrap with FSDP
         tp_fsdp_model = parallelize_module(
-            tp_fsdp_model, mesh_2d, PairwiseSequenceParallel(), tp_mesh_dim=1
+            tp_fsdp_model, mesh_2d, SequenceParallel(), tp_mesh_dim=1
         )
         assert isinstance(tp_fsdp_model.net1.weight, DT)
         assert isinstance(tp_fsdp_model.net2.weight, DT)
