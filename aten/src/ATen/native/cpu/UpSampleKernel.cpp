@@ -1287,6 +1287,25 @@ struct HelperInterpCubic : public HelperInterpBase {
 #undef a
   }
 
+  template<typename scalar_t>
+  static inline scalar_t aa_filter_075(scalar_t x) {
+    // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+    // In this code we are using alternative a=-0.75 definition that matches
+    // get_cubic_upsample_coefficients implementation, as used by float path
+    // TODO: merge both implementations, the only difference is the value of a.
+    constexpr scalar_t a = -0.75;
+    if (x < 0.0) {
+      x = -x;
+    }
+    if (x < 1.0) {
+      return cubic_convolution1(x, a);
+    }
+    if (x < 2.0) {
+      return cubic_convolution2(x, a);
+    }
+    return 0.0;
+  }
+
   static inline std::vector<Tensor> compute_indices_weights_aa(
     at::ScalarType scalar_type,
     int64_t input_size,
@@ -1340,7 +1359,9 @@ struct HelperInterpCubic : public HelperInterpBase {
   ) {
 
     auto interp_size = HelperInterpCubic::interp_size;
-    auto fn = HelperInterpCubic::aa_filter<double>;
+    // We have to use the -0.75 constant when aa is False so that this uint8
+    // path is as close as possible to float results.
+    auto fn = antialias ? HelperInterpCubic::aa_filter<double> : HelperInterpCubic::aa_filter_075<double>;
     return HelperInterpCubic::_compute_indices_int16_weights_aa(
         input_size, output_size, stride, ndims, reshape_dim,
         align_corners, opt_scale, interp_size, fn, antialias, align_i32);
