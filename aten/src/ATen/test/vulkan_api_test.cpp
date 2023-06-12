@@ -3343,6 +3343,41 @@ TEST_F(VulkanAPITest, sub_to_scalar_wrapped) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, uniform) {
+  float a_min = -8.2f;
+  float a_max = -1.4f;
+
+  auto a_vulkan =
+      at::rand({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  a_vulkan.uniform_(a_min, a_max);
+  auto a_cpu = a_vulkan.cpu();
+
+  ASSERT_TRUE(a_cpu.max().item<float>() < a_max);
+  ASSERT_TRUE(a_cpu.min().item<float>() >= a_min);
+
+  // Verify range, also perform a loose check with on histogram distribution.
+  float b_min = 0.0f;
+  float b_max = 10.0f;
+
+  auto b_vulkan =
+      at::rand({80, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat))
+          .vulkan();
+  b_vulkan.uniform_(b_min, b_max);
+  auto b_cpu = b_vulkan.cpu();
+
+  int bins = 10;
+  auto b_hist_tuple = at::histogram(b_cpu, bins);
+
+  int64_t expected_per_bin = b_vulkan.numel() / bins;
+  auto b_hist = std::get<0>(b_hist_tuple);
+
+  // Very relaxed definition of uniform. Pass if all bins are within 5% of
+  // expected.
+  ASSERT_TRUE(
+      (b_hist - expected_per_bin).abs().max().item<float>() <=
+      (expected_per_bin * 0.05));
+}
+
 void test_unsqueeze(const at::IntArrayRef input_shape, int64_t dim) {
   at::TensorOptions options(at::kCPU);
   options = options.dtype(at::kFloat);

@@ -39,17 +39,30 @@ runs:
       env:
         IS_XLA: ${{ inputs.xla == 'true' && 'true' || '' }}
         XLA_IMAGE_TAG: v1.0
-        DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}
+        DOCKER_IMAGE_NAME: ${{ inputs.docker-image-name }}
       run: |
-        if [ -n "${IS_XLA}" ]; then
-          echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
-          DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
+        set -x
+        DOCKER_IMAGE_ECR_PREFIX="308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch"
+
+        if [[ "${DOCKER_IMAGE_NAME}" == *"${DOCKER_IMAGE_ECR_PREFIX}"* ]]; then
+          # The docker image name already includes the ECR prefix and tag, so we can just
+          # use it as it is, but first let's extract the tag
+          DOCKER_TAG=$(echo "${DOCKER_IMAGE_NAME}" | awk -F '[:,]' '{print $2}')
           echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
-          echo "docker-image=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "docker-image=${DOCKER_IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
         else
-          DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
-          echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
-          echo "docker-image=${DOCKER_IMAGE_BASE}:${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+          DOCKER_IMAGE_BASE="${DOCKER_IMAGE_ECR_PREFIX}/${DOCKER_IMAGE_NAME}"
+
+          if [ -n "${IS_XLA}" ]; then
+            echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
+            DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
+            echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+            echo "docker-image=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+          else
+            DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
+            echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+            echo "docker-image=${DOCKER_IMAGE_BASE}:${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
+          fi
         fi
 
     - name: Check if image should be built
