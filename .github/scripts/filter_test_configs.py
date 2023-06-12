@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import warnings
-from typing import Any, Dict, List, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.request import Request, urlopen
 
 import yaml
@@ -40,10 +40,20 @@ VALID_TEST_CONFIG_LABELS = {
     }
 }
 
-# Supported modes when running periodically
-SUPPORTED_PERIODICAL_MODES = {
-    "mem_leak_check",
-    "rerun_disabled_tests",
+
+def is_cuda_or_rocm_job(job_name: Optional[str]) -> bool:
+    if not job_name:
+        return False
+
+    return "cuda" in job_name or "rocm" in job_name
+
+
+# Supported modes when running periodically. Only applying the mode when
+# its lambda condition returns true
+SUPPORTED_PERIODICAL_MODES: Dict[str, Callable[[Optional[str]], bool]] = {
+    # Memory leak check is only needed for CUDA and ROCm jobs which utilize GPU memory
+    "mem_leak_check": is_cuda_or_rocm_job,
+    "rerun_disabled_tests": lambda job_name: True,
 }
 
 # The link to the published list of disabled jobs
@@ -54,6 +64,7 @@ BUILD_JOB_NAME = "build"
 TEST_JOB_NAME = "test"
 BUILD_AND_TEST_JOB_NAME = "build-and-test"
 JOB_NAME_CFG_REGEX = re.compile(r"(?P<job>[\w-]+)\s+\((?P<cfg>[\w-]+)\)")
+EXCLUDED_BRANCHES = ["nightly"]
 
 
 def parse_args() -> Any:
@@ -81,7 +92,15 @@ def parse_args() -> Any:
         help="name of the event that triggered the job (pull, schedule, etc)",
     )
     parser.add_argument(
-        "--schedule", type=str, help="cron schedule that triggered the job"
+        "--schedule",
+        type=str,
+        help="cron schedule that triggered the job",
+    )
+    parser.add_argument(
+        "--branch",
+        type=str,
+        default="main",
+        help="the branch name",
     )
     return parser.parse_args()
 
@@ -150,7 +169,9 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         return filtered_test_matrix
 
 
-def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+def set_periodic_modes(
+    test_matrix: Dict[str, List[Any]], job_name: Optional[str]
+) -> Dict[str, List[Any]]:
     """
     Apply all periodic modes when running under a schedule
     """
@@ -159,7 +180,10 @@ def set_periodic_modes(test_matrix: Dict[str, List[Any]]) -> Dict[str, List[Any]
     }
 
     for config in test_matrix.get("include", []):
-        for mode in SUPPORTED_PERIODICAL_MODES:
+        for mode, cond in SUPPORTED_PERIODICAL_MODES.items():
+            if not cond(job_name):
+                continue
+
             cfg = config.copy()
             cfg[mode] = mode
             scheduled_test_matrix["include"].append(cfg)
@@ -214,8 +238,24 @@ def remove_disabled_jobs(
             disabled_job_cfg,
         ) = record
 
-        if disabled_workflow != workflow or disabled_platform != current_platform:
-            # The current workflow or platform is not disabled by this record
+        if disabled_workflow != workflow:
+            # The current workflow is not disabled by this record
+            continue
+
+        cleanup_regex = rf"(-{BUILD_JOB_NAME}|-{TEST_JOB_NAME})$"
+        # There is an exception here for binary build workflows in which the platform
+        # names have the build and test suffix. For example, we have a build job called
+        # manywheel-py3-cuda11_8-build / build and its subsequent test job called
+        # manywheel-py3-cuda11_8-test / test. So they are linked, but their suffixes
+        # are different
+        disabled_platform_no_suffix = re.sub(cleanup_regex, "", disabled_platform)
+        current_platform_no_suffix = re.sub(cleanup_regex, "", current_platform)
+
+        if (
+            disabled_platform != current_platform
+            and disabled_platform_no_suffix != current_platform_no_suffix
+        ):
+            # The current platform is not disabled by this record
             continue
 
         # The logic after this is fairly complicated:
@@ -250,10 +290,7 @@ def remove_disabled_jobs(
             )
             return filtered_test_matrix
 
-        if (
-            disabled_job_cfg == TEST_JOB_NAME
-            or disabled_job_cfg == BUILD_AND_TEST_JOB_NAME
-        ):
+        if disabled_job_cfg in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
             print(
                 f"Issue {disabled_url} created by {author} has disabled all the test jobs for {workflow} / {job_name}"
             )
@@ -263,7 +300,7 @@ def remove_disabled_jobs(
         if m:
             disabled_job = m.group("job")
             # Make sure that the job name is a valid test job name first before checking the config
-            if disabled_job == TEST_JOB_NAME or disabled_job == BUILD_AND_TEST_JOB_NAME:
+            if disabled_job in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
                 disabled_cfg = m.group("cfg")
                 # Remove the disabled config from the test matrix
                 filtered_test_matrix["include"] = [
@@ -350,11 +387,11 @@ def main() -> None:
         filtered_test_matrix = test_matrix
 
     if args.event_name == "schedule" and args.schedule == "29 8 * * *":
-        # we don't want to run the mem leack check or disabled tests on normal
+        # we don't want to run the mem leak check or disabled tests on normal
         # periodically scheduled jobs, only the ones at this time
-        filtered_test_matrix = set_periodic_modes(filtered_test_matrix)
+        filtered_test_matrix = set_periodic_modes(filtered_test_matrix, args.job_name)
 
-    if args.workflow and args.job_name:
+    if args.workflow and args.job_name and args.branch not in EXCLUDED_BRANCHES:
         # If both workflow and job name are available, we will check if the current job
         # is disabled and remove it and all its dependants from the test matrix
         filtered_test_matrix = remove_disabled_jobs(

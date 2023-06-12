@@ -135,7 +135,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
 
 }
 
-void sortUnion(std::vector<TypePtr>* types) {
+static void sortUnion(std::vector<TypePtr>* types) {
   // We want the elements to be sorted so we can easily compare two
   // UnionType objects for equality in the future. Note that this order
   // is guaranteed to be stable since we've already coalesced any

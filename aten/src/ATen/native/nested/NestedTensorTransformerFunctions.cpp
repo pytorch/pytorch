@@ -196,7 +196,7 @@ Tensor NestedTensor_batch_offsets_from_size_tensor(
     int64_t extra_elements) {
   int64_t* const sizes_ptr = sizes.data_ptr<int64_t>();
   Tensor offsets = at::empty({1 + sizes.size(0) + extra_elements}, at::kInt);
-  int32_t* const offsets_ptr = offsets.data_ptr<int32_t>();
+  int32_t* const offsets_ptr = offsets.mutable_data_ptr<int32_t>();
   offsets_ptr[0] = 0;
   const auto sizes_size_1 = sizes.size(1);
   const auto sizes_size_0 = sizes.size(0);
