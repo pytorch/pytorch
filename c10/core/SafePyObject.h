@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/impl/PyInterpreter.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/python_stub.h>
 
 namespace c10 {
@@ -29,7 +29,7 @@ struct C10_API SafePyObject {
   SafePyObject& operator=(SafePyObject const&) = delete;
 
   ~SafePyObject() {
-    (*pyinterpreter_)->decref(data_, /*is_tensor*/ false);
+    (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
   }
 
   c10::impl::PyInterpreter& pyinterpreter() const {

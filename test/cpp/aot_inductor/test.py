@@ -17,12 +17,12 @@ class Net(torch.nn.Module):
 x = torch.randn((32, 64), device="cuda")
 y = torch.randn((32, 64), device="cuda")
 
+for dynamic in [True, False]:
+    torch._dynamo.config.dynamic_shapes = dynamic
+    torch._dynamo.reset()
 
-with torch.no_grad():
-    from torch.fx.experimental.proxy_tensor import make_fx
-    # Using export is blocked by https://github.com/pytorch/pytorch/issues/99000
-    # module, _ = torch._dynamo.export(Net().cuda(), inp)
-    module = make_fx(Net().cuda())(x, y)
-    lib_path = torch._inductor.aot_compile(module, [x, y])
+    with torch.no_grad():
+        module, _ = torch._dynamo.export(Net().cuda(), x, y)
+        lib_path = torch._inductor.aot_compile(module, [x, y])
 
-shutil.copy(lib_path, "libaot_inductor_output.so")
+    shutil.copy(lib_path, f"libaot_inductor_output{'_dynamic' if dynamic else ''}.so")

@@ -334,7 +334,7 @@ an op named ``foo`` would look something like::
       ...
 
 The ``torch._C`` types are Python wrappers around the types defined in C++ in
-`ir.h <https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/ir/ir.h>`_.
+`ir.h <https://github.com/pytorch/pytorch/blob/main/torch/csrc/jit/ir/ir.h>`_.
 
 The process for adding a symbolic function depends on the type of operator.
 
@@ -359,7 +359,7 @@ Adding support for an aten or quantized operator
 If the operator is not in the list above:
 
 * Define the symbolic function in ``torch/onnx/symbolic_opset<version>.py``, for example
-  `torch/onnx/symbolic_opset9.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic_opset9.py>`_.
+  `torch/onnx/symbolic_opset9.py <https://github.com/pytorch/pytorch/blob/main/torch/onnx/symbolic_opset9.py>`_.
   Make sure the function has the same name as the ATen function, which may be declared in
   ``torch/_C/_VariableFunctions.pyi`` or ``torch/nn/functional.pyi`` (these files are generated at
   build time, so will not appear in your checkout until you build PyTorch).
@@ -456,7 +456,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 .. . ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
 .. shape and type inference for down-stream nodes. For a non-trivial example of ``setType``, see
 .. ``test_aten_embedding_2`` in
-.. `test_operators.py <https://github.com/pytorch/pytorch/blob/master/test/onnx/test_operators.py>`_.
+.. `test_operators.py <https://github.com/pytorch/pytorch/blob/main/test/onnx/test_operators.py>`_.
 
 .. The example below shows how you can access ``requires_grad`` via the ``Node`` object:
 

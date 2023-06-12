@@ -22,6 +22,7 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from torchgen import utils as torchgen_utils
+from torchgen.yaml_utils import YamlLoader
 
 _RULES_GENERATED_COMMENT = """\
 GENERATED CODE - DO NOT EDIT DIRECTLY
@@ -205,7 +206,7 @@ def gen_diagnostics(
     out_docs_dir: str,
 ) -> None:
     with open(rules_path, "r") as f:
-        rules = yaml.load(f, Loader=torchgen_utils.YamlLoader)
+        rules = yaml.load(f, Loader=YamlLoader)
 
     template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 

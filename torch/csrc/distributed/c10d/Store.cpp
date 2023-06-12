@@ -37,4 +37,23 @@ std::string Store::get_to_str(const std::string& key) {
   return std::string(value.begin(), value.end());
 }
 
+void Store::append(const std::string& key, const std::vector<uint8_t>& value) {
+  TORCH_CHECK(false, "Not implemented.");
+}
+
+std::vector<std::vector<uint8_t>> Store::multiGet(
+    const std::vector<std::string>& keys) {
+  TORCH_CHECK(false, "Not implemented.");
+}
+
+void Store::multiSet(
+    const std::vector<std::string>& keys,
+    const std::vector<std::vector<uint8_t>>& values) {
+  TORCH_CHECK(false, "Not implemented.");
+}
+
+bool Store::hasExtendedApi() const {
+  return false;
+}
+
 } // namespace c10d

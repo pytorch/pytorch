@@ -302,6 +302,8 @@ class _Reduce_Scatter(Function):
     @staticmethod
     def forward(ctx, op, group, tensor, *input_tensor_list):
         ctx.group = group
+        # Need contiguous tensors for collectives.
+        tensor = tensor.contiguous()
         input_tensor_list = tuple(t.contiguous() for t in input_tensor_list)
         dist.reduce_scatter(tensor, list(input_tensor_list), op=op, group=group)
         return tensor
