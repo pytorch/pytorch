@@ -9776,7 +9776,7 @@ class TestNNDeviceType(NNTestCase):
 
         output_f32 = F.interpolate(
             input_f32, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
-        )
+        ).round().clip(0, 255)
         output_ui8 = F.interpolate(
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
         )
@@ -9794,13 +9794,10 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
-        num_wrong_pixels_tol = 5
-
+        diff = (output_f32 - output_ui8.float()).abs()
         if mode == "bilinear":
-            mae_tol = 0.5
-            max_abs_err_tol = 1.0
-        else:  # Bicubic
-            # Note:
+            torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
+        else:
             # - tolerances for bicubic mode are in general higher than for
             #   bilinear mode, because the bicubic kernel may create
             #   [intermediate] values outside of the [0, 255] range, which need
@@ -9814,20 +9811,20 @@ class TestNNDeviceType(NNTestCase):
             #   in constants exists for historical reasons. Should both paths
             #   use the -0.5 constant, we would have closer results and we would
             #   be able to lower the tolerances.
-            if antialias:
-                mae_tol = 0.5
-                max_abs_err_tol = 50
-            else:
-                mae_tol = 0.65
-                max_abs_err_tol = 75
 
-        abs_diff = torch.abs(output_f32.round() - output_ui8.float())
-        mae = torch.mean(abs_diff)
-        max_abs_err = torch.max(abs_diff)
-        num_wrong_pixels = (abs_diff > max_abs_err_tol).sum()
-        self.assertTrue(mae < mae_tol, msg=f"mae={mae}")
-        self.assertTrue(max_abs_err < max_abs_err_tol + 1e-5, msg=f"max ae={max_abs_err}")
-        self.assertTrue(num_wrong_pixels < num_wrong_pixels_tol, msg=f"num_wrong_pixels={num_wrong_pixels}")
+            max_diff = 30 if antialias else 44
+            assert diff.max() < max_diff
+
+            threshold = 2
+            percent = 3 if antialias else 40
+            assert (diff > threshold).float().mean() < (percent / 100)
+
+            threshold = 5
+            percent = 1 if antialias else 20
+            assert (diff > threshold).float().mean() < (percent / 100)
+
+            mae = .4 if antialias else 3
+            assert diff.mean() < mae
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("align_corners", [True, False])
