@@ -3860,6 +3860,10 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
 
     full_args = []
     # First, the params
+    # NB: It is REQUIRED that parameters come first, Inductor infers "fixed"
+    # parameters by looking at the difference in parameter count outside
+    # and inside AOTAutograd, and assumes the prefix of arguments are fixed
+    # arguments
     full_args.extend(params_and_buffers_flat)
     # Next, the input args
     full_args.extend(args)
