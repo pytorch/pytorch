@@ -1074,6 +1074,7 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
 ):
+    import torch._export.constraints
     from ..symbolic_convert import InstructionTranslatorBase
 
     assert isinstance(tx, InstructionTranslatorBase)
@@ -1164,28 +1165,17 @@ def wrap_fx_proxy_cls(
         from . import UserDefinedObjectVariable
 
         return UserDefinedObjectVariable(example_value)
-    elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
-        proxy.node.meta["example_value"] = example_value
-        return SymNodeVariable.create(tx, proxy, example_value, **options)
-    elif istype(example_value, torch.Size) and config.dynamic_shapes:
-        proxy.node.meta["example_value"] = example_value
-        sizes = []
-        for i, v in enumerate(example_value):
-            proxy_i = proxy[i]
-            sizes.append(SymNodeVariable.create(tx, proxy_i, v, **options))
-        return SizeVariable(sizes, proxy, **options)
     elif istype(example_value, int) and proxy.node.target in (
         torch.seed,
         operator.mod,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
+        # This always wants to be in the graph, even if the constraint
+        # results in a constant int
+        torch._export.constraints.constrain_as_value,
     ):
-        if config.dynamic_shapes:
-            proxy.node.meta["example_value"] = example_value
-            return SymNodeVariable.create(tx, proxy, example_value, **options)
-        else:
-            return ConstantVariable(example_value, **options)
+        return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
     ):
@@ -1212,7 +1202,11 @@ def wrap_fx_proxy_cls(
                         **options,
                     )
                 )
-        if istype(example_value, tuple):
+        if isinstance(example_value, torch.Size):
+            # NB: Keep the old proxy around.  See SizeVariable for an
+            # explanation why
+            return SizeVariable(unpacked, proxy, **options)
+        elif istype(example_value, tuple):
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
@@ -1235,21 +1229,6 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif (
-        isinstance(example_value, int)
-        and config.numpy_ndarray_as_tensor
-        and not config.dynamic_shapes
-    ):
-        proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
-    elif (
-        istype(example_value, torch.Size)
-        and all(isinstance(x, int) for x in example_value)
-        and target_cls is TupleVariable
-    ):  # convert torch.Size to tuple
-        return TupleVariable(
-            [ConstantVariable(x, **options) for x in example_value], **options
-        )
     elif isinstance(example_value, int) and proxy.node.target in [
         getattr,
         operator.getitem,
