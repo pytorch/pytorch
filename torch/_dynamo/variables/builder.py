@@ -1236,13 +1236,6 @@ def wrap_fx_proxy_cls(
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
     elif (
-        isinstance(example_value, int)
-        and config.numpy_ndarray_as_tensor
-        and not config.dynamic_shapes
-    ):
-        proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
-    elif (
         istype(example_value, torch.Size)
         and all(isinstance(x, int) for x in example_value)
         and target_cls is TupleVariable
