@@ -26,7 +26,7 @@ __all__ = [
     'sum',
     'softmax',
     'log_softmax',
-    'SparseSemiStrucutredTensor',
+    'SparseSemiStructuredTensor',
     'to_sparse_semi_structured',
 ]
 
