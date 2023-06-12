@@ -17,6 +17,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    cast,
     overload,
 )
 
@@ -232,8 +233,7 @@ class Optimizer:
             param_groups = [{'params': param_groups}]
 
         for param_group in param_groups:
-            assert isinstance(param_group, dict)
-            self.add_param_group(param_group)
+            self.add_param_group(cast(dict, param_group))
 
         # Allows _cuda_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
         # which I don't think exists
@@ -311,8 +311,7 @@ class Optimizer:
 
         @functools.wraps(func)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> R:
-            self = args[0]
-            assert isinstance(self, Optimizer)
+            self = cast(Optimizer, args[0])
             profile_name = "Optimizer.step#{}.step".format(self.__class__.__name__)
             with torch.autograd.profiler.record_function(profile_name):
                 # call optimizer step pre hooks
