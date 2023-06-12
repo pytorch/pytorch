@@ -21,6 +21,7 @@ from torch._prims_common import is_float_dtype
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import codecache, config, ir, metrics
+from ..codecache import code_hash
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import get_expr_range, range_expressable_in_32_bits
 from ..scheduler import SchedulerNode
@@ -217,8 +218,10 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 def cpp_prefix():
     path = Path(__file__).parent / "cpp_prefix.h"
     with path.open() as f:
+        content = f.read()
         _, filename = codecache.write(
-            f.read(),
+            content,
+            code_hash(content),
             "h",
         )
     return f'#include "{filename}"'
