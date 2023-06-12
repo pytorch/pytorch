@@ -248,6 +248,7 @@ test_dynamo_shard() {
       test_fx \
       test_package \
       test_legacy_vmap \
+      export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
     --shard "$1" "$NUM_TEST_SHARDS" \
@@ -303,10 +304,6 @@ else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
 
-if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
-  export TORCHINDUCTOR_MAX_AUTOTUNE=1
-fi
-
 test_perf_for_dashboard() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -314,62 +311,52 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
-  dtype=amp
-  backend=inductor
-  for mode in inference training; do
-    # All the accuracy tests can be skipped once the CI accuracy checking is stable enough
-    # Run accuracy test for inductor with different configs
-    # --disable-cudagraphs is the default inductor behavior
-    # TODO: update here once cudagraphs is turned on as default
-    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
-      # Only run this one config for max-autotune
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-    else
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-          --dynamic-batch-only --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      if [[ "$mode" == "inference" ]]; then
-        # collect inference results with cpp_wrapper on
-        python "benchmarks/dynamo/$suite.py" \
-            --accuracy --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_accuracy.csv"
-      fi
-    fi
+  local dtype=amp
+  local backend=inductor
+  local modes=()
+  if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
+    modes+=(training)
+  fi
+  if [[ "$DASHBOARD_TAG" == *inference-true* ]]; then
+    modes+=(inference)
+  fi
+  # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
+  local targets=(accuracy performance)
 
-    # Run performance test
-    if [[ "${TEST_CONFIG}" == *max_autotune* ]]; then
-      # Only run this one config for max-autotune
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_performance.csv"
-    else
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_performance.csv"
-      python "benchmarks/dynamo/$suite.py" \
-          --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-          --dynamic-batch-only --disable-cudagraphs "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_performance.csv"
-      if [[ "$mode" == "inference" ]]; then
-        # collect inference results with cpp_wrapper on
-        python "benchmarks/dynamo/$suite.py" \
-            --performance --cold-start-latency --"$mode" --"$dtype" --backend "$backend" \
-            --disable-cudagraphs --cpp-wrapper "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_performance.csv"
+  for mode in "${modes[@]}"; do
+    for target in "${targets[@]}"; do
+      local target_flag=("--${target}")
+      if [[ "$target" == "performance" ]]; then
+        target_flag+=( --cold-start-latency)
       fi
-    fi
+
+      if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
+            --dynamic-batch-only --disable-cudagraphs "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]] && [[ "$mode" == "inference" ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --cpp-wrapper "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_cpp_wrapper_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *maxautotune-true* ]]; then
+        TORCHINDUCTOR_MAX_AUTOTUNE=1 python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
+            --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
+      fi
+    done
   done
 }
 
@@ -541,7 +528,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
 fi
 
 test_libtorch() {
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  local SHARD="$1"
+
+  # The slow test config corresponds to a default test config that should run
+  # the libtorch tests instead.
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$TEST_CONFIG" != "slow" ]]; then
     echo "Testing libtorch"
     ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
@@ -553,61 +544,60 @@ test_libtorch() {
 
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
 
-    # Start background download
-    MNIST_DIR="${PWD}/test/cpp/api/mnist"
-    python tools/download_mnist.py --quiet -d "${MNIST_DIR}" &
-
-    # Prepare the model used by test_jit, the model needs to be in the test directory
-    # to get picked up by run_test
-    pushd test
-    python cpp/jit/tests_setup.py setup
-    popd
-
-    # Run JIT cpp tests
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests
-    else
-      # CUDA tests have already been skipped when CUDA is not available
-      python test/run_test.py --cpp --verbose -i cpp/test_jit -k "not CUDA"
+    if [[ -z "${SHARD}" || "${SHARD}" == "1" ]]; then
+      test_libtorch_api
     fi
 
-    # Run Lazy Tensor cpp tests
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
-      LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_lazy
-    else
-      python test/run_test.py --cpp --verbose -i cpp/test_lazy
-    fi
-
-    # Cleaning up test artifacts in the test folder
-    pushd test
-    python cpp/jit/tests_setup.py shutdown
-    popd
-
-    # Wait for background download to finish
-    wait
-
-    if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* || "$TEST_CONFIG" == "slow" ]]; then
-        TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
-        mkdir -p $TEST_REPORTS_DIR
-
-        # TODO: Not quite sure why these tests time out on ASAN and SLOW, probably
-        # this is due to the fact that a python executable is used or some logic
-        # inside run_test. This test usually takes only minutes to run
-        OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
-        "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
-    else
-        # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
-        OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
-        python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
-    fi
-
-    if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
-      # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
-      export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
-      python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
+    if [[ -z "${SHARD}" || "${SHARD}" == "2" ]]; then
+      test_libtorch_jit
     fi
 
     assert_git_not_dirty
+  fi
+}
+
+test_libtorch_jit() {
+  # Prepare the model used by test_jit, the model needs to be in the test directory
+  # to get picked up by run_test
+  pushd test
+  python cpp/jit/tests_setup.py setup
+  popd
+
+  # Run jit and lazy tensor cpp tests together to finish them faster
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
+    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests cpp/test_lazy
+  else
+    # CUDA tests have already been skipped when CUDA is not available
+    python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy -k "not CUDA"
+  fi
+
+  # Cleaning up test artifacts in the test folder
+  pushd test
+  python cpp/jit/tests_setup.py shutdown
+  popd
+}
+
+test_libtorch_api() {
+  # Start background download
+  MNIST_DIR="${PWD}/test/cpp/api/mnist"
+  python tools/download_mnist.py --quiet -d "${MNIST_DIR}"
+
+  if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
+    TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
+    mkdir -p $TEST_REPORTS_DIR
+
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
+    "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+  else
+    # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
+    python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
+  fi
+
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+    # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
+    export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
+    python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
   fi
 }
 
@@ -738,6 +728,11 @@ test_torch_function_benchmark() {
 }
 
 build_xla() {
+  # xla test needs pytorch headers in torch/include
+  pushd ..
+  python -c "import os, torch, shutil; shutil.copytree(os.path.join(os.path.dirname(torch.__file__), 'include'), 'workspace/torch/include', dirs_exist_ok=True)"
+  popd
+
   # xla test needs sccache setup.
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
@@ -769,6 +764,8 @@ test_xla() {
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  # Set LD_LIBRARY_PATH for C++ tests
+  export LD_LIBRARY_PATH="/opt/conda/lib/:${LD_LIBRARY_PATH}"
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SKIP_MP_OP_TESTS=1 run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 }
@@ -849,7 +846,7 @@ test_bazel() {
 
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
-    tools/bazel test \
+    tools/bazel test --test_output=errors \
       //:any_test \
       //:autograd_test \
       //:dataloader_test \
@@ -889,6 +886,7 @@ test_bazel() {
       //:torch_dist_autograd_test \
       //:torch_include_test \
       //:transformer_test \
+      //:test_bazel \
       //c10/cuda/test:test \
       //c10/test:core_tests \
       //c10/test:typeid_test \
@@ -975,11 +973,9 @@ elif [[ "$TEST_CONFIG" == deploy ]]; then
   checkout_install_torchdeploy
   test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
-  install_huggingface
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
-  install_huggingface
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
@@ -1020,10 +1016,11 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
+  test_libtorch 1
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 2
-  test_libtorch
+  test_libtorch 2
   test_aot_compilation
   test_custom_script_ops
   test_custom_backend

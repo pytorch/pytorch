@@ -194,12 +194,12 @@ class CapabilityBasedPartitioner:
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
                 for node in partition.nodes:
-                    if node.op == "call_function" and \
-                       _get_qualified_name(node.target) not in non_compute_ops:  # type: ignore[arg-type]
-                        compute_node_count += 1
-                    if node.op == "call_function" and \
-                       _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
-                        compute_node_count += 1
+                    if node.op == "call_function":
+                        assert callable(node.target)
+                        if _get_qualified_name(node.target) not in non_compute_ops:
+                            compute_node_count += 1
+                        if _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
+                            compute_node_count += 1
                 if compute_node_count <= 1:
                     partitions_to_remove.append(id)
             for id in partitions_to_remove:

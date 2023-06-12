@@ -63,6 +63,74 @@ def range_expressable_in_32_bits(range):
     )
 
 
+def get_expr_range(expr, vars_ranges: dict):
+    free_symbols = list(expr.free_symbols)
+    if len(free_symbols) == 0:
+        return ValueRanges(expr, expr)
+
+    def replace_symbols_for_deriv(expr):
+        # for the purposes of finding local, minimum, maximum, assume smoothness
+        def mod_indexing_rep(x, y, z):
+            if z.is_constant():
+                return x / y
+
+            # never really happens, we'll bail on optimizing
+            return (x / y) % z
+
+        def indexing_div_rep(x, y):
+            return x / y
+
+        return expr.replace(ModularIndexing, mod_indexing_rep).replace(
+            FloorDiv, indexing_div_rep
+        )
+
+    symbols = expr.free_symbols
+    monotonic_increasing = []
+    monotonic_decreasing = []
+    other_symbols = []
+
+    expr_for_deriv = replace_symbols_for_deriv(expr)
+    for symbol in symbols:
+        diff = sympy.diff(expr_for_deriv, symbol)
+        if diff.is_positive:
+            monotonic_increasing.append(symbol)
+        elif diff.is_positive is False:  # can return None
+            monotonic_decreasing.append(symbol)
+        else:
+            # If diff_free_symbols only one symbol and it is the same as symbol,
+            # If this symbol's lower and upper bounds are the same, then it is constant.
+            # Add it to monotonic_increasing or monotonic_decreasing is ok.
+            diff_free_symbols = list(diff.free_symbols)
+            if (
+                len(diff_free_symbols) == 1
+                and symbol in diff_free_symbols
+                and vars_ranges[symbol].lower == vars_ranges[symbol].upper
+            ):
+                monotonic_increasing.append(symbol)
+            else:
+                other_symbols.append(symbol)
+
+    if not other_symbols:
+        max_val = sympy_subs(
+            expr,
+            {
+                k: (v.upper if k in monotonic_increasing else v.lower)
+                for k, v in vars_ranges.items()
+            },
+        )
+        min_val = sympy_subs(
+            expr,
+            {
+                k: (v.lower if k in monotonic_increasing else v.upper)
+                for k, v in vars_ranges.items()
+            },
+        )
+        return ValueRanges(min_val, max_val)
+    else:
+        # bail on optimizing, have not run into this yet
+        return ValueRanges(-math.inf, math.inf)
+
+
 class OptimizeIndexing:
     """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
@@ -237,65 +305,9 @@ class OptimizeIndexing:
 
     def _get_index_impl(self, name):
         expr = self.indexing_exprs[name]
-
-        free_symbols = list(expr.free_symbols)
-
-        if len(free_symbols) == 0:
-            return ValueRanges(expr, expr)
-
         if expr in self.replacement_vals:
             return self.replacement_vals[expr]
-
-        def replace_symbols_for_deriv(expr, ignore_mod=False):
-            # for the purposes of finding local, minimum, maximum, assume smoothness
-            def mod_indexing_rep(x, y, z):
-                if z.is_constant():
-                    return x / y
-
-                # never really happens, we'll bail on optimizing
-                return (x / y) % z
-
-            def indexing_div_rep(x, y):
-                return x / y
-
-            return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-                FloorDiv, indexing_div_rep
-            )
-
-        symbols = expr.free_symbols
-        monotonic_increasing = []
-        monotonic_decreasing = []
-        other_symbols = []
-
-        expr_for_deriv = replace_symbols_for_deriv(expr, True)
-        for symbol in symbols:
-            diff = sympy.diff(expr_for_deriv, symbol)
-            if diff.is_positive:
-                monotonic_increasing.append(symbol)
-            elif diff.is_positive is False:  # can return None
-                monotonic_decreasing.append(symbol)
-            else:
-                other_symbols.append(symbol)
-
-        if not other_symbols:
-            max_val = sympy_subs(
-                expr,
-                {
-                    k: (v.upper if k in monotonic_increasing else v.lower)
-                    for k, v in self.replacement_vals.items()
-                },
-            )
-            min_val = sympy_subs(
-                expr,
-                {
-                    k: (v.lower if k in monotonic_increasing else v.upper)
-                    for k, v in self.replacement_vals.items()
-                },
-            )
-            return ValueRanges(min_val, max_val)
-        else:
-            # bail on optimizing, have not run into this yet
-            return ValueRanges(-math.inf, math.inf)
+        return get_expr_range(expr, self.replacement_vals)
 
 
 def indexing_dtype_strength_reduction(loop_body: LoopBody):

@@ -827,6 +827,13 @@ def _validate_sample_input_sparse_like_fns(op_info, sample, check_validate=False
                     " \\(self is Sparse(Csc|Csr|Bsc|Bsr) but you requested Sparse(Csr|Csc|Bsr|Bsc)\\)"
                 ),
             )
+    if sample.input.layout is torch.sparse_coo:
+        return ErrorInput(
+            sample,
+            error_regex=(
+                "Could not run 'aten::normal_' with arguments from the 'Sparse(CPU|CUDA)' backend."
+            ),
+        )
     if check_validate:
         _check_validate(op_info, sample)
     return sample

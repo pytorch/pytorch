@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/llvmMathExtras.h>
+#include <array>
 #include <ostream>
 
 namespace c10 {
