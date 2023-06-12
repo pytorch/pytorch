@@ -24,7 +24,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
-from torch._dynamo.backends.debugging import ExplainOutput
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -619,6 +618,8 @@ def explain(f, *args, **kwargs):
 
     # TODO(voz): Do we want a decorator for this?
     reset()
+    from .backends.debugging import ExplainOutput
+
     return ExplainOutput(
         graphs,
         graph_count,
