@@ -182,6 +182,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("IPU", c10::DeviceType::IPU)
       .value("PrivateUse1", c10::DeviceType::PrivateUse1);
 
+  using torch::autograd::CreationMeta;
+  py::enum_<CreationMeta>(m, "CreationMeta")
+      .value("DEFAULT", CreationMeta::DEFAULT)
+      .value("IN_CUSTOM_FUNCTION", CreationMeta::IN_CUSTOM_FUNCTION)
+      .value("MULTI_OUTPUT_NODE", CreationMeta::MULTI_OUTPUT_NODE)
+      .value("NO_GRAD_MODE", CreationMeta::NO_GRAD_MODE)
+      .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
+
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", [](const KinetoEvent& e) { return e.name(); })
@@ -374,6 +382,20 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_pop_saved_tensors_default_hooks", []() {
     torch::autograd::PyDefaultSavedVariableHooks::pop_hooks();
   });
+
+  m.def("_get_creation_meta", [](const at::Tensor& t) {
+    auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+    TORCH_CHECK(meta != nullptr);
+    return meta->get_creation_meta();
+  });
+
+  m.def(
+      "_set_creation_meta",
+      [](const at::Tensor& t, CreationMeta new_creation_meta) {
+        auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+        TORCH_CHECK(meta != nullptr);
+        meta->set_creation_meta(new_creation_meta);
+      });
 
   _C_m.def(
       "_register_py_class_for_device",
