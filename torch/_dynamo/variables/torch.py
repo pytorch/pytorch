@@ -435,6 +435,9 @@ class TorchVariable(VariableTracker):
             return ConstantVariable(
                 torch.backends.cudnn.is_acceptable(tensor_inp), **options
             )
+        elif self.value is torch.nn.Parameter:
+            # https://github.com/pytorch/pytorch/issues/99569
+            unimplemented("torch.nn.Parameter not supported")
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
