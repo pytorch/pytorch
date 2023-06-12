@@ -15,8 +15,9 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 
-from typing import Any, NamedTuple
+from typing import Any, List, NamedTuple, Set
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -284,6 +285,42 @@ CI_SKIP_OPTIMIZER = {
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
 }
+
+
+# Model Groups
+@dataclass(frozen=True)
+class ModelGroup:
+    name: str
+    models: Set[str]
+
+
+BLUEBERRY_MODELS = ModelGroup("Blueberries", {"llama", "nanogpt_generate"})
+
+
+@dataclass(frozen=True)
+class GroupMap:
+    groups: List[ModelGroup]
+
+    def model_group(self, model_name):
+        for group in self.groups:
+            if model_name in group.models:
+                return group.name
+        return None
+
+    @classmethod
+    def assert_single_group(cls, groups: List[ModelGroup]):
+        model_to_group = {}
+        for group in groups:
+            for model in group.models:
+                if model in model_to_group:
+                    raise ValueError(
+                        f"Model {model} appears in multiple groups, {model_to_group[model]} and {group.name}"
+                    )
+                model_to_group[model] = group.name
+        return cls(groups)
+
+
+ALL_MODEL_GROUPS = GroupMap.assert_single_group([BLUEBERRY_MODELS])
 
 
 def model_specified_by_path(path_and_class_str):
@@ -688,8 +725,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    first_headers = ["dev", "name", "batch_size"]
-    first_fields = [current_device, current_name, current_batch_size]
+    current_group = ALL_MODEL_GROUPS.model_group(current_name)
+    first_headers = ["dev", "name", "group", "batch_size"]
+    first_fields = [current_device, current_name, current_group, current_batch_size]
     if "tag" in kwargs:
         first_headers.append("tag")
         first_fields.append(kwargs["tag"])
