@@ -14,9 +14,7 @@ struct C10_API PyObjectSlot {
  public:
   PyObjectSlot();
 
-  ~PyObjectSlot();
-
-  void maybe_destroy_pyobj();
+  void destroy_pyobj_if_needed();
 
   // Associate the TensorImpl with the specified PyObject, and, if necessary,
   // also tag the interpreter.
@@ -119,13 +117,6 @@ struct C10_API PyObjectSlot {
   void unchecked_clear_pyobj(PyInterpreter* interpreter);
 
   PyInterpreter& load_pyobj_interpreter() const;
-
-  // Check if the PyObjectSlot's interpreter is the same as the specified
-  // interpreter
-  bool check_interpreter(PyInterpreter* interpreter);
-
-  // Check if the PyObjectSlot is holding a PyObject, owned or non-owned
-  bool has_pyobj();
 
   bool owns_pyobj();
 
