@@ -318,7 +318,6 @@ void upsample_avx_bilinear_bicubic_uint8(
     output.copy_(input_);
     return;
   }
-  // std::cout << "in upsample_avx_bilinear_bicubic_uint8" << std::endl; // TODO: remove this
 
   at::Tensor input = input_;
   if (!(input.is_contiguous() || input.is_contiguous(at::MemoryFormat::ChannelsLast))) {

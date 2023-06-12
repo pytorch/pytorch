@@ -1364,8 +1364,6 @@ void upsample_generic_Nd_kernel_impl(
     const scale_type& scales) {
 
 
-  // std::cout << "In upsample_generic_Nd_kernel_impl" << std::endl; // TODO REMOVE
-
   // input can be NCHW, NCL or NCKHW
   auto shape = input.sizes().vec();
   auto strides = input.strides().vec();
@@ -1501,10 +1499,9 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
   unsigned int weights_precision = 0;
   int unused;
 
-  // std::cout << "in _separable_upsample_generic_Nd_kernel_impl_single_dim" << std::endl; // TODO REMOVE
   if (input_scalar_type == at::kByte) {
-    TORCH_CHECK(F::interp_size != 1 || F::interp_size !=2, "OOPS"); // TODO: clean that up
-    // This is special branch to provide uint8 dtype support for bilinear and bicubic modes only
+    // This is a special branch to provide uint8 dtype support for bilinear and bicubic modes only
+    TORCH_INTERNAL_ASSERT(F::interp_size == 2 || F::interp_size == 4);
     std::tie(indices_weights, unused, weights_precision) =
       F::compute_indices_int16_weights_aa(
         input.size(interp_dim), oshape[interp_dim],
@@ -1860,9 +1857,6 @@ void upsample_bicubic2d_aa_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-  // separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
-  //   output, input, align_corners, {scales_h, scales_w},
-  //   /*antialias=*/true);
 #ifdef CPU_CAPABILITY_AVX2
   if (input.dtype() == at::kByte && input.size(1) <= 4) {
     upsample_avx_bilinear_bicubic_uint8<scale_t, HelperInterpCubic>(
