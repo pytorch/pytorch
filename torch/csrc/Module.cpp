@@ -1399,7 +1399,7 @@ PyObject* initModule() {
 #else
   PyObject* has_cudnn = Py_False;
 #endif
-  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
+  ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;
@@ -1642,10 +1642,10 @@ Call this whenever a new thread is created in order to propagate values from
   PyObject* has_mps = Py_False;
 #endif
 
-  ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
-  ASSERT_TRUE(set_module_attr("has_mps", has_mps));
+  ASSERT_TRUE(set_module_attr("_has_cuda", has_cuda));
+  ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
   ASSERT_TRUE(
-      set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
+      set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
 #ifdef _GLIBCXX_USE_CXX11_ABI
   ASSERT_TRUE(set_module_attr(
