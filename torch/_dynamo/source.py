@@ -367,6 +367,13 @@ class TypeSource(ChainedSource):
         return f"type({self.base.name()})"
 
 
+# NB - SuperSource is a weird one.
+# it is our only source with 2 bases, so we use the objec
+# as the base, rather than the type, since an invocation
+# like super(Foo, foo) is represented here, the source object base is more spiritually
+# aligned with the instance, rather than the type.
+# This whole construction is questionable tho, and we should probably find a way to
+# avoid this exception to our otherwise nice source parentage invariant.
 @dataclasses.dataclass(frozen=True)
 class SuperSource(ChainedSource):
     type: Source
