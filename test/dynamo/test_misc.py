@@ -4286,13 +4286,14 @@ def fn():
         )
         # Dummy ctor
         graph = OutputGraph(
-            f_globals={},
             code_options={},
             compiler_fn=None,
             root_tx=None,
             export=False,
             export_constraints=None,
             frame_state={"_id": 0},
+            local_scope={},
+            global_scope={},
         )
         graph.nn_modules_sources = {}
         # Contrived generation timestamp
