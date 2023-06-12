@@ -895,6 +895,9 @@ def same(
         fp64_ref = ref
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
+        if len(ref) != len(res):
+            log_error("Length mismatch")
+            return False
         return len(ref) == len(res) and all(
             same(
                 ai,
@@ -960,6 +963,7 @@ def same(
                 if not r:
                     log_error("Accuracy failed: uint8 tensor did not match")
                 return r
+
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
