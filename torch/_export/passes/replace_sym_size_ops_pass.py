@@ -10,7 +10,7 @@ replacements: Dict[torch._ops.OpOverloadPacket, torch._ops.OpOverload] = {
 }
 
 
-class ReplaceSymSizeOpPass(PassBase):
+class _ReplaceSymSizeOpPass(PassBase):
     """
     Replace torch.ops.aten.sym_size with torch.ops.aten.sym_size.int
     and torch.ops.aten.sym_stride with torch.ops.aten.sym_stride.int

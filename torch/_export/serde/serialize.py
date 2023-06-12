@@ -306,7 +306,7 @@ def deserialize_state_dict(serialized: bytes) -> Dict[str, torch.Tensor]:
 
 
 
-def _convert_sympy_int_to_int(val: sympy.Expr):
+def _sympy_int_to_int(val: sympy.Expr):
     # Convert simple sympy Integers into concrete int
     if val == sympy.oo:
         return math.inf
@@ -319,7 +319,7 @@ def _convert_sympy_int_to_int(val: sympy.Expr):
     )
 
 
-def _convert_int_to_sympy_int(val) -> sympy.Expr:
+def _int_to_sympy_int(val) -> sympy.Expr:
     # Convert concrete int into simple sympy Integers
     if val == math.inf:
         return sympy.oo
@@ -333,8 +333,8 @@ def serialize_range_constraints(
 ) -> Dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
-            _convert_sympy_int_to_int(v.min_val),
-            _convert_sympy_int_to_int(v.max_val),
+            _sympy_int_to_int(v.min_val),
+            _sympy_int_to_int(v.max_val),
         )
         for k, v in range_constraints.items()
     }
@@ -977,7 +977,7 @@ class ExportedProgramDeserializer:
         self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
     ) -> ep.ExportedProgram:
         symbol_name_to_range = {
-            k: symbolic_shapes.ValueRanges(_convert_int_to_sympy_int(v.min_val), _convert_int_to_sympy_int(v.max_val))
+            k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
             for k, v in serialized_exported_program.range_constraints.items()
         }
 
