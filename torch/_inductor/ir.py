@@ -3219,11 +3219,20 @@ class FallbackKernel(ExternKernelAlloc):
         )
         self.use_cpp_op_schema = False
 
-        if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
+        op_overload_packet = (
+            kernel._overloadpacket
+            if isinstance(kernel, torch._ops.OpOverload)
+            else kernel
+        )
+
+        if (
+            getattr(torch.ops.aten, op_overload_packet.__name__, None)
+            is op_overload_packet
+        ):
             self.kernel = (
-                f"at::{kernel.__name__}"
+                f"at::{op_overload_packet.__name__}"
                 if V.graph.cpp_wrapper
-                else f"aten.{kernel.__name__}"
+                else f"aten.{op_overload_packet.__name__}"
             )
         else:
             if V.graph.cpp_wrapper:
@@ -3250,11 +3259,18 @@ class FallbackKernel(ExternKernelAlloc):
         assert (
             not kernel._schema.is_mutable
         ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
+
+        # These checks are here because ops that return aliasing tensors will
+        # return type Tensor& instead of Tensor, but codegen will always write
+        # type Tensor on the LHS.
+        def is_not_write(arg):
+            return arg.alias_info is None or not arg.alias_info.is_write
+
         assert all(
-            x.alias_info is None for x in kernel._schema.arguments
+            is_not_write(x) for x in kernel._schema.arguments
         ), f"{kernel.__name__} with alias_info arguments is not supported with cpp_wrapper"
         assert all(
-            x.alias_info is None for x in kernel._schema.returns
+            is_not_write(x) for x in kernel._schema.returns
         ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
         self.kernel = kernel._schema.name
@@ -3985,21 +4001,42 @@ class LinearBinary(ExternKernelAlloc):
 
 
 class ConvolutionTransposeUnary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
-
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn._convolution_transpose_pointwise",
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkldnn._convolution_transpose_pointwise",
+            cpp_kernel="mkldnn::_convolution_transpose_pointwise",
+        )
+        self.cpp_kernel_key = "convolution_transpose_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& input_t,
+                const at::Tensor& weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                at::IntArrayRef padding,
+                at::IntArrayRef output_padding,
+                at::IntArrayRef stride,
+                at::IntArrayRef dilation,
+                int64_t groups,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            self.codegen_args(),
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
         )
 
     @classmethod
@@ -4017,7 +4054,6 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         scalars,
         algorithm,
     ):
-        kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
         transposed = True
         (
             inputs,
@@ -4036,12 +4072,17 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             transposed,
             output_padding_,
         )
-        constant_args = constant_args + [attr, scalars, algorithm]
+        optional_string = OptionalString()
+        optional_list = OptionalList()
+        constant_args = constant_args + [
+            attr,
+            may_convert_to_optional(optional_list, scalars),
+            may_convert_to_optional(optional_string, algorithm),
+        ]
         return ConvolutionTransposeUnary(
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
-            kernel=kernel,
         )
 
 
