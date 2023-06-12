@@ -1,4 +1,3 @@
-import logging
 import warnings
 import weakref
 import sys
@@ -26,8 +25,6 @@ else:
 
         def is_torchdynamo_compiling():
             return False
-
-log = logging.getLogger(__name__)
 
 """
 New traceable, functional collectives.
@@ -375,7 +372,6 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    log.debug("all_reduce size: %s, op: %s, group: %s, tag: %s", str(self.size()), reduceOp, group, tag)
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_reduce(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     return _maybe_wrap_tensor(tensor)
@@ -403,13 +399,6 @@ def all_gather_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    log.debug(
-        "all_gather_tensor size: %s, gather_dim: %d, group: %s, tag: %s",
-        self.size(),
-        gather_dim,
-        group,
-        tag
-    )
     assert self.is_contiguous()
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_gather_into_tensor(self, tag, rankset, group_size)  # type: ignore[attr-defined]
@@ -441,14 +430,6 @@ def reduce_scatter_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    log.debug(
-        "reduce_scatter_tensor size: %s, reduce_op: %s, scatter_dim: %d, group: %s, tag: %s",
-        self.size(),
-        reduceOp,
-        scatter_dim,
-        group,
-        tag
-    )
     tag, rankset, group_size = _expand_group(group, tag)
     assert (
         self.size(scatter_dim) % group_size == 0
@@ -479,13 +460,6 @@ def all_reduce_coalesced(self: List[torch.Tensor], reduceOp: str, group: RANK_TY
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    log.debug(
-        "all_reduce_coalesced sizes: %s, reduce_op: %s, group: %s, tag: %s",
-        [t.size() for t in self],
-        reduceOp,
-        group,
-        tag
-    )
     tag, rankset, group_size = _expand_group(group, tag)
     tensor_list = torch.ops.c10d_functional.all_reduce_coalesced(self, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
     return list(map(_maybe_wrap_tensor, tensor_list))
