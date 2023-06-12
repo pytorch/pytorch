@@ -289,7 +289,7 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src
  * Each thread block processes one or more sets of contiguous rows (processing multiple rows
  * per thread block is quicker than processing a single row, especially for short rows).
  */
-template<typename T, int num_threads, class BinaryFunction>
+template<typename T, class BinaryFunction>
 __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const T *src_,
                                       const uint32_t num_rows, const uint32_t row_size,
                                       const uint32_t log_num_threads_x,
@@ -372,7 +372,7 @@ tensor_kernel_scan_innermost_dim(
   const uint32_t num_threads_x = 1 << log_num_threads_x;
   T* row_buf = sbuf + num_threads_x * 2 * threadIdx.y;
 
-  tensor_kernel_scan_innermost_dim_impl<T, num_threads>(
+  tensor_kernel_scan_innermost_dim_impl<T>(
       row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
 }
 
@@ -400,7 +400,7 @@ tensor_kernel_scan_innermost_dim(
 
   T* row_buf = reinterpret_cast<T*>(sbuf + num_threads_x * 4 * threadIdx.y);
 
-  tensor_kernel_scan_innermost_dim_impl<T, num_threads>(
+  tensor_kernel_scan_innermost_dim_impl<T>(
       row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
 }
 
