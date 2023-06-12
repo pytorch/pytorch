@@ -6342,6 +6342,18 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    def test_fft_real_input(self):
+        def fn(x):
+            return torch.fft.fftn(x)
+
+        self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
+
+    def test_fft_real_input_real_output(self):
+        def fn(x):
+            return torch.fft.fftn(x).real
+
+        self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
+
 
 @dataclasses.dataclass
 class TestFailure:
