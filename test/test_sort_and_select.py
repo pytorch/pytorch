@@ -755,8 +755,8 @@ class TestSortAndSelect(TestCase):
             self._test_topk_dtype(device, dtype, True, curr_size)
 
     @onlyCUDA
-    @dtypes(torch.bfloat16)
-    def test_topk_bfloat16(self, device, dtype):
+    @dtypes(torch.bfloat16, torch.half)
+    def test_topk_lower_precision(self, device, dtype):
 
         small = 10
         large = 4096
