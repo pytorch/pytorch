@@ -6,7 +6,7 @@ from torch import Tensor
 from .linear import NonDynamicallyQuantizableLinear
 from torch.nn.init import constant_, xavier_normal_, xavier_uniform_
 from torch.nn.parameter import Parameter
-from .module import Module, _get_speacial_module_supported_device
+from .module import Module, _get_special_module_supported_device_types
 from .. import functional as F
 
 __all__ = ['Threshold', 'ReLU', 'RReLU', 'Hardtanh', 'ReLU6', 'Sigmoid', 'Hardsigmoid', 'Tanh',
@@ -891,7 +891,7 @@ def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
     if x is None:
         return True
     else:
-        return x.device.type in _get_speacial_module_supported_device()
+        return x.device.type in _get_special_module_supported_device_types()
 
     return False
 
@@ -1175,8 +1175,8 @@ class MultiheadAttention(Module):
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif not all(_check_arg_device(x) for x in tensor_args):
-                why_not_fast_path = f"some Tensor argument's device is neither one of "
-                                     "{_get_speacial_module_supported_device()}"
+                why_not_fast_path = ("some Tensor argument's device is neither one of "
+                                     f"{_get_special_module_supported_device_types()}")
             elif torch.is_grad_enabled() and any(_arg_requires_grad(x) for x in tensor_args):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
