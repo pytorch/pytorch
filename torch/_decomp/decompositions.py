@@ -2350,8 +2350,11 @@ def mkldnn_one_layer_lstm(inp, hidden, params, has_biases, reverse=False):
     mode = 2  # third_party/ideep/include/ideep/abstract_types.hpp: ideep::rnn_kind::LSTM = 2
     hidden_size = hx.size(2)
     num_layers = 1
+
+    # _rnn_helper already handles bidirectional and batch_first so we hard-code them to False here
     bidirectional = False
     batch_first = False
+
     train = False
     outputs = torch.ops.aten.mkldnn_rnn_layer.default(
         inp,
@@ -2652,20 +2655,16 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
     return out, hidden_out
 
 
-def get_tensor_state(tensors, func):
-    return {func(t) for t in tensors}
-
-
 def use_mkldnn(input, hx, params):
     if not torch._C.has_mkldnn:
         return False
 
     tensors = [input] + list(hx) + list(chain.from_iterable(params))
-    devices = get_tensor_state(tensors, lambda x: x.device)
+    devices = {t.device for t in tensors}
     if len(devices) != 1:
         return False
 
-    dtypes = get_tensor_state(tensors, lambda x: x.dtype)
+    dtypes = {t.dtype for t in tensors}
     if len(dtypes) != 1:
         return False
 
