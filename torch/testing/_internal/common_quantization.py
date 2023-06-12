@@ -953,7 +953,6 @@ class QuantizationTestCase(TestCase):
             self.checkGraphModuleNodes(
                 prepared, prepare_expected_node,
                 prepare_expected_node_occurrence, prepare_expected_node_list)
-
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(copy.deepcopy(prepared))
             qgraph_reference = convert_to_reference_fx(copy.deepcopy(prepared))
