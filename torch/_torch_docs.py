@@ -1733,6 +1733,10 @@ Concatenates a sequence of tensors along a new dimension.
 
 All tensors need to be of the same size.
 
+.. seealso::
+
+    :func:`torch.cat` concatenates the given sequence along an existing dimension.
+
 Arguments:
     tensors (sequence of Tensors): sequence of tensors to concatenate
     dim (int): dimension to insert. Has to be between 0 and the number
