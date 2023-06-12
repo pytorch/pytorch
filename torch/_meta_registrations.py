@@ -301,8 +301,8 @@ def assert_async_meta(val, assert_msg):
     return
 
 
-@register_meta(aten._constrain_range_native)
-def constrain_range_native(size, min, max):
+@register_meta(aten.sym_constrain_range.default)
+def sym_constrain_range(size, min, max):
     constrain_range(size, min=min, max=max)
 
 
