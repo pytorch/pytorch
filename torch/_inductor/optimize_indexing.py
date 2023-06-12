@@ -69,7 +69,7 @@ def get_expr_range(expr, vars_ranges: dict):
     if len(symbols) == 0:
         return ValueRanges(expr, expr)
 
-    vars_ranges_temp = vars_ranges.copy()
+    vars_ranges = vars_ranges.copy()
 
     def replace_symbols_for_deriv(expr):
         cnt = itertools.count()
@@ -78,7 +78,10 @@ def get_expr_range(expr, vars_ranges: dict):
         def mod_indexing_rep(x, y, z):
             if z.is_constant():
                 new_var = sympy_symbol("mod_index" + f"{next(cnt)}")
-                vars_ranges_temp[new_var] = ValueRanges(0, z - 1)
+                if z > 0:
+                    vars_ranges[new_var] = ValueRanges(0, z - 1)
+                else:
+                    vars_ranges[new_var] = ValueRanges(z + 1, 0)
                 symbols.append(new_var)
                 return new_var
 
@@ -122,14 +125,14 @@ def get_expr_range(expr, vars_ranges: dict):
             expr_for_deriv,
             {
                 k: (v.upper if k in monotonic_increasing else v.lower)
-                for k, v in vars_ranges_temp.items()
+                for k, v in vars_ranges.items()
             },
         )
         min_val = sympy_subs(
             expr_for_deriv,
             {
                 k: (v.lower if k in monotonic_increasing else v.upper)
-                for k, v in vars_ranges_temp.items()
+                for k, v in vars_ranges.items()
             },
         )
         return ValueRanges(min_val, max_val)
