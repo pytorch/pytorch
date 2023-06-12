@@ -7,7 +7,6 @@ import torch.distributed as dist
 from torch.cuda import FloatTensor  # type: ignore[attr-defined]
 from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptState
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch.optim.sgd import SGD
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +35,7 @@ class ShardedGradScaler(GradScaler):
     """
     ShardedGradScaler helps perform gradient scaling in a shard aware manner. It extends
     functionality from GradScaler:
-    * Suports Pytorch DDP and FSDP implementations
+    * Supports Pytorch DDP and FSDP implementations
     * Support CPU offloaded tensors (as used in fully sharded data parallel[FSDP])
     * Supports the custom Mixed Precision loss dtype (fp16, bf16) that FSDP returns
     * Sync inf/nan for scaled gradient tensors on any torch.device (where tensors are placed) across
@@ -156,31 +155,28 @@ class ShardedGradScaler(GradScaler):
         assert inv_scale.numel() == 1, "inv_scale must be a 1-element tensor."
         assert found_inf.numel() == 1, "found_inf must be a 1-element tensor."
 
-        expected_device = grads[0].device
         for grad in grads:
-            for tensor in grad:
-                if tensor.device != expected_device:
-                    log.error(
-                        "tensor device is %s and expected device is %s"
-                        % (tensor.device, expected_device)
-                    )
-                    raise ValueError("Gradients must be on the same device.")
-
-                # check for non_overlapping_and_dense doesn't exist in the python world
-                # as remarked here https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/cuda/AmpKernels.cu#L108
-                # we assume tensor is not MTA(multi tensor apply) safe. iterate through each item regardless of dtype
-                if (
-                    torch.isinf(tensor).any().item() is True
-                    or torch.isnan(tensor).any().item() is True
-                ):
-                    found_inf.data = torch.tensor([1.0])
-                    break
-                else:
-                    tensor.data *= inv_scale.item()
+            if grad.device.type != "cpu":
+                log.error(
+                    "tensor device is %s but was expected to be ``cpu``",
+                    grad.device,
+                )
+                raise ValueError(
+                    "Gradients were found on a non-CPU device when"
+                    " expected to be on CPU."
+                )
+            if (
+                torch.isinf(grad).any().item() is True
+                or torch.isnan(grad).any().item() is True
+            ):
+                found_inf.data = torch.tensor([1.0])
+                break
+            else:
+                grad.data *= inv_scale.item()
 
     def _unscale_grads_(
         self,
-        optimizer: SGD,
+        optimizer: torch.optim.Optimizer,
         inv_scale: torch.Tensor,
         found_inf: torch.Tensor,
         allow_fp16: bool = True,
@@ -208,7 +204,7 @@ class ShardedGradScaler(GradScaler):
                         # For scaled fp16 values, there's a good chance coalescing will cause overflow,
                         # so we should check the coalesced _values().
                         if param.grad.dtype is torch.float16:
-                            # coalesce is not suported in torch.float16
+                            # coalesce is not supported in torch.float16
                             param_grad_fp32 = param.grad.type(torch.float32).coalesce()
                             param.grad = param_grad_fp32.type(torch.float16)
                         to_unscale = param.grad._values()
@@ -233,9 +229,15 @@ class ShardedGradScaler(GradScaler):
                             per_device_found_inf.get(device),
                             per_device_inv_scale.get(device),
                         )
+        # There exist contexts (e.g. w/ `use_orig_params=True`) wherein some
+        # ranks may have no (non-zero sized) parameter shards, necessitating the
+        # initialization of `per_device_found_inf._per_device_tensors` here
+        if not per_device_found_inf._per_device_tensors:
+            assert self._scale is not None
+            per_device_found_inf.get(self._scale.device)
         return per_device_found_inf._per_device_tensors
 
-    def unscale_(self, optimizer: SGD) -> None:
+    def unscale_(self, optimizer: torch.optim.Optimizer) -> None:
         if not self._enabled:
             return
 
@@ -286,7 +288,9 @@ class ShardedGradScaler(GradScaler):
         if future_handles:
             torch.futures.wait_all(future_handles)
 
-    def step(self, optimizer: SGD, *args, **kwargs) -> Optional[float]:
+    def step(
+        self, optimizer: torch.optim.Optimizer, *args, **kwargs
+    ) -> Optional[float]:
         return super().step(optimizer, *args, **kwargs)
 
     def _amp_update_scale_cpu_(self, found_inf) -> None:

@@ -46,7 +46,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
       ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
   auto* Y = Output(0, Y_dims, at::dtype<T>());
   if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    VLOG(2) << "Number of elements is 0 in ConvTransposeOp";
     return true;
   }
 
@@ -200,7 +200,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
       ConvTransposeUnpoolBase<Context>::GetOutputSize(X, C);
   auto* Y = Output(0, Y_dims, at::dtype<T>());
   if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    VLOG(2) << "Number of elements is 0 in ConvTransposeOp";
     return true;
   }
 
@@ -361,7 +361,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
 
   if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    VLOG(2) << "Number of elements is 0 in ConvTransposeOp";
     if (dbias_data != nullptr) {
       math::Set<T, Context>(C, T(0), dbias_data, &context_);
     }
@@ -526,7 +526,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   math::Set<T, Context>(filter.numel(), T(0), dfilter_data, &context_);
 
   if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    VLOG(2) << "Number of elements is 0 in ConvTransposeOp";
     if (dbias_data != nullptr) {
       math::Set<T, Context>(C, T(0), dbias_data, &context_);
     }

@@ -1,7 +1,8 @@
 #pragma once
 
 #include <c10/core/DeviceType.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
+#include <cstdint>
 #include <ostream>
 #include <string>
 
@@ -356,6 +357,7 @@ enum class DispatchKey : uint16_t {
   // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
   // it probably should get its own Autocast key
   AutocastCUDA,
+  AutocastPrivateUse1,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before
@@ -403,6 +405,12 @@ enum class DispatchKey : uint16_t {
   // aten/src/ATen/core/dispatch/backend_fallback_test.cpp
   // for a usage example
   TESTING_ONLY_GenericMode,
+
+  // This key is used for pre-dispatch tracing in make_fx.
+  // It has lower priority than the PythonDispatcher key
+  // because we use the PythonDispatcher to intercept the key from python,
+  // and avoid having to implement it in C++.
+  PreDispatch,
 
   // This is a bypass that allows you to skip running the C++ dispatcher
   // entirely
@@ -519,7 +527,7 @@ constexpr bool isAliasDispatchKey(DispatchKey k) {
 // [Note: Per-Backend Functionality Dispatch Keys]
 // Check if a DispatchKey is a per-backend functionality key
 // Any functionalities that can be customized per-backend should be added here.
-// These keys correspond to functionalities that can be customized indivually
+// These keys correspond to functionalities that can be customized individually
 // per backend. While they only take up one bit in the `DispatchKeySet` bitset,
 // they map to (# backends) slots in the operator table.
 // Each of these keys also has a separate set of "runtime keys" in the dispatch

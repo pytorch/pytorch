@@ -112,29 +112,29 @@ static inline hash_t TensorHash(const at::Tensor& tensor) {
   int64_t size = ctensor.numel() * ctensor.element_size();
   switch (ctensor.scalar_type()) {
     case at::ScalarType::Bool:
-      return DataHash(ctensor.data_ptr<bool>(), size);
+      return DataHash(ctensor.const_data_ptr<bool>(), size);
     case at::ScalarType::Byte:
-      return DataHash(ctensor.data_ptr<uint8_t>(), size);
+      return DataHash(ctensor.const_data_ptr<uint8_t>(), size);
     case at::ScalarType::Char:
-      return DataHash(ctensor.data_ptr<int8_t>(), size);
+      return DataHash(ctensor.const_data_ptr<int8_t>(), size);
     case at::ScalarType::Short:
-      return DataHash(ctensor.data_ptr<int16_t>(), size);
+      return DataHash(ctensor.const_data_ptr<int16_t>(), size);
     case at::ScalarType::Int:
-      return DataHash(ctensor.data_ptr<int32_t>(), size);
+      return DataHash(ctensor.const_data_ptr<int32_t>(), size);
     case at::ScalarType::Long:
-      return DataHash(ctensor.data_ptr<int64_t>(), size);
+      return DataHash(ctensor.const_data_ptr<int64_t>(), size);
     case at::ScalarType::Float:
-      return DataHash(ctensor.data_ptr<float>(), size);
+      return DataHash(ctensor.const_data_ptr<float>(), size);
     case at::ScalarType::Double:
-      return DataHash(ctensor.data_ptr<double>(), size);
+      return DataHash(ctensor.const_data_ptr<double>(), size);
     case at::ScalarType::BFloat16:
-      return DataHash(ctensor.data_ptr<at::BFloat16>(), size);
+      return DataHash(ctensor.const_data_ptr<at::BFloat16>(), size);
     case at::ScalarType::Half:
-      return DataHash(ctensor.data_ptr<at::Half>(), size);
+      return DataHash(ctensor.const_data_ptr<at::Half>(), size);
     case at::ScalarType::ComplexFloat:
-      return DataHash(ctensor.data_ptr<c10::complex<float>>(), size);
+      return DataHash(ctensor.const_data_ptr<c10::complex<float>>(), size);
     case at::ScalarType::ComplexDouble:
-      return DataHash(ctensor.data_ptr<c10::complex<double>>(), size);
+      return DataHash(ctensor.const_data_ptr<c10::complex<double>>(), size);
     default:
       TORCH_INTERNAL_ASSERT(
           false, "Unsupported scalar type:", ctensor.scalar_type());

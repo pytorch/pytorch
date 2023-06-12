@@ -4,13 +4,15 @@ import functools
 import inspect
 from typing import Dict, List
 
+import torch
+
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
-from .base import MutableLocal, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
@@ -37,8 +39,8 @@ class ConstDictVariable(VariableTracker):
         if self.user_cls is collections.OrderedDict:
             codegen.extend_output(
                 [
-                    codegen.create_load_python_module(collections),
-                    create_instruction("LOAD_METHOD", "OrderedDict"),
+                    codegen.create_load_python_module(collections, True),
+                    codegen.create_load_attr("OrderedDict"),
                 ]
             )
         # instructions to build the dict keys and values
@@ -54,12 +56,12 @@ class ConstDictVariable(VariableTracker):
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             return [
-                create_instruction("BUILD_MAP", len(self.items)),
-                create_instruction("CALL_METHOD", 1),
+                create_instruction("BUILD_MAP", arg=len(self.items)),
+                *create_call_function(1, False),
             ]
         # BUILD_MAP only if user_cls is dict
         else:
-            return [create_instruction("BUILD_MAP", len(self.items))]
+            return [create_instruction("BUILD_MAP", arg=len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
         return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)
@@ -218,6 +220,8 @@ class ConstDictVariable(VariableTracker):
             key.is_python_constant()
             or isinstance(key, TensorVariable)
             and key.specialized_value is not None
+            or isinstance(key, ConstantVariable)
+            and key.python_type() is torch.dtype
         )
 
     @classmethod
@@ -237,6 +241,20 @@ class DefaultDictVariable(ConstDictVariable):
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
 
+    def is_python_constant(self):
+        # Return false for unsupported defaults. This ensures that a bad handler
+        # path is not taken in BuiltinVariable for getitem.
+        if self.default_factory not in [list, tuple, dict] and not self.items:
+            return False
+        return super().is_python_constant()
+
+    @staticmethod
+    def is_supported_arg(arg):
+        if isinstance(arg, variables.BuiltinVariable):
+            return arg.fn in [list, tuple, dict]
+        else:
+            return isinstance(arg, variables.functions.BaseUserFunctionVariable)
+
     def call_method(
         self,
         tx,
@@ -244,8 +262,6 @@ class DefaultDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ListVariable, TupleVariable
-
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "__getitem__":
@@ -260,18 +276,7 @@ class DefaultDictVariable(ConstDictVariable):
                     if istensor(k):
                         tx.store_dict_key(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
-                    if self.default_factory is list:
-                        default_var = ListVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is tuple:
-                        default_var = TupleVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is dict:
-                        default_var = ConstDictVariable(
-                            {}, dict, mutable_local=MutableLocal()
-                        )
-                    else:
-                        unimplemented(
-                            f"defaultdict with default_factory = {self.default_factory}"
-                        )
+                    default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
                     new_rec_contains = self.recursively_contains.union(
                         default_var.recursively_contains
@@ -449,3 +454,6 @@ class HFPretrainedConfigVariable(VariableTracker):
         from . import ConstantVariable
 
         return ConstantVariable(getattr(self.obj, name))
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)

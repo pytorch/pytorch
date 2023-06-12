@@ -1,6 +1,7 @@
 from typing import Optional
-import torch.distributed as dist
 
+import torch
+import torch.distributed as dist
 from .planner import SavePlanner
 from .default_planner import DefaultSavePlanner
 
@@ -38,12 +39,12 @@ def save_state_dict(
         call `save_state_dict` and that all data in state_dict belong to it.
 
     .. note::
-        This function can be used to save a state_dict with an intialized process
-        group by passing ``no_dist=True``. This can be used to produce a checkpoint
-        that can consumed by load_state_dict is a SPMD fashion.
+        This function can be used to save a state_dict without having a process group
+        initialized by passing ``no_dist=True``.
+
 
     Args:
-        state_dict (Dict[str, Any]): A state_dict
+        state_dict (Dict[str, Any]): The state_dict to save.
         storage_writer (StorageWriter):
             Instance of StorageWrite use to perform writes.
         process_group (ProcessGroup):
@@ -65,7 +66,7 @@ def save_state_dict(
         >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
         >>> torch.distributed.checkpoint.save_state_dict(
         >>>     state_dict=model_state_dict,
-        >>>     storage_writer=fs_stroage_writer,
+        >>>     storage_writer=fs_storage_writer,
         >>> )
 
     .. note::
@@ -76,6 +77,9 @@ def save_state_dict(
         and it is the user's responsibility to ensure that this is set so that
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.save_state_dict")
+
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultSavePlanner()

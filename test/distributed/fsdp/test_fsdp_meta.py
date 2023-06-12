@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -197,7 +197,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
         self._test_simple_model_with_meta_device(meta_module_fn)
 
     @skip_if_lt_x_gpu(2)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
@@ -208,7 +208,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
         self._test_simple_model_with_meta_device(meta_module_fn)
 
     @skip_if_lt_x_gpu(2)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
@@ -294,7 +294,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
@@ -308,7 +308,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )
@@ -329,7 +329,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
             FSDP(mod, param_init_fn=42)
 
     @skip_if_lt_x_gpu(2)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         not _TORCHDISTX_AVAIL,
         "Test requires torchdistX: https://github.com/pytorch/torchdistX",
     )

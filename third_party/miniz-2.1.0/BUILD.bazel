@@ -6,5 +6,6 @@ cc_library(
     hdrs = [
         "miniz.h",
     ],
+    strip_include_prefix = ".",
     visibility = ["//visibility:public"],
 )

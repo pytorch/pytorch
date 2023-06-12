@@ -81,7 +81,7 @@ ERMatXf ComputeAllAnchors(
         ConstEigenVectorMap<float>(shift_zero.data(), shift_zero.size());
   }
 
-  // Broacast anchors over shifts to enumerate all anchors at all positions
+  // Broadcast anchors over shifts to enumerate all anchors at all positions
   // in the (H, W) grid:
   //   - add A anchors of shape (1, A, box_dim) to
   //   - K shifts of shape (K, 1, box_dim) to get
@@ -370,7 +370,7 @@ OPERATOR_SCHEMA(GenerateProposals)
     .NumInputs(4)
     .NumOutputs(2)
     .SetDoc(R"DOC(
-Generate bounding box proposals for Faster RCNN. The propoasls are generated for
+Generate bounding box proposals for Faster RCNN. The proposals are generated for
 a list of images based on image score 'score', bounding box regression result
 'deltas' as well as predefined bounding box shapes 'anchors'. Greedy
 non-maximum suppression is applied to generate the final bounding boxes.

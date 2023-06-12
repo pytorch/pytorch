@@ -24,7 +24,7 @@ with the main difference being :ref:`construction of the inputs <construction>`.
 
 As this is a prototype feature, the :ref:`operations supported <supported operations>` are still
 limited. However, we welcome issues, feature requests and contributions. More information on contributing can be found
-`in this Readme <https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/nested/README.md>`_.
+`in this Readme <https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/nested/README.md>`_.
 
 .. _construction:
 
@@ -194,21 +194,29 @@ NestedTensor and any constraints they have.
    :func:`torch.nn.Linear`;  "Supports 3-d nested input and a dense 2-d weight matrix."
    :func:`torch.nn.functional.softmax`; "Supports softmax along all dims except dim=0."
    :func:`torch.nn.Dropout`; "Behavior is the same as on regular tensors."
+   :func:`torch.Tensor.masked_fill`; "Behavior is the same as on regular tensors."
    :func:`torch.relu`; "Behavior is the same as on regular tensors."
    :func:`torch.gelu`; "Behavior is the same as on regular tensors."
+   :func:`torch.silu`; "Behavior is the same as on regular tensors."
+   :func:`torch.abs`; "Behavior is the same as on regular tensors."
+   :func:`torch.sgn`; "Behavior is the same as on regular tensors."
+   :func:`torch.logical_not`; "Behavior is the same as on regular tensors."
    :func:`torch.neg`; "Behavior is the same as on regular tensors."
-   :func:`torch.add`; "Supports elementwise addition of two nested tensors.
-   Supports addition of a scalar to a nested tensor."
-   :func:`torch.mul`; "Supports elementwise multiplication of two nested tensors.
-   Supports multiplication of a nested tensor by a scalar."
+   :func:`torch.sub`; "Supports elementwise subtraction of two nested tensors."
+   :func:`torch.add`; "Supports elementwise addition of two nested tensors. Supports addition of a scalar to a nested tensor."
+   :func:`torch.mul`; "Supports elementwise multiplication of two nested tensors. Supports multiplication of a nested tensor by a scalar."
    :func:`torch.select`; "Supports selecting along all dimensions."
    :func:`torch.clone`; "Behavior is the same as on regular tensors."
    :func:`torch.detach`; "Behavior is the same as on regular tensors."
    :func:`torch.unbind`; "Supports unbinding along ``dim=0`` only."
    :func:`torch.reshape`; "Supports reshaping with size of ``dim=0`` preserved (i.e. number of tensors nested cannot be changed).
    Unlike regular tensors, a size of ``-1`` here means that the existing size is inherited.
-   In particular, the only valid size for a ragged dimension is ``-1``.
+   In particular, the only valid size for a irregular dimension is ``-1``.
    Size inference is not implemented yet and hence for new dimensions the size cannot be ``-1``."
    :func:`torch.Tensor.reshape_as`; "Similar constraint as for ``reshape``."
    :func:`torch.transpose`; "Supports transposing of all dims except ``dim=0``."
    :func:`torch.Tensor.view`; "Rules for the new shape are similar to that of ``reshape``."
+   :func:`torch.empty_like`; "Behavior is analogous to that of regular tensors; returns a new empty nested tensor (i.e. with uninitialized values) matching the nested structure of the input."
+   :func:`torch.randn_like`; "Behavior is analogous to that of regular tensors; returns a new nested tensor with values randomly initialized according to a standard normal distribution matching the nested structure of the input."
+   :func:`torch.zeros_like`; "Behavior is analogous to that of regular tensors; returns a new nested tensor with all zero values matching the nested structure of the input."
+   :func:`torch.nn.LayerNorm`; "The ``normalized_shape`` argument is restricted to not extend into the irregular dimensions of the NestedTensor."

@@ -18,7 +18,7 @@ def lazy_deprecated_import(all: List[str], old_module: str, new_module: str) -> 
         new_module: New module location / Migrated location
 
     Returns:
-        Callable to asign to the `__getattr__`
+        Callable to assign to the `__getattr__`
 
     Usage:
 

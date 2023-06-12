@@ -560,7 +560,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   variable_list traced_apply(variable_list inputs);
 
   // Sequence number used to correlate backward nodes with forward ops in the
-  // profiler and provide determinisim in the engine.
+  // profiler and provide determinism in the engine.
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const uint64_t sequence_nr_;
 

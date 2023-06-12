@@ -111,7 +111,7 @@ class TORCH_API PythonRRefFetchRet final : public RRefFetchRet {
       const Message& message);
 };
 
-// UserRRef (regardless it's the creator or not) uses this message to notiify
+// UserRRef (regardless it's the creator or not) uses this message to notify
 // OwnerRRef on delete.
 class TORCH_API RRefUserDelete final : public ForkMessageBase {
  public:

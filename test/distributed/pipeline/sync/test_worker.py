@@ -14,6 +14,7 @@ import torch
 from torch.distributed.pipeline.sync.microbatch import Batch
 from torch.distributed.pipeline.sync.stream import CPUStream
 from torch.distributed.pipeline.sync.worker import Task, spawn_workers
+from torch.testing._internal.common_utils import run_tests
 
 
 class fake_device:
@@ -109,3 +110,7 @@ def test_worker_per_device():
         # 3: fake1, 4: fake2
         assert in_queues[3] is not in_queues[4]
         assert out_queues[3] is not out_queues[4]
+
+
+if __name__ == "__main__":
+    run_tests()

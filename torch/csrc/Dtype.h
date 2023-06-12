@@ -23,6 +23,8 @@ inline bool THPPythonScalarType_Check(PyObject* obj) {
       obj == (PyObject*)(&PyBool_Type) || obj == (PyObject*)(&PyLong_Type);
 }
 
-PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name);
+TORCH_API PyObject* THPDtype_New(
+    at::ScalarType scalar_type,
+    const std::string& name);
 
 void THPDtype_init(PyObject* module);

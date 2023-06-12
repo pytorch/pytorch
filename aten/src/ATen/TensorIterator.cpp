@@ -306,7 +306,7 @@ ScalarType TensorIteratorBase::compute_common_dtype() {
   return common_dtype_;
 }
 
-TensorOptions original_options(const OperandInfo& op) {
+static TensorOptions original_options(const OperandInfo& op) {
   if (op.original_tensor_base().defined()) {
     return op.original_tensor_base().options();
   } else {
@@ -622,7 +622,7 @@ void TensorIteratorBase::coalesce_dimensions() {
   }
 
   // We can coalesce two adjacent dimensions if either dim has size 1 or if:
-  // shape[n] * stride[n] == shape[n + 1].
+  // shape[n] * stride[n] == stride[n + 1].
   auto can_coalesce = [&](int dim0, int dim1) {
     auto shape0 = shape_[dim0];
     auto shape1 = shape_[dim1];
@@ -1507,6 +1507,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
   // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
   if (privateuse1_without_storage  ||
+      common_device_.type() == DeviceType::MTIA ||
       common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||

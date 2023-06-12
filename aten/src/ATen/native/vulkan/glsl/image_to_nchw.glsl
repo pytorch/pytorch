@@ -20,9 +20,11 @@ uBuffer;
  * Params Buffer
  */
 layout(set = 0, binding = 2) uniform PRECISION restrict Block {
-  // Extents of the output texture
+  // xyz contain the extents of the input texture, w contains HxW to help
+  // calculate buffer offsets
   ivec4 in_extents;
-  // Number of texels spanned by one channel
+  // x: number of texels spanned by one channel
+  // y: number of channels
   ivec2 c_info;
 }
 uBlock;

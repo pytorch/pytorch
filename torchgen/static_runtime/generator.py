@@ -235,16 +235,16 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
         base_op_name = g.out.func.name.name.base
         func = g.out.func
     if config.is_hand_written(g):
-        logger.info(f"HAND WRITTEN: {base_op_name}")
+        logger.info("HAND WRITTEN: %s", base_op_name)
         return False
     if base_op_name in BLOCKED_OPS:
-        logger.info(f"BLOCKED: {base_op_name}")
+        logger.info("BLOCKED: %s", base_op_name)
         return False
     for arg in func.schema_order_arguments():
         maybe_method = ivalue_type_conversion_method(arg.type)
         if not maybe_method:
             # Type converting is unsupported yet.
-            logger.info(f"NOT SUPPORTED TYPE CONVERTING: {str(func)}")
+            logger.info("NOT SUPPORTED TYPE CONVERTING: %s", func)
             return False
 
     if isinstance(g, NativeFunctionsViewGroup):
@@ -252,7 +252,7 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
         # the string, just test the dang thing directly
         if "at::Tensor" != cpp.returns_type(func.returns, symint=False).cpp_type():
             # Returns a non-Tensor value.
-            logger.info(f"NON-TENSOR RET TYPE: {str(func)}")
+            logger.info("NON-TENSOR RET TYPE: %s", str(func))
             return False
         return True
 
@@ -261,7 +261,7 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
         maybe_method = ivalue_type_conversion_method(arg.type)
         if not maybe_method:
             # Type converting is unsupported yet.
-            logger.info(f"NOT SUPPORTED TYPE CONVERTING: {str(g.functional.func)}")
+            logger.info("NOT SUPPORTED TYPE CONVERTING: %s", g.functional.func)
             return False
 
     if not g.structured:
@@ -276,11 +276,11 @@ def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bo
             return False
     # TODO: stop type testing by converting to C++
     if "at::Tensor &" != cpp.returns_type(func.returns, symint=False).cpp_type():
-        logger.info(f"NON_TENSOR RET TYPE: {str(func)}")
+        logger.info("NON_TENSOR RET TYPE: %s", func)
         return False
     if has_alias(func.arguments.non_out):
         # This op may create an alias of inputs.
-        logger.info(f"INPUTS ALIAS: {base_op_name}")
+        logger.info("INPUTS ALIAS: %s", base_op_name)
         return False
     return True
 

@@ -17,7 +17,7 @@ from torch._C._profiler import (
     _remove_execution_graph_observer,
 )
 from torch.autograd import kineto_available, ProfilerActivity
-from torch.profiler import _memory_profiler
+from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
 
 __all__ = [
@@ -92,6 +92,7 @@ class _KinetoProfile:
         self.with_modules = with_modules
         self.experimental_config = experimental_config
         self.profiler: Optional[prof.profile] = None
+        self.mem_tl: Optional[MemoryProfileTimeline] = None
 
     def start(self):
         self.prepare_trace()
@@ -104,6 +105,7 @@ class _KinetoProfile:
         self.profiler = prof.profile(
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
+            use_mtia=(ProfilerActivity.MTIA in self.activities),
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -133,6 +135,19 @@ class _KinetoProfile:
             dist_info = self._get_distributed_info()
             if dist_info:
                 self.add_metadata_json("distributedInfo", json.dumps(dist_info))
+
+            # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
+            is_cuda11_or_lower = (
+                (torch.version.cuda is not None)
+                and ([int(x) for x in torch.version.cuda.split(".")] < [12, 0])
+            )
+            if (
+                is_cuda11_or_lower
+                and hasattr(torch, '_inductor')
+                and torch._inductor.config.triton.cudagraphs
+            ):
+                os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
 
     def stop_trace(self):
         assert self.profiler is not None
@@ -217,14 +232,46 @@ class _KinetoProfile:
             "world_size": dist.get_world_size()
         }
 
-    def _memory_profile(self) -> _memory_profiler.MemoryProfile:
+    def _memory_profile(self) -> MemoryProfile:
         required = ("record_shapes", "profile_memory", "with_stack")
         missing = [f"{i}=True" for i in required if not getattr(self, i)]
         if missing:
             raise ValueError(f"{', '.join(missing)} required for memory profiling.")
 
         assert self.profiler is not None and self.profiler.kineto_results is not None
-        return _memory_profiler.MemoryProfile(self.profiler.kineto_results)
+        return MemoryProfile(self.profiler.kineto_results)
+
+    def export_memory_timeline(self, path: str, device: str = None) -> None:
+        """Extract the memory information from the memory profile collected
+        tree for a given device, and export a timeline plot consisting of
+        [times, [sizes by category]], where times are timestamps and sizes
+        are memory usage for each category. The memory timeline plot will
+        be saved a JSON (by default) or gzipped JSON.
+
+        Input: (path of file, device)
+        Output: File written as JSON or gzipped JSON
+        """
+        # Default to device 0, if unset. Fallback on cpu.
+        if device is None:
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+        # Construct the memory timeline plot data
+        self.mem_tl = MemoryProfileTimeline(self._memory_profile())
+
+        # Depending on the file suffix, save the data as json.gz or json.
+        # For html, we can embed the image into an HTML file.
+        if path.endswith('.html'):
+            self.mem_tl.export_memory_timeline_html(path, device)
+        elif path.endswith('.gz'):
+            fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+            fp.close()
+            self.mem_tl.export_memory_timeline(fp.name, device)
+            with open(fp.name) as fin:
+                with gzip.open(path, 'wt') as fout:
+                    fout.writelines(fin)
+            os.remove(fp.name)
+        else:
+            self.mem_tl.export_memory_timeline(path, device)
 
 
 class ProfilerAction(Enum):
@@ -276,6 +323,7 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
     """
     return ProfilerAction.RECORD
 
+
 def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -295,8 +343,9 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
             except Exception as e:
                 raise RuntimeError("Can't create directory: " + dir_name) from e
         if not worker_name:
-            worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
-        file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
+            worker_name = f"{socket.gethostname()}_{os.getpid()}"
+        # Use nanosecond here to avoid naming clash when exporting the trace
+        file_name = f"{worker_name}.{time.time_ns()}.pt.trace.json"
         if use_gzip:
             file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
@@ -502,11 +551,13 @@ class profile(_KinetoProfile):
         prof.KinetoStepTracker.init_step_count(PROFILER_STEP_NAME)
 
     def __enter__(self):
+        prof._enable_dynamo_cache_lookup_profiler(True)
         self.start()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
+        prof._enable_dynamo_cache_lookup_profiler(False)
         prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
 
     def start(self):

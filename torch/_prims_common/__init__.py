@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
+import sympy
 import weakref
 import torch
 from torch import sym_float, sym_int, sym_max
@@ -152,6 +154,16 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
                 )
             )
             raise RuntimeError(msg)
+
+    if a.is_conj() != b.is_conj():
+        raise RuntimeError(
+            f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
+        )
+
+    if a.is_neg() != b.is_neg():
+        raise RuntimeError(
+            f"Neg mismatch! is_neg is set to {a.is_neg()} and {b.is_neg()}"
+        )
 
 
 def _check_strides_helper(
@@ -502,7 +514,7 @@ def validate_shape(shape: ShapeType):
     Validates that a sequence represents a valid shape.
     """
 
-    assert isinstance(shape, Sequence)
+    assert isinstance(shape, Sequence), type(shape)
     for l in shape:
         validate_dim_length(l)
 
@@ -1221,6 +1233,14 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
+def symbol_type(x: sympy.Symbol) -> Type:
+    if x.is_integer:  # type: ignore[attr-defined]
+        return int
+    else:
+        # NB: Not strictly correct, but we don't support SymPy complex or bool.
+        return float
+
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1316,7 +1336,7 @@ def elementwise_dtypes(
 
     highest_type: type = bool
     for x in args:
-        if not isinstance(x, (Number, TensorLike)):
+        if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
             msg = (
                 "Unexpected type {0} when computing elementwise type promotion!".format(
                     str(type(x))
@@ -1326,6 +1346,8 @@ def elementwise_dtypes(
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
+        elif isinstance(x, sympy.Symbol):
+            highest_type = get_higher_type(highest_type, symbol_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1462,6 +1484,23 @@ def make_contiguous_strides_for(
         return result[:-2] + (1, max(shape[-2], 1))
 
 
+def make_channels_last_1d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    check(
+        len(shape) == 3,
+        lambda: "Only tensors of rank 3 can use the channels_last_1d memory format",
+    )
+
+    multiplier = 1
+    strides = [0] * 3
+    for idx in (1, -1, 0):
+        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # This is consistent with eager
+        strides[idx] = multiplier
+        multiplier *= shape[idx]
+
+    return tuple(strides)
+
+
 def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
     check(
@@ -1499,7 +1538,9 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
 
 def make_channels_last_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     ndim = len(shape) if isinstance(shape, Sequence) else 1
-    if ndim == 4:
+    if ndim == 3:
+        return make_channels_last_1d_strides_for(shape)
+    elif ndim == 4:
         return make_channels_last_2d_strides_for(shape)
     elif ndim == 5:
         return make_channels_last_3d_strides_for(shape)
@@ -1751,3 +1792,26 @@ def clone_preserve_strides(x):
         return torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     finally:
         torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, old)
+
+class CUDARngStateHelper:
+    @staticmethod
+    def get_torch_state_as_tuple(fake_mode=nullcontext()):
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA not available")
+
+        with fake_mode:
+            seed = torch.tensor(torch.cuda.initial_seed())
+            offset = torch.tensor(torch.cuda._get_rng_state_offset())
+            return seed, offset
+
+    @staticmethod
+    def set_torch_state_tensor(seed, offset):
+        # Rng state is [64-bit seed, 64-bit offset]
+        seed_portion = seed.reshape([1]).view(torch.uint8)
+        offset_portion = offset.reshape([1]).view(torch.uint8)
+        new_state = torch.cat([seed_portion, offset_portion])
+        torch.cuda.set_rng_state(new_state)
+
+    @staticmethod
+    def set_new_offset(relative_offset):
+        torch.cuda._set_rng_state_offset(relative_offset.item())

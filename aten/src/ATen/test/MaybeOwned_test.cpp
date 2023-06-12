@@ -197,7 +197,7 @@ using MaybeOwnedTypes = ::testing::Types<
   c10::IValue
   >;
 
-TYPED_TEST_CASE(MaybeOwnedTest, MaybeOwnedTypes);
+TYPED_TEST_SUITE(MaybeOwnedTest, MaybeOwnedTypes);
 
 TYPED_TEST(MaybeOwnedTest, SimpleDereferencingString) {
   assertBorrow(this->borrowed, this->borrowFrom);

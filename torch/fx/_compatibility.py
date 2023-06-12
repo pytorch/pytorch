@@ -2,7 +2,7 @@ from typing import Any, Dict
 import textwrap
 
 _BACK_COMPAT_OBJECTS : Dict[Any, None] = {}
-_MARKED_WITH_COMATIBLITY : Dict[Any, None] = {}
+_MARKED_WITH_COMPATIBILITY : Dict[Any, None] = {}
 
 def compatibility(is_backward_compatible : bool):
     if is_backward_compatible:
@@ -15,7 +15,7 @@ def compatibility(is_backward_compatible : bool):
 """
             fn.__doc__ = docstring
             _BACK_COMPAT_OBJECTS.setdefault(fn)
-            _MARKED_WITH_COMATIBLITY.setdefault(fn)
+            _MARKED_WITH_COMPATIBILITY.setdefault(fn)
             return fn
 
         return mark_back_compat
@@ -28,7 +28,7 @@ def compatibility(is_backward_compatible : bool):
     This API is experimental and is *NOT* backward-compatible.
 """
             fn.__doc__ = docstring
-            _MARKED_WITH_COMATIBLITY.setdefault(fn)
+            _MARKED_WITH_COMPATIBILITY.setdefault(fn)
             return fn
 
         return mark_not_back_compat

@@ -774,10 +774,10 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall(
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& opts) {
   TORCH_CHECK(
-      inputTensors.size() == size_,
+      inputTensors.size() == static_cast<size_t>(size_),
       "Number of input tensors are not equal to group size");
   TORCH_CHECK(
-      outputTensors.size() == size_,
+      outputTensors.size() == static_cast<size_t>(size_),
       "Number of output tensors are not equal to group size");
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [this](std::unique_ptr<WorkEntry>& entry) {

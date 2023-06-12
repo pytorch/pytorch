@@ -196,7 +196,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   // The version counter is correct.
-  // Additionnally, if we deal with a non-leaf variable, we have its correct
+  // Additionally, if we deal with a non-leaf variable, we have its correct
   // grad_fn.
 
   // If we have the original variable, we simply return it

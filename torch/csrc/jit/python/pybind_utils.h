@@ -57,6 +57,8 @@
 namespace torch {
 namespace jit {
 
+using ResolutionCallback = std::function<py::object(std::string)>;
+
 void clear_registered_instances(void* ptr);
 
 TORCH_PYTHON_API IValue toIValue(

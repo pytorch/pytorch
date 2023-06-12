@@ -292,7 +292,7 @@ Region of Interest (RoI) align operation as used in Mask R-CNN.
         0,
         "Y",
         "4D output of shape (R, C, pooled_h, pooled_w). The r-th batch element "
-        "is a pooled feature map cooresponding to the r-th RoI.");
+        "is a pooled feature map corresponding to the r-th RoI.");
 
 template <typename T>
 using RoIAlignCPUOp = caffe2::RoIAlignOp<T, CPUContext>;

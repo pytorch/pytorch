@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/DeviceType.h>
-#include <c10/macros/Macros.h>
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 
 #include <cstddef>
@@ -17,7 +17,7 @@ namespace c10 {
 /// DeviceIndex directly.
 using DeviceIndex = int8_t;
 
-/// Represents a a compute device on which a tensor is located. A device is
+/// Represents a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
 /// (e.g. CPU or CUDA GPU), and a device index or ordinal, which identifies the
 /// specific compute device when there is more than one of a certain type. The
@@ -79,6 +79,11 @@ struct C10_API Device final {
   /// Return true if the device is of CUDA type.
   bool is_cuda() const noexcept {
     return type_ == DeviceType::CUDA;
+  }
+
+  /// Return true if the device is of PrivateUse1 type.
+  bool is_privateuseone() const noexcept {
+    return type_ == DeviceType::PrivateUse1;
   }
 
   /// Return true if the device is of MPS type.
@@ -146,10 +151,15 @@ struct C10_API Device final {
     return type_ == DeviceType::CPU;
   }
 
-  /// Return true if the device supports arbirtary strides.
+  /// Return true if the device is of PrivateUse1 type.
+  bool is_privateuse1() const noexcept {
+    return type_ == DeviceType::PrivateUse1;
+  }
+
+  /// Return true if the device supports arbitrary strides.
   bool supports_as_strided() const noexcept {
     return type_ != DeviceType::IPU && type_ != DeviceType::XLA &&
-        type_ != DeviceType::Lazy;
+        type_ != DeviceType::Lazy && type_ != DeviceType::MTIA;
   }
 
   /// Same string as returned from operator<<.

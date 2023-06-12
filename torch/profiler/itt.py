@@ -69,5 +69,7 @@ def range(msg, *args, **kwargs):
         msg (str): message to associate with the range
     """
     range_push(msg.format(*args, **kwargs))
-    yield
-    range_pop()
+    try:
+        yield
+    finally:
+        range_pop()

@@ -79,7 +79,7 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
 )
 from torch.distributed.elastic.utils.logging import get_logger
 
-log = get_logger()
+log = get_logger(__name__)
 
 
 def start_processes(
@@ -242,7 +242,7 @@ def start_processes(
 
             error_file = os.path.join(clogdir, "error.json")
             error_files[local_rank] = error_file
-            log.info(f"Setting worker{local_rank} reply file to: {error_file}")
+            log.info("Setting worker%s reply file to: %s", local_rank, error_file)
             envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
     context: PContext

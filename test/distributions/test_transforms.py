@@ -17,6 +17,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform, Compo
                                             identity_transform, Transform, _InverseTransform,
                                             PositiveDefiniteTransform)
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
+from torch.testing._internal.common_utils import run_tests
 
 
 def get_transforms(cache_size):
@@ -494,5 +495,5 @@ def test_save_load_transform():
     assert torch.allclose(log_prob, other.log_prob(x))
 
 
-if __name__ == '__main__':
-    pytest.main([__file__])
+if __name__ == "__main__":
+    run_tests()

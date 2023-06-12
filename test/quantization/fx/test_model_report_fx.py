@@ -117,16 +117,16 @@ class TwoThreeOps(nn.Module):
 
 class TestFxModelReportDetector(QuantizationTestCase):
 
-    """Prepares and callibrate the model"""
+    """Prepares and calibrate the model"""
 
     def _prepare_model_and_run_input(self, model, q_config_mapping, input):
         model_prep = torch.ao.quantization.quantize_fx.prepare_fx(model, q_config_mapping, input)  # prep model
-        model_prep(input).sum()  # callibrate the model
+        model_prep(input).sum()  # calibrate the model
         return model_prep
 
     """Case includes:
         one conv or linear
-        post training quantiztion
+        post training quantization
         composed as module
         qconfig uses per_channel weight observer
         Only 1 qconfig in qconfig dict
@@ -155,7 +155,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
                 DEFAULT_NO_OPTIMS_ANSWER_STRING.format(torch.backends.quantized.engine),
             )
 
-            # there shoud only be one conv there in this model
+            # there should only be one conv there in this model
             self.assertEqual(per_channel_info["conv"]["backend"], torch.backends.quantized.engine)
             self.assertEqual(len(per_channel_info), 1)
             self.assertEqual(list(per_channel_info)[0], "conv")
@@ -534,23 +534,23 @@ class TestFxModelReportObserver(QuantizationTestCase):
 
             # quick check that a reset occurred
             self.assertEqual(
-                getattr(model, "obs1").average_batch_activation_range,
+                model.obs1.average_batch_activation_range,
                 torch.tensor(float(0)),
             )
-            self.assertEqual(getattr(model, "obs1").epoch_activation_min, torch.tensor(float("inf")))
-            self.assertEqual(getattr(model, "obs1").epoch_activation_max, torch.tensor(float("-inf")))
+            self.assertEqual(model.obs1.epoch_activation_min, torch.tensor(float("inf")))
+            self.assertEqual(model.obs1.epoch_activation_max, torch.tensor(float("-inf")))
 
             # loop through the batches and run through
             for index, batch in enumerate(split_up_data):
 
-                num_tracked_so_far = getattr(model, "obs1").num_batches_tracked
+                num_tracked_so_far = model.obs1.num_batches_tracked
                 self.assertEqual(num_tracked_so_far, index)
 
                 # get general info about the batch and the model to use later
                 batch_min, batch_max = torch.aminmax(batch)
-                current_average_range = getattr(model, "obs1").average_batch_activation_range
-                current_epoch_min = getattr(model, "obs1").epoch_activation_min
-                current_epoch_max = getattr(model, "obs1").epoch_activation_max
+                current_average_range = model.obs1.average_batch_activation_range
+                current_epoch_min = model.obs1.epoch_activation_min
+                current_epoch_max = model.obs1.epoch_activation_max
 
                 # run input through
                 model(ex_input)
@@ -560,13 +560,13 @@ class TestFxModelReportObserver(QuantizationTestCase):
                     num_tracked_so_far + 1
                 )
                 self.assertEqual(
-                    getattr(model, "obs1").average_batch_activation_range,
+                    model.obs1.average_batch_activation_range,
                     correct_updated_value,
                 )
 
                 if current_epoch_max - current_epoch_min > 0:
                     self.assertEqual(
-                        getattr(model, "obs1").get_batch_to_epoch_ratio(),
+                        model.obs1.get_batch_to_epoch_ratio(),
                         correct_updated_value / (current_epoch_max - current_epoch_min),
                     )
 
@@ -589,13 +589,13 @@ class TestFxModelReportObserver(QuantizationTestCase):
         self.run_model_and_common_checks(model, ex_input, 1, 1)
 
         # make sure final values are all 0
-        self.assertEqual(getattr(model, "obs1").epoch_activation_min, 0)
-        self.assertEqual(getattr(model, "obs1").epoch_activation_max, 0)
-        self.assertEqual(getattr(model, "obs1").average_batch_activation_range, 0)
+        self.assertEqual(model.obs1.epoch_activation_min, 0)
+        self.assertEqual(model.obs1.epoch_activation_max, 0)
+        self.assertEqual(model.obs1.average_batch_activation_range, 0)
 
         # we should get an error if we try to calculate the ratio
         with self.assertRaises(ValueError):
-            ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
+            ratio_val = model.obs1.get_batch_to_epoch_ratio()
 
     """Case includes:
     non-zero tensor
@@ -616,13 +616,13 @@ class TestFxModelReportObserver(QuantizationTestCase):
         self.run_model_and_common_checks(model, ex_input, 1, 1)
 
         # make sure final values are all 0 except for range
-        self.assertEqual(getattr(model, "obs1").epoch_activation_min, 1)
-        self.assertEqual(getattr(model, "obs1").epoch_activation_max, 1)
-        self.assertEqual(getattr(model, "obs1").average_batch_activation_range, 0)
+        self.assertEqual(model.obs1.epoch_activation_min, 1)
+        self.assertEqual(model.obs1.epoch_activation_max, 1)
+        self.assertEqual(model.obs1.average_batch_activation_range, 0)
 
         # we should get an error if we try to calculate the ratio
         with self.assertRaises(ValueError):
-            ratio_val = getattr(model, "obs1").get_batch_to_epoch_ratio()
+            ratio_val = model.obs1.get_batch_to_epoch_ratio()
 
     """Case includes:
     non-zero tensor
@@ -1346,7 +1346,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 # assert that each of the desired modules have the observers inserted
                 for fqn, module in prepared_for_callibrate_model.named_modules():
                     # check if module is a supported module
-                    is_in_include_list = sum(list(map(lambda x: isinstance(module, x), mods_to_check))) > 0
+                    is_in_include_list = sum([isinstance(module, x) for x in mods_to_check]) > 0
 
                     if is_in_include_list:
                         # make sure it has the observer attribute

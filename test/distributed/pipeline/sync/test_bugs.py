@@ -12,6 +12,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from torch.distributed.pipeline.sync import Pipe
+from torch.testing._internal.common_utils import run_tests
 
 
 def test_python_autograd_function(setup_rpc):
@@ -137,3 +138,7 @@ def test_parallel_randoms(setup_rpc):
     y.norm().backward()
 
     assert y.to(torch.bool).tolist() == x.grad.to(torch.bool).tolist()
+
+
+if __name__ == "__main__":
+    run_tests()

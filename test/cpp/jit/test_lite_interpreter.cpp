@@ -1,8 +1,7 @@
 #include <test/cpp/jit/test_utils.h>
 
-#include <gtest/gtest.h>
-
 #include <c10/core/TensorOptions.h>
+#include <gtest/gtest.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
@@ -1015,6 +1014,20 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+
+  std::unordered_map<std::string, std::string>
+      loaded_extra_files_without_explicit_mapping;
+  iss.seekg(0, iss.beg);
+  torch::jit::_load_for_mobile(
+      iss,
+      torch::kCPU,
+      loaded_extra_files_without_explicit_mapping,
+      MobileModuleLoadOptions::PARSE_ALL_EXTRA_FILE_MAPS);
+  ASSERT_EQ(
+      loaded_extra_files_without_explicit_mapping["metadata.json"], "abc");
+  ASSERT_EQ(
+      loaded_extra_files_without_explicit_mapping["mobile_info.json"],
+      "{\"key\": 23}");
 }
 
 TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
@@ -2217,7 +2230,7 @@ TEST_P(LiteInterpreterDynamicTypeTestFixture, Conformance) {
   }
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     PyTorch,
     LiteInterpreterDynamicTypeTestFixture,
     ::testing::Range(

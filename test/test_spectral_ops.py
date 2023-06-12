@@ -811,8 +811,10 @@ class TestFFT(TestCase):
                 plan_cache = torch.backends.cuda.cufft_plan_cache[device]
             original = plan_cache.max_size
             plan_cache.max_size = n
-            yield
-            plan_cache.max_size = original
+            try:
+                yield
+            finally:
+                plan_cache.max_size = original
 
         with plan_cache_max_size(devices[0], max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
             self._test_fft_ifft_rfft_irfft(devices[0], dtype)

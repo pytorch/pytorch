@@ -103,6 +103,24 @@ const char* BatchedTensorImpl::tensorimpl_type_name() const {
   return "BatchedTensorImpl";
 }
 
+c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  TORCH_CHECK(false, "accessing `data` under vmap transform is not allowed");
+  return nullptr;
+}
+
+c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  TORCH_CHECK(false, "accessing `data` under vmap transform is not allowed");
+  return nullptr;
+}
+
+void BatchedTensorImpl::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
+  TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
+}
+
 Tensor makeBatched(const Tensor& tensor, int64_t bdim, int64_t level) {
   DispatchKeySet key_set = getKeysToPropagateToWrapper(tensor);
   auto* batched = maybeGetBatchedImpl(tensor);

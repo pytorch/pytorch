@@ -242,7 +242,10 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 };
 
 bool isNamedTupleClass(const py::object& obj);
-TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc);
+TypePtr registerNamedTuple(
+    const py::object& obj,
+    const SourceRange& loc,
+    const ResolutionCallback& rcb);
 
 void recurseThroughNestedModules(
     const SourceRange& loc,

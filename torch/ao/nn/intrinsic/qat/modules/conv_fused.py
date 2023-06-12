@@ -76,7 +76,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         self.bn.reset_running_stats()
         init.uniform_(self.bn.weight)
         init.zeros_(self.bn.bias)
-        # note: below is actully for conv, not BN
+        # note: below is actually for conv, not BN
         if self.bias is not None:
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
@@ -209,7 +209,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         fused_bias = self.bn.bias - self.bn.weight * fused_mean / fused_std
         conv_bn += fused_bias.reshape(bias_shape)
 
-        # HACK to let conv bias particpiate in loss to avoid DDP error (parameters
+        # HACK to let conv bias participate in loss to avoid DDP error (parameters
         #   were not used in producing loss)
         if self.bias is not None:
             conv_bn += (self.bias - self.bias).reshape(bias_shape)

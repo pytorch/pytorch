@@ -31,10 +31,11 @@ class Gumbel(TransformedDistribution):
         self.loc, self.scale = broadcast_all(loc, scale)
         finfo = torch.finfo(self.loc.dtype)
         if isinstance(loc, Number) and isinstance(scale, Number):
-            base_dist = Uniform(finfo.tiny, 1 - finfo.eps)
+            base_dist = Uniform(finfo.tiny, 1 - finfo.eps, validate_args=validate_args)
         else:
             base_dist = Uniform(torch.full_like(self.loc, finfo.tiny),
-                                torch.full_like(self.loc, 1 - finfo.eps))
+                                torch.full_like(self.loc, 1 - finfo.eps),
+                                validate_args=validate_args)
         transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
                       ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
         super().__init__(base_dist, transforms, validate_args=validate_args)

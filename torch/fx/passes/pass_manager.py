@@ -69,7 +69,7 @@ def log_hook(fn: Callable, level=logging.INFO) -> Callable:
     @wraps(fn)
     def wrapped_fn(gm):
         val = fn(gm)
-        logger.log(level, f"Ran pass {fn}\t Return value: {val}",)
+        logger.log(level, "Ran pass %s\t Return value: %s", fn, val)
         return val
 
     return wrapped_fn

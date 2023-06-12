@@ -28,7 +28,7 @@ static void checkForInvalidMutationOnCaptures(
       "as inputs.");
 }
 
-Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
+static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
   if (!tensor.defined()) {
     return tensor;
   }
@@ -69,8 +69,7 @@ static void autogradBasedTransformProcess(
   auto num_args = op.schema().arguments().size();
   foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), maybeTransformGradWrappers);
 
-  auto exclude = keysToExcludeWhenEnteringDynamicLayer(transform_type);
-  setup_dispatch_key_tls(exclude, {});
+  setup_dispatch_key_tls(transform_type, {});
   op.callBoxed(stack);
 }
 
