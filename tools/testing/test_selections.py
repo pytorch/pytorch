@@ -97,15 +97,8 @@ def calculate_shards(
     tests: List[str],
     test_file_times: Dict[str, float],
     must_serial: Optional[Callable[[str], bool]] = None,
-    debug: bool = False,
 ) -> List[Tuple[float, List[ShardedTest]]]:
     must_serial = must_serial or (lambda x: True)
-
-    if debug:
-        print(test_file_times)
-        print(tests)
-        print(num_shards)
-        print([x for x in tests if must_serial(x)])
 
     known_tests = [x for x in tests if x in test_file_times]
     unknown_tests: List[str] = [x for x in tests if x not in known_tests]
@@ -130,11 +123,6 @@ def calculate_shards(
     for unknown_test in unknown_tests:
         sharded_jobs[index].serial.append(ShardedTest(unknown_test, 1, 1, None))
         index = (index + 1) % num_shards
-
-    if debug:
-        for j in sharded_jobs:
-            print(j.convert_to_tuple()[1])
-
     return [job.convert_to_tuple() for job in sharded_jobs]
 
 

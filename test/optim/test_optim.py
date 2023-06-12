@@ -51,7 +51,7 @@ def drosenbrock(tensor):
     x, y = tensor
     return torch.tensor((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
-
+@skipIfTorchDynamo("This is a TEMPORARY stopgap, see https://github.com/pytorch/pytorch/issues/103322")
 class TestOptim(TestCase):
     exact_dtype = True
 
@@ -1086,7 +1086,6 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
-    @skipIfTorchDynamo("Unsupported mutation of step")
     def test_adadelta(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 4e-3
@@ -1129,7 +1128,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
-    @skipIfTorchDynamo("Unsupported mutation of step")
     def test_adadelta_complex(self):
         # Handles https://github.com/pytorch/pytorch/issues/69698
         self.rel_tol = 2e-2
@@ -1338,7 +1336,6 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
             optim.RAdam(None, lr=1e-2, weight_decay=-1)
 
-    @skipIfTorchDynamo("Unsupported mutation of step")
     def test_rmsprop(self):
         for foreach in (False, True):
             self._test_basic_cases(
@@ -1674,11 +1671,11 @@ class TestOptim(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required.")
     def test_fused_optimizer_load_state_dict(self):
-        # NOTE: The below SIMULATES a fused optimizer with its state moved to CPU, issue 103256
+        # NOTE: This SIMULATES a fused/capturable optimizer with state moved to CPU, issue 103256
         # How do we get there? Users typically create CUDA models on fused optimizers and then
         # store checkpoints on CPU as CUDA memory is limited with torch.load(...map_location="cpu").
         # Since this is a unit test, it is more expedient to simulate what the state_dict
-        # would look like, which is basically CPU tensors with fused flag = True.
+        # would look like, which is basically CPU tensors with fused/capturable flag = True.
         for optimC, kwarg in itertools.product((Adam, optim.AdamW), ("fused", "capturable")):
             input = torch.tensor([0.1, 0.2], dtype=torch.float32, device="cpu")
             optimizer = optimC([input])
@@ -1691,7 +1688,7 @@ class TestOptim(TestCase):
             # load
             input_cuda = input.clone().detach().to(device="cuda")
             defaults = {kwarg: True}
-            optimizer_cuda = torch.optim.Adam([input_cuda], **defaults)
+            optimizer_cuda = optimC([input_cuda], **defaults)
             optimizer_cuda.load_state_dict(optim_state_dict_cpu)
             optimizer_cuda.zero_grad()
             input_cuda.grad = torch.rand_like(input_cuda)

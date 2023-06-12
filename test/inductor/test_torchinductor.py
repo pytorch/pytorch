@@ -6324,10 +6324,12 @@ class CommonTemplate:
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
 
+        # The first two values should be the same, attention output
+        # and logsumexp since dropout is not being set
         def fn(q, k, v, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
                 q, k, v, compute_log_sumexp
-            )
+            )[:2]
 
         self.common(
             fn,
@@ -6339,6 +6341,18 @@ class CommonTemplate:
             ),
             check_lowp=False,
         )
+
+    def test_fft_real_input(self):
+        def fn(x):
+            return torch.fft.fftn(x)
+
+        self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
+
+    def test_fft_real_input_real_output(self):
+        def fn(x):
+            return torch.fft.fftn(x).real
+
+        self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
 
 @dataclasses.dataclass
