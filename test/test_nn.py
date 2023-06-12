@@ -9733,10 +9733,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(expected_out, t_out)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
-    # @parametrize_test("mode", ["bilinear", "bicubic"])
-    @parametrize_test("mode", ["bicubic",])
-    # @parametrize_test("antialias", [True, False])
-    @parametrize_test("antialias", [False])
+    @parametrize_test("mode", ["bilinear", "bicubic"])
+    @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("output_size", [32, 600])
