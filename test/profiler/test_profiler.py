@@ -914,7 +914,7 @@ class TestProfiler(TestCase):
                 ]
             )
 
-        if torch._C.has_mkldnn:
+        if torch.backends.mkldnn.is_available():
             create_mkldnn_tensor()
             stats = run_profiler(create_mkldnn_tensor)
             check_metrics(
@@ -2226,7 +2226,7 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(getattr_inputs("layout", None), [torch.sparse_coo, torch.sparse_coo, None])
         self.assertEqual(getattr_inputs("device", None), [torch.device("cpu"), torch.device("cpu"), None])
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_mkldnn_tensors(self):
         x = torch.ones(4, 3).to_mkldnn()
 
