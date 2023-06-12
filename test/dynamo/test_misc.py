@@ -1232,7 +1232,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(3)
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
     @requires_numpy_pytorch_interop
