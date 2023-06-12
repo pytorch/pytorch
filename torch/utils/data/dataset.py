@@ -257,7 +257,7 @@ class StackDataset(Dataset[T_stack]):
     def __getitems__(self, indices: List) -> List[T_stack]:
         # add batched sampling support when parent datasets supports it.
         if isinstance(self.datasets, dict):
-            dict_batch = [{} for _ in indices]
+            dict_batch: List[T_dict] = [{} for _ in indices]
             for k, dataset in self.datasets.items():
                 if callable(getattr(dataset, "__getitems__", None)):
                     for data, sample in zip(dataset.__getitems__(indices), dict_batch):  # type: ignore[attr-defined]
@@ -268,15 +268,16 @@ class StackDataset(Dataset[T_stack]):
             return dict_batch
 
         # tuple data
-        tuple_batch = [[] for _ in indices]
+        list_batch = [[] for _ in indices]
         for dataset in self.datasets:
             if callable(getattr(dataset, "__getitems__", None)):
                 for data, sample in zip(dataset.__getitems__(indices), batch):  # type: ignore[attr-defined]
                     sample.append(data)
             else:
-                for idx, sample in zip(indices, tuple_batch):
+                for idx, sample in zip(indices, list_batch):
                     sample.append(dataset[idx])
-        return [tuple(sample) for sample in tuple_batch]
+        tuple_batch: List[T_tuple] = [tuple(sample) for sample in list_batch]
+        return tuple_batch
 
     def __len__(self):
         return self._length
