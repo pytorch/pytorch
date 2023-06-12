@@ -15,13 +15,15 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import (
-    MultiThreadedTestCase,
-    skip_if_lt_x_gpu
+    MultiThreadedTestCase
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
 )
+
 
 def new_subgroups(group_size: int, pg_tag=None):
     world_size = dist.get_world_size()
@@ -235,25 +237,20 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(res[0], t0 * 4)
         self.assertEqual(res[1], t1 * 4)
 
-    def test_all_gather_into_tensor_coalesced(self):
-        tensors = [torch.ones([4], device="cpu"), torch.ones([4], device="cpu") + 1]
-        mesh = dt.DeviceMesh("cpu", torch.arange(4))
+    @parametrize("device", ["cpu", "cuda"])
+    def test_all_gather_into_tensor_coalesced(self, device):
+        if device == "cuda":
+            if torch.cuda.device_count() < self.world_size:
+                self.skipTest("Not enough CUDA devices")
+            torch.cuda.set_device(dist.get_rank())
+
+        tensors = [torch.ones([4], device=device), torch.ones([4], device=device) + 1]
+        mesh = dt.DeviceMesh(device, torch.arange(4))
 
         res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
         self.assertEqual(2, len(res))
-        self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
-        self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
-
-
-    @skip_if_lt_x_gpu(1)
-    def test_all_gather_into_tensor_coalesced_cuda(self):
-        tensors = [torch.ones([4], device="cuda:0"), torch.ones([4], device="cuda:0") + 1]
-        mesh = dt.DeviceMesh("cuda", torch.arange(4))
-
-        res = ft_c.all_gather_into_tensor_coalesced(tensors, mesh)
-        self.assertEqual(2, len(res))
-        self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
-        self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
+        self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device), res[0])
+        self.assertEqual(torch.ones([4 * dist.get_world_size()], device=device) + 1, res[1])
 
 
 class TestMetaCollectives(TestCase):
@@ -314,6 +311,7 @@ class TestMakeFx(MultiThreadedTestCase):
             .check_not("get_attr")  \
             .check("wait_tensor").run(str(mesh_dim_graph.graph))
 
+instantiate_parametrized_tests(TestTraceableCollectives)
 
 if __name__ == "__main__":
     run_tests()
