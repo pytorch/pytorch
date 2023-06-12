@@ -95,6 +95,9 @@ class TORCH_API Context {
   static bool hasMPS() {
     return detail::getMPSHooks().hasMPS();
   }
+  static bool hasHIPSOLVER() {
+    return detail::getCUDAHooks().hasHIPSOLVER();
+  }
   static bool hasIPU() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
   }

@@ -13,7 +13,7 @@
 #include <c10/cuda/CUDAException.h>
 
 #ifdef USE_ROCM
-#include <hipblas.h>
+#include <hipblas/hipblas.h>
 #endif
 
 namespace c10 {
@@ -43,12 +43,18 @@ class CuDNNError : public c10::Error {
     }                                                                                           \
   } while (0)
 
+
+
+
+
+
 namespace at { namespace cuda { namespace blas {
 C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
 #ifdef USE_ROCM
 C10_EXPORT const char* _hipblasGetErrorEnum(hipblasStatus_t error);
 #endif
 }}} // namespace at::cuda::blas
+
 
 #define TORCH_CUDABLAS_CHECK(EXPR)                              \
   do {                                                          \
@@ -58,6 +64,17 @@ C10_EXPORT const char* _hipblasGetErrorEnum(hipblasStatus_t error);
                 at::cuda::blas::_cublasGetErrorEnum(__err),     \
                 " when calling `" #EXPR "`");                   \
   } while (0)
+
+#ifdef USE_ROCM
+#define TORCH_HIPBLAS_CHECK(EXPR)								\
+  do {															\
+	hipblasStatus_t __err = EXPR;								\
+	TORCH_CHECK(__err == HIPBLAS_STATUS_SUCCESS,				\
+				"CUDA error: ",									\
+				" when calling `" #EXPR "`");					\
+  } while (0)
+#endif
+
 
 const char *cusparseGetErrorString(cusparseStatus_t status);
 

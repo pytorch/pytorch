@@ -33,7 +33,8 @@
 [submodule "third_party/gloo"]
     ignore = dirty
     path = third_party/gloo
-    url = https://github.com/facebookincubator/gloo
+    url = https://github.com/ROCmSoftwarePlatform/gloo
+    branch = rocm5.6_internal_testing
 [submodule "third_party/NNPACK_deps/pthreadpool"]
     ignore = dirty
     path = third_party/pthreadpool
@@ -126,10 +127,6 @@
     ignore = dirty
     path = third_party/fmt
     url = https://github.com/fmtlib/fmt.git
-[submodule "third_party/tensorpipe"]
-    ignore = dirty
-    path = third_party/tensorpipe
-    url = https://github.com/pytorch/tensorpipe.git
 [submodule "third_party/cudnn_frontend"]
 	path = third_party/cudnn_frontend
 	url = https://github.com/NVIDIA/cudnn-frontend.git
@@ -154,3 +151,8 @@
 [submodule "third_party/cutlass"]
 	path = third_party/cutlass
 	url = https://github.com/NVIDIA/cutlass.git
+[submodule "third_party/tensorpipe"]
+	ignore = dirty
+	path = third_party/tensorpipe
+	url = https://github.com/ROCmSoftwarePlatform/tensorpipe.git
+	branch = tp_rocm_54

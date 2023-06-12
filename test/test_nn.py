@@ -11725,7 +11725,8 @@ class TestNNDeviceType(NNTestCase):
     # Ref: https://github.com/pytorch/pytorch/issue/85005
     @onlyCUDA
     @largeTensorTest("45GB", "cpu")
-    @largeTensorTest("45GB", "cuda")
+    # https://ontrack-internal.amd.com/browse/SWDEV-373709, ROCm needs more memory and no GPU support with >64GB
+    @largeTensorTest("64GB" if TEST_WITH_ROCM else "45GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_large_tensor(self, device, reduction):
         logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)

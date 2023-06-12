@@ -308,6 +308,8 @@ case "$image" in
       extract_version_from_image_name rocm ROCM_VERSION
       NINJA_VERSION=1.9.0
       TRITON=yes
+      # Need conda cmake to detect conda mkl and build with mkl support
+      CONDA_CMAKE=yes
     fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
@@ -338,6 +340,12 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   if [[ ${CUDNN_VERSION} == 8 ]]; then
     IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
   fi
+fi
+
+if [[ "$image" == *centos9* ]]; then
+ DOCKERFILE_NAME="Dockerfile.centos.stream"
+else
+ DOCKERFILE_NAME="Dockerfile"
 fi
 
 # Build image

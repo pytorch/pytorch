@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     suppress_warnings,
     noncontiguous_like,
+    TEST_WITH_ROCM,
     TEST_WITH_ASAN,
     TEST_WITH_UBSAN,
     IS_WINDOWS,
@@ -38,6 +39,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfTorchInductor,
     slowTest,
+    setLinalgBackendsToDefaultFinally,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -670,7 +672,9 @@ class TestCommon(TestCase):
     #   - out= with the correct dtype and device, but the wrong shape
     @ops(_ops_and_refs, dtypes=OpDTypes.none)
     @skipIfTorchInductor("Inductor does not support complex dtype yet")
+    @setLinalgBackendsToDefaultFinally
     def test_out_warning(self, device, op):
+        torch.backends.cuda.preferred_linalg_library('magma')
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
         if len(supported_dtypes) == 0:
@@ -799,7 +803,9 @@ class TestCommon(TestCase):
     #   - if device, dtype are passed, device and dtype should match
     @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
     @skipIfTorchInductor("Inductor does not support complex dtype yet")
+    @setLinalgBackendsToDefaultFinally
     def test_out(self, device, dtype, op):
+        torch.backends.cuda.preferred_linalg_library('magma')
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
@@ -1171,6 +1177,10 @@ class TestCommon(TestCase):
     @ops(op_db, allowed_dtypes=(torch.complex32,))
     @skipIfTorchInductor("Inductor does not support complex dtype yet")
     def test_complex_half_reference_testing(self, device, dtype, op):
+        # SWDEV-373709, refer for more info
+        if all([TEST_WITH_ROCM, op.name == "nn.functional.conv_transpose3d", device == 'cuda:0', dtype == torch.complex32]):
+            self.skipTest("Skipped!!! SWDEV-373709 Tensor accuracy issue")
+
         if not op.supports_dtype(torch.complex32, device):
             unittest.skip("Does not support complex32")
 

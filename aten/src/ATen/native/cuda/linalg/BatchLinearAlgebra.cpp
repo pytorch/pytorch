@@ -40,6 +40,8 @@
 #include <magma_v2.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 
+
+
 const bool use_magma_ = true;
 
 namespace {
@@ -1116,7 +1118,8 @@ void ldl_factor_kernel(
     // By default use cusolver if available and magma otherwise.
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
     // call magma for complex inputs
-#if defined(USE_LINALG_SOLVER)
+
+#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
 #if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 254)
       if (LD.is_complex() && hermitian) {
         return ldl_factor_magma(
@@ -1619,8 +1622,13 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
     // matrix is exactly singular. The returned pivots contain garbage. This breaks linalg.det
     // Now, batched_cublas does not handle rectangular matrices, so we still dispatch to
     // looped_cusolver even if m != n.
+#ifdef USE_CUSOLVER
     constexpr bool looped_correct = CUSOLVER_VERSION >= 11100;
-    if (m != n || (looped_correct && (batch_size == 1 || m >= 512))) {
+#else
+	bool looped_correct = false;
+#endif
+
+	if (m != n || (looped_correct && (batch_size == 1 || m >= 512))) {
       lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
@@ -1649,7 +1657,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
 #endif
 #else // !USE_LINALG_SOLVER
     lu_factor_magma(input, pivots, infos, compute_pivots);
-#endif
+#endif // USE_CUSOLVER || USE_HIPSOLVER
   }
 
   // We return the trivial permutation of pivots starting with 1 (FORTRAN indexing)
@@ -1834,7 +1842,7 @@ void geqrf_magma(const Tensor& input, const Tensor& tau) {
 }
 
 void geqrf_kernel(const Tensor& input, const Tensor& tau) {
-#ifdef CUDART_VERSION
+#if defined(CUDART_VERSION) || defined(USE_ROCM)
   auto geqrf_cusolver_backend = [](const Tensor& input, const Tensor& tau) {
     #if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
       // For the benchmarks see
@@ -1844,7 +1852,7 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
       } else {
         return geqrf_cusolver(input, tau);
       }
-    #endif
+#endif
       return geqrf_batched_cublas(input, tau);
   };
 
@@ -2176,12 +2184,29 @@ void svd_magma(const Tensor& A,
                    .mT();
   // U, S, Vh, info are the right size and strides, but are on GPU
   // We copy them into CPU in pinned_memory
-  const auto empty_like_cpu = [](const Tensor& t) {
-    return at::empty_like(t, t.options().device(kCPU).pinned_memory(true));
+  const auto empty_like_cpu = [](const Tensor& t, bool make_contiguous = false) {
+    if (!make_contiguous) {
+      return at::empty_like(t,
+                            t.options()
+                            .device(kCPU)
+                            .pinned_memory(true));
+    } else {
+      return at::empty_like(t.mT(),
+                            t.options()
+                            .device(kCPU)
+                            .memory_format(at::MemoryFormat::Contiguous)
+                            .pinned_memory(true)).mT();
+    }
   };
   auto U_ = compute_uv ? empty_like_cpu(U) : Tensor{};
   auto S_ = empty_like_cpu(S);
+#ifdef USE_HIPSOLVER
+  // However, on ROCM platform, Vh is not guaranteed to have correct storage
+  // order, so processing similar to A matrix is essential
+  auto Vh_ = compute_uv ? empty_like_cpu(Vh, true) : Tensor{};
+#else
   auto Vh_ = compute_uv ? empty_like_cpu(Vh) : Tensor{};
+#endif
   auto info_ = empty_like_cpu(info);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda", [&] {
@@ -2476,13 +2501,11 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     }
   };
 
-#ifdef CUDART_VERSION
   auto lu_solve_batched_cublas_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
     auto LU_ = maybe_expand_lu(B, LU);
     auto pivots_ = maybe_expand_pivots(B, pivots);
     lu_solve_batched_cublas(*LU_, *pivots_, B, trans);
   };
-#endif
 
   auto lu_solve_batched_magma_fn = [](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
     auto LU_ = maybe_expand_lu(B, LU);
@@ -2542,12 +2565,10 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   // Particular case when multiplying A^{-1}B where B is square
   // In this case doing two triangular solves is almost always fastest
   if (n == k) {
-#ifdef CUDART_VERSION
     if (n <= 16) {
       lu_solve_batched_cublas_fn(LU, pivots, B, trans);
       return;
     }
-#endif
     lu_solve_triangular(LU, pivots, B, trans);
     return;
   }
@@ -2680,7 +2701,6 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
         /*unitriangular=*/false);
   } else { // underdetermined case
     Tensor Ah = cloneBatchedColumnMajor(A.mH());
-
     // Step 1: compute QR factorization of conjugate transpose of A using geqrf
     geqrf_kernel(Ah, tau);
 
@@ -2751,7 +2771,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
         "Please rebuild with cuSOLVER.");
 #endif
   } else { // m >= n
-#if !AT_ROCM_ENABLED()
+//#if !AT_ROCM_ENABLED()
     // On CUDA platform we use either cuBLAS or cuSOLVER here
     // the batched vs looped dispatch is implemented based on the following performance results
     // https://github.com/pytorch/pytorch/pull/54725#issuecomment-832234456
@@ -2760,11 +2780,13 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
     } else {
       gels_looped(a, b, infos);
     }
+/*
 #else
     // On ROCm platform we can only use MAGMA here
     // If MAGMA is not available, an error will be thrown
     gels_magma(a, b, infos);
 #endif // !AT_ROCM_ENABLED()
+*/
   }
 }
 
