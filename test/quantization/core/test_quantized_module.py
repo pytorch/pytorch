@@ -1321,13 +1321,24 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
             f_prelu = torch.nn.PReLU(num_parameters=num_parameters)
             f_prelu.weight = torch.nn.Parameter(torch.randn(num_parameters).abs())
-            f_prelu.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
+            f_prelu.qconfig = torch.ao.quantization.QConfig(
+                activation=torch.ao.quantization.default_observer,
+                weight=torch.ao.quantization.default_observer,)
             f_prelu.activation_post_process = f_prelu.qconfig.activation()
             f_prelu.activation_post_process(f_prelu(x))
             q_prelu = nnq.PReLU.from_float(f_prelu)
+            w_obs = f_prelu.qconfig.weight()
+            w_obs(f_prelu.weight)
+            w_scale, w_zp = w_obs.calculate_qparams()
+            q_prelu_weight = torch.quantize_per_tensor(
+                f_prelu.weight,
+                dtype=torch.quint8,
+                scale = w_scale,
+                zero_point = w_zp
+            ).dequantize()
 
             # check that the weight makes sense
-            self.assertEqual(q_prelu.weight.dequantize(), f_prelu.weight, atol=.1, rtol=.1)
+            self.assertEqual(q_prelu.weight.dequantize(), q_prelu_weight)
             f_prelu.weight = torch.nn.Parameter(q_prelu.weight.dequantize())
             qy = q_prelu(qx)
             qy_ref = torch.quantize_per_tensor(
