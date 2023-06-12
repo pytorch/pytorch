@@ -3,7 +3,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
 from ..exc import unimplemented
-from ..source import AttrSource, Source
+from ..source import AttrSource, is_from_local_source, Source
 from ..utils import dict_values, identity, istype, odict_values
 
 
@@ -163,12 +163,6 @@ class VariableTracker(metaclass=HasPostInit):
         """
         return self
 
-    def associate(self, real_value):
-        self.real_value = real_value
-
-    def _input_associated_real_value(self):
-        return self.real_value
-
     def can_make_guard(self):
         try:
             self.make_guard(None)
@@ -195,13 +189,22 @@ class VariableTracker(metaclass=HasPostInit):
         if not self.source:
             raise NotImplementedError()
 
-        _input_associated_real_value = self._input_associated_real_value()
+        if not is_from_local_source(self.source):
+            raise NotImplementedError()
+        # For local source, we associate the real value. We use this real value
+        # for implementing getattr fallthrough on the variable tracker base class.
+
+        # Note - this scope construction is mirrored in guards
+        # A subsequent PR will introduce a util.
+        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+        _input_associated_real_value = eval(self.source.name(), scope)
+
         if _input_associated_real_value is None:
             raise NotImplementedError()
 
         from .builder import VariableBuilder
 
-        real_value = getattr(self._input_associated_real_value(), name)
+        real_value = getattr(_input_associated_real_value, name)
         return VariableBuilder(tx, AttrSource(self.source, name))(real_value)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
@@ -280,7 +283,6 @@ class VariableTracker(metaclass=HasPostInit):
         source: Source = None,
         mutable_local: MutableLocal = None,
         recursively_contains: Optional[Set] = None,
-        real_value=None,
     ):
         super().__init__()
         self.guards = guards or set()
@@ -289,7 +291,6 @@ class VariableTracker(metaclass=HasPostInit):
         self.recursively_contains = (
             recursively_contains  # provides hint to replace_all when replacing vars
         )
-        self.real_value = real_value
 
     def __post_init__(self, *args, **kwargs):
         if self.recursively_contains is None:
