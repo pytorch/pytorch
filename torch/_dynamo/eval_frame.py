@@ -798,7 +798,6 @@ def export(
     tracing_mode: str = "symbolic",
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
-    functionalize: bool = False,
     fake_mode: fake_tensor.FakeTensorMode = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
@@ -823,10 +822,6 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
-
-        functionalize (bool): If True, the resulting aten graph module will be functional. You will need to
-
-        set aten_graph=True to see the effect. By default, this flag will be false.
 
         fake_mode (fake_tensor.FakeTensorMode): Use this fake_mode instead of creating an internal one.
         Useful during symbolic tracing, when user input is already fakefied. Implies free fake tensors
@@ -1024,6 +1019,7 @@ def export(
                     tracing_mode="real",
                     _allow_non_fake_inputs=True,
                     pre_autograd=pre_autograd,
+                    _allow_fake_constant=_allow_fake_constant,
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error
