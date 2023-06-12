@@ -280,6 +280,54 @@ static void expect_at_least_rank(
       rank, " dimensions instead.");
 }
 
+twoOutputs _scaled_dot_product_efficient_attention_batch_rule(
+  const Tensor& query, optional<int64_t> query_bdim,
+  const Tensor& key, optional<int64_t> key_bdim,
+  const Tensor& value, optional<int64_t> value_bdim,
+  bool compute_log_sumexp,
+  bool is_causal,
+  c10::optional<double> scale
+) {
+  const auto query_ = query_bdim.has_value() ? reshape_dim_into(*query_bdim, 0, query) : query;
+  const auto key_ = key_bdim.has_value() ? reshape_dim_into(*key_bdim, 0, key) : key;
+  const auto value_ = value_bdim ? reshape_dim_into(*value_bdim, 0, value) : value;
+
+  const auto res = at::_scaled_dot_product_efficient_attention(query_, key_, value_, compute_log_sumexp, is_causal, scale);
+  const auto batch_size = query.size(*query_bdim);
+  const auto res1_ = reshape_dim_outof(0, batch_size, std::get<0>(res));
+  const auto res2_ = reshape_dim_outof(0, batch_size, std::get<1>(res));
+  return std::make_tuple(res1_, 0, res2_, 0);
+}
+
+threeOutputs _scaled_dot_product_efficient_attention_backward_batch_rule(
+    const at::Tensor& grad_out_, optional<int64_t> grad_out_bdim,
+    const at::Tensor& query, optional<int64_t> query_bdim,
+    const at::Tensor& key, optional<int64_t> key_bdim,
+    const at::Tensor& value, optional<int64_t> value_bdim,
+    const at::Tensor& out, optional<int64_t> out_bdim,
+    const at::Tensor& logsumexp, optional<int64_t> logsumexp_bdim,
+    bool causal,
+    bool chunk_grad_outputs,
+    c10::optional<double> scale){
+
+  const auto grad_out__ = grad_out_bdim.has_value() ? reshape_dim_into(*grad_out_bdim, 0, grad_out_) : grad_out_;
+  const auto query_ = query_bdim.has_value() ? reshape_dim_into(*query_bdim, 0, query) : query;
+  const auto key_ = key_bdim.has_value() ? reshape_dim_into(*key_bdim, 0, key) : key;
+  const auto value_ = value_bdim.has_value() ? reshape_dim_into(*value_bdim, 0, value) : value;
+  const auto out_ = out_bdim.has_value() ? reshape_dim_into(*out_bdim, 0, out) : out;
+  const auto logsumexp_ = logsumexp_bdim.has_value() reshape_dim_into(*logsumexp_bdim, 0, logsumexp) : logsumexp;
+
+  const auto res = at::_scaled_dot_product_efficient_attention_backward(
+      grad_out__, query_, key_, value_, out_, logsumexp_, causal,
+      chunk_grad_outputs, scale);
+
+  auto batch_size = query.size(*query_bdim);
+  auto res1_ = reshape_dim_outof(0, batch_size, std::get<0>(res));
+  auto res2_ = reshape_dim_outof(0, batch_size, std::get<1>(res));
+  auto res3_ = reshape_dim_outof(0, batch_size, std::get<2>(res));
+  return std::make_tuple(res1_, 0, res2_, 0, res3_, 0);
+}
+
 oneOutput linalg_lu_solve_batch_rule(
     const Tensor& LU, optional<int64_t> LU_bdim,
     const Tensor& pivots, optional<int64_t> pivots_bdim,
@@ -618,6 +666,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(linalg_pinv, atol_rtol_tensor, pinv_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
+  VMAP_SUPPORT(_scaled_dot_product_efficient_attention_backward, _scaled_dot_product_efficient_attention_backward_batch_rule);
 
   m.impl("vdot", vdot_decomp);
 }
