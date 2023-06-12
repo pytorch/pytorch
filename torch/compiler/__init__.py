@@ -23,13 +23,6 @@ def reset() -> None:
     This function clears all compilation caches and restores the system to its initial state.
     It is recommended to call this function, especially after using operations like `torch.compile(...)`
     to ensure a clean state before another unrelated compilation
-
-    Example::
-
-        >>> # xdoctest: +SKIP
-        >>> torch.compiler.reset()
-        >>> torch.compile(...)
-        >>> torch.compiler.reset()
     """
 
     torch._dynamo.reset()
@@ -64,11 +57,6 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
 
     Args:
         exclude_tags(optional): A tuple of strings representing tags to exclude.
-
-    Example::
-        >>> # xdoctest: +SKIP
-        >>> valid_backends = torch.compiler.list_backends()
-
     """
 
     return torch._dynamo.list_backends(exclude_tags)
@@ -81,10 +69,6 @@ def assume_constant_result(fn):
 
     Args:
         fn: The function to be marked as having a constant result.
-
-    Example::
-        >>> # xdoctest: +SKIP
-        >>> marked_function = torch.compiler.assume_constant_result(my_function)
 
     .. warning::
         `assume_constant_result` can if invalid cause safety and soundness issues, :func:`torch.compile`
@@ -102,17 +86,6 @@ def disable(fn=None, recursive=True):
     Args:
         fn (optional): The function to disable
         recursive (optional): A boolean value indicating whether the disabling should be recursive.
-
-    Example::
-
-        >>> # xdoctest: +SKIP
-        >>> # The decorator without recursive disabling
-        >>> @torch.compiler.disable(recursive=False)
-        >>> def my_function():
-
-        >>> # The context manager with recursive disabling:
-        >>> with torch.compiler.disable(recursive=True):
-
     """
 
     return torch._dynamo.disable(fn, recursive)
