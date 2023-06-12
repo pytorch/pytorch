@@ -53,6 +53,7 @@ USE_SMALL_BATCH_SIZE = {
     "dlrm": 1024,
     "densenet121": 4,
     "hf_Reformer": 4,
+    "hf_T5_base": 4,
     "timm_efficientdet": 1,
 }
 
