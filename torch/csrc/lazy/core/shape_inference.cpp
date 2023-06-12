@@ -97,6 +97,9 @@ static std::vector<int64_t> expand_param_if_needed(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_mul(const at::Tensor & self, const at::Tensor & other) {
+    return {Shape(self.scalar_type(), self.sizes().vec())}; 
+}
 TORCH_API std::vector<Shape> compute_shape_arange_out(
     const at::Scalar& start,
     const at::Scalar& end,
