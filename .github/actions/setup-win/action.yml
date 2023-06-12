@@ -95,6 +95,9 @@ runs:
         # that it doesn't interfere
         Set-MpPreference -DisableRealtimeMonitoring $True
 
+        # Completely disable Windows Defender service, the service name comes from Get-Service
+        Stop-Service -Name "WinDefend"
+
     - name: Install sysinternals handle tool
       continue-on-error: true
       shell: powershell
