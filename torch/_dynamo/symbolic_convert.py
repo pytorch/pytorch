@@ -1944,7 +1944,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 export_constraints,
                 frame_state,
                 local_scope=f_locals,
-                global_scope=f_globals
+                global_scope=f_globals,
             ),
             instructions=instructions,
             f_locals=f_locals,

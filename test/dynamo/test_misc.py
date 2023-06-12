@@ -4271,7 +4271,6 @@ def fn():
         )
         # Dummy ctor
         graph = OutputGraph(
-            f_globals={},
             code_options={},
             compiler_fn=None,
             root_tx=None,
