@@ -47,7 +47,6 @@ from ..utils import (
     global_key_name,
     HAS_NUMPY,
     is_namedtuple,
-    is_numpy_int_type,
     is_typing,
     istype,
     np,
@@ -639,16 +638,7 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if (
-            istype(value, (tuple, list))
-            and all(
-                isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value
-            )
-            and not config.dynamic_shapes
-        ):
-            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
-        else:
-            guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+        guards = self.make_guards(GuardBuilder.LIST_LENGTH)
 
         for item in value:
             if item is value:
@@ -977,9 +967,8 @@ class VariableBuilder:
                 # and it is inappropriate to eagerly duck size them with
                 # real sizevars
                 if (
-                    frame_state_entry.scalar is None
-                    or not config.assume_static_by_default
-                ):
+                    config.automatic_dynamic_shapes and frame_state_entry.scalar is None
+                ) or not config.assume_static_by_default:
                     dynamic_dim = DimDynamic.DYNAMIC
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
