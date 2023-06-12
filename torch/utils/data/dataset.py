@@ -254,7 +254,7 @@ class StackDataset(Dataset[T_stack]):
             return {k: dataset[index] for k, dataset in self.datasets.items()}
         return tuple(dataset[index] for dataset in self.datasets)
 
-    def __getitems__(self, indices: List) -> List[T_stack]:
+    def __getitems__(self, indices: list):
         # add batched sampling support when parent datasets supports it.
         if isinstance(self.datasets, dict):
             dict_batch: List[T_dict] = [{} for _ in indices]
