@@ -26,6 +26,7 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
+from .dicts import ConstDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -514,14 +515,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
 
+        index = (
+            key.source
+            if ConstDictVariable.is_valid_key(key) and key.source is not None
+            else key.as_python_constant()
+        )
+
         return VariableBuilder(
             tx,
-            ODictGetItemSource(self.source, key.as_python_constant()),
+            ODictGetItemSource(self.source, index),
         )(
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
-        ).add_options(
-            key, self
-        )
+        ).add_options(key, self)
 
 
 class ProcessGroupVariable(UserDefinedObjectVariable):
