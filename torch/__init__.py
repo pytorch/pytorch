@@ -1602,15 +1602,19 @@ def compile(model: Optional[Callable] = None, *,
         - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
         - "default" is the default mode, which is a good balance between performance and overhead
+
         - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
           useful for small batches.  Reduction of overhead can come at the cost of more memory
           usage, as we will cache the workspace memory required for the invocation so that we
           do not have to reallocate it on subsequent runs.  Reduction of overhead is not guaranteed
           to work; today, we only reduce overhead for CUDA only graphs which do not mutate inputs.
           There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
-          to debug.)
+          to debug.
+
         - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
+
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
         - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
         - `max_autotune` which will profile to pick the best matmul configuration
@@ -1724,5 +1728,19 @@ if not _running_with_deploy():
             return cls.ops_table[(op_key, dispatch_key)]
 
 
+# Deprecated attributes
+_deprecated_attrs = {
+    "has_mps": torch.backends.mps.is_built,
+    "has_cuda": torch.backends.cuda.is_built,
+    "has_cudnn": torch.backends.cudnn.is_available,
+    "has_mkldnn": torch.backends.mkldnn.is_available,
+}
+def __getattr__(name):
+    replacement = _deprecated_attrs.get(name)
+    if replacement is not None:
+        import warnings
+        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+        return replacement()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 from . import _logging
 _logging._init_logs()

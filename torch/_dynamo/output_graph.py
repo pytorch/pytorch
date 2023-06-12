@@ -232,9 +232,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
-            )
-            if config.dynamic_shapes
-            else None,
+            ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
