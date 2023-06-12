@@ -395,8 +395,6 @@ class TensorVariable(VariableTracker):
             )
         elif name in ("tolist", "backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
-        elif name == "nonzero" and not config.dynamic_shapes:
-            unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
         elif name == "__len__":
@@ -781,7 +779,23 @@ class NumpyNdarrayVariable(TensorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented(f"numpy_ndarray.{name}()")
+        options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
+        from torch._dynamo.variables.builder import wrap_fx_proxy_cls
+        from ..utils import numpy_method_wrapper
+
+        result = wrap_fx_proxy_cls(
+            target_cls=NumpyNdarrayVariable,
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                numpy_method_wrapper(name),
+                *proxy_args_kwargs([self] + list(args), kwargs),
+            ),
+            example_value=None,
+            **options,
+        )
+
+        return result
 
 
 class UnspecializedPythonVariable(TensorVariable):

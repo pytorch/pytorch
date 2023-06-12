@@ -211,9 +211,9 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # special 11.7 wheels package without dependencies
+            # special 12.1 wheels package without dependencies
             # dependency downloaded via pip install
-            if arch_version == "11.7" and os == "linux":
+            if arch_version == "12.1" and os == "linux":
                 ret.append(
                     {
                         "python_version": python_version,
@@ -225,17 +225,17 @@ def generate_wheels_matrix(
                         "devtoolset": "",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
-                        "pytorch_extra_install_requirements": "nvidia-cuda-nvrtc-cu11==11.7.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
-                        "nvidia-cuda-runtime-cu11==11.7.99; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-cuda-cupti-cu11==11.7.101; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-cudnn-cu11==8.5.0.96; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-cublas-cu11==11.10.3.66; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-cufft-cu11==10.9.0.58; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-curand-cu11==10.2.10.91; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-cusolver-cu11==11.4.0.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-cusparse-cu11==11.7.4.91; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-nccl-cu11==2.14.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-                        "nvidia-nvtx-cu11==11.7.91; platform_system == 'Linux' and platform_machine == 'x86_64'",
+                        "pytorch_extra_install_requirements": "nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
+                        "nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cudnn-cu12==8.8.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-nccl-cu12==2.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+                        "nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'",
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-with-pypi-cudnn".replace(  # noqa: B950
                             ".", "_"
                         ),
