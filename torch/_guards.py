@@ -181,17 +181,28 @@ class Guard:
         else:
             return str(obj_weakref)
 
-    def __str__(self):
+    def __repr__(self):
         s = f"""
-            {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
-            {{
-                'guard_types': {self.guard_types},
-                'code': {self.code_list},
-                'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
-                'guarded_class': {self.guarded_class_weakref}
-            }}
-            """
+        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
+        {{
+            'guard_types': {self.guard_types},
+            'code': {self.code_list},
+            'obj_weakref': {self.weakref_to_str(self.obj_weakref)}
+            'guarded_class': {self.guarded_class_weakref}
+        }}
+        """
         return s
+
+    def __str__(self):
+        output = f"Name: {repr(self.name)}\n"
+        source = self.source.name.lower() if self.source else ""
+        output += f"    Source: {source}\n"
+        output += f"    Create Function: {self.create_fn.__name__}\n"
+        output += f"    Guard Types: {self.guard_types}\n"
+        output += f"    Code List: {self.code_list}\n"
+        output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"
+        output += f"    Guarded Class Weakref: {self.guarded_class_weakref}\n"
+        return output
 
     def create(self, local_builder: GuardBuilderBase, global_builder: GuardBuilderBase):
         return self.create_fn(self.source.select(local_builder, global_builder), self)
