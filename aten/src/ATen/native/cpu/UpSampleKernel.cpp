@@ -1287,6 +1287,25 @@ struct HelperInterpCubic : public HelperInterpBase {
 #undef a
   }
 
+  template<typename scalar_t>
+  static inline scalar_t aa_filter_075(scalar_t x) {
+    // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+    // In this code we are using alternative a=-0.75 definition that matches
+    // get_cubic_upsample_coefficients implementation, as used by float path
+    // TODO: merge both implementations, the only difference is the value of a.
+    constexpr scalar_t a = -0.75;
+    if (x < 0.0) {
+      x = -x;
+    }
+    if (x < 1.0) {
+      return cubic_convolution1(x, a);
+    }
+    if (x < 2.0) {
+      return cubic_convolution2(x, a);
+    }
+    return 0.0;
+  }
+
   static inline std::vector<Tensor> compute_indices_weights_aa(
     at::ScalarType scalar_type,
     int64_t input_size,
@@ -1327,6 +1346,27 @@ struct HelperInterpCubic : public HelperInterpBase {
     return indices_weights;
   }
 
+  static inline std::tuple<std::vector<Tensor>, int, unsigned int> compute_indices_int16_weights_aa(
+    int64_t input_size,
+    int64_t output_size,
+    int64_t stride,
+    int64_t ndims,
+    int64_t reshape_dim,
+    bool align_corners,
+    const c10::optional<double> opt_scale,
+    bool antialias,
+    bool align_i32=false
+  ) {
+
+    auto interp_size = HelperInterpCubic::interp_size;
+    // We have to use the -0.75 constant when aa is False so that this uint8
+    // path is as close as possible to float results.
+    auto fn = antialias ? HelperInterpCubic::aa_filter<double> : HelperInterpCubic::aa_filter_075<double>;
+    return HelperInterpCubic::_compute_indices_int16_weights_aa(
+        input_size, output_size, stride, ndims, reshape_dim,
+        align_corners, opt_scale, interp_size, fn, antialias, align_i32);
+  }
+
 };
 
 // Generic upsampling interpolation kernel for N-d case.
@@ -1343,6 +1383,7 @@ void upsample_generic_Nd_kernel_impl(
     const Tensor& input,
     bool align_corners,
     const scale_type& scales) {
+
 
   // input can be NCHW, NCL or NCKHW
   auto shape = input.sizes().vec();
@@ -1479,10 +1520,11 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
   unsigned int weights_precision = 0;
   int unused;
 
-  if (F::interp_size == 2 && input_scalar_type == at::kByte) {
-    // This is special branch to provide uint8 dtype support for bilinear mode only
+  if (input_scalar_type == at::kByte) {
+    // This is a special branch to provide uint8 dtype support for bilinear and bicubic modes only
+    TORCH_INTERNAL_ASSERT(F::interp_size == 2 || F::interp_size == 4);
     std::tie(indices_weights, unused, weights_precision) =
-      HelperInterpLinear::compute_indices_int16_weights_aa(
+      F::compute_indices_int16_weights_aa(
         input.size(interp_dim), oshape[interp_dim],
         input.stride(interp_dim) * input.element_size(),
         input.dim(), interp_dim, align_corners, scales[interp_dim - 2],
@@ -1740,7 +1782,7 @@ void upsample_bilinear2d_kernel_impl(
   if (input.dtype() == at::kByte){
     #ifdef CPU_CAPABILITY_AVX2
       if (input.size(1) <= 4) {
-        upsample_avx_bilinear_uint8<scale_t, HelperInterpLinear>(input,
+        upsample_avx_bilinear_bicubic_uint8<scale_t, HelperInterpLinear>(input,
           output, align_corners, {scales_h, scales_w},
           /*antialias=*/false);
       } else {
@@ -1767,7 +1809,7 @@ void upsample_bilinear2d_aa_kernel_impl(
     c10::optional<double> scales_w) {
 #ifdef CPU_CAPABILITY_AVX2
   if (input.dtype() == at::kByte && input.size(1) <= 4) {
-    upsample_avx_bilinear_uint8<scale_t, HelperInterpLinear>(
+    upsample_avx_bilinear_bicubic_uint8<scale_t, HelperInterpLinear>(
       input, output, align_corners, {scales_h, scales_w},
       /*antialias=*/true);
   } else {
@@ -1806,12 +1848,27 @@ void upsample_bicubic2d_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-  // We explicitly checking for non-supported uint8 dtype
-  TORCH_CHECK(input.scalar_type() != at::kByte,
-      "'upsample_bicubic2d_aa_kernel_impl' not implemented for 'Byte'");
-
-  upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
-    output, input, align_corners, {scales_h, scales_w});
+  if (input.dtype() == at::kByte){
+    #ifdef CPU_CAPABILITY_AVX2
+      if (input.size(1) <= 4) {
+        upsample_avx_bilinear_bicubic_uint8<scale_t, HelperInterpCubic>(input,
+          output, align_corners, {scales_h, scales_w},
+          /*antialias=*/false);
+      } else {
+        separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
+          output, input, align_corners, {scales_h, scales_w},
+          /*antialias=*/false);
+      }
+    #else  // CPU_CAPABILITY_AVX2
+      separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
+        output, input, align_corners, {scales_h, scales_w},
+        /*antialias=*/false);
+    #endif  // CPU_CAPABILITY_AVX2
+  }
+  else {
+    upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
+      output, input, align_corners, {scales_h, scales_w});
+  }
 }
 
 void upsample_bicubic2d_aa_kernel_impl(
@@ -1821,13 +1878,21 @@ void upsample_bicubic2d_aa_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
 
-  // We explicitly checking for non-supported uint8 dtype
-  TORCH_CHECK(input.scalar_type() != at::kByte,
-      "'upsample_bicubic2d_aa_kernel_impl' not implemented for 'Byte'");
-
+#ifdef CPU_CAPABILITY_AVX2
+  if (input.dtype() == at::kByte && input.size(1) <= 4) {
+    upsample_avx_bilinear_bicubic_uint8<scale_t, HelperInterpCubic>(
+      input, output, align_corners, {scales_h, scales_w},
+      /*antialias=*/true);
+  } else {
+    separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
+        output, input, align_corners, {scales_h, scales_w},
+        /*antialias=*/true);
+  }
+#else // CPU_CAPABILITY_AVX2
   separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
-    output, input, align_corners, {scales_h, scales_w},
-    /*antialias=*/true);
+      output, input, align_corners, {scales_h, scales_w},
+      /*antialias=*/true);
+#endif // CPU_CAPABILITY_AVX2
 }
 
 template <
