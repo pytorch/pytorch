@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 
-import functools
 import sys
 import unittest
 
@@ -82,9 +81,9 @@ class ForeachTests(TestCase):
         )
 
     # called in test_cpp_wrapper.py
-    test_foreach_cpp_wrapper = requires_cuda()(
-        functools.partial(_test_single_list, op=torch._foreach_add)
-    )
+    @requires_cuda()
+    def test_foreach_cpp_wrapper(self):
+        self._test_single_list(op=torch._foreach_add)
 
     @requires_cuda()
     @bin_ops
