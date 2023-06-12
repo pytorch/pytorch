@@ -114,6 +114,7 @@ def validate_ir(node_or_nodes):
                     sympy.Symbol,
                     sympy.core.relational.Relational,
                     Expr,
+                    torch._inductor.ir.ExpandView,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 

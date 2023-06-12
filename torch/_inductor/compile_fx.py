@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import sys
+import unittest
 import warnings
 
 from copy import deepcopy
@@ -663,6 +664,59 @@ def compile_fx_aot(
 _graph_counter = itertools.count(0)
 
 
+def fw_compiler_freezing(
+    aot_autograd_model: torch.fx.GraphModule,
+    aot_example_inputs,
+    dynamo_model,
+    num_example_inputs,
+    inner_compile,
+    cudagraphs,
+    graph_id,
+    forward_device,
+):
+    from torch._inductor.freezing import freeze
+
+    # partition_fn won't be called
+    joint_graph_passes(aot_autograd_model)
+
+    opt_model, preserved_arg_indices = freeze(
+        dynamo_model,
+        aot_autograd_model,
+        fw_metadata=torch._guards.TracingContext.get().fw_metadata,
+    )
+
+    aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
+    num_fixed = len(preserved_arg_indices) - num_example_inputs
+
+    fake_mode = detect_fake_mode(aot_example_inputs)
+
+    # constant params will be real tensors, not fake
+    with unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
+        optimized_function = inner_compile(
+            opt_model,
+            aot_example_inputs,
+            num_fixed=num_fixed,
+            cudagraphs=cudagraphs,
+            graph_id=graph_id,
+            is_inference=True,
+            boxed_forward_device_index=forward_device,
+        )
+
+    # Need to drop the args we have constant-ified.
+    params_flat = torch._guards.TracingContext.get().params_flat
+    for i in range(len(params_flat)):
+        if i not in preserved_arg_indices:
+            params_flat[i] = None
+
+    def wrapper(args):
+        args_new = [args[i] for i in preserved_arg_indices]
+        args.clear()
+        return optimized_function(args_new)
+
+    wrapper._boxed_call = True
+    return wrapper
+
+
 def compile_fx(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -753,6 +807,13 @@ def compile_fx(
             model_outputs, _ = pytree.tree_flatten(model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
+            if torch._guards.TracingContext.get():
+                original_output_start_index = (
+                    torch._guards.TracingContext.get().fw_metadata.num_mutated_inputs
+                )
+            else:
+                original_output_start_index = 0
+
             if isinstance(model_, torch.fx.GraphModule):
                 *_, orig_model_outputs_node = model_.graph.nodes
                 assert orig_model_outputs_node.op == "output"
@@ -802,7 +863,19 @@ def compile_fx(
         )
 
     fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
-    inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
+
+    if config.freezing:
+        inference_compiler = functools.partial(
+            fw_compiler_freezing,
+            dynamo_model=model_,
+            num_example_inputs=num_example_inputs,
+            inner_compile=inner_compile,
+            cudagraphs=cudagraphs,
+            graph_id=graph_id,
+            forward_device=forward_device,
+        )
+    else:
+        inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
     def partition_fn(graph, joint_inputs, **kwargs):
         joint_graph_passes(graph)
