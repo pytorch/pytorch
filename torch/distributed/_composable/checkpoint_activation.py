@@ -20,8 +20,6 @@ def _no_hook(module: nn.Module):
     checkpoint.state(module).enable_hook = False
     try:
         yield
-    except Exception:
-        raise
     finally:
         checkpoint.state(module).enable_hook = orig_enable_hook
 

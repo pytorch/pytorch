@@ -9,7 +9,6 @@ from torch.testing._internal.common_utils import (
 
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 from functorch.compile import aot_function, nop, min_cut_rematerialization_partition
-from unittest import skip
 from unittest.mock import patch
 import functools
 import torch.utils.checkpoint
@@ -287,7 +286,6 @@ class TestFunctionalizationRngOps(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
 
     # TODO - Dropout needs more work because of offset calculation
-    @skip("Dropout needs more work because of offset calculation")
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     @dtypes(torch.float32)
     def test_checkpoint(self, dtype, device):
@@ -307,11 +305,22 @@ class TestFunctionalizationRngOps(TestCase):
         fwd_compiler = functools.partial(count_philox_rand, freq=1)
         bwd_compiler = functools.partial(count_philox_rand, freq=1)
         aot_fn = aot_function(fn, fwd_compiler, bwd_compiler)
-        torch.cuda.manual_seed(123)
+        # We cant check accuracy here because rand_like generated different rand numbers than dropout
         res = aot_fn(x, y)
-        # res.sum().backward()
-        # TODO - This is not same. Debug this further.
-        self.assertEqual(ref, res)
+        res.sum().backward()
+
+    @dtypes(torch.float32)
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_dropout_decomp(self, dtype, device):
+        def fn(x):
+            return torch.nn.functional.dropout(x, 0.6) * x
+
+        x = torch.rand(10, device=device, dtype=dtype)
+
+        # Ensure the decomp is happening
+        aot_fn = aot_function(fn, functools.partial(count_philox_rand, freq=1))
+        # We cant check accuracy here because rand_like generated different rand numbers than dropout
+        aot_fn(x)
 
 
 only_for = ("cuda",)

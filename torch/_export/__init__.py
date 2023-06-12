@@ -1,8 +1,30 @@
-import torch
+import dataclasses
 import weakref
-from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-from torch.utils._sympy.value_ranges import ValueRanges
+from typing import Any, Callable, List, Tuple, Optional, Dict, Union
+
 import sympy
+
+import torch
+import torch._dynamo
+import torch.fx
+from .exported_program import (
+    CallSpec,
+    ExportedProgram,
+    ExportGraphSignature,
+    _set_constraints,
+)
+from torch._decomp import core_aten_decompositions
+from torch._dynamo.eval_frame import Constraint
+
+import torch.utils._pytree as pytree
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    GuardOnDataDependentSymNode,
+    StrictMinMaxConstraint,
+)
+from torch._dynamo.exc import UserError, UserErrorType
+from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
+
 
 
 # Note - [On Export Dynamic Dimension UX]
@@ -39,7 +61,104 @@ import sympy
 #     ]
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
-    from torch._dynamo.eval_frame import Constraint
     return Constraint(
-        weakref.ref(t), id(t), index, StrictMinMaxConstraint(vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False)
+        weakref.ref(t),
+        id(t),
+        index,
+        StrictMinMaxConstraint(
+            vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
+        ),
     )
+
+
+@dataclasses.dataclass
+class ExportDynamoConfig:
+    """
+    Manage Export-specific configurations of Dynamo.
+    TODO add tests to make sure the flags are not outdated
+    """
+    capture_scalar_outputs: bool = True
+    capture_dynamic_output_shape_ops: bool = True
+    guard_nn_modules: bool = True
+    dynamic_shapes: bool = True
+    specialize_int: bool = True
+    allow_rnn: bool = True
+
+
+DECOMP_TABLE = core_aten_decompositions()
+
+
+def export(
+    f: Callable,
+    args: Tuple[Any],
+    constraints: Optional[List[Constraint]] = None,
+) -> ExportedProgram:
+    """
+    Traces either an nn.Module's forward function or just a callable with PyTorch
+    operations inside and produce a ExportedProgram.
+
+    Args:
+        m: the `nn.Module` or callable to trace.
+
+        args: Tracing example inputs.
+
+        constraints: A list of constraints on the dynamic arguments specifying
+            their possible range of their shapes
+
+    Returns:
+        An ExportedProgram containing the traced method.
+    """
+    if constraints is None:
+        constraints = []
+
+    with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
+        try:
+            gm, _ = torch._dynamo.export(
+                f,
+                *args,
+                aten_graph=True,
+                tracing_mode="symbolic",
+                decomposition_table=DECOMP_TABLE,
+                constraints=constraints,
+                assume_static_by_default=True,
+                functionalize=True,
+            )
+        except (ConstraintViolationError, ValueRangeError) as e:
+            raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
+        except GuardOnDataDependentSymNode as e:
+            raise UserError(
+                UserErrorType.ANTI_PATTERN,
+                f"Consider annotating your code using constrain_as_*(). {str(e)}")
+
+    flat_args, in_spec = pytree.tree_flatten(args)
+    out_spec = (
+        gm.graph._codegen.pytree_info.out_spec or pytree.tree_flatten(f(*args))[1]  # type: ignore[attr-defined]
+    )
+
+    # TODO(tugsuu): Fill out signature/state_dict
+    graph_signature = ExportGraphSignature(
+        parameters=[],
+        buffers=[],
+        user_inputs=[],
+        user_outputs=[],
+        inputs_to_parameters={},
+        inputs_to_buffers={},
+        buffers_to_mutate={},
+        backward_signature=None,
+    )
+
+    exported_program = ExportedProgram(
+        gm,
+        gm.graph,
+        graph_signature,
+        CallSpec(in_spec, out_spec),
+        {},
+    )
+    _set_constraints(
+        exported_program,
+        gm.meta.get("input_shape_constraints", []),
+        gm.meta.get("inline_constraints", []),
+        flat_args,
+    )
+
+    return exported_program

@@ -1,9 +1,13 @@
 # Owner(s): ["module: inductor"]
+import copy
+import unittest
+
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
-from torch.testing._internal.common_utils import IS_LINUX
+from torch._inductor.utils import run_and_get_code
+from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -12,17 +16,40 @@ class TestPaternMatcher(TestCase):
         def fn(a, b, c, d):
             return torch.add(torch.mm(a, b), torch.mm(c, d))
 
-        args = [
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
-            torch.randn(16, 16, device="cuda"),
+        args_list = [
+            (
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+                torch.randn(16, 16, device="cuda"),
+            ),
+            # https://github.com/pytorch/pytorch/issues/100670.
+            (
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 2, device="cuda"),
+                torch.randn(2, 1, device="cuda"),
+            ),
+            (
+                torch.randn(1, 2, device="cuda"),
+                torch.randn(2, 1, device="cuda"),
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+            ),
+            (
+                torch.randn(1, 4, device="cuda"),
+                torch.randn(4, 2, device="cuda"),
+                torch.randn(1, 5, device="cuda"),
+                torch.randn(5, 2, device="cuda"),
+            ),
         ]
-        expected = fn(*args)
-        actual = torch.compile(fn)(*args)
-        torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
+        for args in args_list:
+            counters.clear()
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
     def test_addmm(self):
         def fn(a, b, c):
@@ -127,6 +154,24 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
+        # Verify we fallback to non-optimal path for negative `end`.
+        def fn(a, b):
+            cat_1 = torch.ops.aten.cat.default([a, b], 1)
+            slice_1 = torch.ops.aten.slice.Tensor(cat_1, 0, 0, 9223372036854775807)
+            slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 0, -1)
+            return torch.ops.aten.cat.default([cat_1, slice_2], 1)
+
+        counters.clear()
+        args = [
+            torch.randn(2, 8, device="cuda"),
+            torch.randn(2, 16, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+
     def test_pointless_convert(self):
         def fn1(x):
             x = torch.ops.prims.convert_element_type.default(x, torch.float16)
@@ -147,6 +192,26 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
         joint_graph.joint_graph_passes(gm)
         self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_cumsum(self):
+        def fn1():
+            ones = torch.full(
+                [1, 128], 1, layout=torch.strided, dtype=torch.float32
+            ).to(torch.int64)
+            return torch.cumsum(ones, 1) * ones
+
+        def fn2():
+            ones = torch.full(
+                [55, 10], 1, layout=torch.strided, dtype=torch.float32
+            ).to(torch.int64)
+            return torch.cumsum(ones, 1)
+
+        for fn in (fn1, fn2):
+            result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
+            self.assertNotIn("aten.cumsum", code)
+            self.assertEqual(result, fn())
+            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            counters.clear()
 
     def test_splitwithsizes_cat(self):
         # Good case
@@ -218,7 +283,49 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
 
+    def test_match_with_mutation(self):
+        from torch._inductor.pattern_matcher import (
+            CallFunction,
+            KeywordArg,
+            PatternMatcherPass,
+            register_graph_pattern,
+        )
+
+        counter = 0
+        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+
+        @register_graph_pattern(
+            CallFunction(
+                torch.add, KeywordArg("x"), CallFunction(torch.sin, KeywordArg("x"))
+            ),
+            pass_dict=test_pass,
+        )
+        def _test(match, x):
+            nonlocal counter
+            counter += 1
+
+        def fn(x, y):
+            a = torch.sin(x)
+            x.copy_(y)
+            b = torch.add(x, a)
+            return b
+
+        args1 = [
+            torch.randn(5, 5, device="cuda"),
+            torch.randn(5, 5, device="cuda"),
+        ]
+        args2 = copy.deepcopy(args1)
+
+        with unittest.mock.patch(
+            "torch._inductor.fx_passes.pre_grad.pattern_matcher_passes", [test_pass]
+        ):
+            expected = fn(*args1)
+            actual = torch.compile(fn)(*args2)
+            # should not match
+            self.assertEqual(counter, 0)
+            torch.testing.assert_close(actual, expected)
+
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
         run_tests()

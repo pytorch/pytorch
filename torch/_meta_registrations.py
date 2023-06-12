@@ -1,10 +1,15 @@
 import math
-from typing import List, Optional, Sequence, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._prims_common as utils
 from torch import Tensor
-from torch._decomp import _add_op_to_registry, global_decomposition_table, meta_table
+from torch._decomp import (
+    _add_op_to_registry,
+    _convert_out_params,
+    global_decomposition_table,
+    meta_table,
+)
 from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
@@ -18,7 +23,12 @@ from torch._prims_common import (
     TensorLike,
 )
 
-from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
+from torch._prims_common.wrappers import (
+    _maybe_resize_out,
+    _resize_output_check,
+    _safe_copy_out,
+    out_wrapper,
+)
 from torch._refs import _broadcast_shapes
 
 from torch.utils._pytree import tree_map
@@ -31,6 +41,8 @@ _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", 
 
 def register_meta(op):
     def wrapper(fn):
+        fn = _convert_out_params(fn)
+
         def register(op):
             _add_op_to_registry(meta_table, op, fn)
 
@@ -49,43 +61,29 @@ def toRealValueType(dtype):
     return from_complex.get(dtype, dtype)
 
 
+def check_inplace_broadcast(self_shape, *args_shape):
+    broadcasted_shape = tuple(_broadcast_shapes(self_shape, *args_shape))
+    check(
+        broadcasted_shape == self_shape,
+        lambda: f"output with shape {self_shape} doesn't match the broadcast shape {broadcasted_shape}",
+    )
+
+
 @register_meta([aten.take.default, aten.take.out])
-def meta_take(self, index, *, out=None):
+@out_wrapper()
+def meta_take(self, index):
     # Type and device checks
     check(
         index.dtype == torch.long,
         lambda: f"take(): Expected a long tensor for index, but got {index.dtype}",
     )
-    if out is not None:
-        check(
-            self.dtype == out.dtype,
-            lambda: (
-                f"take(): self and out expected to have the same dtype, "
-                f"but got self.dtype = {self.dtype} and out.dtype = {out.dtype}"
-            ),
-        )
-        check(
-            self.device == out.device and self.device == index.device,
-            lambda: (
-                f"take(): self, index and out expected to be in the same device, "
-                f"but got self.device = {self.device}, index.device = {index.device}, "
-                f"and out.device = {out.device}"
-            ),
-        )
-
     # Index checks
     check(
         not (self.numel() == 0 and index.numel() != 0),
         lambda: "take(): tried to take from an empty tensor",
         IndexError,
     )
-
-    result = self.new_empty(index.shape)
-    if out is not None:
-        assert isinstance(out, TensorLike)
-        out = _maybe_resize_out(out, result.shape)
-        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
-    return result
+    return self.new_empty(index.shape)
 
 
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
@@ -295,6 +293,16 @@ def meta_angle_out(self, out):
     return out.copy_(torch.angle(self))
 
 
+@register_meta(aten._assert_async.default)
+def assert_async(val):
+    return
+
+
+@register_meta(aten._assert_async.msg)
+def assert_async_meta(val, assert_msg):
+    return
+
+
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def squareCheckInputs(self: Tensor, f_name: str):
     assert (
@@ -305,6 +313,48 @@ def squareCheckInputs(self: Tensor, f_name: str):
     ), f"{f_name}: A must be batches of square matrices, but they are {self.size(-2)} by {self.size(-1)} matrices"
 
 
+# Validates input shapes and devices
+# for linear solve methods (solve, cholesky_solve, lu_solve, triangular_solve)
+# From aten/src/ATen/native/LinearAlgebraUtils.h
+def linearSolveCheckInputs(
+    self: Tensor,
+    A: Tensor,
+    name: str,
+):
+    check(
+        self.device == A.device,
+        lambda: (
+            f"Expected b and A to be on the same device, but found b on "
+            f"{self.device} and A on {A.device} instead."
+        ),
+    )
+
+    check(
+        self.dtype == A.dtype,
+        lambda: (
+            f"Expected b and A to have the same dtype, but found b of type "
+            f"{self.dtype} and A of type {A.dtype} instead."
+        ),
+    )
+
+    check(
+        A.size(-1) == A.size(-2),
+        lambda: (
+            f"A must be batches of square matrices, "
+            f"but they are {A.size(-2)} by {A.size(-1)} matrices"
+        ),
+    )
+
+    check(
+        A.size(-1) == self.size(-2),
+        lambda: (
+            f"Incompatible matrix sizes for {name}: each A "
+            f"matrix is {A.size(-1)} by {A.size(-1)}"
+            f" but each b matrix is {self.size(-2)} by {self.size(-1)}"
+        ),
+    )
+
+
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def checkFloatingOrComplex(
     t: Tensor, f_name: str, allow_low_precision_dtypes: bool = True
@@ -312,12 +362,12 @@ def checkFloatingOrComplex(
     dtype = t.dtype
     check(
         t.is_floating_point() or t.is_complex(),
-        lambda: f"{f_name}, : Expected a floating point or complex tensor as input. Got , {dtype}",
+        lambda: f"{f_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
     if allow_low_precision_dtypes:
         check(
             dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
-            lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
+            lambda: f"{f_name}: Low precision dtypes not supported. Got {dtype}",
         )
 
 
@@ -329,23 +379,65 @@ def checkIsMatrix(A: Tensor, f_name: str, arg_name: str = "A"):
     )
 
 
-def checkUplo(uplo: str):
-    uplo_uppercase = uplo.upper()
-    assert (
-        len(uplo) == 1 and uplo_uppercase == "U" or uplo_uppercase == "L"
-    ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
+def checkInputsSolver(
+    A: Tensor,
+    B: Tensor,
+    left: bool,
+    f_name: str,
+):
+    squareCheckInputs(A, f_name)
+    checkIsMatrix(B, f_name)
+    check(
+        A.size(-2) == B.size(-2) if left else A.size(-1) == B.size(-1),
+        lambda: (
+            f"{f_name}: Incompatible shapes of A and B for the equation "
+            f"{'AX = B' if left else 'XA = B'}"
+            f" ({A.size(-2)}x{A.size(-1)} and {B.size(-2)}x{B.size(-1)})"
+        ),
+    )
 
 
-# @register_meta(aten.linalg_eigh.default)
-def meta_linalg_eigh(self, uplo="L"):
-    squareCheckInputs(self, "linalg_eigh")
-    checkUplo(uplo)
-    real_dtype = toRealValueType(self.dtype)
-    assert self.dim() >= 2
-    values = self.new_empty(self.shape, dtype=real_dtype)
-    values.transpose_(-2, -1)
-    vectors = self.new_empty(self.shape[:-1])
-    return (values, vectors)
+def checkSameDevice(
+    fn_name: str, result: Tensor, input: Tensor, result_name: str = "result"
+):
+    check(
+        result.device == input.device,
+        lambda: (
+            f"{fn_name}: Expected {result_name} and input tensors to be on the same device, but got "
+            f"{result_name} on {result.device} and input on {input.device}"
+        ),
+    )
+
+
+def checkUplo(UPLO: str):
+    UPLO_uppercase = UPLO.upper()
+    check(
+        len(UPLO) == 1 and (UPLO_uppercase == "U" or UPLO_uppercase == "L"),
+        lambda: f"Expected UPLO argument to be 'L' or 'U', but got {UPLO}",
+    )
+
+
+@register_meta([aten._linalg_eigh.default, aten._linalg_eigh.eigenvalues])
+@out_wrapper("eigenvalues", "eigenvectors")
+def meta__linalg_eigh(
+    A: Tensor,
+    UPLO: str = "L",
+    compute_v: bool = True,
+):
+    squareCheckInputs(A, "linalg.eigh")
+    checkUplo(UPLO)
+
+    shape = list(A.shape)
+    if compute_v:
+        vecs = A.new_empty(shape)
+        vecs.as_strided_(shape, make_contiguous_strides_for(shape, row_major=False))
+    else:
+        vecs = A.new_empty([0])
+
+    shape.pop()
+    vals = A.new_empty(shape, dtype=toRealValueType(A.dtype))
+
+    return vals, vecs
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -367,6 +459,59 @@ def linalg_cholesky_ex(A: Tensor, upper: bool = False, check_errors: bool = Fals
     return L, infos
 
 
+@register_meta(
+    [aten.linalg_householder_product.default, aten.linalg_householder_product.out]
+)
+@out_wrapper()
+def linalg_householder_product(input: Tensor, tau: Tensor) -> Tensor:
+    check(
+        input.ndim >= 2,
+        lambda: "torch.linalg.householder_product: input must have at least 2 dimensions.",
+    )
+    check(
+        input.size(-2) >= input.size(-1),
+        lambda: "torch.linalg.householder_product: input.shape[-2] must be greater than or equal to input.shape[-1]",
+    )
+    check(
+        input.size(-1) >= tau.size(-1),
+        lambda: "torch.linalg.householder_product: input.shape[-1] must be greater than or equal to tau.shape[-1]",
+    )
+
+    check(
+        input.ndim - tau.ndim == 1,
+        lambda: (
+            f"torch.linalg.householder_product: Expected tau to have one dimension less than input, "
+            f"but got tau.ndim equal to {tau.ndim} and input.ndim is equal to {input.ndim}"
+        ),
+    )
+    if input.ndim > 2:
+        expected_batch_tau_shape = input.shape[:-2]
+        actual_batch_tau_shape = tau.shape[:-1]
+        check(
+            actual_batch_tau_shape == expected_batch_tau_shape,
+            lambda: (
+                f"torch.linalg.householder_product: Expected batch dimensions of tau to be "
+                f"equal to input.shape[:-2], but got {actual_batch_tau_shape}"
+            ),
+        )
+
+    check(
+        tau.dtype == input.dtype,
+        lambda: (
+            f"torch.linalg.householder_product: tau dtype {tau.dtype}"
+            f" does not match input dtype {input.dtype}"
+        ),
+    )
+    checkSameDevice("torch.linalg.householder_product", tau, input, "tau")
+
+    return torch.empty_strided(
+        size=input.shape,
+        stride=make_contiguous_strides_for(input.shape, row_major=False),
+        dtype=input.dtype,
+        device=input.device,
+    )
+
+
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
 @register_meta(aten.linalg_inv_ex.default)
 def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
@@ -378,6 +523,238 @@ def linalg_inv_ex_meta(A: Tensor, check_errors: bool = False):
 
     infos = A.new_empty(A.shape[:-2], dtype=torch.int32)
     return L, infos
+
+
+@register_meta([aten.linalg_ldl_factor_ex.default, aten.linalg_ldl_factor_ex.out])
+@out_wrapper("LD", "pivots", "info")
+def linalg_ldl_factor_ex_meta(
+    self: Tensor,
+    *,
+    hermitian: bool = False,
+    check_errors: bool = False,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    squareCheckInputs(self, "torch.linalg.ldl_factor_ex")
+    checkFloatingOrComplex(self, "torch.linalg.ldl_factor_ex")
+    LD = torch.empty_strided(
+        size=self.shape,
+        stride=make_contiguous_strides_for(self.shape, row_major=False),
+        dtype=self.dtype,
+        device=self.device,
+    )
+    pivots = self.new_empty(self.shape[:-1], dtype=torch.int)
+    info = self.new_empty(self.shape[:-2], dtype=torch.int)
+    return LD, pivots, info
+
+
+@register_meta([aten.linalg_ldl_solve.default, aten.linalg_ldl_solve.out])
+@out_wrapper()
+def linalg_ldl_solve_meta(
+    LD: Tensor, pivots: Tensor, B: Tensor, *, hermitian: bool = False
+) -> Tensor:
+    squareCheckInputs(LD, "torch.linalg.ldl_solve")
+    checkFloatingOrComplex(LD, "torch.linalg.ldl_solve")
+    linearSolveCheckInputs(B, LD, "torch.linalg.ldl_solve")
+    check(
+        B.ndim >= 2,
+        lambda: (
+            f"torch.linalg.ldl_solve: Expected B to have at least 2 dimensions, "
+            f"but it has {B.ndim} dimensions instead"
+        ),
+    )
+    expected_pivots_shape = LD.shape[:-1]
+    check(
+        expected_pivots_shape == pivots.shape,
+        lambda: (
+            f"torch.linalg.ldl_solve: Expected LD.shape[:-1] and pivots.shape to be the same, "
+            f"but got pivots with shape {pivots.shape} instead"
+        ),
+    )
+    check(
+        utils.is_integer_dtype(pivots.dtype),
+        lambda: f"torch.linalg.ldl_solve: Expected pivots to be integers. Got {pivots.dtype}",
+    )
+    check(
+        LD.dtype == B.dtype,
+        lambda: f"torch.linalg.ldl_solve: LD dtype {LD.dtype} does not match b dtype {B.dtype}",
+    )
+    B_broadcast_size, _ = _linalg_broadcast_batch_dims(B, LD)
+    return torch.empty_strided(
+        size=B_broadcast_size,
+        stride=make_contiguous_strides_for(B_broadcast_size, row_major=False),
+        dtype=B.dtype,
+        device=B.device,
+    )
+
+
+@register_meta([aten.linalg_lu.default, aten.linalg_lu.out])
+@out_wrapper("P", "L", "U")
+def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> Tuple[Tensor, Tensor, Tensor]:
+    check(
+        A.ndim >= 2,
+        lambda: f"linalg.lu: Expected tensor with 2 or more dimensions. Got size: {A.shape} instead",
+    )
+
+    sizes = list(A.shape)
+    m = sizes[-2]
+    n = sizes[-1]
+    k = min(m, n)
+
+    sizes[-1] = m
+    if pivot:
+        P = A.new_empty(sizes)
+    else:
+        P = A.new_empty([0])
+
+    sizes[-1] = k
+    L = A.new_empty(sizes)
+
+    sizes[-2] = k
+    sizes[-1] = n
+    U = A.new_empty(sizes)
+    return P, L, U
+
+
+@register_meta([aten.linalg_lu_factor_ex.default, aten.linalg_lu_factor_ex.out])
+@out_wrapper("LU", "pivots", "info")
+def linalg_lu_factor_ex_meta(
+    A: Tensor, *, pivot: bool = True, check_errors: bool = False
+) -> Tuple[Tensor, Tensor, Tensor]:
+    check(
+        A.ndim >= 2,
+        lambda: f"torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: {A.shape} instead",
+    )
+
+    sizes = list(A.shape)
+    m = sizes[-2]
+    n = sizes[-1]
+
+    LU = torch.empty_strided(
+        size=sizes,
+        stride=make_contiguous_strides_for(sizes, row_major=False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+
+    # Sets sizes to the size of pivots
+    sizes.pop()
+    sizes[-1] = min(m, n)
+    pivots = A.new_empty(sizes, dtype=torch.int)
+
+    # Sets sizes to the size of info
+    sizes.pop()
+    info = A.new_empty(sizes, dtype=torch.int)
+
+    return LU, pivots, info
+
+
+@register_meta([aten.linalg_lu_solve.default, aten.linalg_lu_solve.out])
+@out_wrapper()
+def linalg_lu_solve_meta(
+    LU: Tensor,
+    pivots: Tensor,
+    B: Tensor,
+    *,
+    left: bool = True,
+    adjoint: bool = False,
+) -> Tensor:
+    # dtype
+    checkFloatingOrComplex(LU, "torch.linalg.lu_solve")
+    check(
+        LU.dtype == B.dtype,
+        lambda: (
+            f"linalg.lu_solve: Expected LU and B to have the same dtype, "
+            f"but found LU of type {LU.dtype} and B of type {B.dtype} instead"
+        ),
+    )
+    check(
+        pivots.dtype == torch.int,
+        lambda: "linalg.lu_solve: pivots should be a Tensor of scalar type torch.int32",
+    )
+
+    # matrix shapes
+    squareCheckInputs(LU, "torch.linalg.lu_solve")
+    checkInputsSolver(LU, B, left, "linalg.lu_solve")
+    check(
+        LU.size(-1) == pivots.size(-1),
+        lambda: "linalg.lu_solve: Number of pivots per batch should be same as the dimension of the matrix",
+    )
+
+    # batches
+    check(
+        LU.shape[:-1] == pivots.shape,
+        lambda: (
+            f"linalg.lu_solve: Expected LU.shape[:-1] and pivots.shape to be the same, "
+            f"but got pivots with shape {pivots.shape} instead"
+        ),
+    )
+
+    B_broadcast_size, _ = _linalg_broadcast_batch_dims(B, LU)
+
+    result = torch.empty_strided(
+        size=B_broadcast_size,
+        stride=make_contiguous_strides_for(B_broadcast_size, row_major=not left),
+        dtype=B.dtype,
+        device=B.device,
+    )
+
+    if result.numel() != 0 and not left:
+        if result.is_complex():
+            result = result.conj()
+
+    return result
+
+
+# parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
+def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
+    if mode == "reduced":
+        compute_q = True
+        reduced = True
+    elif mode == "complete":
+        compute_q = True
+        reduced = False
+    elif mode == "r":
+        compute_q = False
+        reduced = True  # this is actually irrelevant in this mode
+    else:
+        check(
+            False,
+            lambda: (
+                f"qr received unrecognized mode '{mode}' "
+                f"but expected one of 'reduced' (default), 'r', or 'complete'"
+            ),
+        )
+    return compute_q, reduced
+
+
+@register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
+@out_wrapper("Q", "R")
+def linalg_qr_meta(
+    A: Tensor,
+    mode: str = "reduced",
+) -> Tuple[Tensor, Tensor]:
+    checkIsMatrix(A, "linalg.qr")
+    checkFloatingOrComplex(A, "linalg.qr")
+
+    compute_q, reduced_mode = _parse_qr_mode(mode)
+
+    m = A.shape[-2]
+    n = A.shape[-1]
+    k = min(m, n)
+
+    if compute_q:
+        Q_shape = list(A.shape)
+        Q_shape[-1] = k if reduced_mode else m
+        Q = A.new_empty(Q_shape)
+        Q.as_strided_(Q_shape, make_contiguous_strides_for(Q_shape, row_major=False))
+    else:
+        Q = A.new_empty([0])
+
+    # For readability
+    R_shape = list(A.shape)
+    R_shape[-2] = k if reduced_mode or not compute_q else m
+    R = A.new_empty(R_shape)
+    R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))
+    return Q, R
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -404,8 +781,12 @@ def _linalg_svd_meta(
 
         V_shape = batch_dims + [n if full_matrices else k, n]
         V = A.new_empty(V_shape)
-        # TODO: need to distinguish cuSOLVER case? (see original code)
-        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=False))
+        # NB: This checks for CUDA since there is no way to check for cuSolver.
+        # Also, this might not work correctly on CPU when fake_device is not
+        # available as device_hint just defaults to CUDA in that case. See
+        # _linalg_svd meta in core.
+        is_cuda = device_hint(A) == "cuda"
+        V.as_strided_(V_shape, make_contiguous_strides_for(V_shape, row_major=is_cuda))
     else:
         # doesn't matter
         U = A.new_empty([0])
@@ -414,6 +795,66 @@ def _linalg_svd_meta(
     # S is always real, even when A is complex.
     S = A.new_empty(batch_dims + [k], dtype=toRealValueType(A.dtype))
     return U, S, V
+
+
+def _linalg_broadcast_batch_dims(
+    arg1: Tensor, arg2: Tensor
+) -> Tuple[List[int], List[int]]:
+    # broadcast the batch dimensions of arg1 and arg2.
+    arg1_batch_sizes = arg1.shape[:-2]
+    arg2_batch_sizes = arg2.shape[:-2]
+    expand_batch_portion = _broadcast_shapes(arg1_batch_sizes, arg2_batch_sizes)
+
+    arg1_expand_size = list(expand_batch_portion)
+    arg1_expand_size += [arg1.size(-2), arg1.size(-1)]
+
+    arg2_expand_size = list(expand_batch_portion)
+    arg2_expand_size += [arg2.size(-2), arg2.size(-1)]
+    return arg1_expand_size, arg2_expand_size
+
+
+def _linalg_broadcast_batch_dims_name(
+    arg1: Tensor, arg2: Tensor, name: Optional[str]
+) -> Tuple[Tensor, Tensor]:
+    # If there's no name we assume we don't want to check the errors
+    if name:
+        linearSolveCheckInputs(arg1, arg2, name)
+
+    arg1_expand_size, arg2_expand_size = _linalg_broadcast_batch_dims(arg1, arg2)
+
+    arg1_broadcasted = (
+        arg1 if arg1_expand_size == arg1.shape else arg1.expand(arg1_expand_size)
+    )
+    arg2_broadcasted = (
+        arg2 if arg2_expand_size == arg2.shape else arg2.expand(arg2_expand_size)
+    )
+    return arg1_broadcasted, arg2_broadcasted
+
+
+@register_meta([aten.linalg_solve_triangular.default, aten.linalg_solve_triangular.out])
+def linalg_solve_triangular_meta(
+    A: Tensor,
+    B: Tensor,
+    *,
+    upper: bool,
+    left: bool = True,
+    unitriangular: bool = False,
+    out: Tensor = None,
+) -> Tensor:
+    if out is None:
+        out = A.new_empty([0])
+    assert isinstance(out, TensorLike)
+    checkInputsSolver(A, B, left, "linalg.solve_triangular")
+    B_, A_ = _linalg_broadcast_batch_dims_name(B, A, None)
+    avoid_copy_A = A_.transpose(-2, -1).is_contiguous() and A_.is_conj()
+    if avoid_copy_A:
+        out = _maybe_resize_out(out, B_.shape)
+    else:
+        # reimplementation of resize_output with result F-contig
+        if _resize_output_check(out, B_.shape):
+            out.resize_(B_.transpose(-2, -1).shape)
+            out.transpose_(-2, -1)
+    return out  # type: ignore[return-value]
 
 
 # From aten/src/ATen/native/LinearAlgebra.cpp
@@ -1091,11 +1532,7 @@ def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
 
 
-# Leaving this function around because a python implementation
-# of indexing shape inference is useful,
-# but not registering it to the dispatcher because we already
-# get shape inference through structured kernels
-@register_meta(aten.index.Tensor)
+@register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
 def meta_index_Tensor(self, indices):
     check(indices, lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
@@ -1408,6 +1845,23 @@ def meta__foreach_pow_scalar_and_tensor(self, exponent):
     return [torch.empty_like(e) for e in exponent]
 
 
+@register_meta([aten._foreach_addcdiv_.Tensor, aten._foreach_addcmul_.Tensor])
+def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
+    check(
+        all(isinstance(l, List) for l in [self, tensor1, tensor2])
+        and isinstance(scalars, torch.Tensor),
+        lambda: (
+            "_foreach_addc*_ op expects arguments of type: List[Tensor], List[Tensor], List[Tensor], tensor, "
+            f"but got: {type(self)}, {type(tensor1)}, {type(tensor2)}, and {type(scalars)}"
+        ),
+    )
+    check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    check(
+        len(self) == len(tensor1) and len(self) == len(tensor2),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,
@@ -1615,7 +2069,7 @@ def meta_embedding_bag(
             max_indices = indices.new_empty(0)
     else:
         fast_path_sum = is_fast_path(weight, per_sample_weights, output, padding_idx)
-        if mode == MODE_MEAN or mode == MODE_MAX or not fast_path_sum:
+        if mode in (MODE_MEAN, MODE_MAX) or not fast_path_sum:
             offset2bag = offsets.new_empty(indices.size(0))
         else:
             offset2bag = offsets.new_empty(0)
@@ -1723,6 +2177,8 @@ def meta_zero_(self):
     ],
 )
 def meta_binop_inplace(self, other):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
     return self
 
 
@@ -1735,6 +2191,8 @@ def meta_binop_inplace(self, other):
     ],
 )
 def meta_binop_inplace_alpha(self, other, alpha=1):
+    if isinstance(other, torch.Tensor):
+        check_inplace_broadcast(self.shape, other.shape)
     return self
 
 
@@ -1765,13 +2223,14 @@ def meta_relu_(self):
     return self
 
 
-@register_meta(aten.index_put.default)
+@register_meta([aten.index_put.default, aten._unsafe_index_put.default])
 def meta_index_put(self, indices, values, accumulate=False):
     return torch.empty_like(self)
 
 
 @register_meta(aten.masked_fill_.Scalar)
 def meta_masked_fill_(self, mask, value):
+    check_inplace_broadcast(self.shape, mask.shape)
     return self
 
 
@@ -2393,19 +2852,6 @@ def meta__scaled_dot_product_flash(
     return_debug_mask: bool = False,
     scale: Optional[float] = None,
 ):
-    # [Note] SDPA_flash's meta function returns incorrect Philox seed and offset:
-    # We have added logic to torch/_dynamo/variables/torch.py
-    # We need to check if scaled_dot_product_attention will run the flash attention
-    # kernel and if dropout is != 0.0. If that is the case then we want dynamo
-    # to graph break. The derivative calculation for _scaled_dot_product_flash_attention
-    # does not function correctly with cuda graphs because the full philox state is not captured
-    # the forward's return values. Another reason to graph break is that the the meta function
-    # returns the wrong outputs for philox seed and offset and these values get baked into the
-    # inductor fallback calls to the eager kernels.
-    check(
-        dropout_p == 0.0,
-        lambda: f"Can only trace _scaled_dot_product_flash_attention when dropout is set to 0 but got a dropout_p of {dropout_p}.",
-    )
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
@@ -2453,6 +2899,11 @@ def meta__scaled_dot_product_flash(
     else:
         debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
+    # note: device for seed and offset below depends on whether we are
+    # capturing or not, but at the time of tracing we don't know if we
+    # are going to use cudagraphs or not, so we return cpu tensors here
+    # it's possible we'll need to have some special handling in inductor for sdpa
+
     return (
         output,
         logsumexp,
@@ -2460,8 +2911,8 @@ def meta__scaled_dot_product_flash(
         cumulative_sequence_length_k,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        1,  # Philox Seed will not be used, see note at top.
-        1,  # Philox Offset will not be used, see note at top.
+        torch.empty((), dtype=torch.long, device="meta"),
+        torch.empty((), dtype=torch.long, device="meta"),
         debug_mask,
     )
 
@@ -2492,24 +2943,24 @@ def meta__scaled_dot_product_flash_backward(
     num_heads = query.size(1)
     head_dim = query.size(3)
 
-    Nnz_q = batch_size * max_q
-    Nnz_kv = batch_size * max_k
-
-    query = query.transpose(1, 2)
-    key = key.transpose(1, 2)
-    value = value.transpose(1, 2)
-
-    query_reshaped = query.reshape(Nnz_q, num_heads, head_dim)
-    key_reshaped = key.reshape(Nnz_kv, num_heads, head_dim)
-    value_reshaped = value.reshape(Nnz_kv, num_heads, head_dim)
-
-    grad_q = torch.empty_like(query_reshaped)
-    grad_k = torch.empty_like(key_reshaped)
-    grad_v = torch.empty_like(value_reshaped)
-
-    grad_q = grad_q.view(batch_size, max_q, num_heads, head_dim).transpose(1, 2)
-    grad_k = grad_k.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
-    grad_v = grad_v.view(batch_size, max_k, num_heads, head_dim).transpose(1, 2)
+    grad_q = torch.empty_permuted(
+        (batch_size, num_heads, max_q, head_dim),
+        (0, 2, 1, 3),
+        dtype=query.dtype,
+        device=query.device,
+    )
+    grad_k = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=key.dtype,
+        device=key.device,
+    )
+    grad_v = torch.empty_permuted(
+        (batch_size, num_heads, max_k, head_dim),
+        (0, 2, 1, 3),
+        dtype=value.dtype,
+        device=value.device,
+    )
 
     return grad_q, grad_k, grad_v
 
@@ -2610,6 +3061,20 @@ def meta_scatter_reduce_two(self, dim, index, src, reduce, include_self=True):
 def meta_scatter_reduce__two(self, dim, index, src, reduce, include_self=True):
     scatter_meta_impl(self, dim, index, src, reduce, use_new_options=True)
     return self
+
+
+@register_meta([aten.multinomial.default, aten.multinomial.out])
+@out_wrapper()
+def meta_multinomial(input, num_samples, replacement=False, *, generator=None):
+    check(
+        0 < input.dim() <= 2,
+        lambda: f"The probabilty distributions dimensions must be 1 or 2, but got {input.dim()}",
+    )
+    if input.dim() == 1:
+        return torch.empty(num_samples, dtype=torch.long, device=input.device)
+    return torch.empty(
+        input.size(0), num_samples, dtype=torch.long, device=input.device
+    )
 
 
 def multiply_integers(vs):
@@ -3091,6 +3556,60 @@ def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
 def nan_to_num(self, nan=None, posinf=None, neginf=None):
     result_size = list(self.size())
     return self.new_empty(result_size)
+
+
+@register_meta(torch.ops.aten.transpose_)
+def transpose_(self, dim0, dim1):
+    assert self.layout not in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }, f"torch.transpose_: in-place transposition is not supported for {self.layout} layout"
+
+    ndims = self.ndim
+
+    dim0 = maybe_wrap_dim(dim0, ndims)
+    dim1 = maybe_wrap_dim(dim1, ndims)
+
+    if dim0 == dim1:
+        return self
+
+    size = list(self.size())
+    stride = list(self.stride())
+
+    stride[dim0], stride[dim1] = stride[dim1], stride[dim0]
+    size[dim0], size[dim1] = size[dim1], size[dim0]
+
+    self.as_strided_(size, stride)
+    return self
+
+
+@register_meta(torch.ops.aten.t_)
+def t_(self):
+    ndims = self.ndim
+
+    if self.is_sparse:
+        sparse_dim = self.sparse_dim()
+        dense_dim = self.dense_dim()
+        assert (
+            sparse_dim <= 2 and dense_dim == 0
+        ), f"t_ expects a tensor with <= 2 sparse and 0 dense dimensions, but got {sparse_dim} sparse and {dense_dim} dense dimensions"  # noqa: B950
+    else:
+        assert (
+            self.dim() <= 2
+        ), f"t_ expects a tensor with <= 2 dimensions, but self is {ndims}D"
+
+    return transpose_(self, 0, 0 if ndims < 2 else 1)
+
+
+@register_meta([aten.searchsorted.Tensor, aten.searchsorted.Tensor_out])
+@out_wrapper()
+def meta_searchsorted(
+    sorted_sequence, self, *, out_int32=False, right=False, side=None, sorter=None
+):
+    dtype = torch.int32 if out_int32 else torch.int64
+    return torch.empty_like(self, dtype=dtype).contiguous()
 
 
 # We must also trigger meta registrations from PrimTorch ref

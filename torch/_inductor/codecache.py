@@ -7,6 +7,7 @@ import json
 import logging
 import multiprocessing
 import os
+import pathlib
 import re
 import shutil
 import signal
@@ -14,6 +15,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import threading
 import types
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -28,7 +30,6 @@ import torch
 from torch._inductor import config, cuda_properties, exc
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
-from torch.utils import cpp_extension
 
 if config.is_fbcode():
     from torch._inductor.fb.logging import global_cache_log
@@ -65,10 +66,9 @@ log = logging.getLogger(__name__)
 
 @functools.lru_cache(None)
 def cache_dir():
-    cache_dir = os.environ.get(
-        "TORCHINDUCTOR_CACHE_DIR",
-        f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
-    )
+    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+    if cache_dir is None:
+        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
@@ -80,7 +80,7 @@ def cubin_cache_dir():
     return cubin_dir
 
 
-class PersistentCache:
+class CacheBase:
     def __init__(self):
         if not torch.cuda.is_available():
             return
@@ -128,6 +128,33 @@ class PersistentCache:
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
         )
 
+
+class LocalCache(CacheBase):
+    def lookup(self, *keys: List[str]):
+        cache = self.get_local_cache()
+
+        sub_cache = cache
+        for key in keys:
+            if key in cache:
+                sub_cache = cache[key]
+            else:
+                return None
+
+        return sub_cache
+
+    def set_value(self, *keys: List[str], value: Any):
+        cache = self.get_local_cache()
+
+        sub_cache = cache
+        for key in keys[0:-1]:
+            sub_cache.setdefault(key, {})
+            sub_cache = sub_cache[key]
+        sub_cache[keys[-1]] = value
+
+        self.update_local_cache(cache)
+
+
+class PersistentCache(CacheBase):
     @functools.lru_cache(None)
     def get_global_cache(self):
         if self.global_cache_path is None or not os.path.isfile(self.global_cache_path):
@@ -230,11 +257,14 @@ def write(source_code, ext, extra=""):
 
 
 def write_atomic(path: str, source_code: str):
-    # use a temp file for thread safety
-    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
-    with os.fdopen(fd, "w") as f:
+    # Write into temporary file first to avoid conflicts between threads
+    # Avoid using a named temporary file, as those have restricted permissions
+    path = pathlib.Path(path)
+    tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
+    with tmp_path.open("w") as f:
         f.write(source_code)
-    os.rename(tmp_path, path)
+
+    tmp_path.rename(path)
 
 
 def cpp_compiler():
@@ -358,6 +388,9 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self):
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
@@ -476,10 +509,8 @@ def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
 
-def optimization_flags(cuda=False):
+def optimization_flags():
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
-    if cuda:
-        return base_flags
 
     if sys.platform == "darwin":
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
@@ -497,6 +528,8 @@ def use_custom_generated_macros():
 def get_include_and_linking_paths(
     include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
 ):
+    from torch.utils import cpp_extension
+
     macros = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -512,13 +545,12 @@ def get_include_and_linking_paths(
             sysconfig.get_config_var("LIBDIR")
         ]
         libs = ["c10", "torch", "torch_cpu", "torch_python"]
+        libs += ["gomp"]
+        macros = vec_isa.build_macro()
+        if macros:
+            macros = f"-D{macros}"
         if cuda:
             libs += ["c10_cuda", "cuda", "torch_cuda"]
-        else:
-            libs += ["gomp"]
-            macros = vec_isa.build_macro()
-            if macros:
-                macros = f"-D{macros}"
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -569,7 +601,7 @@ def cpp_compile_command(
             {cpp_compiler()} {input} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
             {ipaths} {lpaths} {libs} {macros}
-            {optimization_flags(cuda)}
+            {optimization_flags()}
             {use_custom_generated_macros()}
             -o {output}
         """,
@@ -754,35 +786,27 @@ class PyCodeCache:
 
 
 class TritonCodeCache:
-    @staticmethod
-    def get_name(mod):
-        (name,) = [n for n in dir(mod) if n.startswith("triton_")]
-        return name
-
     @classmethod
-    def load(cls, source_code):
+    def load(cls, kernel_name, source_code):
         mod = PyCodeCache.load(source_code)
-        return getattr(mod, cls.get_name(mod))
+        return getattr(mod, kernel_name)
 
 
-def _worker_compile(source_code, cc, device):
+def _worker_compile(kernel_name, source_code, cc, device):
     cuda_properties.set_compiler_worker_current_device(device)
-    kernel = TritonCodeCache.load(source_code)
+    kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
 
 
-def _load_kernel(source_code):
-    kernel = TritonCodeCache.load(source_code)
+def _load_kernel(kernel_name, source_code):
+    kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile()
     return kernel
 
 
-def _load_kernel_name(source_code):
-    return TritonCodeCache.get_name(PyCodeCache.load(source_code))
-
-
 class TritonFuture:
-    def __init__(self, source_code, future):
+    def __init__(self, kernel_name, source_code, future):
+        self.kernel_name = kernel_name
         self.source_code = source_code
         self.future = future
 
@@ -793,15 +817,14 @@ class TritonFuture:
             return self.kernel
         # If the worker failed this will throw an exception.
         self.future.result()
-        kernel = self.kernel = _load_kernel(self.source_code)
+        kernel = self.kernel = _load_kernel(self.kernel_name, self.source_code)
         latency = time() - t0
         if latency > 50:
-            name = _load_kernel_name(self.source_code)
             developer_warning(
-                f"Detected long compilation time of {latency} seconds for kernel name {name}"
+                f"Detected long compilation time of {latency} seconds for kernel name {self.kernel_name}"
             )
             developer_warning(self.source_code)
-        del self.source_code, self.future
+        del self.kernel_name, self.source_code, self.future
         return kernel
 
 
@@ -895,7 +918,7 @@ class AsyncCompile:
             return list(map(fn, seq))
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
-    def triton(self, source_code):
+    def triton(self, kernel_name, source_code):
         _compile_start()
 
         if config.compile_threads > 1:
@@ -903,11 +926,11 @@ class AsyncCompile:
             device = torch.cuda.current_device()
             cc = major * 10 + minor
             future = self.process_pool().submit(
-                _worker_compile, source_code, cc, device
+                _worker_compile, kernel_name, source_code, cc, device
             )
-            return TritonFuture(source_code, future)
+            return TritonFuture(kernel_name, source_code, future)
         else:
-            return _load_kernel(source_code)
+            return _load_kernel(kernel_name, source_code)
 
     def cpp(self, source_code):
         def task():

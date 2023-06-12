@@ -44,9 +44,6 @@ static void pool2d_template(const Tensor& input,
                             const c10::optional<int64_t> divisor_override,
                             PoolingOpBlock poolingBlock,
                             const c10::string& op_name) {
-  if (input.numel() == 0) {
-    return;
-  }
   if (!is_macos_13_or_newer()) {
     TORCH_CHECK(input.scalar_type() != ScalarType::Long,
                 "MPS: ",
@@ -116,6 +113,10 @@ static void pool2d_template(const Tensor& input,
                      outputHeight,
                      outputWidth,
                      memory_format);
+
+  if (input.numel() == 0) {
+    return;
+  }
 
   auto output_memory_format = output.suggest_memory_format();
   // the output and indices are 'empty', so we could avoid unnecessary gatherView on empty tensors

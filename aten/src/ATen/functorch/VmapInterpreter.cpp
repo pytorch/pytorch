@@ -6,8 +6,7 @@ namespace at { namespace functorch {
 void VmapInterpreterPtr::processImpl(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) {
-  DispatchKeySet exclude = keysToExcludeWhenEnteringDynamicLayer(TransformType::Vmap);
-  setup_dispatch_key_tls(exclude, DispatchKeySet(DispatchKey::FuncTorchVmapMode));
+  setup_dispatch_key_tls(TransformType::Vmap, DispatchKeySet(DispatchKey::FuncTorchVmapMode));
   op.callBoxed(stack);
 }
 

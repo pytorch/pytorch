@@ -35,6 +35,7 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestTracer(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_large_nbr_kernel_args(self):
@@ -1990,6 +1991,7 @@ class TestTracer(JitTestCase):
         self.assertEqual(model(**input_dict), traced_model(**input_dict))
 
 
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):
         @torch.jit.script
