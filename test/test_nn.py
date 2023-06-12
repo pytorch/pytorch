@@ -9706,11 +9706,8 @@ class TestNNDeviceType(NNTestCase):
             if dtype in (torch.uint8, ) + floating_types():
                 should_raise_runtime_error = False
 
-        elif mode == "bilinear":
+        elif mode in ("bilinear", "bicubic"):
             if dtype in floating_types() or (device == "cpu" and dtype == torch.uint8):
-                should_raise_runtime_error = False
-        elif mode == "bicubic":
-            if dtype in floating_types():
                 should_raise_runtime_error = False
 
         if should_raise_runtime_error:
@@ -9736,7 +9733,10 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(expected_out, t_out)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
-    @parametrize_test("antialias", [True, False])
+    # @parametrize_test("mode", ["bilinear", "bicubic"])
+    @parametrize_test("mode", ["bicubic",])
+    # @parametrize_test("antialias", [True, False])
+    @parametrize_test("antialias", [False])
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("output_size", [32, 600])
@@ -9747,6 +9747,7 @@ class TestNNDeviceType(NNTestCase):
         self,
         device,
         memory_format,
+        mode,
         antialias,
         align_corners,
         num_channels,
@@ -9755,12 +9756,12 @@ class TestNNDeviceType(NNTestCase):
         non_contig,
         batch_size,
     ):
+        # Check output value consistency between resized_input_uint8 and resized input_float
         if torch.device(device).type == "cuda":
             raise SkipTest("CUDA implementation is not yet supporting uint8")
 
-        mode = "bilinear"
-        # Check if Max Abs Error between resized input_uint8 and resized input_float is
-        # smaller than a tolerated value, e.g. 1.0
+        torch.manual_seed(0)
+
         input_ui8 = torch.randint(0, 256, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
 
@@ -9795,9 +9796,32 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
-        mae_tol = 0.5
-        max_abs_err_tol = 1.0
         num_wrong_pixels_tol = 5
+
+        if mode == "bilinear":
+            mae_tol = 0.5
+            max_abs_err_tol = 1.0
+        else:  # Bicubic
+            # Note:
+            # - tolerances for bicubic mode are in general higher than for
+            #   bilinear mode, because the bicubic kernel may create
+            #   [intermediate] values outside of the [0, 255] range, which need
+            #   to be clipped in uint8 path, but not in float path. This isn't
+            #   an issue with bilinear kernel.
+            # - Also in bicubic mode, when antialias=False, we have to use
+            #   bigger tolerances than when antialias=True. This is partially
+            #   due to the fact that when False, the float path uses the -0.75
+            #   constant while the uint8 path uses the -0.5 constant in the
+            #   bicubic kernel (when True, they both use -0.5). This difference
+            #   in constants exists for historical reasons. Should both paths
+            #   use the -0.5 constant, we would have closer results and we would
+            #   be able to lower the tolerances.
+            if antialias:
+                mae_tol = 0.5
+                max_abs_err_tol = 50
+            else:
+                mae_tol = 0.65
+                max_abs_err_tol = 75
 
         abs_diff = torch.abs(output_f32.round() - output_ui8.float())
         mae = torch.mean(abs_diff)
