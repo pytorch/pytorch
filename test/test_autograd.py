@@ -4293,6 +4293,20 @@ Done""")
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
+    def test_anomaly_gives_view_stack(self):
+        def arglebargle(x):
+            with torch.no_grad():
+                return x.view(2, 2)
+
+        r = arglebargle(torch.randn(4))
+        with self.assertRaisesRegex(RuntimeError, r"detect_anomaly\(check_nan=False\)"):
+            r.add_(torch.randn(4, requires_grad=True))
+
+        with detect_anomaly(check_nan=False):
+            r = arglebargle(torch.randn(4))
+        with self.assertRaisesRegex(RuntimeError, "arglebargle"):
+            r.add_(torch.randn(4, requires_grad=True))
+
     def test_calculate_shape_util(self):
         out = torch.randn(10, 5, requires_grad=True)
         grad = torch.randn(5, 10, requires_grad=True)
@@ -4748,7 +4762,7 @@ Done""")
         check(fast_mode=True)
         check(fast_mode=False)
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_gradcheck_validates_input_mkldnn(self):
         # when mkldnn inputs, forward mode testing is not allowed
         # Update tolerances below to make sure the gradient match even in single precision floats
@@ -4764,7 +4778,7 @@ Done""")
                 gradcheck(lambda x: x.to_dense(), (x,), raise_exception=False, fast_mode=True, check_forward_ad=True,
                           atol=1e-1, rtol=1e-1)
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_gradcheck_test_outputs(self):
         def check(fast_mode):
             # when sparse outputs (always raise even if raise_exception=False)
@@ -4921,7 +4935,7 @@ Done""")
         check(fast_mode=True)
         check(fast_mode=False)
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
     def test_gradcheck_multiple_mkldnn_inputs(self):
         def check(fast_mode):
             def fn(x, y):

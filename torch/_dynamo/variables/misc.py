@@ -19,7 +19,11 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
-from .functions import NestedUserFunctionVariable, UserFunctionVariable
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -369,17 +373,41 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
-        if name not in ["backward", "forward"]:
-            unimplemented(f"Unsupported method: {name}")
-
         if name == "backward":
             with tx.strict_translation_mode():
-                return tx.inline_call(
-                    tx, UserFunctionVariable(self.fn_cls.backward), args, kwargs
+                if isinstance(self.fn_cls.backward, types.FunctionType):
+                    backward = UserFunctionVariable(self.fn_cls.backward)
+                elif isinstance(self.fn_cls.backward, types.MethodType):
+                    backward = UserMethodVariable(
+                        self.fn_cls.backward.__func__,
+                        variables.UserDefinedClassVariable(self.fn_cls),
+                    )
+                    args = [backward.obj] + args
+                else:
+                    unimplemented(
+                        f"backward is a non-function or method: {self.fn_cls.backward}"
+                    )
+
+                return tx.inline_call(tx, backward, args, kwargs)
+
+        elif name == "forward":
+            if isinstance(self.fn_cls.forward, types.FunctionType):
+                forward = UserFunctionVariable(self.fn_cls.forward)
+            elif isinstance(self.fn_cls.forward, types.MethodType):
+                forward = UserMethodVariable(
+                    self.fn_cls.forward.__func__,
+                    variables.UserDefinedClassVariable(self.fn_cls),
                 )
-        return tx.inline_call(
-            tx, UserFunctionVariable(self.fn_cls.forward), args, kwargs
-        )
+                args = [forward.obj] + args
+            else:
+                unimplemented(
+                    f"forward is a non-function or method: {self.fn_cls.forward}"
+                )
+
+            return tx.inline_call(tx, forward, args, kwargs)
+
+        else:
+            unimplemented(f"Unsupported method: {name}")
 
 
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):

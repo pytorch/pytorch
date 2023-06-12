@@ -189,7 +189,10 @@ def enable_dynamic(enable: bool = True, export: bool = False):
     if not enable:
         yield
         return
-    with config.patch(dynamic_shapes=True):
+    # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
+    # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
+    # dynamic=True here to mean "fully dynamic from the start".
+    with config.patch(dynamic_shapes=True, assume_static_by_default=False):
         yield
 
 
@@ -965,6 +968,7 @@ def export(
         summarize_dim_constraints=True,
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
+        dynamic_shapes=tracing_mode == "symbolic",
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -974,7 +978,6 @@ def export(
             ),
             export=True,
             export_constraints=constraints,
-            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         try:
@@ -984,21 +987,31 @@ def export(
     remove_from_cache(f)
 
     if (
-        shape_env := getattr(fake_mode, "shape_env", None)
-    ) is not None and not skipfiles.check(inspect.getsourcefile(call_to_inspect)):
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
+        (shape_env := getattr(fake_mode, "shape_env", None)) is not None
+        and (dim_constraints := shape_env.dim_constraints) is not None
+        and not skipfiles.check(inspect.getsourcefile(call_to_inspect))
+    ):
         dim_constraints.solve()
         msg = dim_constraints.prettify_results(original_signature)
+        forced_specializations = dim_constraints.forced_specializations()
+        if forced_specializations:
+            msg = (
+                "Some dynamic dimensions need to be specialized because "
+                "the constraints inferred for them are too complex to specify.\n"
+                f"{forced_specializations}\n{msg}"
+            )
         if constraint_violation_error:
             constraint_violation_error.args = (
                 constraint_violation_error.args[0] + msg,
             )
         else:
-            log.info(
-                "Summary of dimension constraints:%s",
-                msg,
-            )
+            if forced_specializations:
+                constraint_violation_error = ConstraintViolationError(msg)
+            else:
+                log.info(
+                    "Summary of dimension constraints:%s",
+                    msg,
+                )
 
         # Error if we have any constraints on static values
         for k in shape_env.var_to_range.keys():
@@ -1279,6 +1292,9 @@ class TorchPatcher:
             opt.state_dict = disable(opt.state_dict)
             opt.load_state_dict = disable(opt.load_state_dict)
             opt.add_param_group = disable(opt.add_param_group)
+
+            if hasattr(opt, "_init_group"):
+                opt._init_group = disable(opt._init_group)
 
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook

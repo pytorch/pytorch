@@ -191,13 +191,6 @@ def setup_stacktrace_preservation_hooks(roots: List):
         )
         node.register_hook(get_posthook(special_stack))
 
-def flatten_parameters(mod: torch.fx.GraphModule):
-    params_and_buffers = {
-        **dict(mod.named_parameters(remove_duplicate=False)),
-        **dict(mod.named_buffers(remove_duplicate=False)),
-    }
-    params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
-    return params_and_buffers, params_and_buffers_flat, params_spec
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -669,6 +662,16 @@ def from_fun(t):
     torch._sync(t)
     return torch._from_functional_tensor(t)
 
+def _get_hints(exprs):
+    """
+    Get the hints of a list/tuple of int/SymInt.
+    """
+    if isinstance(exprs, (list, tuple)):
+        return type(exprs)(_get_hints(e) for e in exprs)
+    elif isinstance(exprs, torch.SymInt):
+        return exprs.node.shape_env.size_hint(exprs.node.expr)
+    else:
+        return exprs
 
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
@@ -1531,6 +1534,9 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             fake_mode = detect_fake_mode()
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
+
+        if torch._guards.TracingContext.get():
+            torch._guards.TracingContext.get().fw_metadata = fw_metadata
         compiled_fw = compiler(fw_module, flat_args)
 
     # This boxed_call handling happens inside create_runtime_wrapper as well.
@@ -2773,6 +2779,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # 1) There is a check in the the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
 
+            if torch._guards.TracingContext.get():
+                torch._guards.TracingContext.get().fw_metadata = fw_metadata
+
+
             # the compiler need to use this field to find the original modol outputs
             # from the AOTAutograd fwd module's outputs. Thus compiler can make sure
             # optimizations like layout optimization does not change those tensors'
@@ -2780,6 +2790,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # TODO once https://github.com/pytorch/pytorch/pull/100652/files#r1212002707 is in
             # change to access fw_metadata from the global tracing context.
             fw_module.meta["original_output_start_index"] = fw_metadata.num_mutated_inputs
+
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, adjusted_flat_args
             )
@@ -3008,7 +3019,26 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         real_arg = all_args[i]
                         if not isinstance(ph_arg, torch.Tensor):
                             continue
-                        if ph_arg.stride() != real_arg.stride():
+
+                        # Comparing ph_arg.stride() with real_arg.stride() directly may
+                        # cause dynamic dimensions in ph_arg being specialized to static
+                        # value. Using the hints to avoid that.
+                        if _get_hints(ph_arg.stride()) != real_arg.stride():
+                            # Note that here we use the stride of the real tensor to
+                            # restride a FakeTensor. This does not cause trouble
+                            # for dynamic shape since this code path only get
+                            # executed if layout optimization is enabled. And we
+                            # disable layout optimization for dynamic shape right
+                            # now.
+                            #
+                            # A solution that decide stride order based on real
+                            # tensor's stride and then apply that stride order to
+                            # the FakeTensor does not work smoothly since some
+                            # tensor's layout is not 'dense'. E.g. mixnet_l has a
+                            # tensor with size [8, 64, 112, 112] and strides
+                            # (2408448, 1, 21504, 192). The solution mentioned will
+                            # decide a stride of (802816, 1, 7168, 64) for this
+                            # tensor which is wrong.
                             placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
 
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
@@ -3636,8 +3666,14 @@ def aot_module_simplified(
     :func:`aot_module_simplified` removes these overheads.
     """
 
-    params_and_buffers, params_and_buffers_flat, params_spec = flatten_parameters(mod)
-    params_len = len(params_and_buffers_flat)
+    params = {
+        **dict(mod.named_parameters(remove_duplicate=False)),
+        **dict(mod.named_buffers(remove_duplicate=False)),
+    }
+    params_flat, params_spec = pytree.tree_flatten(params)
+    params_flat = list(params_flat)
+    params_len = len(params_flat)
+
     functional_call = create_functional_call(mod, params_spec, params_len)
 
     if bw_compiler is None:
@@ -3649,7 +3685,10 @@ def aot_module_simplified(
 
     full_args = []
     # First, the params
-    full_args.extend(params_and_buffers_flat)
+    full_args.extend(params_flat)
+
+    if torch._guards.TracingContext.get():
+        torch._guards.TracingContext.get().params_flat = params_flat
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
@@ -3658,7 +3697,7 @@ def aot_module_simplified(
         # We now know this came from dynamo, and (1) we care about guards,
         # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
-        for name in params_and_buffers.keys():
+        for name in params.keys():
             assert name in mod._param_name_to_source, f"{name} not found."
             source = mod._param_name_to_source[name]
             assert source not in seen_sources, source
@@ -3717,7 +3756,7 @@ def aot_module_simplified(
     # convention.  This should get fixed...
     def forward(*runtime_args):
         full_args = []
-        full_args.extend(params_and_buffers_flat)
+        full_args.extend(params_flat)
         full_args.extend(runtime_args)
         return compiled_fn(full_args)
 
@@ -3772,8 +3811,14 @@ def aot_export_module(
     """
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
-    _, params_and_buffers_flat, params_spec = flatten_parameters(mod)
+    params_and_buffers = {
+        **dict(named_parameters),
+        **dict(named_buffers),
+    }
+    params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
+    params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
+
     functional_call = create_functional_call(mod, params_spec, params_len)
 
     num_fw_outs = None
@@ -3826,6 +3871,10 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
 
     full_args = []
     # First, the params
+    # NB: It is REQUIRED that parameters come first, Inductor infers "fixed"
+    # parameters by looking at the difference in parameter count outside
+    # and inside AOTAutograd, and assumes the prefix of arguments are fixed
+    # arguments
     full_args.extend(params_and_buffers_flat)
     # Next, the input args
     full_args.extend(args)
