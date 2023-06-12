@@ -1,4 +1,5 @@
 #include <torch/csrc/profiler/combined_traceback.h>
+#include <atomic>
 
 namespace torch {
 
@@ -17,9 +18,11 @@ std::shared_ptr<CapturedTraceback> CapturedTraceback::gather(
       p = p->next_;
     }
   }
+#ifndef BUILD_LITE_INTERPRETER
   if (script) {
     r->script_frames_ = torch::jit::currentCallstack();
   }
+#endif
   if (cpp) {
     r->cpp_frames_ = unwind::unwind();
   }
@@ -114,6 +117,7 @@ SymbolizedTracebacks symbolize(
     };
 
     auto append_jit = [&]() {
+#ifndef BUILD_LITE_INTERPRETER
       if (jit_appended) {
         return;
       }
@@ -133,6 +137,7 @@ SymbolizedTracebacks symbolize(
         r.tracebacks.back().push_back(r.all_frames.size());
         r.all_frames.emplace_back(std::move(frame));
       }
+#endif
     };
 
     for (void* f : sc->cpp_frames_) {
