@@ -180,9 +180,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
 
-    case DispatchKey::PreDispatch:
-      return "PreDispatch";
-
     case DispatchKey::PythonDispatcher:
       return "PythonDispatcher";
 
@@ -303,7 +300,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::TESTING_ONLY_GenericWrapper},
       {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
       {"PythonDispatcher", c10::DispatchKey::PythonDispatcher},
-      {"PreDispatch", c10::DispatchKey::PreDispatch},
 
       {"CPU", c10::DispatchKey::CPU},
       {"CUDA", c10::DispatchKey::CUDA},
