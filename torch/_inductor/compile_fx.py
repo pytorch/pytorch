@@ -261,10 +261,14 @@ def compile_fx_inner(
         "is_inference": is_inference,
         "user_visible_outputs": user_visible_outputs,
     }
-
-    compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
-        *graph_args, **graph_kwargs
-    )
+    if config.fx_graph_cache:
+        compiled_graph: CompiledFxGraph = FxGraphCache.load(
+            fx_codegen_and_compile, graph_args, graph_kwargs
+        )
+    else:
+        compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
+            *graph_args, **graph_kwargs
+        )
 
     if aot_mode:
         return compiled_graph

@@ -254,6 +254,36 @@ def code_hash(code):
     )
 
 
+def serialize_fx_arg(arg: Any):
+    if isinstance(arg, torch.fx.GraphModule):
+        # Special case for fx_graph
+        return arg.print_readable(print_output=False).encode("utf-8")
+    if isinstance(arg, list):
+        if len(arg) > 0 and isinstance(arg[0], torch.Tensor):
+            # Special case for example_inputs, everything in torch/csrc/dynamo/guards.cpp
+            # Except for requires_grad, as that has already been handled
+            pickled_guards = []
+            for t in arg:
+                pickled_guards.append(
+                    b"".join(
+                        [
+                            pickle.dumps(torch._C._dispatch_keys(t).__repr__()),
+                            pickle.dumps(t.dtype),
+                            pickle.dumps(t.device),
+                            pickle.dumps(t.shape),
+                        ]
+                    )
+                )
+            return b"".join(pickled_guards)
+    return pickle.dumps(arg)
+
+
+def compiled_fx_graph_hash(fx_args: List[Any]):
+    serialized_fx_args = b"".join([serialize_fx_arg(arg) for arg in fx_args])
+    hashed_fx_args = base64.b32encode(hashlib.sha256(serialized_fx_args).digest())[:51]
+    return "f" + hashed_fx_args.decode("utf-8").lower()
+
+
 def get_path(basename: str, extension: str):
     subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{extension}")
@@ -281,6 +311,47 @@ def write_atomic(path: str, content: Union[str, bytes]):
     with tmp_path.open(write_mode) as f:
         f.write(content)
     tmp_path.rename(path)
+
+
+class FxGraphCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def load(
+        cls, compile_fx_fn: Callable, fx_args: List[Any], fx_kwargs: Dict[str, Any]
+    ):
+        fx_args_for_hashing = copy(fx_args)
+        fx_args_for_hashing.extend(list(fx_kwargs.values()))
+        # Hash also on torch version and current triton config
+        fx_args_for_hashing.append(torch.__version__)
+        fx_args_for_hashing.append(config.save_config())
+        key = compiled_fx_graph_hash(fx_args_for_hashing)
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                _, _, cg_path = get_path(key, "cg")
+                if not os.path.exists(cg_path):
+                    compiled_graph: CompiledFxGraph = compile_fx_fn(
+                        *fx_args, **fx_kwargs
+                    )
+
+                    disk_compiled_graph = copy(compiled_graph)
+                    # Important as compiled models are not pickeable
+                    disk_compiled_graph.compiled_artifact = None
+                    print(disk_compiled_graph)
+                    write(pickle.dumps(disk_compiled_graph), key, "cg")
+                else:
+                    # Load required info from disk, recreation of compiled model will be on first run
+                    with open(cg_path, "rb") as f:
+                        compiled_graph = pickle.load(f)
+
+                cls.cache[key] = compiled_graph
+
+        return cls.cache[key]
 
 
 @dataclasses.dataclass
