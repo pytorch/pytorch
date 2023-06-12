@@ -1,4 +1,5 @@
 import copy
+import itertools
 import operator
 from typing import Any, Callable, List, Tuple
 
@@ -107,7 +108,7 @@ def _qat_conv2d_bn_pattern_no_conv_bias(
     x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
     return x
 
-def _get_quantized_qat_conv2d_bn_pattern(is_per_channel: bool):
+def _get_quantized_qat_conv2d_bn_pattern(is_per_channel: bool, has_relu: bool):
     """
     Return the quantized version of QAT conv + BN pattern.
     This is based on `nniqat.ConvBn2d._forward_approximate`,
@@ -170,12 +171,14 @@ def _get_quantized_qat_conv2d_bn_pattern(is_per_channel: bool):
         x = x / scale_factor.reshape(bias_shape)
         x = x + conv_bias.reshape(bias_shape)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
+        if has_relu:
+            x = F.relu(x)
         x = torch.ops.quantized_decomposed.quantize_per_tensor(
             x, output_scale, output_zero_point, output_quant_min, output_quant_max, torch.int8)
         return x
     return _quantized_qat_conv2d_bn_pattern
 
-def _get_folded_quantized_qat_conv2d_bn_pattern(is_per_channel: bool):
+def _get_folded_quantized_qat_conv2d_bn_pattern(is_per_channel: bool, has_relu: bool):
     """
     Quantized QAT conv - bn pattern with bn weights being folded into conv.
     """
@@ -224,6 +227,8 @@ def _get_folded_quantized_qat_conv2d_bn_pattern(is_per_channel: bool):
             )
         x = F.conv2d(x, conv_weight, conv_bias)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
+        if has_relu:
+            x = F.relu(x)
         x = torch.ops.quantized_decomposed.quantize_per_tensor(
             x, output_scale, output_zero_point, output_quant_min, output_quant_max, torch.int8)
         return x
@@ -424,11 +429,15 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
 
     # Step (1): Replace QAT pattern with simple [conv - bn] pattern
     replacements = []
-    for is_per_channel in [True, False]:
+    replacement_options = itertools.product(
+        [True, False],  # is_per_channel
+        [True, False],  # has_relu
+    )
+    for is_per_channel, has_relu in replacement_options:
         example_inputs = _quantized_conv2d_bn_pattern_example_inputs
-        match_pattern = _get_quantized_qat_conv2d_bn_pattern(is_per_channel)
+        match_pattern = _get_quantized_qat_conv2d_bn_pattern(is_per_channel, has_relu)
         match_pattern = _get_aten_graph_module(match_pattern, example_inputs)
-        replacement_pattern = _get_folded_quantized_qat_conv2d_bn_pattern(is_per_channel)
+        replacement_pattern = _get_folded_quantized_qat_conv2d_bn_pattern(is_per_channel, has_relu)
         replacement_pattern = _get_aten_graph_module(replacement_pattern, example_inputs)
         # Workaround: current convert does not produce q/dq ops with a specific overload
         # we'll remove the overload from the pattern here as a workaround since we do not want to break BC
