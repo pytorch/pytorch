@@ -662,6 +662,16 @@ def from_fun(t):
     torch._sync(t)
     return torch._from_functional_tensor(t)
 
+def _get_hints(exprs):
+    """
+    Get the hints of a list/tuple of int/SymInt.
+    """
+    if isinstance(exprs, (list, tuple)):
+        return type(exprs)(_get_hints(e) for e in exprs)
+    elif isinstance(exprs, torch.SymInt):
+        return exprs.node.shape_env.size_hint(exprs.node.expr)
+    else:
+        return exprs
 
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
@@ -3001,7 +3011,26 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         real_arg = all_args[i]
                         if not isinstance(ph_arg, torch.Tensor):
                             continue
-                        if ph_arg.stride() != real_arg.stride():
+
+                        # Comparing ph_arg.stride() with real_arg.stride() directly may
+                        # cause dynamic dimensions in ph_arg being specialized to static
+                        # value. Using the hints to avoid that.
+                        if _get_hints(ph_arg.stride()) != real_arg.stride():
+                            # Note that here we use the stride of the real tensor to
+                            # restride a FakeTensor. This does not cause trouble
+                            # for dynamic shape since this code path only get
+                            # executed if layout optimization is enabled. And we
+                            # disable layout optimization for dynamic shape right
+                            # now.
+                            #
+                            # A solution that decide stride order based on real
+                            # tensor's stride and then apply that stride order to
+                            # the FakeTensor does not work smoothly since some
+                            # tensor's layout is not 'dense'. E.g. mixnet_l has a
+                            # tensor with size [8, 64, 112, 112] and strides
+                            # (2408448, 1, 21504, 192). The solution mentioned will
+                            # decide a stride of (802816, 1, 7168, 64) for this
+                            # tensor which is wrong.
                             placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
 
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
