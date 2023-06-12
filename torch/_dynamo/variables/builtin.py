@@ -18,6 +18,7 @@ from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     check_constant_args,
+    check_numpy_ndarray_args,
     check_unspec_python_args,
     get_higher_order_op,
     istype,
@@ -492,6 +493,9 @@ class BuiltinVariable(VariableTracker):
                     fn,
                     *proxy_args_kwargs(args, kwargs),
                 )
+                import pdb
+
+                pdb.set_trace()
                 if any(isinstance(arg, FakeItemVariable) for arg in args):
                     return wrap_fx_proxy_cls(
                         FakeItemVariable,
@@ -515,6 +519,13 @@ class BuiltinVariable(VariableTracker):
                         proxy,
                         raw_value=raw_value,
                         need_unwrap=need_unwrap,
+                        **options,
+                    )
+                elif check_numpy_ndarray_args(args, kwargs):
+                    return wrap_fx_proxy_cls(
+                        variables.NumpyNdarrayVariable,
+                        tx,
+                        proxy,
                         **options,
                     )
                 elif all(isinstance(x, SymNodeVariable) for x in args):
