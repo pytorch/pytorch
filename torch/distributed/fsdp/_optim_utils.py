@@ -1497,7 +1497,7 @@ def _all_gather_optim_state(
     object_list: List[StateInfo] = [
         processed_state for _ in range(fsdp_state.world_size)
     ]
-    dist.all_gather_object(object_list, processed_state)
+    dist.all_gather_object(object_list, processed_state, group=fsdp_state.process_group)
 
     # Convert the gathered, pre-processed state of each rank to the original one.
     gathered_state: Dict[str, Any] = {}

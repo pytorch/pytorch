@@ -58,6 +58,9 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
 
+    def _helper_sqrt(self, expr):
+        return f"tl.math.sqrt({self.paren(self._print(expr))}.to(tl.float32))"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
@@ -125,6 +128,10 @@ class TritonOverrides(OpOverrides):
             # that produces 0's for negative values
             return f"{x}.to(tl.int8).to(tl.uint8)"
         return f"{x}.to({triton_compute_type(dtype)})"
+
+    @staticmethod
+    def to_dtype_bitcast(x, dtype: torch.dtype):
+        return f"{x}.to({triton_compute_type(dtype)}, bitcast=True)"
 
     @staticmethod
     def constant_val(val):
@@ -2126,7 +2133,13 @@ class TritonScheduling:
                     kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
                     # TODO - mostly works but needs a couple fixes
-                    if not dynamo_config.dynamic_shapes:
+                    # Problem looks like free variables NYI: s0
+                    # We need to detect if the proposed ranges would have
+                    # symbols and bail out on this optimization if so
+                    if (
+                        not dynamo_config.dynamic_shapes
+                        and dynamo_config.assume_static_by_default
+                    ):
                         # TODO - use split ranges ?
                         indexing_dtype_strength_reduction(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
