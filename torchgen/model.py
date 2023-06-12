@@ -976,7 +976,9 @@ class NativeFunction:
         )
         # See Note [resize_ in Functionalization] for more dtails
         is_inplace_view = (
-            "inplace_view" in self.tags and str(self.func.name) != "resize_"
+            "inplace_view" in self.tags
+            and str(self.func.name) != "resize_"
+            and str(self.func.name) != "resize_as_"
         )
         is_wildcard_view = any(
             inp.annotation is not None and "*" in inp.annotation.alias_set_after

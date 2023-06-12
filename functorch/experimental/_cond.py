@@ -5,7 +5,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 
 import torch.utils._pytree as pytree
 
-from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
+from torch._C import DispatchKey, DispatchKeySet, _ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -128,8 +128,8 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
     assert all(not f.requires_grad for f in flat_operands
                if isinstance(f, torch.Tensor))
 
-    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU))
-    return cond(pred, true_fn, false_fn, *operands)
+    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU)):
+        return cond(pred, true_fn, false_fn, *operands)
 
 
 @cond.py_impl(ProxyTorchDispatchMode)
@@ -137,8 +137,10 @@ def inner(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with _pop_mode_temporarily() as mode:
-        res = trace_cond(mode, cond, pred, true_fn, false_fn, operands)
-    return res
+        if mode.enable_tracing:
+            return trace_cond(mode, cond, pred, true_fn, false_fn, operands)
+        else:
+            return cond(pred, true_fn, false_fn, operands)
 
 
 @cond.py_impl(FakeTensorMode)
@@ -214,13 +216,19 @@ def _has_potential_branch_input_alias(branch, inputs):
     def _detect_input_alias(gm):
         input_storages = set()
         for node in gm.graph.nodes:
-            if node.op == "placeholder":
+            # We need to check existence of "val" because we reuse the logic here
+            # for map operator, where num_mapped_args is a scalar
+            # and doesn't have a "val" meta.
+            if node.op == "placeholder" and "val" in node.meta:
                 input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
             if node.op == "output":
-                for out in node.args:
-                    out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
-                    if out_storage in input_storages:
-                        return True
+                def check_alias(out):
+                    if out is not None and "val" in out.meta:
+                        out_storage = StorageWeakRef(out.meta['val']._typed_storage())
+                        return out_storage in input_storages
+                    return False
+                if any(pytree.tree_flatten(pytree.tree_map(check_alias, node.args))[0]):
+                    return True
 
         for _, module in gm.named_children():
             if isinstance(module, torch.fx.GraphModule) and _detect_input_alias(module):
@@ -237,8 +245,7 @@ def cond_func(pred, true_fn, false_fn, inputs):
     unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=reapply_views)
     unwrapped_pred = _unwrap_all_tensors_from_functional(pred, reapply_views=reapply_views)
     mode = 'mutations_and_views' if reapply_views else 'mutations'
-    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
-    try:
+    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
         functional_true = functionalize(true_fn, remove=mode)
         functional_false = functionalize(false_fn, remove=mode)
         for branch in [true_fn, false_fn]:
@@ -252,9 +259,6 @@ def cond_func(pred, true_fn, false_fn, inputs):
 
         cond_return = cond(unwrapped_pred, functional_true, functional_false, unwrapped_inputs)
         return _wrap_all_tensors_to_functional(cond_return, level=0)
-
-    finally:
-        del guard
 
 
 @cond.py_impl(torch._C._functorch.TransformType.Functionalize)
