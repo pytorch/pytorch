@@ -47,7 +47,6 @@ from ..utils import (
     global_key_name,
     HAS_NUMPY,
     is_namedtuple,
-    is_numpy_int_type,
     is_typing,
     istype,
     np,
@@ -639,16 +638,7 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if (
-            istype(value, (tuple, list))
-            and all(
-                isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value
-            )
-            and not config.dynamic_shapes
-        ):
-            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
-        else:
-            guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+        guards = self.make_guards(GuardBuilder.LIST_LENGTH)
 
         for item in value:
             if item is value:
@@ -763,7 +753,7 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        unspec = not config.specialize_int and config.dynamic_shapes
+        unspec = not config.specialize_int
         if unspec and type(value) is torch.Size:
             return SizeVariable(
                 [
@@ -940,8 +930,7 @@ class VariableBuilder:
             # but the general idea is that we generate kernels that can
             # take unspecialized floats and use them in sizevar computation
             if (
-                config.dynamic_shapes
-                and isinstance(value, int)
+                isinstance(value, int)
                 and not is_constant_source(self.get_source())
                 and not isinstance(self.get_source(), RandomValueSource)
             ):
@@ -977,9 +966,8 @@ class VariableBuilder:
                 # and it is inappropriate to eagerly duck size them with
                 # real sizevars
                 if (
-                    frame_state_entry.scalar is None
-                    or not config.assume_static_by_default
-                ):
+                    config.automatic_dynamic_shapes and frame_state_entry.scalar is None
+                ) or not config.assume_static_by_default:
                     dynamic_dim = DimDynamic.DYNAMIC
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -1071,7 +1059,10 @@ def _dataclasses_fields_lambda(obj):
     return TupleVariable(items).add_options(obj)
 
 
-def wrap_fx_proxy(tx, proxy, example_value=None, **options):
+no_example = object()
+
+
+def wrap_fx_proxy(tx, proxy, example_value=no_example, **options):
     return wrap_fx_proxy_cls(
         target_cls=TensorVariable,
         tx=tx,
@@ -1084,7 +1075,11 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 # Note: Unfortunate split due to some gross classes existing that subclass TensorVariable
 # Should be compositional instead
 def wrap_fx_proxy_cls(
-    target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
+    # NB: target_cls does NOT necessarily match the output Variable type
+    # passed here; in particular, if the function in question returned
+    # a tuple, you'll get a TupleVariable (but target_cls would likely
+    # have been something like TensorVariable)
+    target_cls, tx, proxy, example_value=no_example, ignore_subclass=False, **options
 ):
     from ..symbolic_convert import InstructionTranslatorBase
 
@@ -1106,7 +1101,7 @@ def wrap_fx_proxy_cls(
         return value
 
     with preserve_rng_state():
-        if example_value is None:
+        if example_value is no_example:
             example_value = get_fake_value(proxy.node, tx)
 
         # Handle recursive calls here
@@ -1178,44 +1173,46 @@ def wrap_fx_proxy_cls(
         return UserDefinedObjectVariable(example_value)
     elif istype(example_value, (int, bool, float)):
         proxy.node.meta["example_value"] = example_value
-        return SymNodeVariable.create(tx, proxy, example_value, **options)
-    elif istype(example_value, torch.Size):
-        proxy.node.meta["example_value"] = example_value
-        sizes = []
-        for i, v in enumerate(example_value):
-            proxy_i = proxy[i]
-            sizes.append(SymNodeVariable.create(tx, proxy_i, v, **options))
-        return SizeVariable(sizes, proxy, **options)
+        return ConstantVariable(example_value, **options)
+    # NB: handles torch.Size
     elif isinstance(example_value, (tuple, list)):
+        # TODO: This is a grievous hack for numpy support, figure
+        # out a better way
+        if (
+            istype(example_value, torch.Size)
+            and all(isinstance(x, int) for x in example_value)
+            and target_cls is TupleVariable
+        ):
+            return TupleVariable(
+                [ConstantVariable(x, **options) for x in example_value], **options
+            )
         proxy.node.meta["example_value"] = example_value
         unpacked = []
         for i, val in enumerate(example_value):
-            if val is None:
-                # nn.MultiheadAttention() can return None, see issue #175
-                unpacked.append(
-                    ConstantVariable(None, **options),
+            # Recursive call!
+            unpacked.append(
+                wrap_fx_proxy_cls(
+                    target_cls,
+                    tx,
+                    proxy.tracer.create_proxy(
+                        "call_function", operator.getitem, (proxy, i), {}
+                    ),
+                    example_value=val,
+                    **options,
                 )
-            else:
-                unpacked.append(
-                    wrap_fx_proxy_cls(
-                        target_cls,
-                        tx,
-                        proxy.tracer.create_proxy(
-                            "call_function", operator.getitem, (proxy, i), {}
-                        ),
-                        example_value=val,
-                        **options,
-                    )
-                )
-        if istype(example_value, tuple):
+            )
+        if isinstance(example_value, torch.Size):
+            # NB: Keep the old proxy around.  See SizeVariable for an
+            # explanation why
+            return SizeVariable(unpacked, proxy, **options)
+        elif istype(example_value, tuple):
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
         else:
-            assert (
-                example_value.__class__.__module__ == "torch.return_types"
-                or hasattr(example_value, "_fields")
-            ), ("namedtuple?")
+            assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
+                example_value, "_fields"
+            ), f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable(None, **options)
@@ -1225,14 +1222,6 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif (
-        istype(example_value, torch.Size)
-        and all(isinstance(x, int) for x in example_value)
-        and target_cls is TupleVariable
-    ):  # convert torch.Size to tuple
-        return TupleVariable(
-            [ConstantVariable(x, **options) for x in example_value], **options
-        )
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
@@ -1313,51 +1302,49 @@ def _automatic_dynamic(e, tx, name, static_shapes):
                     constraint.shared.dim, constraint.constraint_range
                 )
 
-    dynamic_dims = None
-    constraint_dims = None
-    if tx.fake_mode.shape_env is not None:
-        dynamic_dims = []
-        constraint_dims = []
-        for i in range(e.dim()):
-            # NB: mark dynamic has precedence over static
-            marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
-            marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
-            marked_static = i in getattr(e, "_dynamo_static_indices", set())
+    dynamic_dims = []
+    constraint_dims = []
+    for i in range(e.dim()):
+        # NB: mark dynamic has precedence over static
+        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+        marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
+        marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
-            # NB: both static and dynamic have precedence over
-            automatic_dynamic = config.automatic_dynamic_shapes and (
-                frame_state_entry.size is None or frame_state_entry.size[i] is None
-            )
+        # NB: both static and dynamic have precedence over
+        automatic_dynamic = config.automatic_dynamic_shapes and (
+            frame_state_entry.size is None or frame_state_entry.size[i] is None
+        )
 
-            # Reflect the user directive in the frame_state
-            # For dynamic, apply None always
-            if frame_state_entry.size and marked_dynamic:
-                frame_state_entry.size[i] = None
+        # Reflect the user directive in the frame_state
+        # For dynamic, apply None always
+        if frame_state_entry.size and marked_dynamic:
+            frame_state_entry.size[i] = None
 
-            # We will process constraints first, as they will imply that we
-            # have a dynamic dimension
-            # Precedence: export constraints > eager constraints
-            constraint = dim2constraint.get(i)
-            if constraint is None:
-                if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                    constraint = RelaxedUnspecConstraint(warn_only=False)
-                elif not marked_static and automatic_dynamic:
-                    constraint = RelaxedUnspecConstraint(warn_only=True)
-            constraint_dims.append(constraint)
+        # We will process constraints first, as they will imply that we
+        # have a dynamic dimension
+        # Precedence: export constraints > eager constraints
+        constraint = dim2constraint.get(i)
+        if constraint is None:
+            if marked_dynamic and not config.allow_ignore_mark_dynamic:
+                constraint = RelaxedUnspecConstraint(warn_only=False)
+            elif not marked_static and automatic_dynamic:
+                constraint = RelaxedUnspecConstraint(warn_only=True)
+        constraint_dims.append(constraint)
 
-            # Now, figure out if the dim is dynamic/duck/static
-            if constraint is not None or marked_dynamic or marked_weak_dynamic:
-                # NB: We could assert static_shapes is False here, but it
-                # seems better to allow the user to override policy in this
-                # case
-                dynamic = DimDynamic.DYNAMIC
-            elif static_shapes or config.assume_static_by_default or marked_static:
-                dynamic = DimDynamic.STATIC
-            else:
-                dynamic = DimDynamic.DUCK
-            dynamic_dims.append(dynamic)
+        # Now, figure out if the dim is dynamic/duck/static
+        if constraint is not None or marked_dynamic or marked_weak_dynamic:
+            # NB: We could assert static_shapes is False here, but it
+            # seems better to allow the user to override policy in this
+            # case
+            dynamic = DimDynamic.DYNAMIC
+        elif static_shapes or config.assume_static_by_default or marked_static:
+            dynamic = DimDynamic.STATIC
+        else:
+            dynamic = DimDynamic.DUCK
 
-        tx.output.frame_state[name] = frame_state_entry
+        dynamic_dims.append(dynamic)
+
+    tx.output.frame_state[name] = frame_state_entry
 
     return dynamic_dims, constraint_dims
 

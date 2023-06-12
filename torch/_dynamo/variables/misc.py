@@ -814,7 +814,6 @@ class NumpyVariable(VariableTracker):
                     numpy_to_tensor_wrapper(func),
                     *proxy_args_kwargs(args, kwargs),
                 ),
-                example_value=None,
                 **options,
             )
         else:

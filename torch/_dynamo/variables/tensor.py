@@ -1,5 +1,4 @@
 import inspect
-import itertools
 import operator
 import types
 from typing import Dict, List
@@ -242,9 +241,7 @@ class TensorVariable(VariableTracker):
         return result
 
     def has_unpack_var_sequence(self, tx):
-        return (self.size is not None and len(self.size) > 0) or (
-            self.size is None and config.dynamic_shapes
-        )
+        return self.ndim > 0
 
     def unpack_var_sequence(self, tx, idxes=None):
         from .builder import wrap_fx_proxy
@@ -290,7 +287,7 @@ class TensorVariable(VariableTracker):
                 dim = kwargs.pop("dim")
                 constant_result = constant_result.getitem_const(dim)
 
-        elif name == "size" and self.size is None and config.dynamic_shapes:
+        elif name == "size" and self.size is None:
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -373,14 +370,6 @@ class TensorVariable(VariableTracker):
                     [constant_result.getitem_const(a) for a in args], **options
                 )
             return constant_result
-        elif (
-            name == "repeat"
-            and not all(
-                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-            )
-            and not config.dynamic_shapes
-        ):
-            unimplemented("dynamic Tensor.repeat")
         elif name == "numpy":
             if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
                 unimplemented(
@@ -401,7 +390,6 @@ class TensorVariable(VariableTracker):
                     torch.detach,
                     *proxy_args_kwargs([self], {}),
                 ),
-                example_value=None,
                 **options,
             )
         elif name in ("tolist", "backward", "data_ptr"):
@@ -410,14 +398,6 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
-        elif (
-            name == "item"
-            and config.capture_scalar_outputs
-            and not config.dynamic_shapes
-        ):
-            raise AssertionError(
-                "To capture_scalar_outputs, you must also set dynamic_shapes = True"
-            )
         elif name == "__len__":
             return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":
@@ -737,7 +717,6 @@ class NumpyNdarrayVariable(TensorVariable):
                     (self.as_proxy(), name),
                     {},
                 ),
-                example_value=None,
                 **options,
             )
         elif name in ["ndim", "itemsize", "shape"]:
@@ -745,7 +724,6 @@ class NumpyNdarrayVariable(TensorVariable):
                 target_cls=ConstantVariable,
                 tx=tx,
                 proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                example_value=None,
                 **options,
             )
         elif name == "shape":
@@ -755,7 +733,6 @@ class NumpyNdarrayVariable(TensorVariable):
                 target_cls=TupleVariable,
                 tx=tx,
                 proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                example_value=None,
                 **options,
             )
         elif name == "size":
@@ -767,7 +744,6 @@ class NumpyNdarrayVariable(TensorVariable):
                     (self.as_proxy(),),
                     {},
                 ),
-                example_value=None,
                 **options,
             )
         elif name == "strides":
@@ -784,7 +760,6 @@ class NumpyNdarrayVariable(TensorVariable):
                     (self.as_proxy(), torch_np_func_name),
                     {},
                 ),
-                example_value=None,
                 **options,
             )
         elif name in ["base", "flags", "dtype"]:

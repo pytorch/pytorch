@@ -970,7 +970,7 @@ def glu(x, dim=-1):
 
 
 def register_onednn_fusion_ops():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
