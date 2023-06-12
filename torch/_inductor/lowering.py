@@ -970,7 +970,7 @@ def glu(x, dim=-1):
 
 
 def register_onednn_fusion_ops():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
@@ -1633,6 +1633,10 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
+
+
+make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
+make_fallback(torch._prims.rng_prims.run_with_rng_state)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
