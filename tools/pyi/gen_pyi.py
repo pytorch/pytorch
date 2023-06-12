@@ -1028,7 +1028,7 @@ def gen_pyi(
         ) or (
             not name.startswith("_") and not name.endswith("__") and name.endswith("_")
         ):
-            # _TensorBase.__iadd__() etc and _TensorBase.idd_() etc should return self
+            # _TensorBase.__iadd__() etc and _TensorBase.add_() etc should return self
             # TODO `self: Self` is not needed when PEP-673 Self is supported
             hints = [
                 h.replace("self", "self: Self", 1).replace("-> Tensor", "-> Self")
