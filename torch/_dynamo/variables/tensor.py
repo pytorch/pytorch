@@ -765,7 +765,6 @@ class NumpyNdarrayVariable(TensorVariable):
         # no intrinsic reason ndarray properties are related to Tensor
         # properties.  The inheritance here is for implementation sharing.
 
-        from torch._dynamo.variables import GetAttrVariable, TupleVariable
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
@@ -781,10 +780,7 @@ class NumpyNdarrayVariable(TensorVariable):
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
-                    "call_function",
-                    numpy_attr_wrapper,
-                    (self.as_proxy(), name),
-                    {}
+                    "call_function", numpy_attr_wrapper, (self.as_proxy(), name), {}
                 ),
                 **options,
             )
