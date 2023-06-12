@@ -1079,7 +1079,12 @@ def wrap_fx_proxy_cls(
     # passed here; in particular, if the function in question returned
     # a tuple, you'll get a TupleVariable (but target_cls would likely
     # have been something like TensorVariable)
-    target_cls, tx, proxy, example_value=no_example, ignore_subclass=False, **options
+    target_cls,
+    tx,
+    proxy,
+    example_value=no_example,
+    ignore_subclass=False,
+    **options,
 ):
     from ..symbolic_convert import InstructionTranslatorBase
 
