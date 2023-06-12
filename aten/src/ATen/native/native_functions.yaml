@@ -6801,6 +6801,12 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_mask_sparse_csr
   autogen: sparse_mask.out
 
+- func: _sparse_mask_projection(Tensor self, Tensor mask) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU, SparseCUDA: sparse_mask_projection
+  autogen: _sparse_mask_projection.out
+
 - func: _to_cpu(Tensor[] tensors) -> Tensor[]
   variants: function
 
