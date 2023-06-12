@@ -1328,7 +1328,7 @@ def meta_conv(
     return out
 
 
-if torch._C.has_mkldnn:
+if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
         "mkldnn", "IMPL", "Meta"
     )
