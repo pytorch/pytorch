@@ -3946,11 +3946,11 @@ Tensor differential_analytic_matrix_function(
   // Given an analytic matrix function, this computes the differential (forward
   // AD) or the adjoint of the differential (backward AD)
   auto A = adjoint ? self.transpose(-2, -1).conj() : self;
-  auto meta_grad_sizes = A.sizes().vec();
+  auto meta_grad_sizes = A.sym_sizes().vec();
   meta_grad_sizes[A.dim() - 2] *= 2;
   meta_grad_sizes[A.dim() - 1] *= 2;
 
-  auto n = A.size(-1);
+  auto n = A.sym_size(-1);
   Tensor meta_grad;
   // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
   // so we use out-of-place ops with equivalent output.
@@ -3964,13 +3964,14 @@ Tensor differential_analytic_matrix_function(
          at::cat({at::zeros_like(A), std::move(A)}, -1)},
         -2);
   } else {
-    meta_grad = at::zeros(meta_grad_sizes, grad.options());
-    meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
-    meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
-    meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+    meta_grad = at::zeros_symint(meta_grad_sizes, grad.options());
+    meta_grad.narrow_symint(-2, 0, n).narrow_symint(-1, 0, n).copy_(A);
+    meta_grad.narrow_symint(-2, n, n).narrow_symint(-1, n, n).copy_(A);
+    meta_grad.narrow_symint(-2, 0, n).narrow_symint(-1, n, n).copy_(grad);
   }
 
-  return matrix_function(meta_grad).narrow(-2, 0, n).narrow(-1, n, n);
+  return matrix_function(meta_grad).narrow_symint(-2, 0, n).narrow_symint(
+      -1, n, n);
 }
 
 Tensor linalg_matrix_exp_differential(
