@@ -1314,8 +1314,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                                              offsets, set_qconfig, is_emb_bag=True, dtype=qdtype)
 
     def test_prelu(self):
-        for num_parameters in range(1,10):
-            x = torch.randn(4,num_parameters,4)
+        for num_parameters in range(1, 10):
+            x = torch.randn(4, num_parameters, 4)
             qx = torch.quantize_per_tensor_dynamic(x, dtype=torch.quint8, reduce_range=False)
 
 
@@ -1333,8 +1333,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             q_prelu_weight = torch.quantize_per_tensor(
                 f_prelu.weight,
                 dtype=torch.quint8,
-                scale = w_scale,
-                zero_point = w_zp
+                scale=w_scale,
+                zero_point=w_zp
             ).dequantize()
 
             # check that the weight makes sense
