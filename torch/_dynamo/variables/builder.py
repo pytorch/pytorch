@@ -47,14 +47,13 @@ from ..utils import (
     global_key_name,
     HAS_NUMPY,
     is_namedtuple,
-    is_numpy_int_type,
     is_typing,
     istype,
     np,
     odict_values,
     preserve_rng_state,
+    requires_higher_order_op,
     tensor_always_has_static_shape,
-    torch_np,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -71,7 +70,11 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
-from .functions import UserFunctionVariable, UserMethodVariable
+from .functions import (
+    CollectiveFunctionRewriteVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .lists import (
     ListVariable,
     NamedTupleVariable,
@@ -93,8 +96,11 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
+
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
+from .optimizer import OptimizerVariable
 from .tensor import (
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
@@ -103,10 +109,14 @@ from .tensor import (
 from .torch import (
     tensor_dunder_fns,
     torch_special_class_types,
-    TorchHigherOrderOperator,
+    TorchHigherOrderOperatorVariable,
     TorchVariable,
 )
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .user_defined import (
+    ProcessGroupVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 
 log = logging.getLogger(__name__)
@@ -162,6 +172,12 @@ class GraphArg:
 
     def erase(self):
         self._example = None
+
+
+@dataclasses.dataclass
+class FrameStateSizeEntry:
+    scalar: Optional[int]
+    size: Optional[List[int]]
 
 
 class VariableBuilder:
@@ -252,6 +268,8 @@ class VariableBuilder:
                 cls.wrap_literal,
             ),
         ]
+        if config.numpy_ndarray_as_tensor:
+            entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
         for ts, fn in entries:
@@ -366,7 +384,10 @@ class VariableBuilder:
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
-                    result, type(value), value.default_factory, guards=guards
+                    result,
+                    type(value),
+                    self._wrap(value.default_factory),
+                    guards=guards,
                 )
             else:
                 result = ConstDictVariable(result, type(value), guards=guards)
@@ -425,6 +446,7 @@ class VariableBuilder:
             istype(value, (type, types.FunctionType))
             and skipfiles.check(getfile(value), allow_torch=True)
             and not inspect.getattr_static(value, "_torchdynamo_inline", False)
+            and not requires_higher_order_op(value)
         ):
             return SkipFilesVariable(
                 value,
@@ -432,6 +454,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later
+        elif CollectiveFunctionRewriteVariable.can_rewrite(value):
+            return CollectiveFunctionRewriteVariable(
+                CollectiveFunctionRewriteVariable.rewrite(value),
+                orig_fn=value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,
@@ -489,7 +518,7 @@ class VariableBuilder:
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
         elif isinstance(value, HigherOrderOperator):
-            return TorchHigherOrderOperator(
+            return TorchHigherOrderOperatorVariable(
                 value,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
@@ -503,12 +532,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.cuda.streams.Stream):
-            return CUDAStreamVariable(
-                None,
-                value,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.ID_MATCH),
-            )
+            unimplemented("CUDAStreamVariable does not currently work soundly.")
+            # return CUDAStreamVariable(
+            #     None,
+            #     value,
+            #     source=self.source,
+            #     guards=self.make_guards(GuardBuilder.ID_MATCH),
+            # )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
@@ -550,6 +580,18 @@ class VariableBuilder:
             return NullContextVariable(
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, torch.optim.Optimizer):
+            return OptimizerVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            )
+        elif ProcessGroupVariable.is_process_group(value):
+            return ProcessGroupVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(
@@ -596,16 +638,7 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if (
-            istype(value, (tuple, list))
-            and all(
-                isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value
-            )
-            and not config.dynamic_shapes
-        ):
-            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
-        else:
-            guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+        guards = self.make_guards(GuardBuilder.LIST_LENGTH)
 
         for item in value:
             if item is value:
@@ -720,7 +753,7 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        unspec = not config.specialize_int and config.dynamic_shapes
+        unspec = not config.specialize_int
         if unspec and type(value) is torch.Size:
             return SizeVariable(
                 [
@@ -796,7 +829,7 @@ class VariableBuilder:
             # a later point in time.
             ignore_subclass = True
         else:
-            assert type(value) in (torch.Tensor, torch.nn.Parameter)
+            assert type(value) in (torch.Tensor, torch.nn.Parameter), type(value)
             ignore_subclass = False
 
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
@@ -853,6 +886,41 @@ class VariableBuilder:
 
         return tensor_variable
 
+    def wrap_numpy_ndarray(self, value):
+        assert isinstance(value, np.ndarray)
+
+        source = self.get_source()
+        tensor_value = torch.from_numpy(value)
+
+        proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value)
+        )
+        options = {"source": source}
+        numpy_ndarray_variable = wrap_fx_proxy_cls(
+            target_cls=NumpyNdarrayVariable,
+            tx=self.tx,
+            proxy=proxy,
+            example_value=tensor_value,
+            **options,
+        )
+
+        self.tx.output.input_source_to_var[source] = numpy_ndarray_variable
+        example_value = numpy_ndarray_variable.proxy.node.meta["example_value"]
+
+        # is_unspecialized should be true because we are wrapping a np.ndarray as argument input, and it needs to be
+        # converted to a tensor.
+        grapharg = GraphArg(
+            source,
+            tensor_value,
+            is_unspecialized=True,
+            fake_tensor=example_value,
+            is_tensor=True,
+            example_strong_ref=tensor_value,
+        )
+        proxy.node.meta["grapharg"] = grapharg
+
+        return numpy_ndarray_variable
+
     def wrap_unspecialized_primitive(self, value):
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
@@ -862,8 +930,7 @@ class VariableBuilder:
             # but the general idea is that we generate kernels that can
             # take unspecialized floats and use them in sizevar computation
             if (
-                config.dynamic_shapes
-                and isinstance(value, int)
+                isinstance(value, int)
                 and not is_constant_source(self.get_source())
                 and not isinstance(self.get_source(), RandomValueSource)
             ):
@@ -883,18 +950,24 @@ class VariableBuilder:
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
-                    curr_size = value
+                    # Note - this esentially means that if this name gets reused as a tensor,
+                    # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
+                    # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
+                    # sure that is necessary for now.
+                    frame_state_entry = FrameStateSizeEntry(scalar=value, size=None)
                 else:
-                    curr_size = self.tx.output.frame_state[name]
-                    if curr_size != value:
-                        curr_size = None
-                self.tx.output.frame_state[name] = curr_size
+                    frame_state_entry = self.tx.output.frame_state[name]
+                    if frame_state_entry.scalar != value:
+                        frame_state_entry.scalar = None
+                self.tx.output.frame_state[name] = frame_state_entry
 
                 # TODO: This should be dynamic, as we in general do not
                 # know if bare integers are actually going to be sizevars
                 # and it is inappropriate to eagerly duck size them with
                 # real sizevars
-                if curr_size is None or not config.assume_static_by_default:
+                if (
+                    config.automatic_dynamic_shapes and frame_state_entry.scalar is None
+                ) or not config.assume_static_by_default:
                     dynamic_dim = DimDynamic.DYNAMIC
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -1144,10 +1217,9 @@ def wrap_fx_proxy_cls(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
         else:
-            assert (
-                example_value.__class__.__module__ == "torch.return_types"
-                or hasattr(example_value, "_fields")
-            ), ("namedtuple?")
+            assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
+                example_value, "_fields"
+            ), f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable(None, **options)
@@ -1163,9 +1235,21 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif config.numpy_ndarray_as_tensor and isinstance(example_value, torch_np.ndarray):
+    elif (
+        isinstance(example_value, int)
+        and config.numpy_ndarray_as_tensor
+        and not config.dynamic_shapes
+    ):
         proxy.node.meta["example_value"] = example_value
-        return target_cls(proxy, **options)
+        return ConstantVariable(example_value, **options)
+    elif (
+        istype(example_value, torch.Size)
+        and all(isinstance(x, int) for x in example_value)
+        and target_cls is TupleVariable
+    ):  # convert torch.Size to tuple
+        return TupleVariable(
+            [ConstantVariable(x, **options) for x in example_value], **options
+        )
     elif isinstance(example_value, int) and proxy.node.target in [
         getattr,
         operator.getitem,
@@ -1197,6 +1281,108 @@ class TrackedFake:
         return False
 
 
+# Performs automatic dynamic dim determination.
+# Returns tuple of (dynamic_dims, constraint_dims) where each is either a list of dims or None.
+def _automatic_dynamic(e, tx, name, static_shapes):
+    # Prep for automatic dynamic
+    frame_state_entry = None
+    if name not in tx.output.frame_state:
+        # If there is no entry for this source, add the tensor to frame state with its current static size.
+        # E.g., {} -> {"x": [2, 4]}
+        frame_state_entry = FrameStateSizeEntry(None, None)
+        frame_state_entry.size = list(e.size())
+    else:
+        frame_state_entry = tx.output.frame_state[name]
+        if frame_state_entry.size is not None:
+            if e.ndim != len(frame_state_entry.size):
+                # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
+                # E.g. {"x": [2, 3, 4]} -> {"x": None}
+                frame_state_entry.size = None
+            else:
+                # If there is already an entry, and the dim matches, for every size in the frame state which
+                # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
+                for i, dim in enumerate(frame_state_entry.size):
+                    if e.size()[i] != dim:
+                        frame_state_entry.size[i] = None
+
+    # TODO: index export_constraints ahead of time so we don't have to
+    # do a linear scan every time here
+    t_id = id(e)
+    dim2constraint = {}
+
+    def update_dim2constraint(dim, constraint_range):
+        if dim in dim2constraint:
+            from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
+
+            dim2constraint[dim] = StrictMinMaxConstraint(
+                vr=constraint_range.vr & dim2constraint[dim].vr,
+                warn_only=False,
+            )
+        else:
+            dim2constraint[dim] = constraint_range
+
+    if tx.output.export_constraints:
+        for constraint in tx.output.export_constraints:
+            if constraint.t_id == t_id:
+                update_dim2constraint(constraint.dim, constraint.constraint_range)
+            if constraint.shared is not None and constraint.shared.t_id == t_id:
+                # We process constraint ranges for each shared dimension separately
+                # so that we can directly check range constraint violations on them
+                # without looking up which other shared dimensions have this info.
+                # In other words, for this t_id, we will have processed all of its
+                # constraint ranges, no matter where / how they were specified, by
+                # by the end of this loop.
+                update_dim2constraint(
+                    constraint.shared.dim, constraint.constraint_range
+                )
+
+    dynamic_dims = []
+    constraint_dims = []
+    for i in range(e.dim()):
+        # NB: mark dynamic has precedence over static
+        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+        marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
+        marked_static = i in getattr(e, "_dynamo_static_indices", set())
+
+        # NB: both static and dynamic have precedence over
+        automatic_dynamic = config.automatic_dynamic_shapes and (
+            frame_state_entry.size is None or frame_state_entry.size[i] is None
+        )
+
+        # Reflect the user directive in the frame_state
+        # For dynamic, apply None always
+        if frame_state_entry.size and marked_dynamic:
+            frame_state_entry.size[i] = None
+
+        # We will process constraints first, as they will imply that we
+        # have a dynamic dimension
+        # Precedence: export constraints > eager constraints
+        constraint = dim2constraint.get(i)
+        if constraint is None:
+            if marked_dynamic and not config.allow_ignore_mark_dynamic:
+                constraint = RelaxedUnspecConstraint(warn_only=False)
+            elif not marked_static and automatic_dynamic:
+                constraint = RelaxedUnspecConstraint(warn_only=True)
+        constraint_dims.append(constraint)
+
+        # Now, figure out if the dim is dynamic/duck/static
+        if constraint is not None or marked_dynamic or marked_weak_dynamic:
+            # NB: We could assert static_shapes is False here, but it
+            # seems better to allow the user to override policy in this
+            # case
+            dynamic = DimDynamic.DYNAMIC
+        elif static_shapes or config.assume_static_by_default or marked_static:
+            dynamic = DimDynamic.STATIC
+        else:
+            dynamic = DimDynamic.DUCK
+
+        dynamic_dims.append(dynamic)
+
+    tx.output.frame_state[name] = frame_state_entry
+
+    return dynamic_dims, constraint_dims
+
+
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
@@ -1208,106 +1394,9 @@ def wrap_to_fake_tensor_and_record(
             e, is_tensor, guard_source=source.guard_source()
         )
 
-        name = source.name()
-
-        # Prep for automatic dynamic
-        curr_sizes = None
-        if name not in tx.output.frame_state:
-            # If there is no entry for this source, add the tensor to frame state with its current static size.
-            # E.g., {} -> {"x": [2, 4]}
-            curr_sizes = list(e.size())
-        else:
-            curr_sizes = tx.output.frame_state[name]
-            if curr_sizes is not None:
-                if e.ndim != len(curr_sizes):
-                    # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
-                    # E.g. {"x": [2, 3, 4]} -> {"x": None}
-                    curr_sizes = None
-                else:
-                    # If there is already an entry, and the dim matches, for every size in the frame state which
-                    # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
-                    for i, dim in enumerate(curr_sizes):
-                        if e.size()[i] != dim:
-                            curr_sizes[i] = None
-
-        # TODO: index export_constraints ahead of time so we don't have to
-        # do a linear scan every time here
-        t_id = id(e)
-        dim2constraint = {}
-
-        def update_dim2constraint(dim, constraint_range):
-            if dim in dim2constraint:
-                from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-
-                dim2constraint[dim] = StrictMinMaxConstraint(
-                    vr=constraint_range.vr & dim2constraint[dim].vr,
-                    warn_only=False,
-                )
-            else:
-                dim2constraint[dim] = constraint_range
-
-        if tx.output.export_constraints:
-            for constraint in tx.output.export_constraints:
-                if constraint.t_id == t_id:
-                    update_dim2constraint(constraint.dim, constraint.constraint_range)
-                if constraint.shared is not None and constraint.shared.t_id == t_id:
-                    # We process constraint ranges for each shared dimension separately
-                    # so that we can directly check range constraint violations on them
-                    # without looking up which other shared dimensions have this info.
-                    # In other words, for this t_id, we will have processed all of its
-                    # constraint ranges, no matter where / how they were specified, by
-                    # by the end of this loop.
-                    update_dim2constraint(
-                        constraint.shared.dim, constraint.constraint_range
-                    )
-
-        dynamic_dims = None
-        constraint_dims = None
-        if tx.fake_mode.shape_env is not None:
-            dynamic_dims = []
-            constraint_dims = []
-            for i in range(e.dim()):
-                # NB: mark dynamic has precedence over static
-                marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
-                marked_weak_dynamic = i in getattr(
-                    e, "_dynamo_weak_dynamic_indices", set()
-                )
-                marked_static = i in getattr(e, "_dynamo_static_indices", set())
-
-                # NB: both static and dynamic have precedence over
-                automatic_dynamic = config.automatic_dynamic_shapes and (
-                    curr_sizes is None or curr_sizes[i] is None
-                )
-
-                # Reflect the user directive in the frame_state
-                # For dynamic, apply None always
-                if curr_sizes and marked_dynamic:
-                    curr_sizes[i] = None
-
-                # We will process constraints first, as they will imply that we
-                # have a dynamic dimension
-                # Precedence: export constraints > eager constraints
-                constraint = dim2constraint.get(i)
-                if constraint is None:
-                    if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                        constraint = RelaxedUnspecConstraint(warn_only=False)
-                    elif not marked_static and automatic_dynamic:
-                        constraint = RelaxedUnspecConstraint(warn_only=True)
-                constraint_dims.append(constraint)
-
-                # Now, figure out if the dim is dynamic/duck/static
-                if constraint is not None or marked_dynamic or marked_weak_dynamic:
-                    # NB: We could assert static_shapes is False here, but it
-                    # seems better to allow the user to override policy in this
-                    # case
-                    dynamic = DimDynamic.DYNAMIC
-                elif static_shapes or config.assume_static_by_default or marked_static:
-                    dynamic = DimDynamic.STATIC
-                else:
-                    dynamic = DimDynamic.DUCK
-                dynamic_dims.append(dynamic)
-
-        tx.output.frame_state[name] = curr_sizes
+        dynamic_dims, constraint_dims = _automatic_dynamic(
+            e, tx, source.name(), static_shapes
+        )
 
         log.debug(
             "wrap_to_fake %s %s %s %s",
@@ -1327,7 +1416,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
-            tx.output.tracked_fakes_id_to_source[t_id].append(source)
+            tx.output.tracked_fakes_id_to_source[id(e)].append(source)
         tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),

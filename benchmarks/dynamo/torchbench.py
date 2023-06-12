@@ -75,13 +75,12 @@ SKIP = {
     "fambench_xlmr",
     # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
     "tacotron2",
-    # https://github.com/pytorch/pytorch/issues/99438
-    "vision_maskrcnn",
 }
 
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
+    "nanogpt_generate",  # timeout
 }
 
 SKIP_FOR_CUDA = {
@@ -97,6 +96,7 @@ SKIP_TRAIN = {
     "pyhpc_isoneutral_mixing",
     "pyhpc_turbulent_kinetic_energy",
     "maml",
+    "llama",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -122,7 +122,6 @@ REQUIRE_HIGHER_TOLERANCE = {
     "mobilenet_v3_large",
     "nvidia_deeprecommender",
     "timm_efficientdet",
-    "vision_maskrcnn",
 }
 
 # These models need >1e-3 tolerance
@@ -143,7 +142,6 @@ REQUIRE_COSINE_TOLERACE = {
 NONDETERMINISTIC = {
     # https://github.com/pytorch/pytorch/issues/98355
     "mobilenet_v3_large",
-    "vision_maskrcnn",  # eager variant
 }
 
 # These benchmarks took >600s on an i9-11900K CPU
@@ -190,6 +188,7 @@ DONT_CHANGE_BATCH_SIZE = {
     "demucs",
     "pytorch_struct",
     "pyhpc_turbulent_kinetic_energy",
+    "vision_maskrcnn",  # https://github.com/pytorch/benchmark/pull/1656
 }
 
 
@@ -276,6 +275,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         batch_size=None,
         part=None,
     ):
+        if self.args.enable_activation_checkpointing:
+            raise NotImplementedError(
+                "Activation checkpointing not implemented for Torchbench models"
+            )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes
@@ -290,6 +293,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 break
             except ModuleNotFoundError:
                 pass
+        else:
+            raise ImportError(f"could not import any of {candidates}")
         benchmark_cls = getattr(module, "Model", None)
         if not hasattr(benchmark_cls, "name"):
             benchmark_cls.name = model_name
@@ -346,6 +351,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if model_name == "maml_omniglot":
             batch_size = 5
             assert example_inputs[0].shape[0] == batch_size
+        if model_name == "vision_maskrcnn":
+            batch_size = 1
         # global current_name, current_device
         # current_device = device
         # current_name = benchmark.name

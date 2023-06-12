@@ -136,6 +136,8 @@ test_failures = {
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
+    "test_uint_dynamic_shapes": TestFailure(("cpu",)),
+    "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
     #
     # Failed to find for loop/triton kernel:
     #
@@ -163,7 +165,11 @@ test_failures = {
     "test_linspace2_dynamic_shapes": TestFailure(("cpu",)),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
+        ("cpu", "cuda")
+    ),
+    "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(
         ("cpu", "cuda")
     ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
@@ -182,6 +188,7 @@ test_failures = {
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_views6_dynamic_shapes": TestFailure(("cpu",)),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linear_float64_dynamic_shapes": TestFailure(("cpu")),
@@ -194,6 +201,9 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_cauchy_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_scaled_dot_product_efficient_attention_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
     "test_dropout_deterministic_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -220,8 +230,8 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_list_clearing_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_lowmem_dropout1_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
-    "test_lowmem_dropout2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_dropout2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_dropout3_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_masked_fill_promotion_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -263,6 +273,8 @@ test_failures = {
     #
     "test_cudnn_rnn_dynamic_shapes": TestFailure(("cuda",)),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(("cpu", "cuda")),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
@@ -295,7 +307,7 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
 
     class DynamicShapesCodegenCudaTests(TestCase):
         maxDiff = None

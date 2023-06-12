@@ -1595,11 +1595,20 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy",
             PythonProcessGroupExtensionTest.create_dummy
         )
-        self.assertEqual(dist.Backend.DUMMY, "DUMMY")
+        self.assertEqual(dist.Backend.DUMMY, "dummy")
         self.assertEqual(
             dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
+
+    def test_is_backend_available(self):
+        self.assertEqual(dist.is_ucc_available(), dist.is_backend_available("ucc"))
+        self.assertFalse(dist.is_backend_available("dummy"))
+        dist.Backend.register_backend(
+            "dummy",
+            PythonProcessGroupExtensionTest.create_dummy
+        )
+        self.assertTrue(dist.is_backend_available("dummy"))
 
     def test_backend_config(self):
         dist.Backend.register_backend(

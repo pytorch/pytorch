@@ -10,8 +10,8 @@ endif
 
 CUDA_VERSION              = 11.7.0
 CUDNN_VERSION             = 8
-BASE_RUNTIME              = ubuntu:18.04
-BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu18.04
+BASE_RUNTIME              = ubuntu:20.04
+BASE_DEVEL                = nvidia/cuda:$(CUDA_VERSION)-cudnn$(CUDNN_VERSION)-devel-ubuntu20.04
 CMAKE_VARS               ?=
 
 # The conda channel to use to install cudatoolkit
