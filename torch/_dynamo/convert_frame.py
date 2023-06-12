@@ -477,8 +477,6 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
             output,
-            locals,
-            globals,
             hooks.guard_fail_fn if hooks else None,
         )
 
