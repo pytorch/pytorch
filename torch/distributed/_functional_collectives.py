@@ -316,18 +316,14 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     elif isinstance(group, dt.DeviceMesh):
         assert group.ndim == 1, "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         # TODO: it should run collective in the whole mesh instead of dim 0
-        mesh_pg = group.get_dim_groups()[0]
-        rankset = dist.get_process_group_ranks(mesh_pg)
+        tag, rankset = group._dim_group_infos[0]
         group_size = len(rankset)
-        tag = tag or c10d._get_group_tag(mesh_pg)
     elif isinstance(group, tuple):
         if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
             dmesh = group[0]
             dim = group[1]
-            dim_group = dmesh.get_dim_groups()[dim]
-            rankset = dist.get_process_group_ranks(dim_group)
+            tag, rankset = dmesh._dim_group_infos[dim]
             group_size = len(rankset)
-            tag = tag or c10d._get_group_tag(dim_group)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
@@ -517,3 +513,47 @@ if not torch._running_with_deploy():
     _register_ops()
 else:
     warnings.warn("PyTorch Distributed functional collectives do not work with torch::deploy.")
+
+# We allow torchdynamo to convert calls from legacy inplace APIs into traceable APIs
+# via a pseudo-inplace version (like a decomp) that uses the functional collective
+# and a copy.
+#
+# These schemas intentionally match torch.distributed.distributed_c10d.* ops that we are trying to remap from
+def all_gather_tensor_inplace(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    group,  # TODO add a type,
+    async_op: bool = False,
+    tag: str = "",
+    gather_dim: int = 0
+):
+    assert not async_op, "Can't remap async version of inplace op to functional collective"
+    return output.copy_(all_gather_tensor(input, gather_dim, group, tag))
+
+def reduce_scatter_tensor_inplace(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    op: str = "sum",  # TODO type is actually c10d ReduceOp. is this ok?
+    group=None,  # TODO add a type
+    async_op: bool = False,
+    scatter_dim: int = 0,
+    tag: str = "",
+):
+    assert not async_op, "Can't remap async version of inplace op to functional collective"
+    return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
+
+from torch.distributed.distributed_c10d import (
+    all_gather_into_tensor as legacy_allgather,
+    reduce_scatter_tensor as legacy_reducescatter,
+)
+
+"""
+This dict should contain sets of functions that dynamo is allowed to remap.
+
+Functions in this set should accept the same args/kwargs 1:1 as their mapping.
+"""
+
+traceable_collective_remaps = {
+    legacy_allgather: all_gather_tensor_inplace,
+    legacy_reducescatter: reduce_scatter_tensor_inplace,
+}

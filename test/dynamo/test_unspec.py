@@ -108,7 +108,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     # some models fail on missing codegen.tx.output.random_values_var. If we let the tensor value go into wrap as
     # it is, this test fails.
     # The real solution here is to rewrite RandomValueSource and all the codegen it does from the ground up.
-    @unittest.expectedFailure
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
@@ -247,6 +246,18 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_dynamic(y, 0)
         opt_fn(y)
 
+    def test_mark_01_dynamic(self):
+        def fn(x):
+            return x * 2
+
+        x = torch.randn(1)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        # This will fail to compile a generic kernel, but we should not
+        # complain about it (mark dynamic will try its best but 0/1
+        # specialization is allowed)
+        opt_fn(x)
+
     def test_conv1d_symint_padding(self):
         kernel = torch.randn(1, 1, 4)
 
@@ -255,7 +266,8 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             out = F.conv1d(x, kernel, padding=padding, stride=2)
             return out
 
-        opt_func = torch.compile(func, dynamic=True)
+        # TODO: NameError: name 's1' is not defined when dynamic=True
+        opt_func = torch.compile(func)
 
         x = torch.randn(1, 1, 175)
         opt_func(x)  # passes

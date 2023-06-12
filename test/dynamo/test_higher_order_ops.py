@@ -90,6 +90,30 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3)
 
+    def test_capture_constants(self):
+        x = torch.randn(3, 3)
+        y = 4.0
+
+        def fn(x, y, z):
+            if z:
+                return x + y
+            return x * y
+
+        def f(x, y, z):
+            return wrap(fn, x, y, z)
+
+        args = (x, 4.0, None)
+        opt_f = torch.compile(f, fullgraph=True, backend=CompileCounter())
+        expected = f(*args)
+        result = opt_f(*args)
+        self.assertEqual(result, expected)
+
+        # Ensure that we recompile here
+        args = (x, 5.0, None)
+        expected = f(*args)
+        result = opt_f(*args)
+        self.assertEqual(result, expected)
+
     def test_capture_untracked_global_nested(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -133,6 +157,15 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         def f(x, y):
             return wrap(lambda x: x + y, x)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_capture_tracked_nested(self):
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        def f(x, y):
+            return wrap(lambda x: wrap(lambda x: x + y, x), x)
 
         self._test_wrap_simple(f, (x, y), 3)
 

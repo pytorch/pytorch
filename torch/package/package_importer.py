@@ -99,6 +99,11 @@ class PackageImporter(Importer):
             self.filename = "<binary>"
             self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
 
+        torch._C._log_api_usage_metadata(
+            "torch.package.PackageImporter.metadata",
+            {"serialization_id": self.zip_reader.serialization_id()},
+        )
+
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()

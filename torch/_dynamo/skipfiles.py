@@ -8,6 +8,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import glob
 import importlib
 import inspect
 import linecache
@@ -121,6 +122,7 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 
 # Do trace through match and replace patterns used in PT2E QAT
 # Note: These patterns are comprised of torch ops and for internal use only.
@@ -132,6 +134,10 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
 }
 
+# TODO (zhxchen17) Make exportdb importable here.
+FILENAME_ALLOWLIST |= set(
+    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
+)
 
 SKIP_DIRS_RE = None
 
