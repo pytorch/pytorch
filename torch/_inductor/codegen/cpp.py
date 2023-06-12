@@ -177,19 +177,23 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     if reduction_type == "argmax":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmax : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmax : {struct_name} :\\",
                 "    omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     elif reduction_type == "argmin":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmin : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmin : {struct_name} :\\",
                 "    omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     return prefix
