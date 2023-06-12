@@ -1086,6 +1086,30 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a = x.numpy()
         return a.T, a.imag, a.real
 
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_method(x):
+        a = x.numpy()
+        return a.copy()
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_transpose(x):
+        a = x.numpy()
+        return a.transpose(0, 1)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_reshape(x):
+        a = x.numpy()
+        return a.reshape([1, a.size])
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_methods_returning_scalar(x):
+        a = x.numpy()
+        return a.max(axis=0), a.all(axis=0)
+
 
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))

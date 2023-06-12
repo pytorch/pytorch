@@ -405,12 +405,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         for i in range(start, end):
             opt_fn(torch.randn(i), torch.randn(i))
 
-        if config.assume_static_by_default:
-            # 2 graph breaks - 1 static, 1 made dynamic via automatic
-            self.assertEqual(cnt_dynamic.frame_count, 2)
-        else:
-            # just one graph
-            self.assertEqual(cnt_dynamic.frame_count, 1)
+        self.assertEqual(cnt_dynamic.frame_count, 1)
 
     def test_dynamic_duck_size(self):
         def fn(a, b):
@@ -428,13 +423,14 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, y), fn(x, y))
         self.assertEqual(cnt_dynamic.frame_count, 2)
 
+    @patch("torch._dynamo.config.dynamic_shapes", True)
     def test_dynamic_order_dependence(self):
         def fn(a, b):
             return a.sum() + b.sum()
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
         x = torch.randn(2)
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, y), fn(x, y))
