@@ -1318,6 +1318,8 @@ class Tensor(torch._C._TensorBase):
             this stream before the capsule is created, and since the capsule
             shares its storage with the tensor this make it safe to access from
             both streams.  If None or -1 is passed then no synchronization is performed.
+            If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
+            synchronization.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
@@ -1342,7 +1344,15 @@ class Tensor(torch._C._TensorBase):
             raise TypeError("stream must be ``int`` or ``none``")
         elif stream is not None and stream != -1:
             if self.device.type == "cuda":
-                stream = torch.cuda.ExternalStream(stream)
+                # NB: This logic handles the special case values for default
+                # streams and must be kept in sync with from_dlpack in
+                # torch/utils/dlpack.py
+                if stream == 1 and torch.version.hip is None:
+                    stream = torch.cuda.default_stream()
+                elif stream == 0 and torch.version.hip is not None:
+                    stream = torch.cuda.default_stream()
+                else:
+                    stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
                 sync_stream = torch.cuda.current_stream()
                 if stream != sync_stream:

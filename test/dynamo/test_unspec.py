@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import math
 import random
 import unittest
 
@@ -6,6 +7,7 @@ import numpy as np
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch.nn.functional as F
 
 from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import same
@@ -98,6 +100,15 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    # Really annoying intersection of specialization and RandomValueSource
+    # If we get a RandomValueSource with a single element tensor, we should return a ConstantVariable like other
+    # unspects... but if we do, we break the bytecode assumptions and guards will not work as we will be reffering
+    # to a name from a source that is not there. If we call .item() and take the wrapped_value out, where we do
+    # wrapped_value = wrapped_value.item() where we send unspec down to wrap_fx_proxy, this test passes and then
+    # some models fail on missing codegen.tx.output.random_values_var. If we let the tensor value go into wrap as
+    # it is, this test fails.
+    # The real solution here is to rewrite RandomValueSource and all the codegen it does from the ground up.
+    @unittest.expectedFailure
     @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
@@ -146,8 +157,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
-    # TypeError: zeros(): argument 'size' (position 1) must be tuple of SymInts, not FakeTensor
-    @unittest.expectedFailure
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):
@@ -224,7 +233,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(20)
         opt_fn = torch._dynamo.optimize("eager")(fn)
-        torch._dynamo.mark_dynamic(x, 0)
         opt_fn(x)
 
     def test_isinstance_symint(self):
@@ -238,6 +246,21 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(30)
         torch._dynamo.mark_dynamic(y, 0)
         opt_fn(y)
+
+    def test_conv1d_symint_padding(self):
+        kernel = torch.randn(1, 1, 4)
+
+        def func(x):
+            padding = math.ceil((kernel.shape[-1] + x.shape[-1] % 2) / 2) - 1
+            out = F.conv1d(x, kernel, padding=padding, stride=2)
+            return out
+
+        opt_func = torch.compile(func, dynamic=True)
+
+        x = torch.randn(1, 1, 175)
+        opt_func(x)  # passes
+        x = torch.randn(1, 1, 249)
+        opt_func(x)  # crashes
 
     @torch._dynamo.config.patch("assume_static_by_default", True)
     def test_propagate_dynamic_dim(self):

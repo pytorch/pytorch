@@ -95,7 +95,9 @@ Tensor mkldnn_reorder_conv2d_weight(
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
-
+  const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
+  const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
+  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
   auto w = itensor_from_mkldnn(self);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
@@ -119,10 +121,10 @@ Tensor mkldnn_reorder_conv2d_weight(
   auto desc = ideep::convolution_forward::expected_weights_desc(
       w.get_dims(),
       w.get_data_type(),
-      {stride.begin(), stride.end()},
-      {padding.begin(), padding.end()},
-      {padding.begin(), padding.end()},
-      {dilation.begin(), dilation.end()},
+      stride_expanded,
+      padding_expanded,
+      padding_expanded,
+      dilation_expanded,
       groups,
       ideep::algorithm::convolution_direct,
       ideep::prop_kind::forward,
@@ -148,17 +150,19 @@ Tensor mkldnn_reorder_conv3d_weight(
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_reorder_conv3d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
-
+  const auto padding_expanded = expand_param_if_needed(padding, "padding", 3);
+  const auto stride_expanded = expand_param_if_needed(stride, "stride", 3);
+  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 3);
   auto w = itensor_from_mkldnn(self);
 
   auto desc =
       ideep::convolution_forward::expected_weights_desc(
           w.get_dims(),
           w.get_data_type(),
-          {stride.begin(), stride.end()},
-          {padding.begin(), padding.end()},
-          {padding.begin(), padding.end()},
-          {dilation.begin(), dilation.end()},
+          stride_expanded,
+          padding_expanded,
+          padding_expanded,
+          dilation_expanded,
           groups,
           ideep::algorithm::convolution_direct);
   ideep::tensor result;
@@ -246,7 +250,10 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_reorder_conv2d_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
-
+  const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
+  const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
+  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
+  const auto output_padding_expanded = expand_param_if_needed(output_padding, "output_padding", 2);
   ideep::tensor w = itensor_from_tensor(self);
 
   ideep::dims src_dims = ideep::dims();
@@ -260,10 +267,10 @@ Tensor mkldnn_reorder_conv_transpose2d_weight(
   auto expected_desc = get_conv_transpose_expected_weights_desc(
       w.get_dims(),
       w.get_data_type(),
-      stride.vec(),
-      padding.vec(),
-      padding_r(padding, output_padding),
-      dilation.vec(),
+      stride_expanded,
+      padding_expanded,
+      padding_r(padding_expanded, output_padding_expanded),
+      dilation_expanded,
       groups,
       is_channels_last,
       ideep::algorithm::deconvolution_direct,

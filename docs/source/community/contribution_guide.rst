@@ -61,7 +61,7 @@ here is the basic process.
         open an issue first before implementing a PR.
 
    -  Core changes and refactors can be quite difficult to coordinate
-      since the pace of development on PyTorch master is quite fast.
+      since the pace of development on the PyTorch main branch is quite fast.
       Definitely reach out about fundamental or cross-cutting changes;
       we can often give guidance about how to stage such changes into
       more easily reviewable pieces.
@@ -85,7 +85,7 @@ here is the basic process.
       everything, but if you happen to know who the maintainer for a
       given subsystem affected by your patch is, feel free to include
       them directly on the pull request. You can learn more about
-      `Persons of Interest <https://pytorch.org/docs/master/community/persons_of_interest.html>`_
+      `Persons of Interest <https://pytorch.org/docs/main/community/persons_of_interest.html>`_
       that could review your code.
 
 -  **Iterate on the pull request until it's accepted!**
@@ -315,7 +315,7 @@ Python Docs
 
 PyTorch documentation is generated from python source using
 `Sphinx <https://www.sphinx-doc.org/en/master/>`__. Generated HTML is
-copied to the docs folder in the master branch of
+copied to the docs folder in the main branch of
 `pytorch.github.io <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__,
 and is served via GitHub pages.
 

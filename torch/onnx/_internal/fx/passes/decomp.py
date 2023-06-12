@@ -8,18 +8,19 @@ import torch.fx
 from torch.fx.experimental import proxy_tensor
 
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import _pass
+from torch.onnx._internal.fx import _pass, diagnostics
 from torch.onnx._internal.fx.passes import _utils
 
 
 class Decompose(_pass.Transform):
     def __init__(
         self,
+        diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
         decomposition_table: Mapping[torch._ops.OpOverload, Callable],
         enable_dynamic_axes: bool,
     ):
-        super().__init__(module)
+        super().__init__(diagnostic_context, module)
         self.decomposition_table = decomposition_table
         self.enable_dynamic_axes = enable_dynamic_axes
 
