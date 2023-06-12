@@ -260,22 +260,22 @@ class StackDataset(Dataset[T_stack]):
             dict_batch: List[T_dict] = [{} for _ in indices]
             for k, dataset in self.datasets.items():
                 if callable(getattr(dataset, "__getitems__", None)):
-                    for data, sample in zip(dataset.__getitems__(indices), dict_batch):  # type: ignore[attr-defined]
-                        sample[k] = data
+                    for data, d_sample in zip(dataset.__getitems__(indices), dict_batch):  # type: ignore[attr-defined]
+                        d_sample[k] = data
                 else:
-                    for idx, sample in zip(indices, dict_batch):
-                        sample[k] = dataset[idx]
+                    for idx, d_sample in zip(indices, dict_batch):
+                        d_sample[k] = dataset[idx]
             return dict_batch
 
         # tuple data
-        list_batch = [[] for _ in indices]
+        list_batch: List[list] = [[] for _ in indices]
         for dataset in self.datasets:
             if callable(getattr(dataset, "__getitems__", None)):
-                for data, sample in zip(dataset.__getitems__(indices), batch):  # type: ignore[attr-defined]
-                    sample.append(data)
+                for data, t_sample in zip(dataset.__getitems__(indices), list_batch):  # type: ignore[attr-defined]
+                    t_sample.append(data)
             else:
-                for idx, sample in zip(indices, list_batch):
-                    sample.append(dataset[idx])
+                for idx, t_sample in zip(indices, list_batch):
+                    t_sample.append(dataset[idx])
         tuple_batch: List[T_tuple] = [tuple(sample) for sample in list_batch]
         return tuple_batch
 
