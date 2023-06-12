@@ -756,9 +756,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return x.sin().sum()
 
         def wrapper_fn(x):
-            return torch.func.grad(lambda x: torch.func.grad(fn)(x).sum())(x)
+            return torch.func.grad(torch.func.grad(fn))(x)
 
-        x = torch.randn(3, 3, 3)
+        x = torch.randn(())
         self._grad_compile_check(
             wrapper_fn,
             x,
@@ -777,10 +777,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3, 3, 3)
         actual = wrapper_fn(x)
-        with self.assertRaises(TypeError):
-            # TODO(kshitij12345):
-            # Something weird is happening on graph break
-            expected = torch.compile(wrapper_fn)(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(actual, expected)
 
     def test_grad_with_side_effect(self):
         counters.clear()
@@ -796,10 +794,8 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3, 3, 3)
         actual = wrapper_fn(x)
-        with self.assertRaises(TypeError):
-            # TODO(kshitij12345):
-            # Something weird is happening on graph break
-            expected = torch.compile(wrapper_fn)(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(actual, expected)
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):

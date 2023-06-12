@@ -201,7 +201,6 @@ class TorchVariable(VariableTracker):
         )
 
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
-        # print(self.value)
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -832,15 +831,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         self,
         value,
         source: Optional[Source] = None,
-        value_args_kwargs: Optional[Dict] = None,
-        base = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.value = value
         self.source = source
-        self.value_args_kwargs = value_args_kwargs
-        self.base = base
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
