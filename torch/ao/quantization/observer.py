@@ -1140,7 +1140,6 @@ class HistogramObserver(UniformQuantizationObserverBase):
         return orig_hist
 
     def forward(self, x_orig: torch.Tensor) -> torch.Tensor:
-
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()
