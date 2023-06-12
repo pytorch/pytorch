@@ -44,7 +44,7 @@ operation can be done in an in-place fashion too, by providing the same input
 and output blobs.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/log1p_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/log1p_op.cc
 )DOC")
     .Input(0, "input", "Input data blob to be operated on.")
     .Output(0, "output", "Output data blob with same shape as input")

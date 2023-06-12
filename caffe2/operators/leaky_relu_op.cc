@@ -53,8 +53,8 @@ The default value of *alpha* is 0.01.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/leaky_relu_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/leaky_relu_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/leaky_relu_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/leaky_relu_op.cc
 
 
 <details>

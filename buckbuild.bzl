@@ -566,21 +566,13 @@ def pt_operator_query_codegen(
         apple_sdks = None):
     oplist_dir_name = name + "_pt_oplist"
 
-    # Use a helper rule to properly resolves any `select()`s in deps.
-    fb_native.cxx_library(
-        name = oplist_dir_name + "-deps",
-        compatible_with = compatible_with,
-        deps = deps,
-        visibility = ["PUBLIC"],
-    )
-
     # @lint-ignore BUCKLINT
     fb_native.genrule(
         name = oplist_dir_name,
         cmd = ("$(exe {}tools:gen_oplist) ".format(ROOT_PATH) +
-               "--model_file_list_path $(@query_outputs 'attrfilter(labels, pt_operator_library, deps(\":{name}-deps\"))') " +
+               "--model_file_list_path $(@query_outputs 'attrfilter(labels, pt_operator_library, deps(set({deps})))') " +
                ("" if enforce_traced_op_list else "--allow_include_all_overloads ") +
-               "--output_dir $OUT ").format(name = oplist_dir_name),
+               "--output_dir $OUT ").format(deps = " ".join(["\"{}\"".format(d) for d in deps])),
         outs = get_gen_oplist_outs(),
         default_outs = ["."],
         compatible_with = compatible_with,

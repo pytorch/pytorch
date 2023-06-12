@@ -21,9 +21,9 @@ $$W_{out} = (W_{in}-1)*strides[1] - 2*pads[1] + kernels[1]$$
 Note on the implementation layout: conv_transpose_op_impl.h is the templated implementation of the conv_transpose_op.h file, which is why they are separate files. Also, in the implementation this operator inherits from the *ConvTransposeUnpoolOpBase* operator.
 
 Github Links:
-- https://github.com/pytorch/pytorch/tree/master/caffe2/operators/conv_transpose_op.h
-- https://github.com/pytorch/pytorch/tree/master/caffe2/operators/conv_transpose_op.cc
-- https://github.com/pytorch/pytorch/tree/master/caffe2/operators/conv_transpose_unpool_op_base.h
+- https://github.com/pytorch/pytorch/tree/main/caffe2/operators/conv_transpose_op.h
+- https://github.com/pytorch/pytorch/tree/main/caffe2/operators/conv_transpose_op.cc
+- https://github.com/pytorch/pytorch/tree/main/caffe2/operators/conv_transpose_unpool_op_base.h
 
 <details>
 
