@@ -360,6 +360,10 @@ class WrapperCodeGen(CodeGen):
         for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, sympy.Expr):
                 continue
+
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(buf.get_size()) == 0:
+                continue
             size = self.codegen_shape_tuple(buf.get_size())
             stride = self.codegen_shape_tuple(buf.get_stride())
             self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
@@ -1103,6 +1107,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return self.codegen_device(val)
         elif isinstance(val, torch.dtype):
             return DTYPE_TO_ATEN[val]
+        elif isinstance(val, float) and val in [float("inf"), float("-inf")]:
+            if val == float("inf"):
+                return "std::numeric_limits<float>::infinity()"
+            else:
+                return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
             return f"{{{', '.join(list(map(self.val_to_str, val)))}}}"
         else:
