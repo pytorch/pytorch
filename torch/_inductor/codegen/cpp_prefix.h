@@ -88,11 +88,27 @@ inline at::vec::Vectorized<scalar_t> vec_shuffle_down(at::vec::Vectorized<scalar
   using Vec = at::vec::Vectorized<scalar_t>;
   alignas(alignof(Vec)) scalar_t array[Vec::size()];
   x.store(array);
-  for (size_t i = 0; i + n < Vec::size(); ++i) {
+  for (size_t i = 0; i + n < Vec::size(); i += 2 * n) {
     array[i] = array[i + n];
   }
   return Vec::loadu(array);
 }
+
+#ifdef CPU_CAPABILITY_AVX2
+inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x, size_t n) {
+  using vec_t = at::vec::Vectorized<float>;
+#define SHUFFLE_MASK(z, y, x, w) ((z << 6) | (y << 4) | (x << 2) | w)
+  switch (n) {
+  case 1:
+    return vec_t(_mm256_permute_ps(x, SHUFFLE_MASK(1, 1, 3, 3)));
+  case 2:
+    return vec_t(_mm256_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
+  case 4:
+    return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
+  }
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+}
+#endif
 
 template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
