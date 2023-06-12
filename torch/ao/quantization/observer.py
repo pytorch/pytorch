@@ -1140,15 +1140,25 @@ class HistogramObserver(UniformQuantizationObserverBase):
         return orig_hist
 
     def forward(self, x_orig: torch.Tensor) -> torch.Tensor:
+
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()
+        x_min, x_max = torch.aminmax(x)
+        # want to ignore torch.inf since we don't actually
+        # want to make our quantization range infinite
+        # and in practice those values will be clamped
+        if x_min==-torch.inf or x_max==torch.inf:
+            x = x[x.abs()!=torch.inf]
+            if x.numel() == 0:
+                return x_orig
+            x_min,x_max = torch.aminmax(x)
         min_val = self.min_val
         max_val = self.max_val
         same_values = min_val.item() == max_val.item()
         is_uninitialized = min_val == float("inf") and max_val == float("-inf")
         if is_uninitialized or same_values:
-            min_val, max_val = torch.aminmax(x)
+            min_val, max_val = x_min , x_max
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)
             self.max_val.resize_(max_val.shape)
@@ -1160,7 +1170,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
                 x, self.bins, min=min_val, max=max_val, out=self.histogram  # type: ignore[arg-type]
             )
         else:
-            new_min, new_max = torch.aminmax(x)
+            new_min, new_max = x_min , x_max
             combined_min = torch.min(new_min, min_val)
             combined_max = torch.max(new_max, max_val)
             # combine the existing histogram and new histogram into 1 histogram

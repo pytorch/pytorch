@@ -327,6 +327,21 @@ class TestObserver(QuantizationTestCase):
         self.assertEqual(min_shape_before, obs.min_val.shape)
         self.assertEqual(max_shape_before, obs.max_val.shape)
 
+    def test_histogram_observer_ignore_infinity(self):
+        """
+        Ensures that the buffer shapes do not change from uninitialized to
+        initialized states for HistogramObserver.
+        """
+        obs = HistogramObserver()
+        obs2 = HistogramObserver()
+        x = torch.randn(4, 4, 4, 4)
+        obs(x*torch.inf)
+        obs(x)
+        obs2(x)
+        obs(x*torch.inf)
+        self.assertTrue(obs.min_val!=-torch.inf and obs.max_val!=torch.inf)
+        self.assertEqual(obs.histogram, obs2.histogram)
+
     def test_histogram_observer_save_load_state_dict(self):
         """
         Smoke test on saving/loading state_dict
