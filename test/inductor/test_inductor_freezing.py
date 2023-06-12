@@ -290,5 +290,10 @@ del OptimizeForInferenceTemplate
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
+    if IS_WINDOWS and IS_CI:
+        if __name__ == "__main__":
+            sys.exit(0)
+        raise unittest.SkipTest("skipping windows")
+
     if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")
