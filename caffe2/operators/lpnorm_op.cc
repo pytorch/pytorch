@@ -77,8 +77,8 @@ This op supports $p$ values of 1 or 2. If the average argument is set, the norm 
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/lpnorm_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/lpnorm_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/lpnorm_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/lpnorm_op.cc
 
 
 <details>

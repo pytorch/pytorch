@@ -1,9 +1,9 @@
 sphinx==3.5.4
 docutils==0.16
 -e git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
-sphinxcontrib.katex
+sphinxcontrib.katex==0.8.6
 sphinx_copybutton>=0.3.1
-IPython
+IPython==8.12.0
 myst-nb==0.13.2
 # Fixing upper version due to https://github.com/sphinx-doc/sphinx/issues/10306
 Jinja2<3.1.0

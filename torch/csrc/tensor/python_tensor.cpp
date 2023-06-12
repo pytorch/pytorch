@@ -36,6 +36,7 @@ struct PyTensorType {
   THPDtype* dtype;
   THPLayout* layout;
   bool is_cuda;
+  bool is_xpu;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,modernize-avoid-c-arrays)
   char name[64];
   int backend;
@@ -77,6 +78,11 @@ static PyObject* Tensor_new(
   auto& tensor_type = *((PyTensorType*)type);
   if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
     throw unavailable_type(tensor_type);
+  }
+  if (tensor_type.is_cuda) {
+    TORCH_WARN_ONCE(
+        "The torch.cuda.*DtypeTensor constructors are no longer recommended. "
+        "It's best to use methods such as torch.tensor(data, dtype=*, device='cuda') to create tensors.")
   }
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(
       tensor_type.get_dispatch_key(),
@@ -129,6 +135,14 @@ static PyObject* Tensor_is_cuda(PyTensorType* self, void* unused) {
   }
 }
 
+static PyObject* Tensor_is_xpu(PyTensorType* self, void* unused) {
+  if (self->is_xpu) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 static PyObject* Tensor_is_sparse(PyTensorType* self, void* unused) {
   if (self->layout->layout == at::Layout::Strided) {
     Py_RETURN_FALSE;
@@ -157,6 +171,7 @@ static struct PyGetSetDef metaclass_properties[] = {
     {"dtype", (getter)Tensor_dtype, nullptr, nullptr, nullptr},
     {"layout", (getter)Tensor_layout, nullptr, nullptr, nullptr},
     {"is_cuda", (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
+    {"is_xpu", (getter)Tensor_is_xpu, nullptr, nullptr, nullptr},
     {"is_sparse", (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
     {"is_sparse_csr", (getter)Tensor_is_sparse_csr, nullptr, nullptr, nullptr},
     {nullptr}};
@@ -250,6 +265,8 @@ static void set_type(
   type_obj.dtype = torch::getTHPDtype(scalarType);
   type_obj.is_cuda =
       (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
+  type_obj.is_xpu =
+      (backend == at::Backend::XPU || backend == at::Backend::SparseXPU);
 }
 
 static void set_name(PyTensorType& type_obj, const std::string& name) {
@@ -431,6 +448,9 @@ static bool PyTensorType_Check(PyObject* obj) {
 
 void py_set_default_tensor_type(PyObject* obj) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  TORCH_WARN_ONCE(
+      "torch.set_default_tensor_type() is deprecated as of PyTorch 2.1, "
+      "please use torch.set_default_dtype() and torch.set_default_device() as alternatives.")
   TORCH_CHECK_TYPE(
       PyTensorType_Check(obj),
       "invalid type object: only floating-point types are supported as the default type");

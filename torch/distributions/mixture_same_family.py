@@ -24,7 +24,7 @@ class MixtureSameFamily(Distribution):
         >>> comp = D.Normal(torch.randn(5,), torch.rand(5,))
         >>> gmm = MixtureSameFamily(mix, comp)
 
-        >>> # Construct Gaussian Mixture Modle in 2D consisting of 5 equally
+        >>> # Construct Gaussian Mixture Model in 2D consisting of 5 equally
         >>> # weighted bivariate normal distributions
         >>> mix = D.Categorical(torch.ones(5,))
         >>> comp = D.Independent(D.Normal(

@@ -10,6 +10,8 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/Resize.h>
 
+#include <type_traits>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -159,6 +161,13 @@ constexpr int NLL_LOSS_THREADS = 32;
   AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Byte, index_t, __VA_ARGS__) \
   AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Long, index_t, __VA_ARGS__))
 
+#define CHECK_INDEX_IN_CLASS(INDEX, N_CLASSES)                                \
+  if constexpr(std::is_unsigned<decltype(INDEX)>::value) {                    \
+    CUDA_KERNEL_ASSERT(INDEX < N_CLASSES);                                    \
+  } else {                                                                    \
+    CUDA_KERNEL_ASSERT(INDEX >= 0 && INDEX < N_CLASSES);                      \
+  }
+
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_forward_no_reduce_cuda_kernel(
     int64_t batch_size,
@@ -174,7 +183,7 @@ __global__ void nll_loss_forward_no_reduce_cuda_kernel(
       output[index] = static_cast<scalar_t>(0);
       continue;
     }
-    CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
+    CHECK_INDEX_IN_CLASS(cur_target, n_classes);
     auto cur_weight =
         weights != nullptr ? weights[cur_target] : static_cast<scalar_t>(1);
     output[index] = -cur_weight * input[index][cur_target];
@@ -195,7 +204,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
 
   const index_t t = *target;
   if (t != ignore_index) {
-    CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
+    CHECK_INDEX_IN_CLASS(t, n_classes);
     const auto cur_weight = weights != nullptr ? weights[t] : scalar_t{1};
     *total_weight = cur_weight;
 
@@ -238,7 +247,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     index_t t = target[i];
     if (t != ignore_index) {
-      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
+      CHECK_INDEX_IN_CLASS(t, n_classes);
       scalar_t cur_weight =
           weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
       sh_inputs[threadIdx.x] -= input[i * ndim + t] * cur_weight;
@@ -410,7 +419,7 @@ __global__ void nll_loss_backward_no_reduce_cuda_kernel(
     if (cur_target == ignore_index) {
       continue;
     }
-    CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
+    CHECK_INDEX_IN_CLASS(cur_target, n_classes);
     scalar_t weight = weights != nullptr ? weights[cur_target] : static_cast<scalar_t>(1);
     grad_input[index][cur_target] = -weight * grad_output[index];
   }
@@ -429,7 +438,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
 ) {
   const index_t t = *target;
   if (t != ignore_index) {
-    CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
+    CHECK_INDEX_IN_CLASS(t, n_classes);
     const auto grad = -(size_average ? *grad_output / *total_weight : *grad_output);
     grad_input[t] = weights != nullptr ? weights[t] * grad : grad;
   }
@@ -458,10 +467,12 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     const index_t t = target[i];
     if (t != ignore_index) {
-      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
+      CHECK_INDEX_IN_CLASS(t, n_classes);
       // NOTE(crcrpar): this index could overflow in int64_t as `t` itself can be close to the max.
       const bwd_index_t index = static_cast<bwd_index_t>(i) * ndim + t;
-      CUDA_KERNEL_ASSERT(index >= 0);
+      if constexpr(!std::is_unsigned<decltype(index)>::value) {
+        CUDA_KERNEL_ASSERT(index >= 0);
+      }
       grad_input[index] = weights != nullptr ? weights[t] * grad : grad;
     }
   }
