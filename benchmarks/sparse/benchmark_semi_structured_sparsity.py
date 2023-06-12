@@ -1,11 +1,11 @@
+import random
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
 from tqdm import tqdm
 import pandas as pd
 import argparse
-from torch.sparse import to_semi_structured_sparse, SemiStructuredSparseTensor
-from torch.sparse.semi_structured import gen_semi_structured_sparse_mask
+from torch.sparse import to_sparse_semi_structured, SparseSemiStructuredTensor
 
 
 torch.set_printoptions(
@@ -29,13 +29,27 @@ class Model(nn.Module):
         return self.linear(x)
 
 
+def rand_sparse_semi_structured_mask(
+    r, c, dtype=torch.float16, device="cuda", choice=None
+):
+    """
+    This function returns a 1:2 sparse matrix of size (r, c).
+    Note that this means this matrix will also be 2:4 and 4:8 sparse as well.
+    """
+
+    choices = [[0, 1], [1, 0]]
+    mask_entries = [choice or random.choice(choices) for i in range(r * c // 2)]
+
+    return (
+        torch.tensor(mask_entries, dtype=dtype, device=device)
+        .reshape(r, c)
+        .contiguous()
+    )
+
 
 def test_linear(m, k, n, dtype, contiguous, backend):
-
-    SemiStructuredSparseTensor.fuse_transpose = contiguous
-    mask = gen_semi_structured_sparse_mask(
-        m, k, dtype=dtype
-    )
+    SparseSemiStructuredTensor.fuse_transpose = contiguous
+    mask = rand_sparse_semi_structured_mask(m, k, dtype=dtype)
     sparse_weight = torch.rand(m, k).to(dtype).cuda() * mask
     input_tensor = torch.zeros(n, k).to(dtype).cuda()
     model = Model(m, k).to(dtype).cuda().eval()
@@ -48,7 +62,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     dense_output = model(input_tensor)
 
     # sparsify weights
-    model.linear.weight = nn.Parameter(to_semi_structured_sparse(sparse_weight))
+    model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight))
 
     sparse_output = model(input_tensor)
 
@@ -75,11 +89,11 @@ def test_linear(m, k, n, dtype, contiguous, backend):
 
 
 def test_tensor(m, k, n, dtype, contiguous, backend):
-    A = gen_semi_structured_sparse_mask(m, k, dtype=dtype)
+    A = rand_sparse_semi_structured_mask(m, k, dtype=dtype)
     B = torch.zeros(k, n).to(dtype).cuda()
     bias = torch.rand(n).to(dtype).cuda()
 
-    sA = to_semi_structured_sparse(A)
+    sA = to_sparse_semi_structured(A)
 
     # torch.mm calculation
     if dtype is not torch.int8:
@@ -147,10 +161,8 @@ if __name__ == "__main__":
         default="fp16",
     )
     parser.add_argument(
-        "--backend",
-        type=str,
-        choices=["cutlass", "cusparselt"],
-        default="cusparselt")
+        "--backend", type=str, choices=["cutlass", "cusparselt"], default="cusparselt"
+    )
     parser.add_argument("-contiguous", action="store_true")
     parser.add_argument("-e2e", action="store_true")
     parser.add_argument("-save", action="store_true")
@@ -198,7 +210,8 @@ if __name__ == "__main__":
             20480,
         ]
         results = (
-            eval_fn(mn, 10240, mn, dtype, args.contiguous, args.backend) for mn in tqdm(mn_vals)
+            eval_fn(mn, 10240, mn, dtype, args.contiguous, args.backend)
+            for mn in tqdm(mn_vals)
         )
 
     elif args.mode == "nvidia-fixed-mn":
@@ -220,7 +233,8 @@ if __name__ == "__main__":
             20480,
         ]
         results = (
-            eval_fn(10240, k, 10240, dtype, args.contiguous, args.backend) for k in tqdm(k_vals)
+            eval_fn(10240, k, 10240, dtype, args.contiguous, args.backend)
+            for k in tqdm(k_vals)
         )
 
     df = pd.DataFrame.from_records(results)
