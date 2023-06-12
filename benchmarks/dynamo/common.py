@@ -35,8 +35,7 @@ from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.nn.parallel import DistributedDataParallel as DDP
+
 from torch.utils._pytree import tree_map, tree_map_only
 
 from tqdm.auto import tqdm, trange
@@ -1151,7 +1150,10 @@ class BenchmarkRunner:
         self._args = None
 
     def setup_amp(self):
-        if self.args.amp and self.args.training and self.args.devices == ["cuda"]:
+        if self.args.only in self.fp32_only_models:
+            return
+
+        if self.args.amp and self.args.devices == ["cuda"]:
             # AMP training can lead to small loss values which can undeflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
@@ -1216,6 +1218,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def fp32_only_models(self):
+        return set()
+
+    @property
     def skip_not_suitable_for_training_models(self):
         return set()
 
@@ -1263,10 +1269,7 @@ class BenchmarkRunner:
                     continue  # bad benchmark implementation
 
     def deepcopy_model(self, model):
-        try:
-            return copy.deepcopy(model)
-        except TypeError:
-            return model
+        return copy.deepcopy(model)
 
     def validate_model(self, model, example_inputs):
         """
@@ -1393,8 +1396,18 @@ class BenchmarkRunner:
         def deepcopy_and_maybe_ddp(model):
             model = self.deepcopy_model(model)
             if self.args.ddp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use DDP without a distributed enabled build"
+                from torch.nn.parallel import DistributedDataParallel as DDP
+
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use FSDP without a distributed enabled build"
+                from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
                 model = FSDP(model, use_orig_params=True)
                 if torch._inductor.config.triton.cudagraphs:
                     log.warning("Disabling cudagraphs for FSDP compatibility")
@@ -2282,8 +2295,10 @@ def run(runner, args, original_dir=None):
     if args.dynamic_batch_only:
         args.dynamic_shapes = True
         torch._dynamo.config.assume_static_by_default = True
+        torch._dynamo.config.automatic_dynamic_shapes = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
+        torch._dynamo.config.automatic_dynamic_shapes = True
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
     if args.specialize_int:
@@ -2350,12 +2365,20 @@ def run(runner, args, original_dir=None):
             "pytorch_unet",
             "Super_SloMo",
             "vgg16",
+            # https://github.com/pytorch/pytorch/issues/96724
+            "Wav2Vec2ForCTC",
+            "Wav2Vec2ForPreTraining",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
             # See https://github.com/pytorch/pytorch/issues/102814
-            torch._dynamo.config.assume_static_by_default = False
+            if torch._dynamo.config.dynamic_shapes:
+                torch._dynamo.config.assume_static_by_default = False
+            if not torch._dynamo.config.automatic_dynamic_shapes:
+                log.warning(
+                    "hf_T5_generate compiles extremely slowly without dynamic shapes; consider lowering cache_size_limit"
+                )
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -2448,25 +2471,6 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
-
-    if args.inductor or args.inductor_settings:
-        runner.skip_models.update(runner.failing_torchinductor_models)
-        if args.float16:
-            # TODO(jansel): check if correctness issue is real
-            runner.skip_models.add("yolov3")
-
-    if args.float16:
-        # these give `INCORRECT - Variation in Eager runs itself` sometimes
-        runner.non_deterministic_models.update(
-            {
-                "demucs",
-                "pyhpc_equation_of_state",
-                "timm_efficientdet",
-                "pyhpc_isoneutral_mixing",
-                "pyhpc_turbulent_kinetic_energy",
-                "shufflenet_v2_x1_0",
-            }
-        )
 
     if args.no_skip:
         runner.skip_models.clear()
