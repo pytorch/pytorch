@@ -521,7 +521,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                     f"{INPUT}",
                     f"{KERNEL_SIZE}",
                     "output_size: Optional[Union[_int, _size]] = None",
-                    "output_ratio: Optional[Union[_int, _size]] = None",
+                    "output_ratio: Optional[_ratio_any_t] = None",
                     "{return_indices}",
                     "_random_samples: Optional[Tensor] = None",
                 ],
