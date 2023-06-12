@@ -760,10 +760,10 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
-Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmax");
 }
-Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
+static Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmin");
 }
 Tensor argsort(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
