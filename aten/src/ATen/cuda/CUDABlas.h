@@ -428,9 +428,8 @@ TORCH_CUDA_CU_API void gelsBatched<c10::complex<double>>(HIPBLAS_GELS_BATCHED_AR
 template<>
 TORCH_CUDA_CU_API void gelsBatched<c10::complex<float>>(HIPBLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>));
 
-#else
+#elif defined(CUDART_VERSION)
 
-#ifdef CUDART_VERSION
 
 #define CUDABLAS_GELS_BATCHED_ARGTYPES(Dtype)  \
   cublasHandle_t handle, cublasOperation_t trans, int m, int n, int nrhs, Dtype** dA_array, int ldda, Dtype** dC_array, int lddc, int* info, int *devInfoArray, int batchSize
@@ -450,7 +449,6 @@ template<>
 TORCH_CUDA_CU_API void gelsBatched<c10::complex<float>>(CUDABLAS_GELS_BATCHED_ARGTYPES(c10::complex<float>));
 
 #endif //CUDART_VERSION
-#endif //USE_ROCM
 
 
 } // namespace blas

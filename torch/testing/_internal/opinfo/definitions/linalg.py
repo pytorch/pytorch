@@ -1583,7 +1583,6 @@ op_db: List[OpInfo] = [
                 _get_torch_cuda_version() < (11, 4), "not available before CUDA 11.3.1"
             ),
             skipCUDAIfNoCusolver,
-            skipCUDAIfRocm,
             skipCPUIfNoLapack,
         ],
     ),

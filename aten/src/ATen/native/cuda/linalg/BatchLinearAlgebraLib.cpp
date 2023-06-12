@@ -408,6 +408,8 @@ inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
   // Cannot auto-hipifiy this piece of code, because in other functions
   // CUBLAS_OP_N must be translated to HIPSOLVER_OP_N
   auto trans = HIPBLAS_OP_N;
+#elif defined(ROCM_VERSION) && (ROCM_VERSION < 50400)
+  auto trans = rocblas_operation_none;
 #else
   auto trans = CUBLAS_OP_N;
 #endif

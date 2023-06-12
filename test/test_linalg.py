@@ -2,7 +2,7 @@
 
 import torch
 import numpy as np
-
+import sys
 import unittest
 import itertools
 import warnings
@@ -2776,7 +2776,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @onlyNativeDeviceTypes   # TODO: XLA doesn't raise exception
-    @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
     def test_inverse_errors_large(self, device, dtype):
         # Test batched inverse of singular matrices reports errors without crashing (gh-51930)
@@ -3628,8 +3627,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(*floating_types_and(
-                  *[torch.cfloat] if not TEST_WITH_ROCM else [],
-                  *[torch.cdouble] if not TEST_WITH_ROCM else []))
+                  *[torch.cfloat, torch.cdouble] if not TEST_WITH_ROCM else []))
     def test_qr_batched(self, device, dtype):
         torch.backends.cuda.preferred_linalg_library("cusolver")
         """
@@ -4063,7 +4061,6 @@ class TestLinalg(TestCase):
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "Test fails for float64 on GPU (P100, V100) on Meta infra")
     @onlyCUDA
     @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
-    @skipCUDAIfRocm  # There is a memory access bug in rocBLAS in the (non-batched) solve_triangular
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -4491,8 +4488,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @dtypesIfCUDA(*floating_types_and(
-                  *[torch.cfloat] if not TEST_WITH_ROCM else [],
-                  *[torch.cdouble] if not TEST_WITH_ROCM else []))
+                  *[torch.cfloat, torch.cdouble] if not TEST_WITH_ROCM else []))
     @dtypes(*floating_and_complex_types())
     def test_ormqr(self, device, dtype):
 
@@ -4750,8 +4746,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @dtypesIfCUDA(*floating_types_and(
-                  *[torch.cfloat] if not TEST_WITH_ROCM else [],
-                  *[torch.cdouble] if not TEST_WITH_ROCM else []))
+                  *[torch.cfloat, torch.cdouble] if not TEST_WITH_ROCM else []))
     @dtypes(*floating_and_complex_types())
     def test_householder_product(self, device, dtype):
         def generate_reflectors_and_tau(A):
@@ -7146,7 +7141,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_lu_solve_batched(self, device, dtype):
-        torch.backends.cuda.preferred_linalg_library('cusolver')
         def sub_test(pivot):
             def lu_solve_batch_test_helper(A_dims, b_dims, pivot):
                 b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, pivot, device, dtype)
@@ -7325,8 +7319,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypesIfCUDA(*floating_types_and(
-                  *[torch.cfloat] if not TEST_WITH_ROCM else [],
-                  *[torch.cdouble] if not TEST_WITH_ROCM else []))
+                  *[torch.cfloat, torch.cdouble] if not TEST_WITH_ROCM else []))
     @dtypes(*floating_and_complex_types())
     def test_geqrf(self, device, dtype):
 

@@ -1603,7 +1603,6 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   (void) batch_size; // Silence unused warning in some builds
   auto m = input.size(-2);
   auto n = input.size(-1);
-
   const auto lu_factor_magma = [batch_size](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
     if (batch_size == 1) {
       lu_factor_looped_magma(input, pivots, infos, compute_pivots);
@@ -1611,6 +1610,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
       lu_factor_batched_magma(input, pivots, infos, compute_pivots);
     }
   };
+
 
   const auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #if defined(USE_LINALG_SOLVER)
@@ -1622,7 +1622,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
 #ifdef USE_CUSOLVER
     constexpr bool looped_correct = CUSOLVER_VERSION >= 11100;
 #else
-	bool looped_correct = false;
+	bool looped_correct = true;
 #endif
 
 	if (m != n || (looped_correct && (batch_size == 1 || m >= 512))) {
@@ -1631,6 +1631,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
     }
   };
+
 
   if (preferred_backend == at::LinalgBackend::Cusolver) {
     lu_factor_cusolver(input, pivots, infos, compute_pivots);
@@ -1644,11 +1645,17 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
     // If magma batched is buggy, we use cusolver
     // otherwise, lu_factor just works for square matrices, for non-square matrices magma batched is the fastest
     // otherwise (i.e. for square matrices), we choose between cusolver and magma using a heuristic
+	// ROCm: magma_batched is buggy on rocm also. If we are here, we have access to hipSOLVER so always use 
+	// it instead of magma
+#if defined(USE_ROCM)
+    lu_factor_cusolver(input, pivots, infos, compute_pivots);
+#else
     if (m == n && (batch_size == 1 || m <= 16 || (m <= 128 && batch_size <= 16))) {
       lu_factor_cusolver(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_batched_magma(input, pivots, infos, compute_pivots);
     }
+#endif // USE_ROCM
 #else // USE_LINALG_SOLVER && !AT_MAGMA_ENABLED
     lu_factor_cusolver(input, pivots, infos, compute_pivots);
 #endif// AT_MAGMA_ENABLED
@@ -1656,7 +1663,6 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
     lu_factor_magma(input, pivots, infos, compute_pivots);
 #endif // USE_LINALG_SOLVER
   }
-
   // We return the trivial permutation of pivots starting with 1 (FORTRAN indexing)
   if (!compute_pivots) {
     auto k = std::min(input.size(-2), input.size(-1));
@@ -1841,7 +1847,7 @@ void geqrf_magma(const Tensor& input, const Tensor& tau) {
 void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 #if defined(CUDART_VERSION) || defined(USE_ROCM)
   auto geqrf_cusolver_backend = [](const Tensor& input, const Tensor& tau) {
-    #if defined(USE_LINALG_SOLVER)
+#if defined(USE_LINALG_SOLVER)
       // For the benchmarks see
       // https://github.com/pytorch/pytorch/pull/56253#discussion_r622851107
       if (input.size(-2) <= 256 && batchCount(input) >= std::max<int64_t>(2, input.size(-2) / 16)) {
@@ -2542,6 +2548,8 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   //}
   //}
 
+
+#if defined(USE_LINALG_SOLVER)
   // Particular case when multiplying A^{-1}B where B is square
   // In this case doing two triangular solves is almost always fastest
   if (n == k) {
@@ -2553,38 +2561,35 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
     return;
   }
 
-#if defined(USE_LINALG_SOLVER)
-if (n <= 8) {
-  if (use_magma_ && !over_batched_magma_dim_limit && trans == TransposeType::NoTranspose && k >= 256) {
-    lu_solve_batched_magma_fn(LU, pivots, B, trans);
-  } else {
-    lu_solve_batched_cublas_fn(LU, pivots, B, trans);
-  }
-} else if (n <= 64) {
-  if (b <= 2 && (k <= 64 || trans != TransposeType::NoTranspose || n <= 32)) {
-    lu_solve_looped_cusolver(LU, pivots, B, trans);
-  } else if (k <= 8) {
-    lu_solve_batched_cublas_fn(LU, pivots, B, trans);
-  } else {
+  if (n <= 8) {
+    if (use_magma_ && !over_batched_magma_dim_limit && trans == TransposeType::NoTranspose && k >= 256) {
+      lu_solve_batched_magma_fn(LU, pivots, B, trans);
+    } else {
+      lu_solve_batched_cublas_fn(LU, pivots, B, trans);
+    }
+  } else if (n <= 64) {
+    if (b <= 2 && (k <= 64 || trans != TransposeType::NoTranspose || n <= 32)) {
+      lu_solve_looped_cusolver(LU, pivots, B, trans);
+    } else if (k <= 8) {
+      lu_solve_batched_cublas_fn(LU, pivots, B, trans);
+    } else {
+      lu_solve_triangular(LU, pivots, B, trans);
+    }
+  } else if (n <= 128) {
+    if (b <= 2 && k <= 2)  {
+      lu_solve_looped_cusolver(LU, pivots, B, trans);
+    } else if (k <= 2)  {
+      lu_solve_batched_cublas_fn(LU, pivots, B, trans);
+    } else {
+      lu_solve_triangular(LU, pivots, B, trans);
+    }
+  } else { // n > 128
     lu_solve_triangular(LU, pivots, B, trans);
-  }
-} else if (n <= 128) {
-  if (b <= 2 && k <= 2)  {
-    lu_solve_looped_cusolver(LU, pivots, B, trans);
-  } else if (k <= 2)  {
-    lu_solve_batched_cublas_fn(LU, pivots, B, trans);
-  } else {
-    lu_solve_triangular(LU, pivots, B, trans);
-  }
-} else { // n > 128
-  lu_solve_triangular(LU, pivots, B, trans);
 }
 #else
-#ifdef CUDART_VERSION
   // No cublas or cusolver
   // lu_solve_triangular is almost always best
   lu_solve_triangular(LU, pivots, B, trans);
-#endif // ifdef CUDART_VERSION
 #endif // ifdef USE_LINALG_SOLVER
 }
 
