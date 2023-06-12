@@ -26,8 +26,6 @@ from torch.testing._internal.common_utils import (
     TestCase as TorchTestCase,
 )
 
-from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
-
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
         "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
@@ -35,6 +33,8 @@ if IS_WINDOWS and IS_CI:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
 importlib.import_module("functorch")
 importlib.import_module("filelock")
@@ -323,11 +323,6 @@ del OptimizeForInferenceTemplate
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-
-    if IS_WINDOWS and IS_CI:
-        if __name__ == "__main__":
-            sys.exit(0)
-        raise unittest.SkipTest("skipping windows")
 
     if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")

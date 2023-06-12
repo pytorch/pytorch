@@ -1478,10 +1478,16 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config: Dict[str, Any] = dict()
+        self.config = dict()
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
+        if dynamic:
+            # cudagraphs conflicts with dynamic shapes
+            self.config["triton.cudagraphs"] = False
+            assert "triton.cudagraphs" not in (
+                options or ()
+            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
 
         # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
         if self.config.get("triton.cudagraphs", False):
@@ -1702,5 +1708,19 @@ if not _running_with_deploy():
             return cls.ops_table[(op_key, dispatch_key)]
 
 
+# Deprecated attributes
+_deprecated_attrs = {
+    "has_mps": torch.backends.mps.is_built,
+    "has_cuda": torch.backends.cuda.is_built,
+    "has_cudnn": torch.backends.cudnn.is_available,
+    "has_mkldnn": torch.backends.mkldnn.is_available,
+}
+def __getattr__(name):
+    replacement = _deprecated_attrs.get(name)
+    if replacement is not None:
+        import warnings
+        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+        return replacement()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 from . import _logging
 _logging._init_logs()
