@@ -271,6 +271,7 @@ class PReLU(torch.nn.Module):
         qprelu = cls(float(scale), int(zero_point), mod.num_parameters)
         float_wt = mod.weight.float()
         observer = mod.qconfig.weight()
+        observer(float_wt)
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(
             float_wt, float(wt_scale), int(wt_zp), torch.quint8)
@@ -282,6 +283,7 @@ class PReLU(torch.nn.Module):
         qprelu = cls(float(scale), int(zero_point), mod.num_parameters)
         float_wt = mod.weight.float()
         observer = mod.qconfig.weight()
+        observer(float_wt)
         wt_scale, wt_zp = observer.calculate_qparams()
         qweight = torch.quantize_per_tensor(
             float_wt, float(wt_scale), int(wt_zp), torch.quint8)
