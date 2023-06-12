@@ -26,8 +26,12 @@ from typing_extensions import ParamSpec, Self, TypeAlias
 import torch
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
-from torch.utils._foreach_utils import (_get_fused_kernels_supported_devices,
-                                        _get_foreach_kernels_supported_devices)
+from torch.utils._foreach_utils import (
+    Indices,
+    TensorListList,
+    _get_foreach_kernels_supported_devices,
+    _get_fused_kernels_supported_devices,
+)
 from torch._utils import is_compiling
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -338,11 +342,11 @@ class Optimizer:
 
     @staticmethod
     def _group_tensors_by_device_and_dtype(
-        tensorlistlist: List[List[Optional[torch.Tensor]]],
+        tensorlistlist: TensorListList,
         with_indices: bool = False,
     ) -> Union[
-        Dict[Tuple[None, None], Tuple[List[List[Optional[torch.Tensor]]], List[int]]],
-        Dict[Tuple[torch.device, torch.dtype], Tuple[List[List[Optional[torch.Tensor]]], List[int]]],
+        Dict[Tuple[None, None], Tuple[TensorListList, Indices]],
+        Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]],
     ]:
         """Groups a list of lists of tensors by device and dtype.
         Skips this step if we are compiling since this will occur during inductor lowering."""
