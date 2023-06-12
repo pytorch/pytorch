@@ -916,7 +916,7 @@ class BuiltinVariable(VariableTracker):
         source = (
             None
             if a.source is None or b.source is None
-            else SuperSource(a.source, b.source)
+            else SuperSource(type=a.source, base=b.source)
         )
         return variables.SuperVariable(a, b, source=source)
 
