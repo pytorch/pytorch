@@ -753,7 +753,7 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        unspec = not config.specialize_int and config.dynamic_shapes
+        unspec = not config.specialize_int
         if unspec and type(value) is torch.Size:
             return SizeVariable(
                 [
@@ -930,8 +930,7 @@ class VariableBuilder:
             # but the general idea is that we generate kernels that can
             # take unspecialized floats and use them in sizevar computation
             if (
-                config.dynamic_shapes
-                and isinstance(value, int)
+                isinstance(value, int)
                 and not is_constant_source(self.get_source())
                 and not isinstance(self.get_source(), RandomValueSource)
             ):
@@ -1218,10 +1217,9 @@ def wrap_fx_proxy_cls(
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
         else:
-            assert (
-                example_value.__class__.__module__ == "torch.return_types"
-                or hasattr(example_value, "_fields")
-            ), ("namedtuple?")
+            assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
+                example_value, "_fields"
+            ), f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable(None, **options)
@@ -1338,51 +1336,49 @@ def _automatic_dynamic(e, tx, name, static_shapes):
                     constraint.shared.dim, constraint.constraint_range
                 )
 
-    dynamic_dims = None
-    constraint_dims = None
-    if tx.fake_mode.shape_env is not None:
-        dynamic_dims = []
-        constraint_dims = []
-        for i in range(e.dim()):
-            # NB: mark dynamic has precedence over static
-            marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
-            marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
-            marked_static = i in getattr(e, "_dynamo_static_indices", set())
+    dynamic_dims = []
+    constraint_dims = []
+    for i in range(e.dim()):
+        # NB: mark dynamic has precedence over static
+        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
+        marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
+        marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
-            # NB: both static and dynamic have precedence over
-            automatic_dynamic = config.automatic_dynamic_shapes and (
-                frame_state_entry.size is None or frame_state_entry.size[i] is None
-            )
+        # NB: both static and dynamic have precedence over
+        automatic_dynamic = config.automatic_dynamic_shapes and (
+            frame_state_entry.size is None or frame_state_entry.size[i] is None
+        )
 
-            # Reflect the user directive in the frame_state
-            # For dynamic, apply None always
-            if frame_state_entry.size and marked_dynamic:
-                frame_state_entry.size[i] = None
+        # Reflect the user directive in the frame_state
+        # For dynamic, apply None always
+        if frame_state_entry.size and marked_dynamic:
+            frame_state_entry.size[i] = None
 
-            # We will process constraints first, as they will imply that we
-            # have a dynamic dimension
-            # Precedence: export constraints > eager constraints
-            constraint = dim2constraint.get(i)
-            if constraint is None:
-                if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                    constraint = RelaxedUnspecConstraint(warn_only=False)
-                elif not marked_static and automatic_dynamic:
-                    constraint = RelaxedUnspecConstraint(warn_only=True)
-            constraint_dims.append(constraint)
+        # We will process constraints first, as they will imply that we
+        # have a dynamic dimension
+        # Precedence: export constraints > eager constraints
+        constraint = dim2constraint.get(i)
+        if constraint is None:
+            if marked_dynamic and not config.allow_ignore_mark_dynamic:
+                constraint = RelaxedUnspecConstraint(warn_only=False)
+            elif not marked_static and automatic_dynamic:
+                constraint = RelaxedUnspecConstraint(warn_only=True)
+        constraint_dims.append(constraint)
 
-            # Now, figure out if the dim is dynamic/duck/static
-            if constraint is not None or marked_dynamic or marked_weak_dynamic:
-                # NB: We could assert static_shapes is False here, but it
-                # seems better to allow the user to override policy in this
-                # case
-                dynamic = DimDynamic.DYNAMIC
-            elif static_shapes or config.assume_static_by_default or marked_static:
-                dynamic = DimDynamic.STATIC
-            else:
-                dynamic = DimDynamic.DUCK
-            dynamic_dims.append(dynamic)
+        # Now, figure out if the dim is dynamic/duck/static
+        if constraint is not None or marked_dynamic or marked_weak_dynamic:
+            # NB: We could assert static_shapes is False here, but it
+            # seems better to allow the user to override policy in this
+            # case
+            dynamic = DimDynamic.DYNAMIC
+        elif static_shapes or config.assume_static_by_default or marked_static:
+            dynamic = DimDynamic.STATIC
+        else:
+            dynamic = DimDynamic.DUCK
 
-        tx.output.frame_state[name] = frame_state_entry
+        dynamic_dims.append(dynamic)
+
+    tx.output.frame_state[name] = frame_state_entry
 
     return dynamic_dims, constraint_dims
 
