@@ -267,7 +267,7 @@ def _all_gather_into_tensor_coalesced(self, tag, rankset, group_size):
         output_tensors=out_tensors,
         input_tensors=self,
         group=group,
-        async_op=False)
+        async_op=True)
 
 
     _register_tensor_work(out_tensors, work_list)
@@ -375,18 +375,14 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
     elif isinstance(group, dt.DeviceMesh):
         assert group.ndim == 1, "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
         # TODO: it should run collective in the whole mesh instead of dim 0
-        mesh_pg = group.get_dim_groups()[0]
-        rankset = dist.get_process_group_ranks(mesh_pg)
+        tag, rankset = group._dim_group_infos[0]
         group_size = len(rankset)
-        tag = tag or c10d._get_group_tag(mesh_pg)
     elif isinstance(group, tuple):
         if len(group) == 2 and isinstance(group[0], dt.DeviceMesh) and isinstance(group[1], int):
             dmesh = group[0]
             dim = group[1]
-            dim_group = dmesh.get_dim_groups()[dim]
-            rankset = dist.get_process_group_ranks(dim_group)
+            tag, rankset = dmesh._dim_group_infos[dim]
             group_size = len(rankset)
-            tag = tag or c10d._get_group_tag(dim_group)
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     else:
@@ -708,7 +704,7 @@ def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, gr
     # NCCL's PG::all_gather with multiple tensors is broken, it only works for the multi-device setting
     #  and fails if you mix same-size with different-size tensor lists.
     # _coalescing_manager crashed NCCL when used with all_gather_into_tensor.
-    if input_tensors[0].is_cpu:
+    if input_tensors[0].is_cpu or not async_op:
         work_list = []
         out_tensors_sliced = [
             list(torch.chunk(out_tensor, dist.get_world_size(group)))
@@ -719,7 +715,10 @@ def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, gr
             work_list.append(work)
         return work_list
     else:
-        return c10d._all_gather_into_tensor_coalesced(output_tensors, input_tensors, group=group, async_op=async_op)
+        with c10d._coalescing_manager(group=group, async_ops=True) as cm:
+            for in_t, out_t in zip(input_tensors, output_tensors):
+                dist.all_gather_into_tensor(out_t, in_t, group=group, async_op=True)
+        return cm
 
 def _reduce_scatter_tensor_coalesced_fallback(output_tensors, input_tensors, op, group, async_op=False):
     # All the same reasons as the all_gather fallback

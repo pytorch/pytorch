@@ -299,6 +299,7 @@ class BackendConfig:
             self.device_backend_map = {
                 "cpu" : backend_val,
                 "cuda" : backend_val,
+                "xpu" : backend_val,
             }
 
         logger.info(
@@ -896,11 +897,11 @@ def is_torchelastic_launched() -> bool:
 
 
 def _is_barrier_after_init() -> int:
-    # Environment variable to control whether we do a barrier after process group
-    # init. Default value is 1 for now to stay the same with previous behavior.
-    # Users can change it to 0 if such behavior is undesired. We reserve the right
-    # to change the default value to 0 if small rollout is successful.
-    return int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
+    # Environment variable to control whether process group should perform a
+    # barrier after its init. Default value is 0, i.e. no barrier. If you
+    # experience issue with this setting, you may set
+    # `TORCH_DIST_INIT_BARRIER=1` to add the barrier.
+    return int(os.getenv("TORCH_DIST_INIT_BARRIER", "0"))
 
 
 def _get_default_group():
@@ -1134,13 +1135,17 @@ def init_process_group(
 
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
-        # process groups including global variables are updated correctly on all
-        # ranks.
+        # process groups including global variables (if any) are updated
+        # correctly on all ranks.
         # Update 04/2023: for large-scale runs, this barrier (esp. store-based
         # barrier) may be costly and/or unscalable. Also, in a lot of cases,
-        # these barriers may be unnecessary, as proved by a green CI after
+        # these barriers may be unnecessary, as proven by a green CI after
         # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
-        # added which, when set to 0, will disable these barriers.
+        # added which enables this barrier only when set to 1.
+        logger.info(
+            "Performing barrier after ProcessGroup initialization since "
+            "TORCH_DIST_INIT_BARRIER = 1"
+        )
         if backend == Backend.MPI:
             # MPI backend doesn't use store.
             barrier()
@@ -1148,11 +1153,6 @@ def init_process_group(
             # Use store based barrier here since barrier() used a bunch of
             # default devices and messes up NCCL internal state.
             _store_based_barrier(rank, store, group_name, world_size, timeout)
-    else:
-        logger.info(
-            "TORCH_DIST_INIT_BARRIER is set to 0, omitting the barrier after "
-            "ProcessGroup initialization."
-        )
 
 
 def _new_process_group_helper(
@@ -3899,13 +3899,17 @@ def _new_group_with_tag(
 
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
-        # process groups including global variables are updated correctly on all
-        # ranks.
-        # Update 04/2023: for large-scale runs, these barriers (esp. store-based
+        # process groups including global variables (if any) are updated
+        # correctly on all ranks.
+        # Update 04/2023: for large-scale runs, this barrier (esp. store-based
         # barrier) may be costly and/or unscalable. Also, in a lot of cases,
-        # these barriers may be unnecessary, as proved by a green CI after
+        # these barriers may be unnecessary, as proven by a green CI after
         # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
-        # added which, when set to 0, will disable these barriers.
+        # added which enables this barrier only when set to 1.
+        logger.info(
+            "Performing barrier after ProcessGroup initialization since "
+            "TORCH_DIST_INIT_BARRIER = 1"
+        )
         if backend == Backend.MPI:
             # MPI doesn't have store.
             barrier()
@@ -3915,11 +3919,6 @@ def _new_group_with_tag(
             # Use store based barrier here since barrier() used a bunch of
             # default devices and messes up NCCL internal state.
             _store_based_barrier(global_rank, barrier_store, group_name, world_size, timeout)
-    else:
-        logger.info(
-            "TORCH_DIST_INIT_BARRIER is set to 0, omitting the barrier after "
-            "ProcessGroup initialization."
-        )
 
     return pg
 
@@ -4209,65 +4208,6 @@ def _get_group_tag(pg: ProcessGroup) -> str:
     if tag.startswith("user:"):
         tag = tag[5:]
     return tag
-
-
-@_exception_logger
-def _all_gather_into_tensor_coalesced(output_tensor_list, input_tensor_list, group=None, async_op=False):
-    """
-    Gather tensors from all ranks and put them in a list of output tensors by coalescing.
-
-    Args:
-        output_tensor_list (List[Tensor]): Output tensor list to accommodate tensor elements
-            from all ranks. It must be correctly sized to have one of the
-            following forms:
-            (i) a concatenation of all the input tensors along the primary
-            dimension; for definition of "concatenation", see ``torch.cat()``;
-            (ii) a stack of all the input tensors along the primary dimension;
-            for definition of "stack", see ``torch.stack()``.
-            Examples below may better explain the supported output forms.
-        input_tensor_list (List[Tensor]): Tensor list to be gathered from current rank.
-            Different from the ``all_gather`` API, the input tensors in this
-            API must have the same size across all ranks.
-        group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
-        async_op (bool, optional): Whether this op should be an async op
-
-    Returns:
-        Async work handle, if async_op is set to True.
-        None, if not async_op or if not part of the group
-
-    .. warning::
-        The Gloo backend does not support this API.
-
-    """
-    _check_tensor_list(input_tensor_list, "input_tensor")
-    _check_tensor_list(output_tensor_list, "output_tensor")
-    if _rank_not_in_group(group):
-        _warn_not_in_group("_all_gather_into_tensor_coalesced")
-        return
-
-    _ensure_all_tensors_same_dtype(input_tensor_list, input_tensor_list[0])
-    _ensure_all_tensors_same_dtype(output_tensor_list, input_tensor_list[0])
-
-    if _rank_not_in_group(group):
-        _warn_not_in_group("all_gather")
-        return
-
-    input_tensor_list = [
-        t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list
-    ]
-    output_tensor_list = [
-        t if not t.is_complex() else torch.view_as_real(t) for t in output_tensor_list
-    ]
-
-    group = group or _get_default_group()
-    work = group.allgather_into_tensor_coalesced(output_tensor_list, input_tensor_list)
-
-    if async_op:
-        return work
-    else:
-        work.wait()
-
 
 
 # This ops are not friently to TorchDynamo. So, we decide to disallow these ops
