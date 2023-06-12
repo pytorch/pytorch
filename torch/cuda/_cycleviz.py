@@ -16,7 +16,7 @@ logger.setLevel(logging.INFO)
 def observe_garbage(observer):
     enabled = True
     def disable():
-        logger.info("atexit: disabling garbage observer")
+        logger.info("disabling _cycleviz during atexit")
         # when GC runs during exit, things like `sys` will already be unloaded
         # so we have to disable the callback to avoid hitting errors.
         nonlocal enabled
@@ -24,23 +24,23 @@ def observe_garbage(observer):
     atexit.register(disable)
     def gc_callback(phase, info):
         nonlocal enabled
-        logger.info(f"observe_garbage callback: phase={phase} enabled={enabled}")
+        # logger.info(f"observe_garbage callback: phase={phase} enabled={enabled}")
         if not enabled:
             return
         if phase == "start":
             gc.set_debug(gc.DEBUG_SAVEALL)
-            logger.info(f"Running GC with SAVEALL.")
+            logger.info(f"Running GC with _cycleviz enabled.")
         elif phase == "stop":
-            logger.info(f"GC with SAVEALL finished.")
+            # logger.info(f"GC with SAVEALL finished.")
             orig_trace = sys.getprofile()
             self_return = [False]
             def do_collect(*args, **kwargs):
                 nonlocal enabled
                 if not self_return[0]:
-                    logger.info(f"do_collect profiler waiting for observe garbage to return {self_return}")
+                    # logger.info(f"do_collect profiler waiting for observe garbage to return {self_return}")
                     self_return[0] = True
                 else:
-                    logger.info("do_collect running outside of GC hook")
+                    # logger.info("do_collect running outside of GC hook")
                     sys.setprofile(orig_trace)
                     enabled = False
                     try:
@@ -50,13 +50,13 @@ def observe_garbage(observer):
                         # that stuff. So we have to now force gc at the highest level here,
                         # report all of what we found, _then_ we can free it up.
                         if info['generation'] != 2:
-                            logger.info("Running full GC to make sure we have all objects")
+                            # logger.info("Running full GC to make sure we have all objects")
                             gc.collect()
-                            logger.info("Finished running full GC")
-                        logger.info("Calling the observer")
+                            # logger.info("Finished running full GC")
+                        # logger.info("Calling the observer")
                         observer(gc.garbage)
                         gc.garbage.clear()
-                        logger.info("Calling the real GC")
+                        # logger.info("Calling the real GC")
                         gc.set_debug(0)
                         # no clean up for real
                         before = torch.cuda.memory_allocated()
@@ -64,12 +64,12 @@ def observe_garbage(observer):
                         after = torch.cuda.memory_allocated()
                         if before != after:
                             logger.warn(f"CUDA Memory changed during GC {before - after}")
-                        logger.info("Real GC is finished")
+                        # logger.info("Real GC is finished")
                     finally:
                         enabled = True
                 if orig_trace is not None:
                     return orig_trace(*args, **kwargs)
-            logger.info(f"Adding do_collect setprofile callback.")
+            # logger.info(f"Adding do_collect setprofile callback.")
             sys.setprofile(do_collect)
 
     gc.callbacks.append(gc_callback)
@@ -147,7 +147,7 @@ def annotated_references(obj):
     def add_bound_method_references():
         add_attrs("__self__", "__func__", "im_class")
 
-    def add_weakref_references(obj, references):
+    def add_weakref_references():
         # For subclasses of weakref, we can't reliably distinguish the
         # callback (if any) from other attributes.
         if type(obj) is weakref.ref:
@@ -276,13 +276,13 @@ def create_graph(objects, *, context=None, filter=None):
     for obj in objects:
         fidx = id_to_node[id(obj)]
         f = nodes[fidx]
+        references = annotated_references(obj)
         for referrent in gc.get_referents(obj):
             rid = id(referrent)
             tidx = id_to_node.get(rid, None)
             if tidx is None:
                 continue
             t = nodes[tidx]
-            references = annotated_references(obj)
             labels = references.get(rid, ["?"])
             node_referrers[tidx].append(fidx)
             for label in labels:
