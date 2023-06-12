@@ -58,7 +58,7 @@ void dumpTensorCout(const Tensor& tensor) {
   std::cout << std::endl;
 }
 
-c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool>& life_handle) {
+static c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool>& life_handle) {
   auto keys_to_propagate = kKeysToPropagateToWrapper | DispatchKeySet({
       DispatchKey::AutogradCPU, DispatchKey::AutogradCUDA, DispatchKey::AutogradXLA});
   auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
@@ -183,7 +183,7 @@ TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor) {
   return (TensorWrapper*)(tensor.unsafeGetTensorImpl());
 }
 
-void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+static void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto args_size = op.schema().arguments().size();
   int64_t unwrapped_count = 0;
   auto unwrapIfDeadAndIncrement = [&](const Tensor& tensor) {

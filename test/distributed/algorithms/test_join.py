@@ -250,7 +250,7 @@ class TestJoin(MultiProcessTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             expected_msg
-        ) if throw_on_early_termination else contextlib.suppress():
+        ) if throw_on_early_termination else contextlib.nullcontext():
             with Join(
                 allreducers,
                 enable=enable,

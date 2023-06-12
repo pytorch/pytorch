@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional
 
+import torch
 import torch.distributed as dist
 
 from .storage import (
@@ -84,6 +85,9 @@ def load_state_dict(
         and it is the user's responsibility to ensure that this is set so that each
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
+
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
     if planner is None:
         planner = DefaultLoadPlanner()

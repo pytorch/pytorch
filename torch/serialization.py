@@ -159,7 +159,10 @@ def _meta_tag(obj):
 def _privateuse1_tag(obj):
     backend_name = torch._C._get_privateuse1_backend_name()
     if obj.device.type == backend_name:
-        return backend_name
+        if obj.device.index is None:
+            return backend_name
+        else:
+            return backend_name + ':' + str(obj.device.index)
 
 
 def _cpu_deserialize(obj, location):
@@ -1253,7 +1256,9 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
     result = unpickler.load()
 
     torch._utils._validate_loaded_sparse_tensors()
-
+    torch._C._log_api_usage_metadata(
+        "torch.load.metadata", {"serialization_id": zip_file.serialization_id()}
+    )
     return result
 
 

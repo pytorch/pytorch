@@ -58,6 +58,7 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         "record_stream",
         # See Note [resize_ in Functionalization]
         "resize_",
+        "resize_as_",
     ]
 )
 

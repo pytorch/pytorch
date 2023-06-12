@@ -1,15 +1,24 @@
+import io
+import json
 import pathlib
 import random
 import sys
 import unittest
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Set, Tuple
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
-    from tools.testing.test_selections import calculate_shards, ShardedTest, THRESHOLD
+    from tools.testing.test_selections import (
+        _get_previously_failing_tests,
+        calculate_shards,
+        get_reordered_tests,
+        ShardedTest,
+        THRESHOLD,
+    )
 except ModuleNotFoundError:
     print("Can't import required modules, exiting")
     exit(1)
@@ -326,6 +335,82 @@ class TestCalculateShards(unittest.TestCase):
                 )
                 # All the tests should be represented by some shard
                 self.assertEqual(sorted_tests, [x.name for x in sorted_shard_tests])
+
+
+def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:
+    file_object = io.StringIO()
+    json.dump(contents, file_object)
+    file_object.seek(0)
+    return file_object
+
+
+class TestParsePrevTests(unittest.TestCase):
+    @mock.patch("pathlib.Path.exists", return_value=False)
+    def test_cache_does_not_exist(self, mock_exists: Any) -> None:
+        expected_failing_test_files: Set[str] = set()
+
+        found_tests = _get_previously_failing_tests()
+
+        self.assertSetEqual(expected_failing_test_files, found_tests)
+
+    @mock.patch("pathlib.Path.exists", return_value=True)
+    @mock.patch("builtins.open", return_value=mocked_file({"": True}))
+    def test_empty_cache(self, mock_exists: Any, mock_open: Any) -> None:
+        expected_failing_test_files: Set[str] = set()
+
+        found_tests = _get_previously_failing_tests()
+
+        self.assertSetEqual(expected_failing_test_files, found_tests)
+        mock_open.assert_called()
+
+    lastfailed_with_multiple_tests_per_file = {
+        "test/test_car.py::TestCar::test_num[17]": True,
+        "test/test_car.py::TestBar::test_num[25]": True,
+        "test/test_far.py::TestFar::test_fun_copy[17]": True,
+        "test/test_bar.py::TestBar::test_fun_copy[25]": True,
+    }
+
+    @mock.patch("pathlib.Path.exists", return_value=True)
+    @mock.patch(
+        "builtins.open",
+        return_value=mocked_file(lastfailed_with_multiple_tests_per_file),
+    )
+    def test_dedupes_failing_test_files(self, mock_exists: Any, mock_open: Any) -> None:
+        expected_failing_test_files = {"test_car", "test_bar", "test_far"}
+        found_tests = _get_previously_failing_tests()
+
+        self.assertSetEqual(expected_failing_test_files, found_tests)
+
+    @mock.patch(
+        "tools.testing.test_selections._get_previously_failing_tests",
+        return_value={"test4"},
+    )
+    @mock.patch(
+        "tools.testing.test_selections._get_modified_tests",
+        return_value={"test2", "test4"},
+    )
+    def test_get_reordered_tests(
+        self, mock_get_prev_failing_tests: Any, mock_get_modified_tests: Any
+    ) -> None:
+        tests = [
+            ShardedTest(name="test1", shard=1, num_shards=2, time=600.0),
+            ShardedTest(name="test2", shard=1, num_shards=2, time=500.0),
+            ShardedTest(name="test3", shard=1, num_shards=2, time=400.0),
+            ShardedTest(name="test4", shard=1, num_shards=2, time=300.0),
+            ShardedTest(name="test5", shard=1, num_shards=2, time=200.0),
+        ]
+
+        expected_prioritized_tests = {"test4", "test2"}
+        expected_remaining_tests = {"test1", "test3", "test5"}
+
+        prioritized_tests, remaining_tests = get_reordered_tests(tests)
+
+        # Just want to check the names of the tests
+        prioritized_tests_name = {test.name for test in prioritized_tests}
+        remaining_tests_name = {test.name for test in remaining_tests}
+
+        self.assertSetEqual(expected_prioritized_tests, prioritized_tests_name)
+        self.assertSetEqual(expected_remaining_tests, remaining_tests_name)
 
 
 if __name__ == "__main__":

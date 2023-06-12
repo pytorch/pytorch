@@ -125,6 +125,8 @@ class CheckpointWrapper(ActivationWrapper):
                 use_reentrant=(
                     self.checkpoint_impl == CheckpointImpl.REENTRANT
                 ),
+                *checkpoint_fn_args,
+                **checkpoint_fn_kwargs,
             )
         else:
             # Construct user-specified checkpoint function.
@@ -229,7 +231,7 @@ def checkpoint_wrapper(
     """
 
     return CheckpointWrapper(
-        module, checkpoint_impl, checkpoint_fn, checkpoint_fn_args, checkpoint_fn_kwargs
+        module, checkpoint_impl, checkpoint_fn, *checkpoint_fn_args, **checkpoint_fn_kwargs
     )
 
 
