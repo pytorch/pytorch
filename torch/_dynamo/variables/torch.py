@@ -827,12 +827,7 @@ def speculate_subgraph(
 
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
-    def __init__(
-        self,
-        value,
-        source: Optional[Source] = None,
-        **kwargs,
-    ):
+    def __init__(self, value, source: Optional[Source] = None, **kwargs):
         super().__init__(**kwargs)
         self.value = value
         self.source = source
