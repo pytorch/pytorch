@@ -534,13 +534,14 @@ def set_original_aten_op(func):
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, tracing_mode, pre_autograd=False):
+    def __init__(self, tracer, tracing_mode, pre_autograd=False, _allow_fake_constant=False):
         dk = torch._C.DispatchKey.AutogradFunctionality if pre_autograd else None
         super().__init__(dk)
         self.tracer = tracer
         self.tracing_mode = tracing_mode
         self.enable_tracing = True
         self.pre_autograd = pre_autograd
+        self._allow_fake_constant = _allow_fake_constant
         self.is_inside_mode = False
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
@@ -703,7 +704,13 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, *, pre_autograd=False):
+def make_fx(f,
+            decomposition_table=None,
+            tracing_mode="real",
+            _allow_non_fake_inputs=False,
+            *,
+            pre_autograd=False,
+            _allow_fake_constant=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -745,7 +752,10 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         if tracing_mode == "symbolic" or pre_autograd:
             python_dispatcher_mode = enable_python_dispatcher()
 
-        proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode, pre_autograd=pre_autograd)
+        proxy_mode = ProxyTorchDispatchMode(fx_tracer,
+                                            tracing_mode,
+                                            pre_autograd=pre_autograd,
+                                            _allow_fake_constant=_allow_fake_constant)
 
         arg_count = 0
 
