@@ -206,6 +206,13 @@ ValueError::ValueError(const char* format, ...) {
   va_end(fmt_args);
 }
 
+NotImplementedError::NotImplementedError(const char* format, ...) {
+  va_list fmt_args;
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
+
 AttributeError::AttributeError(const char* format, ...) {
   va_list fmt_args;
   va_start(fmt_args, format);

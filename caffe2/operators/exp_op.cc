@@ -20,7 +20,7 @@ operation can be done in an in-place fashion too, by providing the same input
 and output blobs.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/exp_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/exp_op.cc
 
 <details>
 

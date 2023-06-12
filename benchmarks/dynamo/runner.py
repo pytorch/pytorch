@@ -715,6 +715,12 @@ class ParsePerformanceLogs(Parser):
                 for idx in range(2, len(frames)):
                     df = pd.merge(df, frames[idx], on=["dev", "name", "batch_size"])
 
+            if testing == "performance":
+                for compiler in self.compilers:
+                    df[compiler] = pd.to_numeric(df[compiler], errors="coerce").fillna(
+                        0
+                    )
+
             df_copy = df.copy()
             df_copy = df_copy.sort_values(
                 by=list(reversed(self.compilers)), ascending=False

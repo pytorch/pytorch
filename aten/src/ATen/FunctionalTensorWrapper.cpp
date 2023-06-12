@@ -42,6 +42,10 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // TODO: metadata copying may not actually be necessary then
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
   set_custom_device(true);
+  // E.g. when running torch.compile under inference mode, we need to make sure that
+  // for any inputs that were created outside of inference mode (so they are not inference tensors),
+  // then the functional wrappers that we wrap them with should also not be inference tensors.
+  version_counter_ = value_.unsafeGetTensorImpl()->version_counter();
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)

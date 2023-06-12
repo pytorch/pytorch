@@ -99,7 +99,7 @@ void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, c1
     " (while checking arguments for ", c, ")");
 }
 
-void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, void(*fn)(CheckedFrom, const TensorArg&, const TensorArg&)) {
+static void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, void(*fn)(CheckedFrom, const TensorArg&, const TensorArg&)) {
   const TensorArg* t0 = nullptr;
   for (auto& t : tensors) {
     if (!t->defined()) continue;
@@ -230,7 +230,7 @@ void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
   }
 }
 
-void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
+static void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
   TORCH_CHECK(
     !t.defined() || t.options().backend() == backend,
     "Expected tensor to have ", toString(backend),
@@ -244,7 +244,7 @@ void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Backend backe
   }
 }
 
-void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
+static void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_type) {
   TORCH_CHECK(
       !t.defined() || t.device().type() == device_type,
       "Expected tensor to have ", device_type,

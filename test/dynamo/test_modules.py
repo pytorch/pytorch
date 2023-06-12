@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import itertools
 import traceback
 import types
 import unittest
@@ -551,6 +552,18 @@ class LazyModuleWithListInput(torch.nn.Module):
 
     def forward(self, input):
         return self.layer(input[:-1])
+
+
+class LazyModuleWithLazySubmodule(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self.layer = LazyLayerWithListInput()
+
+    def forward(self, x):
+        return self.layer(x)
 
 
 class LazyParentModule(LazyModuleMixin, torch.nn.Module):
@@ -1254,6 +1267,15 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    def test_lazy_module6(self):
+        # Test new lazy submodule in lazy module's initialize_parameters
+        m = LazyModuleWithLazySubmodule()
+        x = [torch.rand([5, 5])] * 3
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_lazy_module_no_cls_to_become(self):
         # make sure super() works in the case where cls_to_become is None
         m = LazyChildModuleNoClsToBecome()
@@ -1365,6 +1387,43 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check parameteres and buffers
         for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
+        for b1, b2 in zip(mod.buffers(), opt_mod.buffers()):
+            self.assertTrue(id(b1) == id(b2))
+
+        def get_parameter_dtype(mod: torch.nn.Module):
+            parameters_and_buffers = itertools.chain(mod.parameters(), mod.buffers())
+            return next(parameters_and_buffers).dtype
+
+        opt_mod = torch._dynamo.optimize("eager")(get_parameter_dtype)
+        out_dtype = opt_mod(mod)
+        self.assertEqual(out_dtype, torch.float32)
+
+    def test_dir(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.register_buffer("buf0", torch.randn(10, 10))
+                self.register_parameter(
+                    name="param0", param=torch.nn.Parameter(torch.randn(10, 10))
+                )
+
+            def forward(self, x):
+                return self.r(torch.sin(x)) + self.buf0
+
+        mod = MockModule()
+        mod_keys = dir(mod)
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+        opt_mod_keys = dir(opt_mod)
+
+        # Check user-defined attributes, parameters and buffers
+        self.assertIn("linear", opt_mod_keys)
+        self.assertIn("buf0", opt_mod_keys)
+        self.assertIn("param0", opt_mod_keys)
+
+        # Check all attributes, parameters and buffers
+        for p1, p2 in zip(mod_keys, opt_mod_keys):
+            self.assertTrue(p1 == p2)
 
     def test_recursion(self):
         mod = MockModule()
@@ -1610,20 +1669,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp).item(), 15)
         self.assertEqual(cc.frame_count, 1)
 
-    def test_hooks_allowed_modules(self):
-        # this test shouldn't care whether hook guards are enabled or not
-        class ToyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.net = torch.nn.Sequential(
-                    *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
-                    + [torch.nn.Linear(10000, 5), torch.nn.ReLU()]
-                )
-
-            def forward(self, x):
-                return self.net(x)
-
-        model = ToyModel()
+    def _forward_hook_test_helper(self, model):
         forward_handles = {}
         activations = dict()
 
@@ -1649,6 +1695,35 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         print(f"Recorded Layers: {activations.keys()}\n\n")
         print(f"Expected Layers: {forward_handles.keys()}")
         self.assertTrue(activations.keys() == forward_handles.keys())
+
+    def test_hooks_allowed_modules(self):
+        # this test shouldn't care whether hook guards are enabled or not
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Sequential(
+                    *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
+                    + [torch.nn.Linear(10000, 5), torch.nn.ReLU()]
+                )
+
+            def forward(self, x):
+                return self.net(x)
+
+        model = ToyModel()
+        self._forward_hook_test_helper(model)
+
+    def test_dunder_call_explicitly(self):
+        # hooks should be triggered if explicit calling `__call__`
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10000)
+
+            def forward(self, x):
+                return self.linear.__call__(x)
+
+        model = ToyModel()
+        self._forward_hook_test_helper(model)
 
     def test_backward_hooks(self):
         # this test shouldn't care whether hook guards are enabled or not
@@ -1780,6 +1855,19 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         optim_res = torch._dynamo.optimize(cnt)(MyModule())(torch.ones(10, 10))
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_unspecialized_seq(self):
+        models = torch.nn.Sequential(torch.nn.Linear(3, 3))
+
+        def fn(x):
+            models[0].training = False
+            return models(x)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        x = torch.randn(1, 3)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":
