@@ -436,7 +436,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                     )
                     return hijacked_callback(frame, cache_size, hooks, frame_state)
 
-        with compile_lock, torch._functorch.utils.disable_functorch():
+        with compile_lock:
             # NOTE: Generator state is restored as `generator.set_state(old_state.clone())`
             # We disable functorch as calling `clone` under grad, vjp, etc.
             # returns a GradTrackingTensor which trips setting restore random state.
