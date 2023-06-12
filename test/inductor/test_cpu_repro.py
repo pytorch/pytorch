@@ -290,6 +290,7 @@ class CPUReproTests(TestCase):
     def test_lstm_packed(self):
         def _lstm_params_list():
             params_dict = {
+                "unbatched": [True, False],
                 "input_size": [1, 2],
                 "hidden_size": [5, 32],
                 "num_layers": [1, 3],
@@ -308,6 +309,7 @@ class CPUReproTests(TestCase):
 
         params_list = _lstm_params_list()
         for (
+            unbatched,
             input_size,
             hidden_size,
             num_layers,
@@ -324,12 +326,21 @@ class CPUReproTests(TestCase):
             for dtype in dtypes:
                 num_directions = 2 if bidirectional else 1
 
-                if batch_first:
-                    v = torch.randn(batch_size, seq_len, input_size)
+                if unbatched:
+                    v = torch.randn(seq_len, input_size)
+                    h = torch.randn(num_layers * num_directions, hidden_size)
+                    c = torch.randn(num_layers * num_directions, hidden_size)
                 else:
-                    v = torch.randn(seq_len, batch_size, input_size)
-                h = torch.randn(num_layers * num_directions, batch_size, hidden_size)
-                c = torch.randn(num_layers * num_directions, batch_size, hidden_size)
+                    if batch_first:
+                        v = torch.randn(batch_size, seq_len, input_size)
+                    else:
+                        v = torch.randn(seq_len, batch_size, input_size)
+                    h = torch.randn(
+                        num_layers * num_directions, batch_size, hidden_size
+                    )
+                    c = torch.randn(
+                        num_layers * num_directions, batch_size, hidden_size
+                    )
 
                 mod = LstmModule(
                     input_size,

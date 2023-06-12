@@ -1378,7 +1378,14 @@ if torch._C.has_mkldnn:
         hidden_size = hx[0].shape[2]
         direction = 2 if bidirectional else 1
 
-        y = input_tensor.new_empty([seq_length, batch_size, direction * hidden_size])
+        if batch_first:
+            y = input_tensor.new_empty(
+                [batch_size, seq_length, direction * hidden_size]
+            )
+        else:
+            y = input_tensor.new_empty(
+                [seq_length, batch_size, direction * hidden_size]
+            )
         hy = input_tensor.new_empty([direction * num_layers, batch_size, hidden_size])
         cy = input_tensor.new_empty([direction * num_layers, batch_size, hidden_size])
         return y, hy, cy
