@@ -2787,12 +2787,27 @@ def run(runner, args, original_dir=None):
                 print(f"Running model {i+1}/{nmodels}", flush=True)
 
             def write_csv(status):
-                for device in args.devices:
-                    output_csv(
-                        output_filename,
-                        ["dev", "name", "batch_size", "accuracy"],
-                        [device, name, placeholder_batch_size, status],
-                    )
+                if args.accuracy:
+                    headers = ["dev", "name", "batch_size", "accuracy"]
+                    rows = [
+                        [device, name, placeholder_batch_size, status]
+                        for device in args.devices
+                    ]
+                elif args.performance:
+                    headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
+                    rows = [
+                        [device, name, placeholder_batch_size, 0.0, 0.0]
+                        for device in args.devices
+                    ]
+                else:
+                    headers = []
+                    rows = [
+                        [device, name, placeholder_batch_size, 0.0]
+                        for device in args.devices
+                    ]
+
+                for row in rows:
+                    output_csv(output_filename, headers, row)
 
             try:
                 timeout = args.timeout
