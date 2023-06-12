@@ -268,7 +268,7 @@ def requires_numpy_pytorch_interop(fn):
         if utils.HAS_NUMPY_TORCH_INTEROP and utils.HAS_NUMPY:
             with trace_numpy():
                 return fn(*args, **kwargs)
-        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
+        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop.txt")
 
     return _fn
 
