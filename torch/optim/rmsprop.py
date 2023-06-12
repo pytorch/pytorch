@@ -3,7 +3,6 @@ from torch import Tensor
 from .optimizer import (Optimizer, _default_to_fused_or_foreach, _use_grad_for_differentiable,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ["RMSprop", "rmsprop"]
 
@@ -220,8 +219,7 @@ def rmsprop(
     """
 
     if foreach is None:
-        _, foreach = _default_to_fused_or_foreach([params, grads, square_avgs, grad_avgs, momentum_buffer_list],
-                                                  differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -327,9 +325,9 @@ def _multi_tensor_rmsprop(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs, momentum_buffer_list])
-    for (grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs,
-         grouped_momentum_buffer_list) in grouped_tensors.values():
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs, momentum_buffer_list])
+    for (((grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs,
+         grouped_momentum_buffer_list)), _) in grouped_tensors.values():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 

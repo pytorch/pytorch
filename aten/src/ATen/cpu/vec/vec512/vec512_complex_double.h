@@ -174,7 +174,10 @@ public:
     return hadd_pd(val_2, val_2);            // a*a+b*b a*a+b*b
   }
   __m512d abs_() const {
-    return _mm512_sqrt_pd(abs_2_());                // abs     abs
+    auto real = _mm512_movedup_pd(values);        // real real
+    // movehdup_pd does not exist...
+    auto imag = _mm512_permute_pd(values, 0xff);  // imag imag
+    return Sleef_hypotd8_u05(real, imag);         // abs  abs
   }
   Vectorized<c10::complex<double>> abs() const {
     const __m512d real_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
@@ -200,13 +203,8 @@ public:
     auto abs = abs_();
     auto zero = _mm512_setzero_pd();
     auto mask = _mm512_cmp_pd_mask(abs, zero, _CMP_EQ_OQ);
-    auto mask_vec = _mm512_mask_set1_epi64(_mm512_castpd_si512(zero), mask,
-                                          0xFFFFFFFFFFFFFFFF);
-    auto abs_val = Vectorized(abs);
-
-    auto div = values / abs_val.values;       // x / abs(x)
-
-    return blendv(div, zero, _mm512_castsi512_pd(mask_vec));
+    auto div = values / abs;
+    return _mm512_mask_blend_pd(mask, div, zero);
   }
   __m512d real_() const {
     const __m512d real_mask = _mm512_castsi512_pd(_mm512_setr_epi64(0xFFFFFFFFFFFFFFFF, 0x0000000000000000,
@@ -304,7 +302,7 @@ public:
     return scaled_values.exp();
   }
   Vectorized<c10::complex<double>> expm1() const {
-    AT_ERROR("not supported for complex numbers");
+    return map(std::expm1);
   }
   Vectorized<c10::complex<double>> sin() const {
     return map(std::sin);
@@ -378,7 +376,7 @@ public:
                                                       0xFFFFFFFFFFFFFFFF));
   }
   Vectorized<c10::complex<double>> operator!=(const Vectorized<c10::complex<double>>& other) const {
-    auto mask = _mm512_cmp_pd_mask(values, other.values, _CMP_NEQ_OQ);
+    auto mask = _mm512_cmp_pd_mask(values, other.values, _CMP_NEQ_UQ);
     return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, mask,
                                                       0xFFFFFFFFFFFFFFFF));
   }
@@ -528,11 +526,15 @@ Vectorized<c10::complex<double>> inline operator^(const Vectorized<c10::complex<
 }
 
 inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::eq(const Vectorized<c10::complex<double>>& other) const {
-  return (*this == other) & Vectorized<c10::complex<double>>(_mm512_set1_pd(1.0));
+  auto eq = (*this == other);  // compares real and imag individually
+  // If both real numbers and imag numbers are equal, then the complex numbers are equal
+  return (eq.real() & eq.imag()) & Vectorized<c10::complex<double>>(_mm512_set1_pd(1.0));
 }
 
 inline Vectorized<c10::complex<double>> Vectorized<c10::complex<double>>::ne(const Vectorized<c10::complex<double>>& other) const {
-  return (*this != other) & Vectorized<c10::complex<double>>(_mm512_set1_pd(1.0));
+  auto ne = (*this != other);  // compares real and imag individually
+  // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
+  return (ne.real() | ne.imag()) & Vectorized<c10::complex<double>>(_mm512_set1_pd(1.0));
 }
 
 #endif

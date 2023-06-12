@@ -45,3 +45,13 @@ class PropModule(types.ModuleType):
 
     def __getattr__(self, attr):
         return self.m.__getattribute__(attr)
+
+
+from torch.backends import cpu as cpu
+from torch.backends import cuda as cuda
+from torch.backends import mps as mps
+from torch.backends import cudnn as cudnn
+from torch.backends import mkl as mkl
+from torch.backends import mkldnn as mkldnn
+from torch.backends import openmp as openmp
+from torch.backends import quantized as quantized

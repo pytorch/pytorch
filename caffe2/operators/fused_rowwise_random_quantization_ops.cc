@@ -29,7 +29,7 @@ bool FloatToFusedRandRowwiseQuantizedOp<Context>::RunOnDevice() {
   // quantized data in one byte, the last buckets of some bytes may have
   // unused bits. There are totally tail buckets are unused.
   // We encode *bitwidth* and *tail* at the beginning of
-  // each row, following by 32-bit floating data respresenting min and max.
+  // each row, following by 32-bit floating data representing min and max.
   // | bitwidth | tail | min | max | ... int8 data ... |
   // |    1B    |  1B  |  4B |  4B | ...output_data....|
   // In output_data: the b-th bucket of the i-th byte stores

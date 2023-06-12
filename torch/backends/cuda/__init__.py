@@ -15,7 +15,7 @@ def is_built():
     doesn't necessarily mean CUDA is available; just that if this PyTorch
     binary were run a machine with working CUDA drivers and devices, we
     would be able to use it."""
-    return torch._C.has_cuda
+    return torch._C._has_cuda
 
 
 class cuFFTPlanCacheAttrContextProp:
@@ -251,8 +251,6 @@ def sdp_kernel(enable_flash: bool = True, enable_math: bool = True, enable_mem_e
         enable_mem_efficient_sdp(enable_mem_efficient)
         enable_math_sdp(enable_math)
         yield{}
-    except RuntimeError as err:
-        raise err
     finally:
         enable_flash_sdp(previous_flash)
         enable_mem_efficient_sdp(previous_mem_efficient)

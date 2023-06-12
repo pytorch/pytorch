@@ -100,7 +100,6 @@ def translate(
     method: bool = False,
     allow_expensive_conversions: bool = False,
 ) -> List[Expr]:
-
     binding_exprs: List[Expr] = []
     for b in bindings:
         if isinstance(b, Binding):

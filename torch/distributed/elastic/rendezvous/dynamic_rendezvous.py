@@ -915,7 +915,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
             max_nodes:
                 The maximum number of nodes to admit to the rendezvous.
             local_addr:
-                The local node adress.
+                The local node address.
             timeout:
                 The timeout configuration of the rendezvous.
         """

@@ -160,7 +160,7 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
     being less than the given threshold
 
     Takes two dictionaries mapping names to modules, the set of names for each dictionary
-    should be the same, looping over the set of names, for each name take the differnce
+    should be the same, looping over the set of names, for each name take the difference
     between the associated modules in each dictionary
 
     '''

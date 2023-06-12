@@ -868,7 +868,7 @@ def _prepare_n_shadows_add_loggers_model(
     qconfig_mapping: QConfigMapping,
     backend_config: BackendConfig,
 ) -> torch.nn.Module:
-    """
+    r"""
     Note: this API is not recommended for wide usage, it is only
     provided for customers who need to migrate from the `add_loggers`
     API.

@@ -50,7 +50,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_storage", []() { return random_tensor().storage(); });
   m.def("get_symfloat", []() { return c10::SymFloat(1.0); });
   m.def("get_symint", []() { return c10::SymInt(1); });
-  m.def("get_symint_symbolic", []() { return c10::SymInt(c10::SymInt::UNCHECKED, INT64_MIN); });
   m.def("get_symintarrayref", []() { return at::SymIntArrayRef({1, 2, 3}); });
   m.def("get_tensor", []() { return random_tensor(); });
 }

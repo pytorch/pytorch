@@ -204,9 +204,7 @@ class GenLazyIR(ABC):
         # as long as all of its arguments can be generated from information available from the schema
         base_ctor_value_args_list = []
         for arg in value_args:
-            if isinstance(arg.lazy_type, BaseCType) or isinstance(
-                arg.lazy_type, VectorCType
-            ):
+            if isinstance(arg.lazy_type, (BaseCType, VectorCType)):
                 base_ctor_value_args_list.append(f"{arg.name}")
             elif isinstance(arg.lazy_type, OptionalCType):
                 base_ctor_value_args_list.append(f"{arg.name}.value_or(kNullValue)")

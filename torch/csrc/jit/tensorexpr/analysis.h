@@ -287,7 +287,7 @@ class BufLiveRange : public IRVisitor {
 
   static std::tuple<int32_t, int32_t> liveRange(StmtPtr s, BufPtr b) {
     BlockPtr block = to<Block>(std::move(s));
-    // We Only analze buffer live ranges for block stmts.
+    // We Only analyze buffer live ranges for block stmts.
     if (!block) {
       return std::make_tuple(0, 0);
     }
@@ -376,7 +376,7 @@ class BufLiveRange : public IRVisitor {
 };
 
 // A class that analyzes the given program relevant for Block backend
-// It creates a map of multi dim buffers and their flat verions
+// It creates a map of multi dim buffers and their flat versions
 class CreateBufferMap : public IRVisitor {
  public:
   const std::unordered_map<std::string, BufPtr>& getBufferMap() const {

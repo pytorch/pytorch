@@ -33,45 +33,27 @@ on:
         type: string
         default: ""
         description: If set to any value, upload to GHA. Otherwise upload to S3.
+      dashboard-tag:
+        required: false
+        type: string
+        default: ""
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
-  # This needs to be run right before the test starts so that it can gather the
-  # latest labels from the PR
-  filter:
-    runs-on: [self-hosted, linux.large]
-    outputs:
-      test-matrix: ${{ steps.filter.outputs.test-matrix }}
-      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
-      keep-going: ${{ steps.filter.outputs.keep-going }}
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-        with:
-          fetch-depth: 1
-          submodules: false
-
-      - name: Select all requested test configurations
-        id: filter
-        uses: ./.github/actions/filter-test-configs
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          test-matrix: ${{ inputs.test-matrix }}
-
   test:
-    needs: filter
     # Don't run on forked repos or empty test matrix
-    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     strategy:
-      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        if: ${{ !contains(matrix.runner, 'gcp.a100') }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           instructions: |
@@ -79,19 +61,34 @@ jobs:
               docker exec -it $(docker container ps --format '{{.ID}}') bash
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: ./.github/actions/calculate-docker-image
+        with:
+          docker-image-name: ${{ inputs.docker-image }}
+          xla: ${{ contains(inputs.build-environment, 'xla') }}
+
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: ${{ inputs.docker-image }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        id: install-nvidia-driver
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
+
+      - name: Lock NVIDIA A100 40GB Frequency
+        run: |
+          sudo nvidia-smi -pm 1
+          sudo nvidia-smi -ac 1215,1410
+          nvidia-smi
+        if: contains(matrix.runner, 'a100')
 
       - name: Start monitoring script
         id: monitor-script
@@ -110,6 +107,23 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
+
+      - name: Check for keep-going label
+        # This uses the filter-test-configs action because it conviniently
+        # checks for labels.  It does not actually do any filtering.  All
+        # filtering is done in the build step.
+        id: keep-going
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
 
       - name: Set Test step time
         id: test-timeout
@@ -134,7 +148,7 @@ jobs:
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           PR_BODY: ${{ github.event.pull_request.body }}
-          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
@@ -143,6 +157,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
         run: |
           set -x
 
@@ -154,7 +169,7 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
 
           # sanitize the input commit message and PR body here:
           #
@@ -199,6 +214,7 @@ jobs:
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
+            -e DASHBOARD_TAG \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
@@ -213,12 +229,23 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+          # Propagate download.pytorch.org IP to container
+          grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
           docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
+      - name: Upload pytest cache if tests failed
+        uses: ./.github/actions/pytest-cache-upload
+        continue-on-error: true
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
+        with:
+          cache_dir: .pytest_cache
+          shard: ${{ matrix.shard }}
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}_${{ github.job }}_${{ matrix.config }}
+
       - name: Print remaining test logs
         shell: bash
-        if: always()
+        if: always() && steps.test.conclusion
         run: |
           cat test/**/*.log || true
 
@@ -263,3 +290,80 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
+
+      # NB: We are currently having an intermittent GPU-related issue on G5 runners with
+      # A10G GPU. Once this happens, trying to reset the GPU as done in setup-nvidia does
+      # not seem to help. Here are some symptoms:
+      #   * Calling nvidia-smi timeouts after 60 second
+      #   * Fail to run nvidia-smi with an unable to determine the device handle for GPU
+      #     unknown error
+      #   * Test fails with a missing CUDA GPU error when initializing CUDA in PyTorch
+      #   * Run docker --gpus all fails with error response from daemon
+      #
+      # As both the root cause and recovery path are unclear, let's take the runner out of
+      # service so that it doesn't get any more jobs
+      - name: Check NVIDIA driver installation step
+        if: failure() && steps.install-nvidia-driver.outcome && steps.install-nvidia-driver.outcome != 'skipped'
+        shell: bash
+        env:
+          RUNNER_WORKSPACE: ${{ runner.workspace }}
+        run: |
+          set +e
+          set -x
+
+          nvidia-smi
+          # NB: Surprisingly, nvidia-smi command returns successfully with return code 0 even in
+          # the case where the driver has already crashed as it still can get the driver version
+          # and some basic information like the bus ID.  However, the rest of the information
+          # would be missing (ERR!), for example:
+          #
+          # +-----------------------------------------------------------------------------+
+          # | NVIDIA-SMI 525.89.02    Driver Version: 525.89.02    CUDA Version: 12.0     |
+          # |-------------------------------+----------------------+----------------------+
+          # | GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+          # | Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+          # |                               |                      |               MIG M. |
+          # |===============================+======================+======================|
+          # |   0  ERR!                Off  | 00000000:00:1E.0 Off |                 ERR! |
+          # |ERR!  ERR! ERR!    ERR! / ERR! |   4184MiB / 23028MiB |    ERR!      Default |
+          # |                               |                      |                 ERR! |
+          # +-------------------------------+----------------------+----------------------+
+          #
+          # +-----------------------------------------------------------------------------+
+          # | Processes:                                                                  |
+          # |  GPU   GI   CI        PID   Type   Process name                  GPU Memory |
+          # |        ID   ID                                                   Usage      |
+          # |=============================================================================|
+          # +-----------------------------------------------------------------------------+
+          #
+          # This should be reported as a failure instead as it will guarantee to fail when
+          # Docker tries to run with --gpus all
+          #
+          # So, the correct check here is to query one of the missing piece of info like
+          # GPU name, so that the command can fail accordingly
+          nvidia-smi --query-gpu=gpu_name --format=csv,noheader --id=0
+          NVIDIA_SMI_STATUS=$?
+
+          # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
+          if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
+            echo "NVIDIA driver installation has failed, shutting down the runner..."
+            .github/scripts/stop_runner_service.sh
+          fi
+
+          # For runner with multiple GPUs, we also want to confirm that the number of GPUs are the
+          # power of 2, i.e. 1, 2, 4, or 8. This is to avoid flaky test issue when one GPU fails
+          # https://github.com/pytorch/test-infra/issues/4000
+          GPU_COUNT=$(nvidia-smi --list-gpus | wc -l)
+          NVIDIA_SMI_STATUS=$?
+
+          # These are acceptable return code from nvidia-smi as copied from setup-nvidia GitHub action
+          if [ "$NVIDIA_SMI_STATUS" -ne 0 ] && [ "$NVIDIA_SMI_STATUS" -ne 14 ]; then
+            echo "NVIDIA driver installation has failed, shutting down the runner..."
+            .github/scripts/stop_runner_service.sh
+          fi
+
+          # Check the GPU count to be a power of 2
+          if [ "$GPU_COUNT" -le 8 ] && [ "$GPU_COUNT" -ne 1 ] && [ "$GPU_COUNT" -ne 2 ] && [ "$GPU_COUNT" -ne 4 ] && [ "$GPU_COUNT" -ne 8 ]; then
+            echo "NVIDIA driver detects $GPU_COUNT GPUs. The runner has a broken GPU, shutting it down..."
+            .github/scripts/stop_runner_service.sh
+          fi

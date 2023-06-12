@@ -156,6 +156,12 @@ class Upsample(Module):
         return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners,
                              recompute_scale_factor=self.recompute_scale_factor)
 
+    def __setstate__(self, state):
+        if 'recompute_scale_factor' not in state:
+            state['recompute_scale_factor'] = True
+
+        super().__setstate__(state)
+
     def extra_repr(self) -> str:
         if self.scale_factor is not None:
             info = 'scale_factor=' + repr(self.scale_factor)

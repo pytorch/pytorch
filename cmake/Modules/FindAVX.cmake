@@ -74,9 +74,9 @@ MACRO(CHECK_SSE lang type flags)
 ENDMACRO()
 
 CHECK_SSE(C "AVX" " ;-mavx;/arch:AVX")
-CHECK_SSE(C "AVX2" " ;-mavx2 -mfma;/arch:AVX2")
+CHECK_SSE(C "AVX2" " ;-mavx2 -mfma -mf16c;/arch:AVX2")
 CHECK_SSE(C "AVX512" " ;-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma;/arch:AVX512")
 
 CHECK_SSE(CXX "AVX" " ;-mavx;/arch:AVX")
-CHECK_SSE(CXX "AVX2" " ;-mavx2 -mfma;/arch:AVX2")
+CHECK_SSE(CXX "AVX2" " ;-mavx2 -mfma -mf16c;/arch:AVX2")
 CHECK_SSE(CXX "AVX512" " ;-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma;/arch:AVX512")

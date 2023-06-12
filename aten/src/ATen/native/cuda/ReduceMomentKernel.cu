@@ -41,7 +41,7 @@ void mean_kernel_impl(TensorIterator& iter) {
   //  returns acc_t for all non-complex dtypes and returns T for c10::complex<T>
   using factor_t = typename c10::scalar_value_type<acc_t>::type;
   factor_t factor = static_cast<factor_t>(iter.num_output_elements()) / iter.numel();
-  gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<acc_t, factor_t> {factor});
+  gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<scalar_t, acc_t, factor_t, out_t> {factor});
 }
 
 static void mean_kernel_cuda(TensorIterator& iter) {

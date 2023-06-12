@@ -314,7 +314,7 @@ class Scope {
  *
  * - IfThenElse: Same situation as Cond, except since IfThenElse is an Expr
  * rather than a Stmt we cannot insert the scalar definition or finalizer
- * within the conditional scope. Acccesses inside an IfThenElse can be safely
+ * within the conditional scope. Accesses inside an IfThenElse can be safely
  * combined with external accesses but cannot exist completely within.
  *
  * - Let: Accesses dependent on local variables via Let Stmts, or loop vars,

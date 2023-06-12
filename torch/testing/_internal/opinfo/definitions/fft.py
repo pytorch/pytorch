@@ -53,7 +53,6 @@ class SpectralFuncPythonRefInfo(SpectralFuncInfo):
         supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
-
         self.torch_opinfo_name = torch_opinfo_name
         self.torch_opinfo = _find_referenced_opinfo(
             torch_opinfo_name, torch_opinfo_variant, op_db=op_db

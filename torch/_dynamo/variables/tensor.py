@@ -1,26 +1,24 @@
 import inspect
-import itertools
 import operator
 import types
-
 from typing import Dict, List
+
+import sympy
 
 import torch.fx
 import torch.random
-from torch.fx.experimental.symbolic_shapes import guard_scalar
+from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
-from ..bytecode_transformation import create_instruction
+
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
-
 from ..utils import (
     fqn,
     get_fake_value,
     get_real_value,
-    HAS_NUMPY,
-    np,
+    HAS_NUMPY_TORCH_INTEROP,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
@@ -117,7 +115,7 @@ class TensorVariable(VariableTracker):
             return self.dtype in dtypes
 
         if type(tensor_type) is tuple:
-            return any([check_type(ty) for ty in tensor_type])
+            return any(check_type(ty) for ty in tensor_type)
         else:
             return check_type(tensor_type)
 
@@ -133,8 +131,14 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not config.dynamic_shapes:
-            props["size"] = tuple(value.size())
+        if not free_symbols(value):
+            # this is a fully static shape, and the keys on props here inform specialization.
+            # We have to cast to int here, because these might get accessed as ConstantVariable, which has
+            # a strict no-symint policy. If we got here due to not having free symbols, this is a known constant
+            # already. We could remove the discrepancy here, by having ConstantVariable be more permissive for
+            # constant backed SymInts, but that assert being strict has led to some good signal in hunting bugs, and
+            # I'd like to keep it around for now.
+            props["size"] = tuple([int(s) for s in value.size()])
             props["stride"] = tuple(value.stride())
             props["is_contiguous"] = tuple(
                 [
@@ -147,6 +151,10 @@ class TensorVariable(VariableTracker):
 
     def var_getattr(self, tx, name):
         from . import ConstantVariable, TorchVariable
+
+        if tx.strict_checks_enabled:
+            if name in self._strict_mode_banned_ops():
+                unimplemented(f"Illegal getattr invocation {name} in strict mode")
 
         result = None
         options = VariableTracker.propagate(self)
@@ -183,6 +191,18 @@ class TensorVariable(VariableTracker):
         # <tensor> is later changed to another type
         if result is not None and self.source is not None:
             result = result.add_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
+
+        # It's hard to get inplace view (metadata mutation) on graph input work properly across
+        # dynamo/aot/inductor, just fall back.
+        if self.source is not None and hasattr(torch.ops.aten, name):
+            fn = getattr(torch.ops.aten, name)
+            if (
+                hasattr(fn, "overloads")
+                and hasattr(fn, fn.overloads()[0])
+                and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
+            ):
+                # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
+                return variables.misc.DelayGraphBreakVariable()
 
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
@@ -221,9 +241,7 @@ class TensorVariable(VariableTracker):
         return result
 
     def has_unpack_var_sequence(self, tx):
-        return (self.size is not None and len(self.size) > 0) or (
-            self.size is None and config.dynamic_shapes
-        )
+        return self.ndim > 0
 
     def unpack_var_sequence(self, tx, idxes=None):
         from .builder import wrap_fx_proxy
@@ -234,10 +252,18 @@ class TensorVariable(VariableTracker):
                 length = self.size[0]
             else:
                 dyn_length = self.call_method(tx, "size", [ConstantVariable(0)], {})
-                assert isinstance(dyn_length, SymNodeVariable)
-                length = dyn_length.evaluate_expr(tx.output)
+                # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values prouced through
+                # symbolic_shapes, but that end up as int/sympy.Integer
+                assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
+                if isinstance(dyn_length, SymNodeVariable):
+                    length = dyn_length.evaluate_expr(tx.output)
+                else:
+                    length = dyn_length.value
             idxes = range(length)
         return [wrap_fx_proxy(tx, self.as_proxy()[i], **options) for i in idxes]
+
+    def _strict_mode_banned_ops(self):
+        return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
 
     def call_method(
         self,
@@ -246,6 +272,9 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if tx.strict_checks_enabled:
+            if name in self._strict_mode_banned_ops():
+                unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
 
@@ -253,10 +282,12 @@ class TensorVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
-        elif name == "size" and self.size is not None:
-            sizes = [variables.ConstantVariable(x) for x in self.size]
-            constant_result = SizeVariable(sizes, **options)
-        elif name == "size" and self.size is None and config.dynamic_shapes:
+
+            if "dim" in kwargs:
+                dim = kwargs.pop("dim")
+                constant_result = constant_result.getitem_const(dim)
+
+        elif name == "size" and self.size is None:
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -266,6 +297,14 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif name == "size" and self.size is not None:
+            sizes = [variables.ConstantVariable(x) for x in self.size]
+            constant_result = SizeVariable(sizes, **options)
+
+            if "dim" in kwargs:
+                dim = kwargs.pop("dim")
+                constant_result = constant_result.getitem_const(dim)
+
         elif name in ("numel", "nelement") and self.size is not None:
             constant_result = ConstantVariable(product(self.size), **options)
         elif name in ("ndimension", "dim") and self.ndim is not None:
@@ -331,18 +370,11 @@ class TensorVariable(VariableTracker):
                     [constant_result.getitem_const(a) for a in args], **options
                 )
             return constant_result
-        elif (
-            name == "repeat"
-            and not all(
-                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-            )
-            and not config.dynamic_shapes
-        ):
-            unimplemented("dynamic Tensor.repeat")
         elif name == "numpy":
-            if not config.numpy_ndarray_as_tensor:
+            if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
                 unimplemented(
-                    f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor to support tensor.numpy()."
+                    f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor and install torch_np to support "
+                    f"tensor.numpy(). "
                 )
             from .builder import wrap_fx_proxy_cls
 
@@ -351,11 +383,11 @@ class TensorVariable(VariableTracker):
             if kwargs and "force" in kwargs:
                 unimplemented(f"Tensor.numpy(force={kwargs['force']})")
             return wrap_fx_proxy_cls(
-                target_cls=NumpyTensorVariable,
+                target_cls=NumpyNdarrayVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
-                    "call_method",
-                    "detach",
+                    "call_function",
+                    torch.detach,
                     *proxy_args_kwargs([self], {}),
                 ),
                 example_value=None,
@@ -367,17 +399,28 @@ class TensorVariable(VariableTracker):
             unimplemented(f"Tensor.{name}")
         elif name == "item" and not config.capture_scalar_outputs:
             unimplemented(f"Tensor.{name}")
-        elif (
-            name == "item"
-            and config.capture_scalar_outputs
-            and not config.dynamic_shapes
-        ):
-            raise AssertionError(
-                "To capture_scalar_outputs, you must also set dynamic_shapes = True"
-            )
         elif name == "__len__":
             return self.call_method(tx, "size", [ConstantVariable(0, **options)], {})
         elif name == "__setitem__":
+            key, value = args
+
+            def has_bool_key(v):
+                if isinstance(v, TensorVariable):
+                    return v.dtype in (torch.bool, torch.int8)
+                elif isinstance(v, TupleVariable):
+                    return any(has_bool_key(item) for item in v.items)
+                else:
+                    return False
+
+            if (
+                not config.capture_dynamic_output_shape_ops
+                and has_bool_key(key)
+                and isinstance(value, TensorVariable)
+                and value.requires_grad
+            ):
+                unimplemented(
+                    "boolean masking setitem backwards requires dynamic shapes"
+                )
             tx.output.guards.update(options["guards"])
             tx.output.create_proxy(
                 "call_function",
@@ -435,6 +478,16 @@ class TensorVariable(VariableTracker):
                 tx, [result, kwargs["value"]], {}
             )
             return self.call_method(tx, "add_", [result], {})
+        elif name == "__contains__":
+            # Rewrite __contains__ here so that downstream passes can trace through
+            # without dealing with unbacked symbool. Roughly the code we translate is:
+            # def __contains__(self, x):
+            #     return (x == self).any().item()
+            result = TorchVariable(torch.eq, **options).call_function(
+                tx, [self, args[0]], {}
+            )
+            result = TorchVariable(torch.any, **options).call_function(tx, [result], {})
+            return result.call_method(tx, "item", [], {})
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
@@ -468,15 +521,23 @@ class SymNodeVariable(VariableTracker):
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
         proxy.node.meta["example_value"] = sym_num
+
+        if isinstance(sym_num, (sympy.Integer, int)):
+            return ConstantVariable(int(sym_num))
+
         return SymNodeVariable(proxy, sym_num, **options)
 
     def __init__(self, proxy, sym_num, **kwargs):
         super().__init__(**kwargs)
         self.proxy = proxy
+        # TODO: Should we allow non SymTypes here?  Today it is allowed
         self.sym_num = sym_num
 
     def python_type(self):
-        return type(self.sym_num)
+        if isinstance(self.sym_num, SymTypes):
+            return self.sym_num.node.pytype
+        else:
+            return type(self.sym_num)
 
     def unpack_var_sequence(self, tx):
         super().unpack_var_sequence(tx)
@@ -628,120 +689,90 @@ class TensorWithTFOverrideVariable(VariableTracker):
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
-class NumpyTensorVariable(TensorVariable):
+class NumpyNdarrayVariable(TensorVariable):
     """
-    Represents a numpy.ndarray, but backed by torch Tensor. Use this for Tensor.numpy() call.
+    Represents a torch_np.ndarray, but backed by torch Tensor. Use this for Tensor.numpy() call.
     """
 
     def __init__(
         self,
         proxy: torch.fx.Proxy,
-        dtype=None,
-        device=None,
-        layout=None,
-        ndim=None,
-        size=None,
-        stride=None,
-        requires_grad=None,
-        is_quantized=None,
-        is_contiguous=None,
-        is_sparse=None,
-        class_type=torch.Tensor,
-        specialized_value=None,
         **kwargs,
     ):
-        super().__init__(
-            proxy,
-            dtype,
-            device,
-            layout,
-            ndim,
-            size,
-            stride,
-            requires_grad,
-            is_quantized,
-            is_contiguous,
-            is_sparse,
-            class_type,
-            specialized_value,
-            **kwargs,
-        )
+        super().__init__(proxy, **kwargs)
 
     def var_getattr(self, tx, name):
-        from torch_np._dtypes import DType
-
-        from torch._dynamo.variables import GetAttrVariable
-        from .builder import TupleVariable, wrap_fx_proxy_cls
+        from torch._dynamo.variables import GetAttrVariable, TupleVariable
+        from ..utils import numpy_attr_wrapper
+        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         result = None
         options = VariableTracker.propagate(self)
-        if name in ["shape", "ndim"]:
-            result = super().var_getattr(tx, name)
-        elif name == "T":
-            dims = TupleVariable(
-                [ConstantVariable(x) for x in range(self.ndim - 1, -1, -1)]
-            )
+        if name in ["T", "real", "imag"]:
             result = wrap_fx_proxy_cls(
-                target_cls=NumpyTensorVariable,
+                target_cls=NumpyNdarrayVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
-                    "call_method",
-                    "permute",
-                    *proxy_args_kwargs([self, dims], {}),
+                    "call_function",
+                    numpy_attr_wrapper,
+                    (self.as_proxy(), name),
+                    {},
                 ),
                 example_value=None,
                 **options,
             )
-        elif name == "real" or name == "imag":
-            # non-complex tensor.imag will error out, return zeros to match np behavior.
-            if name == "imag" and self.dtype not in (torch.cfloat, torch.cdouble):
-                result = wrap_fx_proxy_cls(
-                    target_cls=NumpyTensorVariable,
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        torch.zeros_like,
-                        *proxy_args_kwargs([self], {}),
-                    ),
-                    example_value=None,
-                    **options,
-                )
-            else:
-                result = wrap_fx_proxy_cls(
-                    target_cls=NumpyTensorVariable,
-                    tx=tx,
-                    proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                    example_value=None,
-                    **options,
-                )
+        elif name in ["ndim", "itemsize", "shape"]:
+            result = wrap_fx_proxy_cls(
+                target_cls=ConstantVariable,
+                tx=tx,
+                proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
+                example_value=None,
+                **options,
+            )
+        elif name == "shape":
+            # ndarray.shape gives a tuple of ints while tensor.shape returns a torch.Size object.
+            # Here we overrides target_cls to be TupleVariable to match ndarray.shape return type.
+            result = wrap_fx_proxy_cls(
+                target_cls=TupleVariable,
+                tx=tx,
+                proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
+                example_value=None,
+                **options,
+            )
         elif name == "size":
-            result = ConstantVariable(product(self.size), **options)
-        elif name == "itemsize":
-            dtype_obj = DType(self.dtype)
-            result = ConstantVariable(dtype_obj.itemsize)
+            result = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    "numel",
+                    (self.as_proxy(),),
+                    {},
+                ),
+                example_value=None,
+                **options,
+            )
         elif name == "strides":
-            dtype_obj = DType(self.dtype)
-            result = TupleVariable(
-                [ConstantVariable(dtype_obj.itemsize * x) for x in self.stride]
+            # ndarray.strides returns a tuple of strides in terms of bytes. E.g., np.ones([2, 3]).strides -> (24, 8).
+            # This result can't be generated from tensor attributes or functions (given we don't have tensor.strides()
+            # and the semantics of tensor.stride() is different), so instead we delegate it to torch_np.ndarray
+            # strides() function call.
+            torch_np_func_name = "strides"
+            result = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    numpy_attr_wrapper,
+                    (self.as_proxy(), torch_np_func_name),
+                    {},
+                ),
+                example_value=None,
+                **options,
             )
         elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
         if result is None:
             raise NotImplementedError()
         return result
-
-    def reconstruct_ndarray(self, stack_values):
-        # returns bytecode to actually convert NumpyTensorVariable to np.ndarray
-        return [
-            create_instruction(
-                name="LOAD_METHOD", arg=len(stack_values) - 1, argval="numpy"
-            ),
-            create_instruction(
-                name="CALL_METHOD",
-                arg=len(stack_values) - 1,
-                argval=len(stack_values) - 1,
-            ),
-        ]
 
     def call_method(
         self,
@@ -750,68 +781,23 @@ class NumpyTensorVariable(TensorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        kwargs = dict(kwargs)
-        options = VariableTracker.propagate(self, args, kwargs.values())
+        options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
+        from torch._dynamo.variables.builder import wrap_fx_proxy_cls
+        from ..utils import numpy_method_wrapper
 
-        if name == "astype" and len(args) == 1:
-            # converts ndarray to another dtype
-            from torch_np import _dtypes
+        result = wrap_fx_proxy_cls(
+            target_cls=NumpyNdarrayVariable,
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                numpy_method_wrapper(name),
+                *proxy_args_kwargs([self] + list(args), kwargs),
+            ),
+            example_value=None,
+            **options,
+        )
 
-            from .builder import TupleVariable, wrap_fx_proxy_cls
-
-            torch_dtype = getattr(
-                _dtypes, args[0].as_python_constant().__name__
-            ).torch_dtype
-            return wrap_fx_proxy_cls(
-                target_cls=NumpyTensorVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method",
-                    "to",
-                    *proxy_args_kwargs([self, ConstantVariable(torch_dtype)], {}),
-                ),
-                example_value=None,
-                **options,
-            )
-        elif name == "copy" and len(args) <= 1:
-            from .builder import wrap_fx_proxy_cls
-
-            return wrap_fx_proxy_cls(
-                target_cls=NumpyTensorVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method",
-                    "clone",
-                    *proxy_args_kwargs([self], {}),
-                ),
-                example_value=None,
-                **options,
-            )
-        elif name in ["transpose", "reshape"]:
-            from torch_np._detail import implementations
-
-            from .builder import TupleVariable, wrap_fx_proxy_cls
-
-            func = getattr(implementations, name)
-
-            if args in [(), None, (None,)]:
-                args = TupleVariable([])
-            elif isinstance(args, (list, tuple)):
-                args = TupleVariable(args)
-            else:
-                unimplemented(f"Unrecognized arguments: {args} for ndarray.{name}()")
-            return wrap_fx_proxy_cls(
-                target_cls=NumpyTensorVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    func,
-                    *proxy_args_kwargs([self, args], kwargs),
-                ),
-                example_value=None,
-                **options,
-            )
-        unimplemented(f"ndarray method {name}() is not supported")
+        return result
 
 
 class UnspecializedPythonVariable(TensorVariable):
@@ -821,8 +807,6 @@ class UnspecializedPythonVariable(TensorVariable):
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         raw_value = kwargs.pop("raw_value", None)
-        if HAS_NUMPY and isinstance(raw_value, np.number):
-            raw_values = raw_value.item()
         need_unwrap = kwargs.pop("need_unwrap", True)
         super().__init__(proxy, **kwargs)
         self.raw_value = raw_value

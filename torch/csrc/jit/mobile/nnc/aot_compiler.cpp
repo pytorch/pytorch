@@ -53,7 +53,7 @@ std::vector<mobile::nnc::InputSpec> toInputSpecs(
   auto num_inputs =
       g->inputs().size() - kernel->getSymbolicShapeInputs().size();
 
-  for (int i = 0; i < num_inputs; i++) {
+  for (const auto i : c10::irange(num_inputs)) {
     auto v = g->inputs()[i];
     const auto& t = v->type();
     mobile::nnc::InputSpec spec;
@@ -373,7 +373,7 @@ std::vector<c10::optional<at::Tensor>> generateExampleInputs(
     const std::vector<at::MemoryFormat>& inputMemoryFormats) {
   std::vector<c10::optional<at::Tensor>> example_inputs;
   example_inputs.reserve(inputShapes.size());
-  for (int i = 0; i < inputShapes.size(); ++i) {
+  for (const auto i : c10::irange(inputShapes.size())) {
     const auto dtype = at::dtype(inputTypes[i]);
     const auto memory_format = inputMemoryFormats[i];
     example_inputs.emplace_back(

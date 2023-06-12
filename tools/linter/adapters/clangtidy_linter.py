@@ -22,6 +22,7 @@ result = subprocess.run(
 PYTORCH_ROOT = result.stdout.decode("utf-8").strip()
 IS_WINDOWS: bool = os.name == "nt"
 
+
 # Returns '/usr/local/include/python<version number>'
 def get_python_include_dir() -> str:
     return gp()["include"]
@@ -147,7 +148,7 @@ def check_file(
         proc = run_command(
             [binary, f"-p={build_dir}", *include_args, filename],
         )
-    except (OSError) as err:
+    except OSError as err:
         return [
             LintMessage(
                 path=filename,

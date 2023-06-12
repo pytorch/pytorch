@@ -9,6 +9,7 @@ from torch.distributed.tensor.parallel.style import (
     make_input_replicate_1d,
     make_input_reshard_replicate,
     make_input_shard_1d,
+    make_sharded_output_tensor,
     make_output_replicate_1d,
     make_output_reshard_tensor,
     make_output_shard_1d,
@@ -41,7 +42,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            "device_mesh has dims [0-9]+ but expcted to be 1 for input.",
+            "device_mesh has dims [0-9]+ but expected to be 1 for input.",
         ):
             dtensor = func(input_local_tensor, device_mesh)
 
@@ -186,7 +187,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         )
         with self.assertRaisesRegex(
             AssertionError,
-            "device_mesh has dims 2 but expcted to be 1 for output.",
+            "device_mesh has dims 2 but expected to be 1 for output.",
         ):
             func(dtensor, device_mesh)
 
@@ -203,14 +204,14 @@ class TensorParallelStyleTest(DTensorTestBase):
         self._1d_input_func_check(tensor, tensor, rs._prepare_input)
         # TODO: change output test
         output, dtensor, device_mesh = self._test_prepare_output(
-            rs._prepare_input, [Shard(0)]
+            rs._prepare_output, [Shard(0)]
         )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
+        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]).to_local())
         # test when input device_mesh is None.
         output, dtensor, device_mesh = self._test_prepare_output(
-            rs._prepare_input, [Shard(0)], None, True
+            rs._prepare_output, [Shard(0)], None, True
         )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
+        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]).to_local())
         self._test_prepare_output_error(rs._prepare_output)
 
     @with_comms
@@ -218,7 +219,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         tensor = torch.rand(8, 16, device=self.device_type)
         cs = ColwiseParallel()
         self._1d_input_func_check(tensor, tensor, cs._prepare_input)
-        self.assertEqual(make_output_replicate_1d, cs._prepare_output)
+        self.assertEqual(make_sharded_output_tensor, cs._prepare_output)
 
 
 if __name__ == "__main__":

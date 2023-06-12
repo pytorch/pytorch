@@ -2,7 +2,6 @@
 
 import functools
 import unittest
-from unittest.mock import patch
 
 import torch
 
@@ -11,7 +10,11 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    skipIfRocm,
+    TEST_CUDA_GRAPH,
+    TEST_WITH_ROCM,
+)
 
 
 def composed(*decs):
@@ -105,7 +108,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         y = torch.randn((), device="cpu")
         fn(x, y)
 
-    @patch("torch._functorch.config.use_functionalize", True)
+    @skipIfRocm
     def test_mutate_input(self):
         def model(x, y):
             y.add_(3)
@@ -160,7 +163,6 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         y = torch.randn(3, device="cuda:0", requires_grad=True)
         fn(y)
 
-    @patch("torch._functorch.config.use_functionalize", True)
     @patch_all()
     def test_mutated_metadata(self):
         # more tortured example at
@@ -181,7 +183,6 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         x = torch.empty(0, device="cuda:0")
         fn(x)
 
-    @patch("torch._functorch.config.use_functionalize", True)
     @patch_all()
     def test_dead_fill(self):
         def model(x):
@@ -205,5 +206,12 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_CUDA_GRAPH:
+        if __name__ == "__main__":
+            import sys
+
+            sys.exit(0)
+        raise unittest.SkipTest("cuda graph test is skipped")
 
     run_tests()

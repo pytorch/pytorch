@@ -35,6 +35,7 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestTracer(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_large_nbr_kernel_args(self):
@@ -136,6 +137,16 @@ class TestTracer(JitTestCase):
             return (x,)
         jit_f2 = torch.jit.trace(f2, x)
         assert f2(x) == jit_f2(x)  # fails
+
+    def test_trace_out_operator_with_two_output(self):
+        example_input = torch.rand(2, 8)
+        out_1, out_2 = torch.cummax(example_input, 1)
+
+        def run_cummax(example_input, out_1, out_2):
+            output_1, output_2 = torch.cummax(example_input, 1, out=(out_1, out_2))
+            return output_1, output_2
+
+        trace_model = torch.jit.trace(run_cummax, (example_input, out_1, out_2))
 
     def test_trace_namedtuple(self):
         Point = namedtuple('point', ['x', 'y'])
@@ -1973,7 +1984,24 @@ class TestTracer(JitTestCase):
         m2 = torch.jit.trace(model, (torch.ones(1), torch.ones(1)))
         m3 = torch.jit.trace(model, example_kwarg_inputs={'x': torch.ones(1), "y": torch.ones(1)}, strict=False)
 
+    def test_trace_with_tuple_tensor(self):
+        class MyClass(torch.nn.Module):
+            def __init__(self):
+                super(MyClass, self).__init__()
 
+            def forward(self, x, y):
+                return x + y[0] + y[1]
+
+        model = MyClass()
+        traced_model = torch.jit.trace(model, (torch.ones(1), (torch.ones(1), torch.ones(1))))
+        input_dict = {"x": torch.tensor([2, 3]), "y": (torch.tensor([5, 6]), torch.tensor([7, 8]))}
+        self.assertEqual(model(**input_dict), traced_model(**input_dict))
+        traced_model = torch.jit.trace(model, example_kwarg_inputs={
+                                       'x': torch.ones(1), "y": (torch.ones(1), torch.ones(1))})
+        self.assertEqual(model(**input_dict), traced_model(**input_dict))
+
+
+@skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):
         @torch.jit.script

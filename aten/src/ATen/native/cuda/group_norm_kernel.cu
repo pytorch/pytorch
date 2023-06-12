@@ -572,9 +572,9 @@ void GroupNormKernelImplInternal(
   }
   const int64_t G = group;
   const int64_t D = C / G;
-  const T* X_data = X.data_ptr<T>();
-  T* mean_data = mean.data_ptr<T>();
-  T* rstd_data = rstd.data_ptr<T>();
+  const T* X_data = X.const_data_ptr<T>();
+  T* mean_data = mean.mutable_data_ptr<T>();
+  T* rstd_data = rstd.mutable_data_ptr<T>();
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int64_t num_threads = D * HxW < cuda_utils::kCUDABlockReduceNumThreads
@@ -605,10 +605,10 @@ void GroupNormKernelImplInternal(
         : X.scalar_type();
     Tensor a = at::empty({N, C}, X.options().dtype(kAccType));
     Tensor b = at::empty({N, C}, X.options().dtype(kAccType));
-    const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
-    const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
-    T_ACC* a_data = a.data_ptr<T_ACC>();
-    T_ACC* b_data = b.data_ptr<T_ACC>();
+    const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
+    const T* beta_data = beta.defined() ? beta.const_data_ptr<T>() : nullptr;
+    T_ACC* a_data = a.mutable_data_ptr<T_ACC>();
+    T_ACC* b_data = b.mutable_data_ptr<T_ACC>();
 
     // TODO: Since there is some issues in gpu_kernel_multiple_outputs, we are
     // using maunal kernel here. Make it using gpu_kernel_multiple_outputs once
@@ -682,22 +682,22 @@ void GroupNorm1dBackward(
   using T_ACC = acc_type<T, true>;
   const int64_t G = group;
   const int64_t D = C / G;
-  const T* dY_data = dY.data_ptr<T>();
-  const T* X_data = X.data_ptr<T>();
-  const T* mean_data = mean.data_ptr<T>();
-  const T* rstd_data = rstd.data_ptr<T>();
+  const T* dY_data = dY.const_data_ptr<T>();
+  const T* X_data = X.const_data_ptr<T>();
+  const T* mean_data = mean.const_data_ptr<T>();
+  const T* rstd_data = rstd.const_data_ptr<T>();
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX.defined()) {
-    const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+    const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
     const auto kAccType =
         (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
         ? kFloat
         : X.scalar_type();
     Tensor c2 = at::empty({N, G}, X.options().dtype(kAccType));
     Tensor c3 = at::empty({N, G}, X.options().dtype(kAccType));
-    T_ACC* c2_data = c2.data_ptr<T_ACC>();
-    T_ACC* c3_data = c3.data_ptr<T_ACC>();
+    T_ACC* c2_data = c2.mutable_data_ptr<T_ACC>();
+    T_ACC* c3_data = c3.mutable_data_ptr<T_ACC>();
     const int64_t num_threads = (C / G) < cuda_utils::kCUDABlockReduceNumThreads
         ? at::cuda::warp_size()
         : cuda_utils::kCUDABlockReduceNumThreads;
@@ -754,8 +754,8 @@ void GroupNorm1dBackward(
     }
   }
   if (dgamma.defined() || dbeta.defined()) {
-    T* dgamma_data = dgamma.defined() ? dgamma.data_ptr<T>() : nullptr;
-    T* dbeta_data = dbeta.defined() ? dbeta.data_ptr<T>() : nullptr;
+    T* dgamma_data = dgamma.defined() ? dgamma.mutable_data_ptr<T>() : nullptr;
+    T* dbeta_data = dbeta.defined() ? dbeta.mutable_data_ptr<T>() : nullptr;
     if (N <= 128) {
       const int64_t B = (C + kCUDANumThreads - 1) / kCUDANumThreads;
       GammaBeta1dBackwardCUDAKernel1<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
@@ -826,19 +826,19 @@ void GroupNormBackwardKernelImplInternal(
     return;
   }
 
-  const T* dY_data = dY.data_ptr<T>();
-  const T* X_data = X.data_ptr<T>();
-  const T* mean_data = mean.data_ptr<T>();
-  const T* rstd_data = rstd.data_ptr<T>();
-  const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
+  const T* dY_data = dY.const_data_ptr<T>();
+  const T* X_data = X.const_data_ptr<T>();
+  const T* mean_data = mean.const_data_ptr<T>();
+  const T* rstd_data = rstd.const_data_ptr<T>();
+  const T* gamma_data = gamma.defined() ? gamma.const_data_ptr<T>() : nullptr;
   const auto kAccType =
       (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
       ? kFloat
       : X.scalar_type();
   Tensor ds = at::empty({N, C}, X.options().dtype(kAccType));
   Tensor db = at::empty({N, C}, X.options().dtype(kAccType));
-  T_ACC* ds_data = ds.data_ptr<T_ACC>();
-  T_ACC* db_data = db.data_ptr<T_ACC>();
+  T_ACC* ds_data = ds.mutable_data_ptr<T_ACC>();
+  T_ACC* db_data = db.mutable_data_ptr<T_ACC>();
 
   if (HxW == 1) {
     GroupNorm1dBackward<T>(
@@ -858,8 +858,8 @@ void GroupNormBackwardKernelImplInternal(
     Tensor c1 = at::empty({0}, X.options().dtype(kAccType));
     Tensor c2 = at::empty({N, G}, X.options().dtype(kAccType));
     Tensor c3 = at::empty({N, G}, X.options().dtype(kAccType));
-    T_ACC* c2_data = c2.data_ptr<T_ACC>();
-    T_ACC* c3_data = c3.data_ptr<T_ACC>();
+    T_ACC* c2_data = c2.mutable_data_ptr<T_ACC>();
+    T_ACC* c3_data = c3.mutable_data_ptr<T_ACC>();
 
     if (gamma.defined()) {
       auto iter = TensorIteratorConfig()
@@ -925,8 +925,8 @@ void GroupNormBackwardKernelImplInternal(
     }
   }
   if (dgamma.defined() || dbeta.defined()) {
-    T* dgamma_data = dgamma.defined() ? dgamma.data_ptr<T>() : nullptr;
-    T* dbeta_data = dbeta.defined() ? dbeta.data_ptr<T>() : nullptr;
+    T* dgamma_data = dgamma.defined() ? dgamma.mutable_data_ptr<T>() : nullptr;
+    T* dbeta_data = dbeta.defined() ? dbeta.mutable_data_ptr<T>() : nullptr;
     if (N <= 128) {
       // For small batch size, do colwise reduce directly.
       const int64_t B = (C + kCUDANumThreads - 1) / kCUDANumThreads;

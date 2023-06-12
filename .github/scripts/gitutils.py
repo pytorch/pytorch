@@ -5,8 +5,21 @@ import re
 import tempfile
 from collections import defaultdict
 from datetime import datetime
-from typing import cast, Any, Dict, Iterator, List, Optional, Tuple, Union
+from functools import wraps
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
+T = TypeVar("T")
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
 
@@ -17,6 +30,7 @@ def get_git_remote_name() -> str:
 
 def get_git_repo_dir() -> str:
     from pathlib import Path
+
     return os.getenv("GIT_REPO_DIR", str(Path(__file__).resolve().parent.parent.parent))
 
 
@@ -25,13 +39,14 @@ def fuzzy_list_to_dict(items: List[Tuple[str, str]]) -> Dict[str, List[str]]:
     Converts list to dict preserving elements with duplicate keys
     """
     rc: Dict[str, List[str]] = defaultdict(lambda: [])
-    for (key, val) in items:
+    for key, val in items:
         rc[key].append(val)
     return dict(rc)
 
 
 def _check_output(items: List[str], encoding: str = "utf-8") -> str:
-    from subprocess import check_output, CalledProcessError, STDOUT
+    from subprocess import CalledProcessError, check_output, STDOUT
+
     try:
         return check_output(items, stderr=STDOUT).decode(encoding)
     except CalledProcessError as e:
@@ -53,13 +68,15 @@ class GitCommit:
     author_date: datetime
     commit_date: Optional[datetime]
 
-    def __init__(self,
-                 commit_hash: str,
-                 author: str,
-                 author_date: datetime,
-                 title: str,
-                 body: str,
-                 commit_date: Optional[datetime] = None) -> None:
+    def __init__(
+        self,
+        commit_hash: str,
+        author: str,
+        author_date: datetime,
+        title: str,
+        body: str,
+        commit_date: Optional[datetime] = None,
+    ) -> None:
         self.commit_hash = commit_hash
         self.author = author
         self.author_date = author_date
@@ -100,13 +117,14 @@ def parse_fuller_format(lines: Union[str, List[str]]) -> GitCommit:
     assert lines[3].startswith("Commit: ")
     assert lines[4].startswith("CommitDate: ")
     assert len(lines[5]) == 0
-    return GitCommit(commit_hash=lines[0].split()[1].strip(),
-                     author=lines[1].split(":", 1)[1].strip(),
-                     author_date=datetime.fromtimestamp(int(lines[2].split(":", 1)[1].strip())),
-                     commit_date=datetime.fromtimestamp(int(lines[4].split(":", 1)[1].strip())),
-                     title=lines[6].strip(),
-                     body="\n".join(lines[7:]),
-                     )
+    return GitCommit(
+        commit_hash=lines[0].split()[1].strip(),
+        author=lines[1].split(":", 1)[1].strip(),
+        author_date=datetime.fromtimestamp(int(lines[2].split(":", 1)[1].strip())),
+        commit_date=datetime.fromtimestamp(int(lines[4].split(":", 1)[1].strip())),
+        title=lines[6].strip(),
+        body="\n".join(lines[7:]),
+    )
 
 
 class GitRepo:
@@ -139,16 +157,16 @@ class GitRepo:
             self._run_git("fetch", self.remote, f"{ref}:{branch}")
 
     def show_ref(self, name: str) -> str:
-        refs = self._run_git('show-ref', '-s', name).strip().split('\n')
+        refs = self._run_git("show-ref", "-s", name).strip().split("\n")
         if not all(refs[i] == refs[0] for i in range(1, len(refs))):
-            raise RuntimeError(f"referce {name} is ambigous")
+            raise RuntimeError(f"reference {name} is ambiguous")
         return refs[0]
 
     def rev_parse(self, name: str) -> str:
-        return self._run_git('rev-parse', '--verify', name).strip()
+        return self._run_git("rev-parse", "--verify", name).strip()
 
     def get_merge_base(self, from_ref: str, to_ref: str) -> str:
-        return self._run_git('merge-base', from_ref, to_ref).strip()
+        return self._run_git("merge-base", from_ref, to_ref).strip()
 
     def patch_id(self, ref: Union[str, List[str]]) -> List[Tuple[str, str]]:
         is_list = isinstance(ref, list)
@@ -156,25 +174,31 @@ class GitRepo:
             if len(ref) == 0:
                 return []
             ref = " ".join(ref)
-        rc = _check_output(['sh', '-c', f'git -C {self.repo_dir} show {ref}|git patch-id --stable']).strip()
+        rc = _check_output(
+            ["sh", "-c", f"git -C {self.repo_dir} show {ref}|git patch-id --stable"]
+        ).strip()
         return [cast(Tuple[str, str], x.split(" ", 1)) for x in rc.split("\n")]
 
     def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
         owner, name = self.gh_owner_and_name()
         msg = f"Pull Request resolved: https://github.com/{owner}/{name}/pull/{pr_num}"
-        rc = self._run_git('log', '--format=%H', '--grep', msg).strip()
+        rc = self._run_git("log", "--format=%H", "--grep", msg).strip()
         return rc.split("\n") if len(rc) > 0 else []
 
     def get_commit(self, ref: str) -> GitCommit:
-        return parse_fuller_format(self._run_git('show', '--format=fuller', '--date=unix', '--shortstat', ref))
+        return parse_fuller_format(
+            self._run_git("show", "--format=fuller", "--date=unix", "--shortstat", ref)
+        )
 
     def cherry_pick(self, ref: str) -> None:
-        self._run_git('cherry-pick', '-x', ref)
+        self._run_git("cherry-pick", "-x", ref)
 
     def revert(self, ref: str) -> None:
         self._run_git("revert", "--no-edit", ref)
 
-    def compute_branch_diffs(self, from_branch: str, to_branch: str) -> Tuple[List[str], List[str]]:
+    def compute_branch_diffs(
+        self, from_branch: str, to_branch: str
+    ) -> Tuple[List[str], List[str]]:
         """
         Returns list of commmits that are missing in each other branch since their merge base
         Might be slow if merge base is between two branches is pretty far off
@@ -182,8 +206,8 @@ class GitRepo:
         from_ref = self.rev_parse(from_branch)
         to_ref = self.rev_parse(to_branch)
         merge_base = self.get_merge_base(from_ref, to_ref)
-        from_commits = self.revlist(f'{merge_base}..{from_ref}')
-        to_commits = self.revlist(f'{merge_base}..{to_ref}')
+        from_commits = self.revlist(f"{merge_base}..{from_ref}")
+        to_commits = self.revlist(f"{merge_base}..{to_ref}")
         from_ids = fuzzy_list_to_dict(self.patch_id(from_commits))
         to_ids = fuzzy_list_to_dict(self.patch_id(to_commits))
         for patch_id in set(from_ids).intersection(set(to_ids)):
@@ -199,14 +223,19 @@ class GitRepo:
                         # HACK: Same commit were merged, reverted and landed again
                         # which creates a tracking problem
                         if (
-                            "pytorch/pytorch" not in self.remote_url() or
-                            frc.commit_hash not in {"0a6a1b27a464ba5be5f587cce2ee12ab8c504dbf",
-                                                    "6d0f4a1d545a8f161df459e8d4ccafd4b9017dbe",
-                                                    "edf909e58f06150f7be41da2f98a3b9de3167bca",
-                                                    "a58c6aea5a0c9f8759a4154e46f544c8b03b8db1",
-                                                    "7106d216c29ca16a3504aa2bedad948ebcf4abc2"}
+                            "pytorch/pytorch" not in self.remote_url()
+                            or frc.commit_hash
+                            not in {
+                                "0a6a1b27a464ba5be5f587cce2ee12ab8c504dbf",
+                                "6d0f4a1d545a8f161df459e8d4ccafd4b9017dbe",
+                                "edf909e58f06150f7be41da2f98a3b9de3167bca",
+                                "a58c6aea5a0c9f8759a4154e46f544c8b03b8db1",
+                                "7106d216c29ca16a3504aa2bedad948ebcf4abc2",
+                            }
                         ):
-                            raise RuntimeError(f"Unexpected differences between {frc} and {toc}")
+                            raise RuntimeError(
+                                f"Unexpected differences between {frc} and {toc}"
+                            )
                     from_commits.remove(frc.commit_hash)
                     to_commits.remove(toc.commit_hash)
                 continue
@@ -217,11 +246,13 @@ class GitRepo:
         # Another HACK: Patch-id is not stable for commits with binary files or for big changes across commits
         # I.e. cherry-picking those from one branch into another will change patchid
         if "pytorch/pytorch" in self.remote_url():
-            for excluded_commit in {"8e09e20c1dafcdbdb45c2d1574da68a32e54a3a5",
-                                    "5f37e5c2a39c3acb776756a17730b865f0953432",
-                                    "b5222584e6d6990c6585981a936defd1af14c0ba",
-                                    "84d9a2e42d5ed30ec3b8b4140c38dd83abbce88d",
-                                    "f211ec90a6cdc8a2a5795478b5b5c8d7d7896f7e"}:
+            for excluded_commit in {
+                "8e09e20c1dafcdbdb45c2d1574da68a32e54a3a5",
+                "5f37e5c2a39c3acb776756a17730b865f0953432",
+                "b5222584e6d6990c6585981a936defd1af14c0ba",
+                "84d9a2e42d5ed30ec3b8b4140c38dd83abbce88d",
+                "f211ec90a6cdc8a2a5795478b5b5c8d7d7896f7e",
+            }:
                 if excluded_commit in from_commits:
                     from_commits.remove(excluded_commit)
 
@@ -281,7 +312,14 @@ class GitRepo:
 
 def clone_repo(username: str, password: str, org: str, project: str) -> GitRepo:
     path = tempfile.mkdtemp()
-    _check_output(['git', 'clone', f'https://{username}:{password}@github.com/{org}/{project}', path]).strip()
+    _check_output(
+        [
+            "git",
+            "clone",
+            f"https://{username}:{password}@github.com/{org}/{project}",
+            path,
+        ]
+    ).strip()
     return GitRepo(path=path)
 
 
@@ -337,17 +375,42 @@ def patterns_to_regex(allowed_patterns: List[str]) -> Any:
     rc += ")"
     return re.compile(rc)
 
+
 def _shasum(value: str) -> str:
     import hashlib
+
     m = hashlib.sha256()
     m.update(value.encode("utf-8"))
     return m.hexdigest()
 
 
 def are_ghstack_branches_in_sync(repo: GitRepo, head_ref: str) -> bool:
-    """ Checks that diff between base and head is the same as diff between orig and its parent """
-    orig_ref = re.sub(r'/head$', '/orig', head_ref)
-    base_ref = re.sub(r'/head$', '/base', head_ref)
+    """Checks that diff between base and head is the same as diff between orig and its parent"""
+    orig_ref = re.sub(r"/head$", "/orig", head_ref)
+    base_ref = re.sub(r"/head$", "/base", head_ref)
     orig_diff_sha = _shasum(repo.diff(f"{repo.remote}/{orig_ref}"))
-    head_diff_sha = _shasum(repo.diff(f"{repo.remote}/{base_ref}", f"{repo.remote}/{head_ref}"))
+    head_diff_sha = _shasum(
+        repo.diff(f"{repo.remote}/{base_ref}", f"{repo.remote}/{head_ref}")
+    )
     return orig_diff_sha == head_diff_sha
+
+
+def retries_decorator(
+    rc: Any = None, num_retries: int = 3
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    def decorator(f: Callable[..., T]) -> Callable[..., T]:
+        @wraps(f)
+        def wrapper(*args: List[Any], **kwargs: Dict[str, Any]) -> T:
+            for idx in range(num_retries):
+                try:
+                    return f(*args, **kwargs)
+                except Exception as e:
+                    print(
+                        f'Attempt {idx} of {num_retries} to call {f.__name__} failed with "{e}"'
+                    )
+                    pass
+            return cast(T, rc)
+
+        return wrapper
+
+    return decorator

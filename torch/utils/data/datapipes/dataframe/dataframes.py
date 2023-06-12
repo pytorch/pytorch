@@ -217,7 +217,7 @@ class CaptureCall(Capture):
 
     def execute(self):
 
-        # TODO: VitalyFedyunin execute kwargs and maybe nestted structures
+        # TODO: VitalyFedyunin execute kwargs and maybe nested structures
         executed_args = []
         for arg in self.kwargs['args']:
             if isinstance(arg, Capture):

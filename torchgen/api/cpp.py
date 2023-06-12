@@ -313,6 +313,7 @@ JIT_TO_CPP_DEFAULT = {
     "long": "at::kLong",
 }
 
+
 # Convert a JIT default into C++ expression representing the default
 def default_expr(d: str, t: Type, *, symint: bool) -> str:
     if d == "None" and str(t) == "Tensor?":

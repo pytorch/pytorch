@@ -87,7 +87,7 @@ jobs:
           {
             echo "DOCKER_IMAGE=pytorch-nightly";
             echo "INSTALL_CHANNEL=pytorch-nightly";
-            echo "TRITON_VERSION=2.0.0+$(cut -c -10 .github/ci_commit_pins/triton.txt)";
+            echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)+$(cut -c -10 .ci/docker/ci_commit_pins/triton.txt)";
           } >> "${GITHUB_ENV}"
       - name: Run docker build / push
         # WITH_PUSH is used here to determine whether or not to add the --push flag

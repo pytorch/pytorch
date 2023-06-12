@@ -81,7 +81,7 @@ def _should_compress(
 
     The result of this function is a tuple of the form (compression_recommendation, uncompressed_el_count, compressed_el_count), where:
 
-    compresion_recommendation is true if the tensor is worth compressing, and false otherwise (see above);
+    compression_recommendation is true if the tensor is worth compressing, and false otherwise (see above);
 
     uncompressed_el_count is the uncompressed element count, i.e. ``num_rows`` * ``num_cols``; and,
 
@@ -106,8 +106,8 @@ def _report_compression_stats(bucket, state):
     ):
         stats = state.compression_stats()
         logger.info(
-            "Compression stats: iter {}, total before compression {}, total after compression {}, "
-            "rate {}".format(state.iter, stats[1], stats[2], stats[0])
+            "Compression stats: iter %s, total before compression %s, total after compression %s, "
+            "rate %s", state.iter, stats[1], stats[2], stats[0]
         )
         state.next_stats_report = state.iter + state.compression_stats_logging_frequency
 
@@ -183,19 +183,18 @@ class PowerSGDState:
         batch_tensors_with_same_shape: bool = False,
     ):
         logger.info(
-            "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
-            "min_compression_rate = {}; orthogonalization_epsilon = {}; use_error_feedback = {}; warm_start = {}; "
-            "random_seed = {}; compression_stats_logging_frequency = {}; batch_tensors_with_same_shape = {}".format(
-                matrix_approximation_rank,
-                start_powerSGD_iter,
-                min_compression_rate,
-                orthogonalization_epsilon,
-                use_error_feedback,
-                warm_start,
-                random_seed,
-                compression_stats_logging_frequency,
-                batch_tensors_with_same_shape,
-            )
+            "PowerSGD config: matrix_approximation_rank = %s; start_powerSGD_iter = %s; "
+            "min_compression_rate = %s; orthogonalization_epsilon = %s; use_error_feedback = %s; warm_start = %s; "
+            "random_seed = %s; compression_stats_logging_frequency = %s; batch_tensors_with_same_shape = %s",
+            matrix_approximation_rank,
+            start_powerSGD_iter,
+            min_compression_rate,
+            orthogonalization_epsilon,
+            use_error_feedback,
+            warm_start,
+            random_seed,
+            compression_stats_logging_frequency,
+            batch_tensors_with_same_shape,
         )
 
         self.process_group = process_group
@@ -258,7 +257,7 @@ class PowerSGDState:
             1, compression_stats_logging_frequency
         )
         self.next_stats_report = 0
-        # Batching tensors with same shape can increase parallelism in compressiom / decompression computation.
+        # Batching tensors with same shape can increase parallelism in compression / decompression computation.
         # This requires a larger bucket size to make more same-shaped tensor to appear in one bucket, however
         # this may reduce the overlap between computation and communication, and increase the memory footprint
         # due to stacking tensors.
@@ -300,7 +299,7 @@ class PowerSGDState:
 
         if self.iter == self.start_powerSGD_iter:
             logger.info(
-                "Start to apply PowerSGD after {} iterations.".format(self.iter)
+                "Start to apply PowerSGD after %s iterations.", self.iter
             )
 
     def compression_stats(self):
@@ -409,9 +408,8 @@ def powerSGD_hook(
             input_tensor.add_(state.error_dict[bucket_index])
         else:
             logger.info(
-                "A zero tensor of length {} that represents local error is created.".format(
-                    total_length
-                )
+                "A zero tensor of length %s that represents local error is created.",
+                total_length
             )
             state.error_dict[bucket_index] = torch.zeros(
                 total_length, device=device, dtype=dtype
@@ -468,9 +466,8 @@ def powerSGD_hook(
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
             logger.info(
-                "Allocating contiguous memory of length {} for Ps, and of length {} for Qs, respectively.".format(
-                    total_Ps_size, total_Qs_size
-                )
+                "Allocating contiguous memory of length %s for Ps, and of length %s for Qs, respectively.",
+                total_Ps_size, total_Qs_size
             )
         state.p_memory_dict[bucket_index] = torch.empty(
             total_Ps_size, device=device, dtype=dtype
@@ -728,9 +725,8 @@ def batched_powerSGD_hook(
             input_tensor.add_(state.error_dict[bucket_index])
         else:
             logger.info(
-                "A zero tensor of length {} that represents local error is created.".format(
-                    padded_total_length
-                )
+                "A zero tensor of length %s that represents local error is created.",
+                padded_total_length
             )
             state.error_dict[bucket_index] = torch.zeros(
                 padded_total_length, device=device, dtype=input_tensor.dtype
@@ -749,9 +745,8 @@ def batched_powerSGD_hook(
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
             logger.info(
-                "Initializing low-rank tensors P and Q, each of which has a shape of {} x {}.".format(
-                    square_side_length, state.matrix_approximation_rank
-                )
+                "Initializing low-rank tensors P and Q, each of which has a shape of %s x %s.",
+                square_side_length, state.matrix_approximation_rank
             )
 
         def create_low_rank_tensor(fill_random_values, rng):
@@ -827,7 +822,7 @@ def batched_powerSGD_hook(
         if state.use_error_feedback:
             # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
-        # Removing this seemingly unnecessary sync somehow may cause faliures.
+        # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)

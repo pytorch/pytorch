@@ -41,7 +41,9 @@ torch::nn::ReflectionPad3d|Yes|No
 torch::nn::ReplicationPad1d|Yes|No
 torch::nn::ReplicationPad2d|Yes|No
 torch::nn::ReplicationPad3d|Yes|No
+torch::nn::ZeroPad1d|Yes|No
 torch::nn::ZeroPad2d|Yes|No
+torch::nn::ZeroPad3d|Yes|No
 torch::nn::ConstantPad1d|Yes|No
 torch::nn::ConstantPad2d|Yes|No
 torch::nn::ConstantPad3d|Yes|No

@@ -23,7 +23,7 @@ def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
 def conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs):
     args = expanded_args_and_kwargs[:len(expanded_args_and_kwargs) - len(kwarg_names)]
     kwargs = expanded_args_and_kwargs[len(expanded_args_and_kwargs) - len(kwarg_names):]
-    kwargs = {name: arg for (name, arg) in zip(kwarg_names, kwargs)}
+    kwargs = dict(zip(kwarg_names, kwargs))
 
     return conv_normalizer(*args, **kwargs)
 
@@ -197,7 +197,7 @@ def unfold3d(
         stride: the stride of the sliding blocks in the input spatial dimensions
         dilation: the spacing between the kernel points.
     Returns:
-        A tensor of shape ``(B, C * np.product(kernel_size), L)``, where L - output spatial dimensions.
+        A tensor of shape ``(B, C * np.prod(kernel_size), L)``, where L - output spatial dimensions.
         See :class:`torch.nn.Unfold` for more details
     Example:
         >>> # xdoctest: +SKIP

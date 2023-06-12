@@ -84,8 +84,8 @@ struct CastLoadPolicy<scalar_t, scalar_t>:
 // For inner sum, load full vec_t then sum partials down to vacc_t size
 template <typename vec_t, typename vacc_t>
 struct InnerSumCastLoadPolicy {
-  using scalar_t = typename vec_t::value_type;
-  using acc_t = typename vacc_t::value_type;
+  using scalar_t = vechold_type<vec_t>;
+  using acc_t = vechold_type<vacc_t>;
 
   static constexpr int64_t memsize() {
     return LoadPolicy<vec_t>::memsize();
@@ -124,8 +124,8 @@ struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
 // For outer sum, load a partial vec_t of size vacc_t then cast to vacc_t
 template <typename vec_t, typename vacc_t>
 struct OuterSumCastLoadPolicy {
-  using scalar_t = typename vec_t::value_type;
-  using acc_t = typename vacc_t::value_type;
+  using scalar_t = vechold_type<vec_t>;
+  using acc_t = vechold_type<vacc_t>;
 
   static constexpr int64_t memsize() {
     return sizeof(scalar_t) * vacc_t::size();
@@ -212,8 +212,8 @@ struct NanSumCastLoadPolicy {
 
 template <typename vec_t, typename vacc_t>
 struct InnerNanSumCastLoadPolicy {
-  using scalar_t = typename vec_t::value_type;
-  using acc_t = typename vacc_t::value_type;
+  using scalar_t = vechold_type<vec_t>;
+  using acc_t = vechold_type<vacc_t>;
 
   static constexpr int64_t memsize() {
     return LoadPolicy<vec_t>::memsize();

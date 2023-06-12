@@ -83,7 +83,7 @@ static std::atomic<bool> profiling_mode{true};
 
 static std::mutex fusion_strategy_lock;
 
-FusionStrategy getInitialStrategy() {
+static FusionStrategy getInitialStrategy() {
   if (FLAGS_torch_jit_always_dynamic) {
     return {{FusionBehavior::DYNAMIC, 12}};
   }
@@ -245,7 +245,7 @@ static C10_UNUSED void setRequiresGradOnDiffGraph(Node* dnode) {
   }
 }
 
-bool guardDifferentiableGraph(Node* dnode) {
+static bool guardDifferentiableGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   bool all_inputs_seen = true;
   for (const auto i : c10::irange(gi.size())) {
@@ -323,7 +323,7 @@ void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
       "After EliminateDeadCode (end of runNooptPassPipeline)\n", *graph);
 }
 
-void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
+static void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG(
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
       *graph);
@@ -395,7 +395,7 @@ FusionBehavior ProfilingGraphExecutorImpl::getCurrentBehavior(
     }
   }
   // should never get here
-  TORCH_WARN("Stratgy changed mid-invocation, NYI");
+  TORCH_WARN("Strategy changed mid-invocation, NYI");
   return FusionBehavior::STATIC;
 }
 
@@ -700,7 +700,7 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   return state;
 }
 
-Node* insertFallbackFunctionCall(
+static Node* insertFallbackFunctionCall(
     Graph* graph,
     GraphFunction* func,
     ArrayRef<Value*> inputs) {
@@ -721,7 +721,7 @@ Node* insertFallbackFunctionCall(
   return fun_unpack_tuple;
 }
 
-GraphFunction* createFallbackPathFunction(
+static GraphFunction* createFallbackPathFunction(
     Block* b,
     const std::string& function_name) {
   auto value_map = [](Value* v) { return v; };

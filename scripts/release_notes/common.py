@@ -6,10 +6,61 @@ import re
 import requests
 import os
 import json
+from dataclasses import dataclass
+
+@dataclass
+class CategoryGroup:
+    name: str
+    categories: list
+
+frontend_categories = [
+    'meta',
+    'nn',
+    'linalg',
+    'cpp',
+    'python',
+    'complex',
+    'vmap',
+    'autograd',
+    'build',
+    'memory_format',
+    'foreach',
+    'dataloader',
+    'sparse',
+    'nested tensor',
+    'optimizer'
+]
+
+pytorch_2_categories = [
+    'dynamo',
+    'inductor',
+]
+
+# These will all get mapped to quantization
+quantization = CategoryGroup(
+    name="quantization",
+    categories=[
+        'quantization',
+        'AO frontend',
+        'AO Pruning', ]
+)
+
+# Distributed has a number of release note labels we want to map to one
+distributed = CategoryGroup(
+    name="distributed",
+    categories=[
+        'distributed',
+        'distributed (c10d)',
+        'distributed (composable)',
+        'distributed (ddp)',
+        'distributed (fsdp)',
+        'distributed (rpc)',
+        'distributed (sharded)',
+    ]
+)
 
 categories = [
     'Uncategorized',
-    'distributed',
     'lazy',
     'hub',
     'mobile',
@@ -17,11 +68,12 @@ categories = [
     'visualization',
     'onnx',
     'caffe2',
-    'quantization',
     'amd',
     'rocm',
     'cuda',
+    'cpu',
     'cudnn',
+    'xla',
     'benchmark',
     'profiler',
     'performance_as_product',
@@ -33,20 +85,15 @@ categories = [
     'vulkan',
     'skip',
     'composability',
-    'meta_frontend',
-    'nn_frontend',
-    'linalg_frontend',
-    'cpp_frontend',
-    'python_frontend',
-    'complex_frontend',
-    'vmap_frontend',
-    'autograd_frontend',
-    'build_frontend',
-    'memory_format_frontend',
-    'foreach_frontend',
-    'dataloader_frontend',
-    'sparse_frontend'
-]
+    # 2.0 release
+    'mps',
+    'intel',
+    'functorch',
+    'gnn',
+    'distributions',
+    'serialization',
+ ]  + [f'{category}_frontend' for category in frontend_categories] + pytorch_2_categories + [quantization.name] + [distributed.name]
+
 
 topics = [
     'bc_breaking',
@@ -141,7 +188,16 @@ def get_ghstack_token():
         raise RuntimeError("Can't find a github oauth token")
     return matches[0]
 
-token = get_ghstack_token()
+def get_token():
+    env_token = os.environ.get("GITHUB_TOKEN")
+    if env_token is not None:
+        print("using GITHUB_TOKEN from environment variable")
+        return env_token
+    else:
+        return get_ghstack_token()
+
+token = get_token()
+
 headers = {"Authorization": f"token {token}"}
 
 def run_query(query):
@@ -149,7 +205,7 @@ def run_query(query):
     if request.status_code == 200:
         return request.json()
     else:
-        raise Exception("Query failed to run by returning code of {}. {}".format(request.status_code, query))
+        raise Exception("Query failed to run by returning code of {}. {}".format(request.status_code, request.json()))
 
 
 def github_data(pr_number):
@@ -179,7 +235,8 @@ def github_data(pr_number):
     }
     """ % pr_number
     query = run_query(query)
-
+    if query.get('errors'):
+        raise Exception(query['errors'])
     edges = query['data']['repository']['pullRequest']['labels']['edges']
     labels = [edge['node']['name'] for edge in edges]
     author = query['data']['repository']['pullRequest']['author']['login']

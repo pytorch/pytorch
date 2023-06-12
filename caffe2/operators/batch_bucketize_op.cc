@@ -117,7 +117,7 @@ after running this operator.
         "Flatten tensor, dimension has to match the sum of lengths")
     .Output(
         0,
-        "bucktized_feat",
+        "bucketized_feat",
         "2-D dense tensor, with 1st dim = float_features.dim(0), 2nd dim = size(indices)"
         "in the arg list, the tensor is of the same data type as `feature`.");
 

@@ -737,11 +737,11 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
     if (!v->type()->cast<TensorType>()) {
       continue;
     }
-    auto from_mkldnn =
-        graph
-            ->create(
-                c10::Symbol::fromQualString("aten::to_dense"), {v, none_value})
-            ->insertAfter(subgraph_node);
+    auto from_mkldnn = graph
+                           ->create(
+                               c10::Symbol::fromQualString("aten::to_dense"),
+                               {v, none_value, none_value})
+                           ->insertAfter(subgraph_node);
     v->replaceAllUsesAfterNodeWith(from_mkldnn, from_mkldnn->output());
   }
 

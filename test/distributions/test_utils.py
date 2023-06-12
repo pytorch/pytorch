@@ -4,7 +4,7 @@ import pytest
 
 import torch
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
-
+from torch.testing._internal.common_utils import run_tests
 
 @pytest.mark.parametrize('shape', [
     (2, 2),
@@ -22,5 +22,5 @@ def test_tril_matrix_to_vec(shape):
         assert torch.allclose(tril_mat, actual)
 
 
-if __name__ == '__main__':
-    pytest.main([__file__])
+if __name__ == "__main__":
+    run_tests()

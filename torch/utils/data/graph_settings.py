@@ -35,6 +35,14 @@ def _get_all_graph_pipes_helper(graph: DataPipeGraph, id_cache: Set[int]) -> Lis
     return results
 
 
+def _is_sharding_datapipe(datapipe: DataPipe) -> bool:
+    if isinstance(datapipe, _ShardingIterDataPipe):
+        return True
+    if hasattr(datapipe, "apply_sharding") and inspect.ismethod(datapipe.apply_sharding):
+        return True
+    return False
+
+
 def apply_sharding(datapipe: DataPipe,
                    num_of_instances: int,
                    instance_id: int,
@@ -48,11 +56,16 @@ def apply_sharding(datapipe: DataPipe,
     def _helper(graph, prev_applied=None):
         for _, (dp, sub_graph) in graph.items():
             applied = None
-            if isinstance(dp, _ShardingIterDataPipe):
+            if _is_sharding_datapipe(dp):
                 if prev_applied is not None:
                     raise RuntimeError("Sharding twice on a single pipeline is likely unintended and will cause data loss. "
                                        f"Sharding already applied to {prev_applied} while trying to apply to {dp}")
-                dp.apply_sharding(num_of_instances, instance_id, sharding_group=sharding_group)
+                # For BC, only provide sharding_group if accepted
+                sig = inspect.signature(dp.apply_sharding)
+                if len(sig.parameters) < 3:
+                    dp.apply_sharding(num_of_instances, instance_id)
+                else:
+                    dp.apply_sharding(num_of_instances, instance_id, sharding_group=sharding_group)
                 applied = dp
             if applied is None:
                 applied = prev_applied

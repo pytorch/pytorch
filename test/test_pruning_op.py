@@ -4,7 +4,7 @@ import hypothesis.strategies as st
 from hypothesis import given
 import numpy as np
 import torch
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
@@ -76,3 +76,7 @@ class PruningOpTest(TestCase):
     )
     def test_rowwise_prune_op_64bit_indices(self, embedding_rows, embedding_dims, weights_dtype):
         self._test_rowwise_prune_op(embedding_rows, embedding_dims, torch.int64, weights_dtype)
+
+
+if __name__ == '__main__':
+    run_tests()

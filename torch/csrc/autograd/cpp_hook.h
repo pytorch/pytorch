@@ -10,9 +10,7 @@ using hooks_list =
     std::vector<std::function<at::TensorBase(const at::TensorBase&)>>;
 
 struct CppFunctionTensorPreHook : public FunctionPreHook {
-  CppFunctionTensorPreHook(
-      const std::shared_ptr<hooks_list>& hooks,
-      int value_idx);
+  CppFunctionTensorPreHook(std::shared_ptr<hooks_list> hooks, int value_idx);
   variable_list operator()(const variable_list& values) override;
 
   std::shared_ptr<hooks_list> hooks_;
