@@ -1630,6 +1630,25 @@ def numpy_attr_wrapper(obj, name):
         return numpy_to_tensor(out)
 
 
+class numpy_method_wrapper:
+    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
+
+    def __init__(self, method: str):
+        self.method = method
+        self.__name__ = "wrapped_" + self.method
+
+    def __repr__(self):
+        return f"<Wrapped method <original {self.method}>>"
+
+    def __call__(self, *args, **kwargs):
+        obj = args[0]
+        if isinstance(obj, torch.Tensor):
+            obj = torch_np.ndarray(obj)
+        method_callable = getattr(obj, self.method)
+        out = method_callable(*args[1:], **kwargs)
+        return numpy_to_tensor(out)
+
+
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
