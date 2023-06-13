@@ -39,9 +39,6 @@ def process_report(
     # We want to keep track of how many times the test fails (num_red) or passes (num_green)
     all_tests: Dict[str, Dict[str, int]] = {}
 
-    if not is_rerun_disabled_tests(root):
-        return all_tests
-
     for test_case in root.iter(TESTCASE_TAG):
         parsed_test_case = process_xml_element(test_case)
 
@@ -237,6 +234,12 @@ def main(repo: str, workflow_run_id: int, workflow_run_attempt: int) -> None:
         args.repo, args.workflow_run_id, args.workflow_run_attempt
     ):
         tests = process_report(report)
+
+        # The scheduled workflow has both rerun disabled tests and memory leak check jobs.
+        # We are only interested in the former here
+        if not is_rerun_disabled_tests(tests):
+            continue
+
         for name, stats in tests.items():
             if name not in all_tests:
                 all_tests[name] = stats.copy()
