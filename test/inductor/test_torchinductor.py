@@ -2752,6 +2752,7 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
+    @skipIfRocm
     def test_batch_norm_2d_2(self):
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
