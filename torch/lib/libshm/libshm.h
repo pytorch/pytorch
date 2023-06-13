@@ -23,7 +23,7 @@ class THManagedMapAllocator : private THManagedMapAllocatorInit,
       const char* manager_handle,
       const char* filename,
       int flags,
-      size_t size);
+      ptrdiff_t size);
 
   void close() override;
 
@@ -35,7 +35,7 @@ class THManagedMapAllocator : private THManagedMapAllocatorInit,
       const char* manager_handle,
       const char* filename,
       int flags,
-      size_t size);
+      ptrdiff_t size);
   static THManagedMapAllocator* fromDataPtr(const at::DataPtr&);
 
   const char* manager_handle() const {
