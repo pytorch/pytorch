@@ -1150,6 +1150,9 @@ class BenchmarkRunner:
         self._args = None
 
     def setup_amp(self):
+        if self.args.only in self.fp32_only_models:
+            return
+
         if self.args.amp and self.args.devices == ["cuda"]:
             # AMP training can lead to small loss values which can undeflow
             # gradient values returning in zero gradients. To solve this
@@ -1212,6 +1215,10 @@ class BenchmarkRunner:
 
     @property
     def non_deterministic_models(self):
+        return set()
+
+    @property
+    def fp32_only_models(self):
         return set()
 
     @property
@@ -2366,7 +2373,12 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
             # See https://github.com/pytorch/pytorch/issues/102814
-            torch._dynamo.config.assume_static_by_default = False
+            if torch._dynamo.config.dynamic_shapes:
+                torch._dynamo.config.assume_static_by_default = False
+            if not torch._dynamo.config.automatic_dynamic_shapes:
+                log.warning(
+                    "hf_T5_generate compiles extremely slowly without dynamic shapes; consider lowering cache_size_limit"
+                )
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -2459,25 +2471,6 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
-
-    if args.inductor or args.inductor_settings:
-        runner.skip_models.update(runner.failing_torchinductor_models)
-        if args.float16:
-            # TODO(jansel): check if correctness issue is real
-            runner.skip_models.add("yolov3")
-
-    if args.float16:
-        # these give `INCORRECT - Variation in Eager runs itself` sometimes
-        runner.non_deterministic_models.update(
-            {
-                "demucs",
-                "pyhpc_equation_of_state",
-                "timm_efficientdet",
-                "pyhpc_isoneutral_mixing",
-                "pyhpc_turbulent_kinetic_energy",
-                "shufflenet_v2_x1_0",
-            }
-        )
 
     if args.no_skip:
         runner.skip_models.clear()
