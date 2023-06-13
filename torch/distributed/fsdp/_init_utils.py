@@ -853,6 +853,7 @@ def _move_module_to_device(
 
     Precondition: ``_check_single_device_module()``.
     """
+    cpu_device = torch.device("cpu")
     if device_from_device_id is not None:
         # BFS from `module` without traversing any nested FSDP instances to
         # collect the parameters/buffers that have not yet been managed
@@ -862,15 +863,19 @@ def _move_module_to_device(
         buffers: List[torch.Tensor] = []
         while queue:
             curr_module = queue.popleft()
+            # NOTE: We include a check to only move parameters/buffers that are
+            # on CPU device. If they are on a CUDA device different from the
+            # one specified by `device_id`, then this does NOT move them. This
+            # is so that we can raise an error in `_get_compute_device()`.
             params.extend(
                 param
                 for param in curr_module.parameters(recurse=False)
-                if param.device != device_from_device_id
+                if param.device == cpu_device
             )
             buffers.extend(
                 buffer
                 for buffer in curr_module.buffers(recurse=False)
-                if buffer.device != device_from_device_id
+                if buffer.device == cpu_device
             )
             for submodule in curr_module.children():
                 if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
@@ -881,7 +886,7 @@ def _move_module_to_device(
         _move_states_to_device(params, buffers, device_from_device_id)
         return
     param = next(_get_orig_params(module, ignored_params), None)
-    if param is not None and param.device == torch.device("cpu"):
+    if param is not None and param.device == cpu_device:
         _warn_cpu_init()
 
 
