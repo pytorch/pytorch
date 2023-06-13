@@ -1092,10 +1092,10 @@ class HistogramObserver(UniformQuantizationObserverBase):
         # Therefore, we avoid such division operation.
         downsample_rate = int(
             torch.ceil(
-                (combined_max - combined_min) * upsample_rate / (self.max_val - self.min_val)
+                ((combined_max - combined_min) / (self.max_val - self.min_val)) * upsample_rate
             ).item()
         )
-        e = downsample_rate * (self.max_val - self.min_val) / upsample_rate - (combined_max - combined_min)
+        e = downsample_rate / upsample_rate * (self.max_val - self.min_val) - (combined_max - combined_min)
         start_idx = int(
             torch.round((self.min_val - combined_min) * self.bins * upsample_rate / (self.max_val - self.min_val)).item()
         )

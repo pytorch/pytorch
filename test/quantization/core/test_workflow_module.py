@@ -329,8 +329,7 @@ class TestObserver(QuantizationTestCase):
 
     def test_histogram_observer_ignore_infinity(self):
         """
-        Ensures that the buffer shapes do not change from uninitialized to
-        initialized states for HistogramObserver.
+        Ensures that HistogramObserver doesn't record values of infinity
         """
         obs = HistogramObserver()
         obs2 = HistogramObserver()
@@ -341,6 +340,21 @@ class TestObserver(QuantizationTestCase):
         obs(x*torch.inf)
         self.assertTrue(obs.min_val!=-torch.inf and obs.max_val!=torch.inf)
         self.assertEqual(obs.histogram, obs2.histogram)
+
+    def test_histogram_observer_handle_close_to_infinity(self):
+        obser = HistogramObserver.with_args(reduce_range=False)()
+        mask = torch.tensor([-3.4028234663852886 * 10**38, 0, 0, 0])
+        obser(mask)
+        obser(mask)
+        scale, zp = obser.calculate_qparams()
+
+        input = torch.randn(4, 1)
+        ref_result = torch.softmax(input + mask, dim=0)
+
+        quant_mask = torch.quantize_per_tensor(mask, scale, zp, torch.quint8)
+        dequant_mask = quant_mask.dequantize()
+        result = torch.softmax(input + dequant_mask, dim=0)
+        self.assertEqual(result, ref_result)
 
     def test_histogram_observer_save_load_state_dict(self):
         """
