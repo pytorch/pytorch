@@ -260,8 +260,8 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
 
     def can_handle_tensor(x):
         r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
-        if proxy_mode._allow_fake_constant:
-            r = r or type(x) in (torch._subclasses.FakeTensor,)
+        # if proxy_mode._allow_fake_constant:
+        #     r = r or type(x) in (torch._subclasses.FakeTensor,)
         if not r:
             unrecognized_types.append(type(x))
         return r

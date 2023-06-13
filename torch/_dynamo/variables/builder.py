@@ -164,6 +164,8 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
+        if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
+            raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
     def load(self, tx):
         return self.source.reconstruct(tx)
@@ -827,10 +829,14 @@ class VariableBuilder:
             # a later point in time.
             ignore_subclass = True
         else:
+            # assert type(value) in (
+            #     torch.Tensor,
+            #     torch.nn.Parameter,
+            #     torch._subclasses.fake_tensor.FakeTensor,
+            # ), type(value)
             assert type(value) in (
                 torch.Tensor,
                 torch.nn.Parameter,
-                torch._subclasses.fake_tensor.FakeTensor,
             ), type(value)
             ignore_subclass = False
 
