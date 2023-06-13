@@ -12,7 +12,7 @@ import copy
 import os
 import itertools
 import sympy
-from collections import defaultdict, deque
+from collections import defaultdict
 from torch.fx.passes import graph_drawer
 from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
@@ -372,19 +372,60 @@ def pointwise_ops():
 
     return ops
 
+def get_depth(node, depth_map):
+    if node in depth_map:
+        return depth_map[node]
 
-def tangent_driven_topological_reordering(gm):
-    """
-    This reordering reorders the graph while prioritizing the users of tangents.
-    This approximately represents what happens in the autograd engine and eager
-    checkpointing. Autograd engine w/ eager checkpointing recomputes activations
-    only when they are required in the bwd pass.
+    # Base case
+    if node.op == "placeholder":
+        depth_map[node] = 0
+        return depth_map[node]
 
-    This pass is required because the current version of duplication of nodes
-    outputs a graph with tensors having way longer life time than necessary. It
-    is certainly possible that in future we harden TorchInductor stack such that
-    it subsumes this reordering optimization as well.
+    # Handle output node
+    if node.op == "output":
+        args = node.args[0]
+        for arg in args:
+            if isinstance(arg, torch.fx.node.Node):
+                get_depth(arg, depth_map)
+        return
+
+    # Get the depth of args and set the depth of this node
+    arg_depths = [get_depth(arg, depth_map) for arg in node.all_input_nodes if isinstance(arg, torch.fx.node.Node)]
+    # factory ops like full, rand might not have any input args
+    if len(arg_depths) == 0:
+        arg_depths = [0]
+    depth_map[node] = max(arg_depths) + 1
+    return depth_map[node]
+
+
+def sort_depths(args, depth_map):
+    arg_depths = {arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)}
+    return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
+
+
+def reordering_to_mimic_autograd_engine(gm):
     """
+    This pass finds the first bwd node in the graph (by looking at users of
+    tangents) and then reorders the graph by walking from this node to all the
+    way to the end of the graph. At each op in this traveral, we insert this op
+    in a new graph and try to bring only the relevant subgraph from the other
+    non-bwd edges relevant for this op. This closely mimics the behavior of
+    autograd engine.
+
+    Why is this pass required in the first place?
+
+    This is an artifact of how partitioners work today. The starting point of
+    partitioner is a joint graph, which is fwd and then bwd graph. In the case
+    of checkpointing, we keep portions of fwd graph in their original place in
+    the joint graph, while obtaining a bwd graph. As a result, the resulting bwd
+    graph has copies of recomputed fwd subgraphs followed by the original bwd
+    graph. If we run this naively, this leads to bad memory footprint, because
+    the fwd subgraphs are live for way longer duration than necessary. This pass
+    reorders the operations such that we prioritize the ops for the original bwd
+    graph while only realizing those ops from the fwd graph that are necessary
+    at any given point in the graph.
+    """
+
     new_graph = fx.Graph()
     env = {}
 
@@ -397,40 +438,48 @@ def tangent_driven_topological_reordering(gm):
             env[node] = new_node
 
 
+    order = {}
+    for idx, node in enumerate(gm.graph.nodes):
+        order[node] = idx
+
+    # Populate depth for the nodes. Depth is the distance from the inputs.
+    depths = {}
+    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
+    get_depth(output_node, depths)
+
     def insert_node_in_graph(node):
         if node in env:
             return env[node]
 
-        if node.op == "output":
-            raise RuntimeError("Should not be here")
-
-        for arg in node.all_input_nodes:
+        # Bias traversal towards the nodes that have higher depth - prioritizes
+        # critical path first.
+        for arg, _ in sort_depths(node.all_input_nodes, depths):
             env[arg] = insert_node_in_graph(arg)
-
         env[node] = new_graph.node_copy(node, lambda x: env[x])
-
         return env[node]
 
+    # Find first bwd node in the graph
     tangent_inputs = list(filter(_is_tangent, gm.graph.nodes))
-    q = deque(tangent_inputs)
+    first_node_in_bwd = None
+    minimum_order = math.inf
+    for tangent in tangent_inputs:
+        for user in tangent.users:
+            if order[user] < minimum_order:
+                minimum_order = order[user]
+                first_node_in_bwd = user
+    assert first_node_in_bwd is not None
 
-    seen = set()
-    while len(q):
-        node = q.popleft()
+    # Build the graph op-by-op by starting from the node all the way to the end
+    for node in list(gm.graph.nodes)[order[first_node_in_bwd]:]:
         insert_node_in_graph(node)
-        for user in node.users:
-            # Check if the node is alredy visited
-            if user not in seen and user.op != "output":
-                q.append(user)
-                seen.add(user)
 
-
-
-    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
-
+    # Build the output node
     new_outputs = []
+    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
     for output in output_node.args[0]:
         if isinstance(output, torch.fx.node.Node):
+            if output not in env:
+                print("output gradient dependent only on fwd", output)
             new_outputs.append(insert_node_in_graph(output))
         else:
             new_outputs.append(output)
@@ -831,7 +880,7 @@ def min_cut_rematerialization_partition(
             fw_module, bw_module = functionalize_rng_ops(
                 joint_module, fw_module, bw_module
             )
-        bw_module = tangent_driven_topological_reordering(bw_module)
+        bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
