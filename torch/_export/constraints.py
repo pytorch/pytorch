@@ -1,10 +1,19 @@
-from typing import Optional
+from typing import Optional, Callable, Union
 
 import torch
-from torch import SymInt
+from torch.types import Number, _complex
+from torch import SymInt, SymFloat
 from torch._dynamo import allow_in_graph
 from torch.fx.experimental.symbolic_shapes import constrain_range_non_symint
 from torch.utils._sympy.value_ranges import ValueRangeError
+
+# `Scalar` type used in native_functions.ymal will be translated to `Union[Number, _complex]`
+# will could cause type error (`Sym***` will be passed in during tracing).
+# Here manually specify for explicitly.
+sym_constrain_range: Callable[
+    [Union[Number, _complex, SymInt, SymFloat], Optional[int], Optional[int]],
+    None,
+] = torch.sym_constrain_range
 
 
 def _constrain_range(symbol, min: Optional[int] = None, max: Optional[int] = None):
@@ -15,7 +24,7 @@ def _constrain_range(symbol, min: Optional[int] = None, max: Optional[int] = Non
         constrain_range_non_symint(symbol, min=min, max=max)
         return
 
-    torch.sym_constrain_range(symbol, min, max)
+    sym_constrain_range(symbol, min, max)
 
 
 # TODO: we want to hide this min/max stuff under some abstraction similar to

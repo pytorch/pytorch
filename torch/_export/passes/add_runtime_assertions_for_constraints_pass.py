@@ -60,8 +60,23 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         super().__init__()
         self.range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
         self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
+        # In some corner case, range constraint assertion could be added for
+        # the same symbol multiple times. For example:
+        # ```
+        # b = x.nonzero()
+        # constrain_as_value(b.shape[0], min=3, max=5)
+        # ```
+        # If x is a fake tensor, b could be fake tensor with size like (i0, 1). In this case,
+        # range constraint could be applied to `i0` at:
+        # 1. b = x.nonzero() - this is due to inside add_assertions it recursively applies
+        #    sym_size_cb until reaching scalar (then applies range constraint).
+        # 2. b.shape[0] passed to constrain_as_value(...).
+        # NOTE: cached_assertions will cause _AddRuntimeAssertionsForConstraintsPass stateful
+        # but only within each pass - it will always be reset at start of each pass.
+        self.cached_assertions: Set[Symbol] = set()
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
+        self.cached_assertions.clear()
         graph_module = copy.deepcopy(graph_module)
         graph = graph_module.graph
 
@@ -231,7 +246,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                     min_val, max_val = _convert_range_to_int(constraint)
                     assert_msg = f" is outside of inline constraint [{min_val}, {max_val}]."
                     call_backs.append(
-                        partial(self._assert_range_constraint, lower=min_val, upper=max_val)
+                        partial(self._assert_range_constraint, lower=min_val, upper=max_val, symbol=symbol)
                     )
                     messages.append(assert_msg)
             elif isinstance(val, torch.Tensor):
@@ -254,7 +269,11 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
             cb(proxy=ret, assert_msg=f"{ret.node}" + msg)
         return ret
 
-    def _assert_range_constraint(self, proxy, lower, upper, assert_msg):
+    def _assert_range_constraint(self, *, proxy, lower, upper, assert_msg, symbol):
+        if symbol in self.cached_assertions:
+            return
+        self.cached_assertions.add(symbol)
+
         if lower > -math.inf:
             self._insert_assert_async(operator.ge, proxy, lower, assert_msg)
 
