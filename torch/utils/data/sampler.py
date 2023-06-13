@@ -160,7 +160,8 @@ class RandomSampler(Sampler[int]):
         if self.replacement:
             for _ in range(self.num_samples // 32):
                 yield from map(int, torch.randint(high=n, size=(32,), dtype=torch.int64, generator=generator).numpy())
-            yield from map(int, torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).numpy())
+            final_samples = torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator)
+            yield from map(int, final_samples.numpy())
         else:
             for _ in range(self.num_samples // n):
                 yield from map(int, torch.randperm(n, generator=generator).numpy())
