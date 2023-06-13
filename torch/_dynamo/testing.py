@@ -310,10 +310,7 @@ def _make_fn_with_patches(fn, *patches):
 
 
 def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
-    class DummyTestClass(cls):
-        pass
-
-    DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+    DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     DummyTestClass.__qualname__ = DummyTestClass.__name__
 
     for name in dir(cls):
@@ -325,6 +322,9 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
             fn = _make_fn_with_patches(fn, *patches)
             fn.__name__ = new_name
             setattr(DummyTestClass, new_name, fn)
+        # NB: Doesn't handle slots correctly, but whatever
+        elif name in cls.__dict__:
+            setattr(DummyTestClass, name, getattr(cls, name))
 
     return DummyTestClass
 
