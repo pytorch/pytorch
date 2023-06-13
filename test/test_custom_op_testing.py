@@ -6,6 +6,7 @@ from torch.testing._internal.optests.compile_check import operator_compile_check
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch._custom_op.impl import custom_op
 
+@unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
 class TestCustomOpTesting(TestCase):
     def setUp(self):
         self.test_ns = '_test_custom_op'
