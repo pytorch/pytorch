@@ -105,34 +105,10 @@ class GraphLowering(torch.fx.Interpreter):
         to each dimension.  We duck-shape tensors, so if two tensors
         have the same size they get assigned the same symbolic variable.
         """
-        if self.reuse_shape_env:
-            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
-                ex.stride()
-            )
-        else:
-            from torch._dynamo.source import ConstantSource
-
-            # TODO: this should not be needed once #93059 lands
-            # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
-            # TODO: make a dedicated UnknownSource for this?
-            # NB: This is using the legacy default behavior from
-            # create_symbolic_sizes_strides_storage_offset but we hope we can
-            # just delete this entirely
-            source = ConstantSource(
-                f"__inductor_unknown_tensor_{len(self._shape_env.var_to_val)}"
-            )
-            (
-                size,
-                stride,
-                _,
-            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(
-                ex,
-                source,
-            )
-
-        size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
-        stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
-        return size, stride
+        assert self.reuse_shape_env:
+        return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
+            ex.stride()
+        )
 
     def static_sizes_strides(self, ex: torch.Tensor):
         """
