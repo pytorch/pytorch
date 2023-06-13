@@ -68,9 +68,8 @@ def add_clones(func):
         # We should change this when Dynamo does support tree_map.
         # Note that what we have is still correct, because operators do
         # not accept nested lists.
-        args = tuple(clone_arg(a) if isinstance(a, torch.Tensor) else a for a in args)
-        kwargs = {(clone_arg(a) if isinstance(k, torch.Tensor) else k): v
-                  for k, v in kwargs.items()}
+        args = tuple(clone_arg(a) for a in args)
+        kwargs = {k: clone_arg(v) for k, v in kwargs.items()}
         return args, kwargs
 
     def clone_then_func(*args, **kwargs):

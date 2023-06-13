@@ -67,16 +67,16 @@ def _test_aot_autograd_forwards_backwards_helper(
     def call_forwards_backwards(f, args):
         flat_args, _ = pytree.tree_flatten(args)
         diff_args = [arg for arg in flat_args if isinstance(arg, torch.Tensor) and
-                     arg.requires_grad and arg.is_leaf]
+                     arg.requires_grad]
         out = wrapper_set_seed(f, args)
-        if not isinstance(out, torch.Tensor):
-            flat_out, _ = pytree.tree_flatten(out)
-            sm = 0
-            for i in flat_out:
-                sm += i.sum().abs()
-            sm
-        else:
-            sm = out.sum().abs()
+        # NB: we're assuming that the output only has Tensors
+        flat_out, _ = pytree.tree_flatten(out)
+        sm = 0
+        for i in flat_out:
+            # We need to call .abs() because it is possible that the output of the
+            # operator is a complex Tensor and autograd will yell at autograd.grad
+            # on a complex Tensor unless we manually provide the grad_output flag.
+            sm += i.sum().abs()
         return torch.autograd.grad(sm, diff_args, allow_unused=True)
 
     def check(args, ignore_failure=False):
