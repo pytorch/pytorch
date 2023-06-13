@@ -579,8 +579,11 @@ def clone_inputs(example_inputs):
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
-            assert isinstance(value, torch.Tensor)
-            res[key] = clone_input(value)
+            if isinstance(value, tuple):
+                res[key] = clone_inputs(value)
+            else:
+                assert isinstance(value, torch.Tensor), type(value)
+                res[key] = clone_input(value)
         return res
 
     res = list(example_inputs)
@@ -1624,6 +1627,25 @@ def numpy_attr_wrapper(obj, name):
         return numpy_to_tensor(out)
     elif isinstance(obj, torch.Tensor):
         out = getattr(torch_np.ndarray(obj), name)
+        return numpy_to_tensor(out)
+
+
+class numpy_method_wrapper:
+    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
+
+    def __init__(self, method: str):
+        self.method = method
+        self.__name__ = "wrapped_" + self.method
+
+    def __repr__(self):
+        return f"<Wrapped method <original {self.method}>>"
+
+    def __call__(self, *args, **kwargs):
+        obj = args[0]
+        if isinstance(obj, torch.Tensor):
+            obj = torch_np.ndarray(obj)
+        method_callable = getattr(obj, self.method)
+        out = method_callable(*args[1:], **kwargs)
         return numpy_to_tensor(out)
 
 
