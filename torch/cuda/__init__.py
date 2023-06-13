@@ -10,6 +10,8 @@ It is lazily initialized, so you can always import it, and use
 
 import contextlib
 import os
+import sys
+import importlib
 import torch
 from torch.types import Device
 import traceback
@@ -1136,6 +1138,43 @@ torch._storage_classes.add(BoolStorage)
 torch._storage_classes.add(BFloat16Storage)
 torch._storage_classes.add(ComplexDoubleStorage)
 torch._storage_classes.add(ComplexFloatStorage)
+
+
+class _WrappedTritonKernel(object):
+    """ Just a simple wrapper to store some metadata for testing purposes.
+    """
+
+    def __init__(self, kernel):
+        self.kernel = kernel
+        self.kernel_invoked = False
+
+    def __call__(self, *args, **kwargs):
+        res = self.kernel(*args, **kwargs)
+        self.kernel_invoked = True
+        return res
+
+
+def _register_triton_kernels():
+    if torch._running_with_deploy():
+        return
+
+    @_WrappedTritonKernel
+    def kernel_impl(*args, **kwargs):
+        from torch.sparse._triton_ops import bsr_dense_mm
+        return bsr_dense_mm(*args, skip_checks=True, **kwargs)
+
+    has_triton = importlib.util.find_spec("triton") is not None
+    if has_triton:
+        torch._TritonLibrary.registerOp(
+            "_triton_bsr_dense_mm_out",
+            "_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)",
+            kernel_impl,
+            "SparseCsrCUDA"
+        )
+
+
+_lazy_call(_register_triton_kernels)
+
 
 from . import sparse
 from . import profiler

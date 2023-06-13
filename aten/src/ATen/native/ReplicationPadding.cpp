@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/Padding.h>
 #include <c10/util/irange.h>
 #include <algorithm>
 
@@ -31,16 +32,10 @@ TORCH_META_FUNC(replication_pad1d) (
   int64_t dimslices = 0;
   int64_t nbatch = 1;
 
-  TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
-
   int64_t pad_l = paddingSize[0];
   int64_t pad_r = paddingSize[1];
 
-  // allow empty batch size but not other dimensions.
-  TORCH_CHECK((input.dim() == 2 && input.size(0) != 0 && input.size(1) != 0) ||
-              (input.dim() == 3 && input.size(1) != 0 && input.size(2) != 0),
-              "Expected 2D or 3D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-              input.sizes());
+  at::native::padding::check_valid_input<1>(input, paddingSize);
 
   if (input.ndimension() == 3) {
     nbatch = input.size(0);
@@ -74,8 +69,7 @@ TORCH_META_FUNC(replication_pad1d_backward) (
   int64_t pad_l = paddingSize[0];
   int64_t pad_r = paddingSize[1];
 
-  if (input.ndimension() == 3)
-  {
+  if (input.ndimension() == 3) {
     dimw++;
   }
 
@@ -93,7 +87,6 @@ TORCH_META_FUNC(replication_pad1d_backward) (
 TORCH_META_FUNC(replication_pad2d) (
   const Tensor& input, IntArrayRef paddingSize
 ) {
-  TORCH_CHECK(paddingSize.size() == 4, "padding size is expected to be 4");
   int64_t pad_l = paddingSize[0];
   int64_t pad_r = paddingSize[1];
   int64_t pad_t = paddingSize[2];
@@ -103,16 +96,9 @@ TORCH_META_FUNC(replication_pad2d) (
   int64_t dimslices = 0;
   int64_t nbatch = 1;
 
-  // allow 0 dim batch size and nothing else.
-  bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
-  TORCH_CHECK(
-      (input.dim() == 3 && input.size(0) != 0 && valid_dims) ||
-      (input.dim() == 4 && valid_dims && input.size(3) != 0),
-      "Expected 3D or 4D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-      input.sizes());
+  at::native::padding::check_valid_input<2>(input, paddingSize);
 
-  if (input.dim() == 4)
-  {
+  if (input.dim() == 4) {
     nbatch = input.size(0);
     dimw++;
     dimh++;
@@ -139,55 +125,11 @@ TORCH_META_FUNC(replication_pad2d) (
 
 } // namespace meta
 
-
-static inline void shapeCheck3d(
-    const Tensor& input,
-    int pleft, int pright,
-    int ptop, int pbottom,
-    int pfront, int pback) {
-  int dimw = 3;
-  int dimh = 2;
-  int dimd = 1;
-  /* int dimslices = 0; */
-
-  // allow batch size of 0-dim.
-  bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
-  TORCH_CHECK(
-      (input.dim() == 4 && input.size(0) != 0 && valid_dims) ||
-      (input.dim() == 5 && valid_dims && input.size(4) != 0),
-      "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-      input.sizes());
-
-  if (input.dim() == 5)
-  {
-    dimw++;
-    dimh++;
-    dimd++;
-    /* dimslices++; */
-  }
-
-  /* sizes */
-  // int64_t nslices = input.size(dimslices);
-  int64_t idepth = input.size(dimd);
-  int64_t iheight = input.size(dimh);
-  int64_t iwidth = input.size(dimw);
-  int64_t odepth = idepth + pfront + pback;
-  int64_t oheight = iheight + ptop + pbottom;
-  int64_t owidth  = iwidth + pleft + pright;
-
-  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
-      "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
-      ") is too small."
-      " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
-
-}
-
 namespace meta {
 
 TORCH_META_FUNC(replication_pad3d) (
   const Tensor& input, IntArrayRef paddingSize
 ) {
-  TORCH_CHECK(paddingSize.size() == 6, "padding size is expected to be 6");
   int64_t pleft = paddingSize[0];
   int64_t pright = paddingSize[1];
   int64_t ptop = paddingSize[2];
@@ -200,10 +142,9 @@ TORCH_META_FUNC(replication_pad3d) (
   int64_t dimslices = 0;
   int64_t nbatch = 1;
 
-  shapeCheck3d(input, pleft, pright, ptop, pbottom, pfront, pback);
+  at::native::padding::check_valid_input<3>(input, paddingSize);
 
-  if (input.dim() == 5)
-  {
+  if (input.dim() == 5) {
     nbatch = input.size(0);
     dimw++;
     dimh++;
@@ -219,6 +160,11 @@ TORCH_META_FUNC(replication_pad3d) (
   int64_t odepth = idepth + pfront + pback;
   int64_t oheight = iheight + ptop + pbottom;
   int64_t owidth  = iwidth + pleft + pright;
+
+  TORCH_CHECK(owidth >= 1 || oheight >= 1 || odepth >= 1,
+      "input (D: ", idepth, " H: ", iheight, ", W: ", iwidth,
+      ") is too small."
+      " Calculated output D: ", odepth, " H: ", oheight, " W: ", owidth);
 
   /* resize output */
   if (input.dim() == 4) {
@@ -743,8 +689,7 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   int dimslices = 0;
   int64_t nbatch = 1;
 
-  if (input.dim() == 5)
-  {
+  if (input.dim() == 5) {
     nbatch = input.size(0);
     dimw++;
     dimh++;
@@ -761,9 +706,17 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   int64_t oheight = iheight + ptop + pbottom;
   int64_t owidth  = iwidth + pleft + pright;
 
+  at::native::padding::check_valid_input<3>(input, paddingSize);
 
-  shapeCheck3d(input, pleft, pright,
-      ptop, pbottom, pfront, pback);
+  TORCH_CHECK(owidth == gradOutput_.size(dimw),
+      "gradOutput width unexpected. Expected: ", owidth, ", Got: ",
+      gradOutput_.size(dimw));
+  TORCH_CHECK(oheight == gradOutput_.size(dimh),
+      "gradOutput height unexpected. Expected: ", oheight, ", Got: ",
+      gradOutput_.size(dimh));
+  TORCH_CHECK(odepth == gradOutput_.size(dimd),
+      "gradOutput depth unexpected. Expected: ", odepth, ", Got: ",
+      gradOutput_.size(dimd));
 
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();

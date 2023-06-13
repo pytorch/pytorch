@@ -1451,6 +1451,27 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
+std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const std::array<bool, 3>& grad_input_mask) {
+  if (!grad.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+  const auto grad_projected = grad.sparse_mask(self);
+  const auto self_requires_grad = grad_input_mask[0];
+  const auto mat1_requires_grad = grad_input_mask[1];
+  const auto mat2_requires_grad = grad_input_mask[2];
+  return std::make_tuple(
+      self_requires_grad ? maybe_multiply(grad, beta.conj()) : Tensor{},
+      mat1_requires_grad ? maybe_multiply(grad_projected.mm(mat2.mH()), alpha.conj()) : Tensor{},
+      mat2_requires_grad ? maybe_multiply(mat1.mH().mm(grad_projected), alpha.conj()) : Tensor{});
+}
+
 Tensor sparse_sparse_matmul_backward(
     const Tensor& grad,
     const Tensor& a,
@@ -1521,6 +1542,54 @@ Tensor renorm_backward(
   auto invnorm = (norm + 1e-7).reciprocal();
   auto grad_norm = maxnorm * invnorm * (grad - invnorm * nb);
   return at::where(norm > maxnorm, grad_norm.to(grad.scalar_type()), grad);
+}
+
+Tensor renorm_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    const Scalar& p,
+    int64_t dim,
+    const Scalar& maxnorm) {
+  auto self_sizes = self_p.sizes();
+  dim = c10::maybe_wrap_dim(dim, self_sizes.size());
+
+  at::DimVector reduce_dims(self_sizes.size());
+  std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
+  reduce_dims.erase(reduce_dims.begin() + dim);
+
+  // For cuda half, calculate norm in float precision then cast
+  // normalization factor to half
+  auto dtype = self_p.scalar_type();
+  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
+  Tensor norm = [&self_p, &p, &reduce_dims, acc_type, dtype]() {
+    if (acc_type != dtype) {
+      return at::linalg_vector_norm(
+          self_p,
+          p.toDouble(),
+          reduce_dims,
+          /*keepdim=*/true,
+          /*dtype=*/acc_type);
+    } else {
+      return at::linalg_vector_norm(
+          self_p,
+          p.toDouble(),
+          reduce_dims,
+          /*keepdim=*/true);
+    }
+  }();
+
+  auto double_maxnorm = maxnorm.toDouble();
+  auto invnorm = (norm + 1e-7).reciprocal();
+  auto factor = invnorm * double_maxnorm;
+
+  return where(
+      norm > double_maxnorm,
+      factor *
+          (self_t -
+           self_p * invnorm *
+               norm_jvp(
+                   self_p, self_t, p, norm, reduce_dims, /*keepdim=*/true)),
+      self_t);
 }
 
 Tensor repeat_backward(
@@ -1925,8 +1994,8 @@ Tensor pinv_jvp(const Tensor& A, const Tensor& pinvA, const Tensor& dA) {
 
 Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
   at::NoTF32Guard disable_tf32;
-  auto m = A.size(-2);
-  auto n = A.size(-1);
+  auto m = A.sym_size(-2);
+  auto n = A.sym_size(-1);
   auto pinvAh = pinvA.mH();
   auto gradh = grad.mH();
   // optimization to produce matrices of the smallest dimension
@@ -3898,11 +3967,11 @@ Tensor differential_analytic_matrix_function(
   // Given an analytic matrix function, this computes the differential (forward
   // AD) or the adjoint of the differential (backward AD)
   auto A = adjoint ? self.transpose(-2, -1).conj() : self;
-  auto meta_grad_sizes = A.sizes().vec();
+  auto meta_grad_sizes = A.sym_sizes().vec();
   meta_grad_sizes[A.dim() - 2] *= 2;
   meta_grad_sizes[A.dim() - 1] *= 2;
 
-  auto n = A.size(-1);
+  auto n = A.sym_size(-1);
   Tensor meta_grad;
   // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
   // so we use out-of-place ops with equivalent output.
@@ -3916,13 +3985,14 @@ Tensor differential_analytic_matrix_function(
          at::cat({at::zeros_like(A), std::move(A)}, -1)},
         -2);
   } else {
-    meta_grad = at::zeros(meta_grad_sizes, grad.options());
-    meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
-    meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
-    meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+    meta_grad = at::zeros_symint(meta_grad_sizes, grad.options());
+    meta_grad.narrow_symint(-2, 0, n).narrow_symint(-1, 0, n).copy_(A);
+    meta_grad.narrow_symint(-2, n, n).narrow_symint(-1, n, n).copy_(A);
+    meta_grad.narrow_symint(-2, 0, n).narrow_symint(-1, n, n).copy_(grad);
   }
 
-  return matrix_function(meta_grad).narrow(-2, 0, n).narrow(-1, n, n);
+  return matrix_function(meta_grad).narrow_symint(-2, 0, n).narrow_symint(
+      -1, n, n);
 }
 
 Tensor linalg_matrix_exp_differential(
@@ -6365,11 +6435,11 @@ Tensor lu_factor_ex_backward(
 
   // L.shape == (..., m, k)
   // U.shape == (..., k, n)
-  const auto m = LU.size(-2);
-  const auto n = LU.size(-1);
+  const auto m = LU.sym_size(-2);
+  const auto n = LU.sym_size(-1);
   const auto k = std::min(m, n);
-  const auto L_grad = grad.narrow(-1, 0, k);
-  const auto U_grad = grad.narrow(-2, 0, k);
+  const auto L_grad = grad.narrow_symint(-1, 0, k);
+  const auto U_grad = grad.narrow_symint(-2, 0, k);
   return linalg_lu_backward(
       /*L_grad=*/L_grad, /*U_grad=*/U_grad, P, L, U, pivot);
 }
