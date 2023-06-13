@@ -623,7 +623,7 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
-    num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 256, 1), 8))
+    num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 64, 1), 8))
     # we are going to arrive at 2 warps only if bs was too small due to
     # numel being too small. However to workaround some ptx bugs we still
     # want at least 4 warps if there's enough elements per thread
@@ -703,13 +703,23 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     bs = max(256, min(numel // 128, 1024))
 
     if len(size_hints) == 1:
-        return cached_autotune(
-            size_hints,
-            [triton_config(size_hints, bs)],
-            meta=meta,
-            heuristic_type=HeuristicType.POINTWISE,
-            filename=filename,
-        )
+        if disable_pointwise_autotuning():
+            return cached_autotune(
+                [triton_config(size_hints, bs)],
+                meta=meta,
+                heuristic_type=HeuristicType.POINTWISE,
+                filename=filename,
+            )
+        else:
+            return cached_autotune(
+                [
+                    triton_config(size_hints, bs),
+                    triton_config(size_hints, bs // 2),
+                ],
+                meta=meta,
+                heuristic_type=HeuristicType.POINTWISE,
+                filename=filename,
+            )
     if len(size_hints) == 2:
         if (disable_pointwise_autotuning() or tile_hint == TileHint.SQUARE) and not (
             config.max_autotune or config.max_autotune_pointwise
