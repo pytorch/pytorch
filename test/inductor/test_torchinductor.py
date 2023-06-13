@@ -201,14 +201,13 @@ def clone_preserve_strides(x, device=None):
 
 
 @patch.object(config, "debug", True)
-def run_and_get_cpp_code(fn, *args, **kwargs):
+def run_and_get_cpp_code(output_code_log, fn, *args, **kwargs):
     torch._dynamo.reset()
     import io
     import logging
 
     log_capture_string = io.StringIO()
     ch = logging.StreamHandler(log_capture_string)
-    from torch._inductor.graph import output_code_log
 
     output_code_log.addHandler(ch)
     prev_level = output_code_log.level

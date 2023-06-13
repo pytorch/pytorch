@@ -104,7 +104,9 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
             assert callable(func), "not a callable"
             func = slowTest(func) if slow else func
             code = test_torchinductor.run_and_get_cpp_code(
-                func, *func_inputs if func_inputs else []
+                torch._inductor.graph.output_code_log,
+                func,
+                *func_inputs if func_inputs else [],
             )
             self.assertEqual("CppWrapperCodeCache" in code, True)
         finally:

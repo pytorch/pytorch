@@ -79,7 +79,9 @@ def check_codegen(
     run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
 
     if is_cpp_code:
-        code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
+        code = run_and_get_cpp_code(
+            torch._inductor.graph.output_code_log, run, *example_inputs, **kwargs
+        )
         for_loop_found = False
         has_dynamic = False
         lines = code.split("\n")

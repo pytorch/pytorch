@@ -51,7 +51,6 @@ def match_output_code_with_fx_graph(dbg_log):
             line_items = line.split(": ")
             assert(len(line_items) == 2)
             debug_path = line_items[1].strip()
-            assert(debug_path.endswith("debug"))
             assert(os.path.exists(debug_path))
             return make_graph_matching(debug_path)
 

@@ -1002,7 +1002,9 @@ class CPUReproTests(TestCase):
 
             f_opt = torch.compile()(f)
 
-            code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
+            code = run_and_get_cpp_code(
+                torch._inductor.graph.output_code_log, f_opt, inps[0], inps[1]
+            )
             FileCheck().check_not("void kernel").run(code)
 
             self.assertEqual(
@@ -1015,7 +1017,9 @@ class CPUReproTests(TestCase):
                 return x[torch.tensor(1) :] * 2
 
             f_opt = torch.compile()(f)
-            code = run_and_get_cpp_code(f_opt, inps[0])
+            code = run_and_get_cpp_code(
+                torch._inductor.graph.output_code_log, f_opt, inps[0]
+            )
             FileCheck().check_not("void kernel").run(code)
             self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
@@ -1809,7 +1813,7 @@ class CPUReproTests(TestCase):
                 return mod(*ex, **kwargs)
 
             run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, v)
+            code = run_and_get_cpp_code(torch._inductor.graph.output_code_log, run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
@@ -1821,7 +1825,9 @@ class CPUReproTests(TestCase):
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
         fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, *inps)
+        code = run_and_get_cpp_code(
+            torch._inductor.graph.output_code_log, fn_opt, *inps
+        )
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
@@ -1867,7 +1873,9 @@ class CPUReproTests(TestCase):
         x2 = torch.rand([2, 10, 3], dtype=torch.float32)
 
         with config.patch({"trace.enabled": True}):
-            dbg_log = run_and_get_cpp_code(opt_fn, x1, x2)
+            dbg_log = run_and_get_cpp_code(
+                torch._inductor.debug.output_code_log, opt_fn, x1, x2
+            )
             self.assertTrue("Debug trace" in dbg_log)
             matched_output_code_path = match_output_code_with_fx_graph(dbg_log)
             self.assertTrue(os.path.exists(matched_output_code_path))
@@ -1884,7 +1892,9 @@ class CPUReproTests(TestCase):
         x = torch.rand([2, 3], dtype=torch.float32)
 
         with config.patch({"trace.enabled": True}):
-            dbg_log = run_and_get_cpp_code(opt_fn, x)
+            dbg_log = run_and_get_cpp_code(
+                torch._inductor.debug.output_code_log, opt_fn, x
+            )
             self.assertTrue("Debug trace" in dbg_log)
             single_graph_path = merge_fx_graphs(dbg_log)
             self.assertTrue(os.path.exists(single_graph_path))

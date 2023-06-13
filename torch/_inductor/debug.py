@@ -33,6 +33,7 @@ from .scheduler import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
 @functools.lru_cache(None)
@@ -316,6 +317,7 @@ class DebugContext:
         if self._path:
             self.upload_tar()
             log.warning("%s debug trace: %s", get_graph_being_compiled(), self._path)
+            output_code_log.info("Debug trace: %s", self._path)
         self._stack.close()
 
     def _save_profile_data(self):
