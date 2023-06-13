@@ -1083,6 +1083,10 @@ def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
     self = self.expand((dim1, dim2, dim3))
     check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+    check(
+        self.dtype == batch1.dtype == batch2.dtype,
+        lambda: f"Input dtypes must be the same, got: input: {self.dtype}, batch1: {batch1.dtype}, batch2: {batch2.dtype}",
+    )
     batch1_sizes = batch1.shape
     batch2_sizes = batch2.shape
     bs = batch1_sizes[0]
