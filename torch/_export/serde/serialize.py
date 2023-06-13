@@ -12,7 +12,7 @@ from torch.fx.experimental import symbolic_shapes
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 import torch._export.exported_program as ep
 from torch.utils._pytree import pytree_to_str, str_to_pytree
-from .schema import (   # type: ignore[attr-defined]
+from .schema import (  # type: ignore[attr-defined]
     Argument,
     BackwardSignature,
     CallSpec,
@@ -36,7 +36,6 @@ from .schema import (   # type: ignore[attr-defined]
     _Union,
 )
 
-
 __all__ = [
     "serialize",
     "GraphModuleSerializer",
@@ -45,8 +44,10 @@ __all__ = [
     "ExportedProgramDeserializer",
 ]
 
+
 from ...fx.node import Target
 from ...fx.passes.graph_manipulation import replace_target_nodes_with
+from ...fx.passes.infra.pass_base import PassResult
 from ...library import Library
 
 log = logging.getLogger(__name__)
@@ -76,9 +77,7 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.bfloat16: ScalarType.BFLOAT16
 }
 
-
 _SERIALIZE_TO_TORCH_DTYPE = _reverse_map(_TORCH_TO_SERIALIZE_DTYPE)  # type: ignore[arg-type]
-
 
 _TORCH_TO_SERIALIZE_LAYOUT = {
     torch.sparse_coo: Layout.SparseCoo,
@@ -90,9 +89,7 @@ _TORCH_TO_SERIALIZE_LAYOUT = {
     torch.strided: Layout.Strided,
 }
 
-
 _SERIALIZE_TO_TORCH_LAYOUT = _reverse_map(_TORCH_TO_SERIALIZE_LAYOUT)  # type: ignore[arg-type]
-
 
 _TORCH_TO_SERIALIZE_MEMORY_FORMAT = {
     torch.contiguous_format: MemoryFormat.ContiguousFormat,
@@ -101,9 +98,7 @@ _TORCH_TO_SERIALIZE_MEMORY_FORMAT = {
     torch.preserve_format: MemoryFormat.PreserveFormat,
 }
 
-
 _SERIALIZE_TO_TORCH_MEMORY_FORMAT = _reverse_map(_TORCH_TO_SERIALIZE_MEMORY_FORMAT)  # type: ignore[arg-type]
-
 
 _SYM_INT_OPS = {
     operator.mul,
@@ -112,7 +107,6 @@ _SYM_INT_OPS = {
     operator.floordiv,
     operator.mod,
 }
-
 
 _SYM_BOOL_OPS = {
     operator.eq,
@@ -396,7 +390,7 @@ class GraphModuleSerializer:
         return serialized_args
 
     def serialize_inputs(
-        self, target: torch._ops.OpOverload, args, kwargs
+            self, target: torch._ops.OpOverload, args, kwargs
     ) -> List[NamedArgument]:
         assert isinstance(target, torch._ops.OpOverload)
         serialized_args = []
@@ -427,12 +421,12 @@ class GraphModuleSerializer:
 
     def is_sym_int_arg(self, arg) -> bool:
         return isinstance(arg, int) or (
-            isinstance(arg, torch.fx.Node) and arg.name in self.sym_int_values
+                isinstance(arg, torch.fx.Node) and arg.name in self.sym_int_values
         )
 
     def is_sym_bool_arg(self, arg) -> bool:
         return isinstance(arg, bool) or (
-            isinstance(arg, torch.fx.Node) and arg.name in self.sym_bool_values
+                isinstance(arg, torch.fx.Node) and arg.name in self.sym_bool_values
         )
 
     def serialize_input(self, arg) -> Argument:
@@ -658,47 +652,55 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
         ),
     },
     """
+
     class UpgraderPass:
         def __init__(self, old_target: Target, new_target: Target):
             self.old_target = old_target
             self.new_target = new_target
 
-        def __call__(self, fx_module: GraphModule):
+        def __call__(self, fx_module: GraphModule) -> Optional[PassResult]:
             replace_target_nodes_with(fx_module, "call_function", self.old_target, "call_function", self.new_target)
             # retrace the graph module
+            return PassResult(fx_module, True)
 
     def __init__(
-        self,
-        compiler_opset_version: Optional[Dict[str, int]] = None,
-        model_opset_version: Optional[Dict[str, int]] = None,
-        op_upgraders: Optional[Dict[str, Tuple[str]]] = None,  # can add a new TS API: torch._C._get_upgraders_entry_map()
+            self,
+            compiler_opset_version: Optional[Dict[str, int]] = None,
+            model_opset_version: Optional[Dict[str, int]] = None,
+            op_upgraders: Optional[Dict[str, Tuple[str, ...]]] = None,
+            # can add a new TS API: torch._C._get_upgraders_entry_map()
     ):
         self.compiler_opset_version = compiler_opset_version
         self.model_opset_version = model_opset_version
         # key is version number, value is a list of upgraders, keyed on op name
         self.upgraders: List[Tuple[str]] = self._parse_upgraders(op_upgraders)
-        self._register_old_ops()
 
         self.upgrader_passes: List[GraphModuleOpUpgrader.UpgraderPass] = self._populate_passes()
 
     def _parse_upgraders(self, op_upgraders: Dict[str, Tuple[str]] = None) -> List[Tuple[str]]:
         """reorder op_upgraders by version number."""
+        if not op_upgraders:
+            return []
         model_ver = self.model_opset_version["aten"]
         curr_ver = self.compiler_opset_version["aten"]
+
         def get_target_version(versioned_upgrader_name: str) -> int:
-            """div_Scalar_0_3 is the name of the upgrader, meaning it applies to opset version 0 to 3 and is upgrading to version 4."""
+            """div_Scalar_0_3 is the name of the upgrader, meaning it applies to opset version 0 to 3 and is
+            upgrading to version 4."""
             return int(versioned_upgrader_name.split('_')[-1]) + 1
+
         versioned_upgraders: Dict[int, Tuple[str]] = {get_target_version(name): v for name, v in op_upgraders.items()}
         target_upgraders: List[Tuple[str]] = []
-        for ver in range(model_ver, curr_ver+1):
-            target_upgraders.append(versioned_upgraders[ver])
+        for ver in range(model_ver, curr_ver + 1):
+            if ver in versioned_upgraders:
+                target_upgraders.append(versioned_upgraders[ver])
 
         return target_upgraders
 
-
-    def _register_old_ops(self):
-        """use torch.Library API to register old ops. Op name will be <name>_<valid_from_ver>_<valid_till_ver>. Register upgarders as CompositeImplicitAutograd kernels.
-        For example:
+    def _populate_passes(self) -> List[UpgraderPass]:
+        """Given a list of upgraders, loop through it from lower version to higher version and create passes for all
+        upgraders. se torch.Library API to register old ops. Op name will be
+        <name>_<valid_from_ver>_<valid_till_ver>. Register upgarders as CompositeImplicitAutograd kernels. For example:
 
         lib = Library("aten", "FRAGMENT")
         lib.define(old_schema)
@@ -708,34 +710,46 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
         """
         lib = Library("aten", "FRAGMENT")
         impl_lib = Library("aten", "IMPL")
+        upgrader_passes = []
+
+        def register_old_op(name: str, schema: str, impl_str: str):
+            """Registers an old version operator using impl_name as old op name."""
+            lib.define(schema)
+            exec(impl_str)
+            impl_lib.impl(name, locals()[name], "CompositeImplicitAutograd")
 
         for schema, upgrader_str in self.upgraders:
             upgrader_name = upgrader_str.split('(')[0].split(' ')[-1]
             op_name = schema.split('(')[0].split("::")[-1]
-            lib.define(schema.replace(op_name, upgrader_name))
-            exec(upgrader_str)
-            impl_lib.impl(upgrader_name, locals()[upgrader_name], "CompositeImplicitAutograd")
+            schema = schema.replace(op_name, upgrader_name)
+            try:
+                register_old_op(name=upgrader_name, schema=schema, impl_str=upgrader_str)
+            except RuntimeError as e:
+                if "with the same name and overload name multiple times" in str(e):
+                    print(f"Registering {upgrader_name} multiple times")
+                else:
+                    raise RuntimeError from e
+            old_op_target = getattr(torch.ops.aten, upgrader_name).default
+            op_name, overload_name = (op_name, "default") if "." not in op_name else tuple(op_name.split(".")[:2])
+            new_op_target = getattr(getattr(torch.ops.aten, op_name), overload_name)
+            # Note that the graph will have op names in the graph, but actually they are of old versions.
+            upgrader_passes.append(GraphModuleOpUpgrader.UpgraderPass(old_target=new_op_target, new_target=old_op_target))
 
-    def _populate_passes(self) -> List[UpgraderPass]:
-        """Given a list of upgraders, loop through it from lower version to higher version and create passes for all upgraders.
-        """
-        pass
-        # for schema, upgrader_str in self.upgraders:
-        #     up_pass = GraphModuleOpUpgrader.UpgraderPass()
-
-    def upgrade(self, fx_module: torch.fx.GraphModule):
-        """Apply upgraders one by one on GraphModule"""
+        return upgrader_passes
 
 
 class GraphModuleDeserializer:
-    def __init__(self):
+    def __init__(self, opset_version: Optional[Dict[str, int]] = None):
+        self.opset_version: Dict[str, int] = (
+            {} if opset_version is None else opset_version
+        )
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
         self.serialized_name_to_meta: Dict[str, Union[FakeTensor, int, torch.SymInt, torch.SymBool]] = {}
         self.graph = torch.fx.Graph()
         self.fake_tensor_mode = FakeTensorMode()
 
     def deserialize_sym(
-        self, s: Union[SymInt, SymBool]
+            self, s: Union[SymInt, SymBool]
     ) -> Union[int, torch.SymInt, bool, torch.SymBool]:
         val = s.value
         if s.type == "as_symbol":
@@ -752,7 +766,7 @@ class GraphModuleDeserializer:
             )
 
     def deserialize(
-        self, serialized_graph_module: GraphModule,
+            self, serialized_graph_module: GraphModule,
     ) -> Tuple[torch.fx.GraphModule, ep.ExportGraphSignature, ep.CallSpec]:
         graph = self.graph
         serialized_graph = serialized_graph_module.graph
@@ -787,6 +801,7 @@ class GraphModuleDeserializer:
 
                     def fake_op(x):
                         raise NotImplementedError("Fake op is not meant to be run.")
+
                     fake_op.__name__ = target
                     target = fake_op
 
@@ -829,7 +844,6 @@ class GraphModuleDeserializer:
                 outputs.append(self.serialized_name_to_node[output.value.as_name])
             else:
                 raise SerializeError(f"Unable to deserialize output node {output}")
-
 
         output_node = graph.output(tuple(outputs))
         output_node.meta["val"] = tuple(
@@ -961,22 +975,21 @@ class ExportedProgramDeserializer:
         )
 
     def deserialize(
-        self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
+            self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
     ) -> ep.ExportedProgram:
         graph_module, sig, call_spec = (
             GraphModuleDeserializer()
             .deserialize(serialized_exported_program.graph_module)
         )
-        model_opset_version: Dict[str, int] = {}  # TODO(larryliu) this should be deserialized as well
+        model_opset_version: Optional[Dict[str, int]] = serialized_exported_program.opset_version
         upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
-        upgrader.upgrade(graph_module)
 
         state_dict = deserialize_state_dict(serialized_state_dict)
 
         # TODO(angelyi): serialize constraints
         return ep.ExportedProgram(
             state_dict, graph_module.graph, sig, call_spec, state_dict, {}, [],
-        )
+        ).transform(*upgrader.upgrader_passes)
 
 
 class EnumEncoder(json.JSONEncoder):
@@ -987,8 +1000,8 @@ class EnumEncoder(json.JSONEncoder):
 
 
 def serialize(
-    exported_program: ep.ExportedProgram,
-    opset_version: Optional[Dict[str, int]] = None,
+        exported_program: ep.ExportedProgram,
+        opset_version: Optional[Dict[str, int]] = None,
 ) -> Tuple[bytes, bytes]:
     serialized_exported_program, serialized_state_dict = (
         ExportedProgramSerializer(opset_version).serialize(exported_program)
@@ -1031,9 +1044,9 @@ def _dict_to_dataclass(cls, data):
 
 
 def deserialize(
-    exported_program_bytes: bytes,
-    state_dict: bytes,
-    expected_opset_version: Optional[Dict[str, int]] = None,
+        exported_program_bytes: bytes,
+        state_dict: bytes,
+        expected_opset_version: Optional[Dict[str, int]] = None,
 ) -> ep.ExportedProgram:
     exported_program_str = exported_program_bytes.decode('utf-8')
     exported_program_dict = json.loads(exported_program_str)
