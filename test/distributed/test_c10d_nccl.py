@@ -410,6 +410,27 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             work.wait()
         torch.cuda.synchronize(local_device)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_allreduce_in_cudagraph(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_idx = self.rank_to_GPU[self.rank][0]
+        with torch.cuda.device(local_device_idx):
+            xs = [torch.FloatTensor([1]).cuda(local_device_idx)]
+
+            # single warmup
+            pg.allreduce(xs).wait()
+            self.assertEqual(xs[0].item(), 2)
+
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                pg.allreduce(xs).wait()
+            self.assertEqual(xs[0].item(), 2)
+
+            graph.replay()
+            graph.replay()
+            self.assertEqual(xs[0].item(), 8)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
