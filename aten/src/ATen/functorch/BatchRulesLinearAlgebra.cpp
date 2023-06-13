@@ -280,11 +280,12 @@ static void expect_at_least_rank(
       rank, " dimensions instead.");
 }
 
-twoOutputs _scaled_dot_product_efficient_attention_batch_rule(
+fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
   const Tensor& query, optional<int64_t> query_bdim,
   const Tensor& key, optional<int64_t> key_bdim,
   const Tensor& value, optional<int64_t> value_bdim,
   bool compute_log_sumexp,
+  double dropout_p,
   bool is_causal,
   c10::optional<double> scale
 ) {
@@ -292,11 +293,14 @@ twoOutputs _scaled_dot_product_efficient_attention_batch_rule(
   const auto key_ = key_bdim.has_value() ? reshape_dim_into(*key_bdim, 0, key) : key;
   const auto value_ = value_bdim ? reshape_dim_into(*value_bdim, 0, value) : value;
 
-  const auto res = at::_scaled_dot_product_efficient_attention(query_, key_, value_, compute_log_sumexp, is_causal, scale);
+  const auto res = at::_scaled_dot_product_efficient_attention(query_, key_,
+      value_, compute_log_sumexp, dropout_p, is_causal, scale);
   const auto batch_size = query.size(*query_bdim);
-  const auto res1_ = reshape_dim_outof(0, batch_size, std::get<0>(res));
-  const auto res2_ = reshape_dim_outof(0, batch_size, std::get<1>(res));
-  return std::make_tuple(res1_, 0, res2_, 0);
+  const auto res0_ = reshape_dim_outof(0, batch_size, std::get<0>(res));
+  const auto res1_ = reshape_dim_outof(0, batch_size, std::get<1>(res));
+  const auto res2_ = reshape_dim_outof(0, batch_size, std::get<2>(res));
+  const auto res3_ = reshape_dim_outof(0, batch_size, std::get<2>(res));
+  return std::make_tuple(res0_, 0, res1_, 0, res2_, 0, res3_, 0);
 }
 
 threeOutputs _scaled_dot_product_efficient_attention_backward_batch_rule(
@@ -306,8 +310,10 @@ threeOutputs _scaled_dot_product_efficient_attention_backward_batch_rule(
     const at::Tensor& value, optional<int64_t> value_bdim,
     const at::Tensor& out, optional<int64_t> out_bdim,
     const at::Tensor& logsumexp, optional<int64_t> logsumexp_bdim,
+    const at::Tensor& philox_seed, optional<int64_t> philox_seed_bdim,
+    const at::Tensor& philox_offset, optional<int64_t> philox_offset_bdim,
+    double dropout_p,
     bool causal,
-    bool chunk_grad_outputs,
     c10::optional<double> scale){
 
   const auto grad_out__ = grad_out_bdim.has_value() ? reshape_dim_into(*grad_out_bdim, 0, grad_out_) : grad_out_;
@@ -315,17 +321,19 @@ threeOutputs _scaled_dot_product_efficient_attention_backward_batch_rule(
   const auto key_ = key_bdim.has_value() ? reshape_dim_into(*key_bdim, 0, key) : key;
   const auto value_ = value_bdim.has_value() ? reshape_dim_into(*value_bdim, 0, value) : value;
   const auto out_ = out_bdim.has_value() ? reshape_dim_into(*out_bdim, 0, out) : out;
-  const auto logsumexp_ = logsumexp_bdim.has_value() reshape_dim_into(*logsumexp_bdim, 0, logsumexp) : logsumexp;
+  const auto logsumexp_ = logsumexp_bdim.has_value() ? reshape_dim_into(*logsumexp_bdim, 0, logsumexp) : logsumexp;
+  const auto philox_seed_ = philox_seed_bdim.has_value() ? reshape_dim_into(*philox_seed_bdim, 0, philox_seed) : philox_seed;
+  const auto philox_offset_ = philox_offset_bdim.has_value() ? reshape_dim_into(*philox_offset_bdim, 0, philox_offset) : philox_offset;
 
   const auto res = at::_scaled_dot_product_efficient_attention_backward(
-      grad_out__, query_, key_, value_, out_, logsumexp_, causal,
-      chunk_grad_outputs, scale);
+      grad_out__, query_, key_, value_, out_, logsumexp_, philox_seed_, 
+      philox_offset_, dropout_p, causal, scale);
 
   auto batch_size = query.size(*query_bdim);
-  auto res1_ = reshape_dim_outof(0, batch_size, std::get<0>(res));
-  auto res2_ = reshape_dim_outof(0, batch_size, std::get<1>(res));
-  auto res3_ = reshape_dim_outof(0, batch_size, std::get<2>(res));
-  return std::make_tuple(res1_, 0, res2_, 0, res3_, 0);
+  auto res0_ = reshape_dim_outof(0, batch_size, std::get<0>(res));
+  auto res1_ = reshape_dim_outof(0, batch_size, std::get<1>(res));
+  auto res2_ = reshape_dim_outof(0, batch_size, std::get<2>(res));
+  return std::make_tuple(res0_, 0, res1_, 0, res2_, 0);
 }
 
 oneOutput linalg_lu_solve_batch_rule(
