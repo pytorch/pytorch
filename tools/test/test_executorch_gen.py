@@ -398,7 +398,6 @@ TORCH_API inline bool op_2(torch::executor::RuntimeContext & context) {
             selector=SelectiveBuilder.get_nop_selector(),
             use_aten_lib=True,
         )
-        print(declarations)
         self.assertTrue(
             """
 namespace custom_1 {
@@ -433,14 +432,22 @@ class TestComputeCodegenUnboxedKernels(unittest.TestCase):
             "default_kernel", False, "at::native"
         )
         self.default_kernel_entry = (
-            self.default_kernel_key,
+            [self.default_kernel_key],
             self.default_backend_metadata,
         )
 
-    def test_codegen_unboxed_default(self) -> None:
+    def test_codegen_unboxed_specialized(self) -> None:
+        specialized_kernel_key = ETKernelKey.gen_from_yaml(
+            {"self": ("T0", "D0"), "other": ("T0", "D0"), "out": ("T0", "D0")},
+            {"T0": ["Double"]},
+            {"D0": [0, 1, 2, 3]},
+        )
         selector = SelectiveBuilder.get_nop_selector()
         use_aten_lib = False
-        entry = (self.native_function_no_kern, self.default_kernel_entry)
+        entry = (
+            self.native_function_no_kern,
+            (specialized_kernel_key, self.default_backend_metadata),
+        )
 
         result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
         # Concat used to prevent whitespace stripping
@@ -448,7 +455,7 @@ class TestComputeCodegenUnboxedKernels(unittest.TestCase):
             """
 Kernel(
     "custom_1::op_1",
-    "default",
+    "v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3",
     [](torch::executor::RuntimeContext & context, EValue** stack) {
         """
             + """
@@ -462,4 +469,30 @@ Kernel(
 """
         )
 
-        self.assertTrue(expected_str == result)
+        self.assertEqual(expected_str, result)
+
+    def test_codegen_unboxed_default(self) -> None:
+        selector = SelectiveBuilder.get_nop_selector()
+        use_aten_lib = False
+        entry = (self.native_function_no_kern, self.default_kernel_entry)
+
+        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        # Concat used to prevent whitespace stripping
+        expected_str = (
+            """
+Kernel(
+    "custom_1::op_1",
+    [](torch::executor::RuntimeContext & context, EValue** stack) {
+        """
+            + """
+
+        EXECUTORCH_SCOPE_PROF("native_call_op_1");
+        bool result_ = at::native::default_kernel(context, );
+
+        *stack[0] = EValue(result_);
+    }
+),
+"""
+        )
+
+        self.assertEqual(expected_str, result)

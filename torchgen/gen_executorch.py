@@ -165,7 +165,7 @@ class ComputeCodegenUnboxedKernels:
         unbox_kernel_entry: Tuple[NativeFunction, Tuple[ETKernelKey, BackendMetadata]],
     ) -> str:
         f: NativeFunction = unbox_kernel_entry[0]
-        kernel_key: ETKernelKey = unbox_kernel_entry[1][0]
+        kernel_key: Union[ETKernelKey, List[ETKernelKey]] = unbox_kernel_entry[1][0]
         kernel_meta: BackendMetadata = unbox_kernel_entry[1][1]
 
         # TODO: Update to use Kernel Selector
@@ -217,10 +217,15 @@ class ComputeCodegenUnboxedKernels:
                 return_assignment = ""
                 ret_prefix = ""
 
-        return f"""
+        if not isinstance(kernel_key, list):
+            kernel_key = [kernel_key]
+
+        newline = "\n    "
+        return "\n".join(
+            [
+                f"""
 Kernel(
-    "{f.namespace}::{f.func.name}",
-    "{kernel_key.to_native_string()}",
+    "{f.namespace}::{f.func.name}",{newline + '"' + (k.to_native_string() + '",') if k.to_native_string() != 'default' else ''}
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 
@@ -231,6 +236,9 @@ Kernel(
     }}
 ),
 """
+                for k in kernel_key
+            ]
+        )
 
 
 def gen_unboxing(
