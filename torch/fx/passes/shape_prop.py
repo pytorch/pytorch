@@ -186,7 +186,7 @@ class ShapeProp(torch.fx.Interpreter):
             Any: The value returned from executing the Module
         """
         if self.fake_mode is not None:
-            fake_args = [self.fake_mode.from_tensor(t) for t in args]
+            fake_args = [self.fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args]
         else:
             fake_args = args
         return super().run(*fake_args)
