@@ -238,10 +238,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        if config.dynamic_shapes:
-            # Register a SHAPE_ENV guard to make sure we setup shape guards
-            # that show up in ShapeEnv
-            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+        # Register a SHAPE_ENV guard to make sure we setup shape guards
+        # that show up in ShapeEnv
+        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
 
         self.guards.add(
             DeterministicAlgorithmsSource().make_guard(
