@@ -34,15 +34,35 @@ class Bucket:
     # param_ids is just used for unit testing
     param_ids: List = field(default_factory=list)
 
+    # keep track of any buckets that were extended for logging purposes
+    extended_to_capture_external_output: bool = False
+
+
+def bucket_has_external_output(bucket: Bucket) -> bool:
+    nodes_in_bucket = set()
+    # we want to iterate in reverse order, but clumsi-luckily the bucket.nodes list was already created backwards
+    # so we don't reverse it here
+    for node in bucket.nodes:
+        # assume node.op != output, since those are filtered in the original iteration
+        nodes_in_bucket.add(node)
+        for user in node.users:
+            if user not in nodes_in_bucket:
+                return True
+    return False
+
 
 def pretty_print_buckets(buckets: List[Bucket]):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
+    extended_buckets = []
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
             rows.append((idx, bucket.size, bucket.params[0]))
             for param in bucket.params[1:]:
                 rows.append((None, None, param))
+        if bucket.extended_to_capture_external_output:
+            extended_buckets.append(idx)
+
     try:
         from tabulate import tabulate
 
@@ -55,6 +75,15 @@ def pretty_print_buckets(buckets: List[Bucket]):
     except ImportError:
         log.info(
             "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
+        )
+
+    if len(extended_buckets):
+        log.warning(
+            "Buckets %s were extended beyond their requested parameter capacities in order to ensure each subgraph has "
+            " an output node, required for fx graph partitioning. This can be the case when a subgraph would have "
+            " only contained nodes performing inplace mutation, and returning no logical outputs. This should not "
+            " be a problem, unless it results in too few graph partitions for optimal DDP performance.",
+            extended_buckets,
         )
 
 
@@ -165,7 +194,16 @@ class DDPOptimizer:
                 or len(buckets) == 1
                 and buckets[0].size >= self.first_bucket_cap
             ):
-                buckets.insert(0, Bucket())
+                if bucket_has_external_output(buckets[0]):
+                    buckets.insert(0, Bucket())
+                else:
+                    # continue building this bucket past the point of filling its parameter capacity,
+                    # to increase chances it contains at least one node that is either a global output or
+                    # passed as input to a subsequent graph
+
+                    # TODO(whc) can we DCE first and then make any guarantee it is
+                    # impossible to have an outputless subgraph?
+                    buckets[0].extended_to_capture_external_output = True
 
             if node.op == "call_module":
                 target = gm.get_submodule(node.target)
