@@ -1399,10 +1399,7 @@ def fqn(obj: Any):
 
 
 def ifdyn(count1, count2):
-    if torch._dynamo.config.dynamic_shapes:
-        return count1
-    else:
-        return count2
+    return count1
 
 
 def ifdynstaticdefault(count1, count2):
@@ -1413,7 +1410,7 @@ def ifdynstaticdefault(count1, count2):
 
 
 def ifunspec(count1, count2):
-    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
+    if not torch._dynamo.config.specialize_int:
         return count1
     else:
         return count2
