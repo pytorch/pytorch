@@ -311,10 +311,11 @@ class TestScatterGather(TestCase):
                 for include_self in [True, False]:
                     out = input.scatter_reduce(0, idx, src, reduce=reduce, include_self=include_self)
                     out2 = input2.scatter_reduce(0, idx2, src2, reduce=reduce, include_self=include_self)
-                    self.assertEqual(out, out2.to(dtype) if dtype in [torch.bfloat16, torch.float16] else out2, atol=atol, rtol=rtol)
+                    self.assertEqual(out, out2.to(dtype) if dtype in [torch.bfloat16, torch.float16] else out2,
+                                     atol=atol, rtol=rtol)
 
         helper([50, 17], 100)
-        helper([50, 1], 100, atol=1e-3, rtol=0.016) # SLow path has accuracy gap between float32 and low precision
+        helper([50, 1], 100, atol=1e-3, rtol=0.016)  # SLow path has accuracy gap between float32 and low precision
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 

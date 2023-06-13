@@ -725,6 +725,7 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
     Tensor buffer = at::zeros({num_threads, K}, self.options().dtype(kFloat));
     float* buffer_data = buffer.data_ptr<float>();
     using Vec = vec::Vectorized<scalar_t>;
+    using fVec = vec::Vectorized<float>;
 
     // TODO: do blocking on col dimension to reduce WR bandwidth
     at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
@@ -746,18 +747,20 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
         }
 
         // step 2: reduce
-        uint64_t k = 0;
+        int64_t k = 0;
+        constexpr int64_t kVecSize = Vec::size();
+        constexpr int64_t kfVecSize = fVec::size();
         for (const auto n : c10::irange(off_start, off_end)) {
           int64_t col = sorted_col_index_values[n];
-          for (k = 0; k < K - (K % Vec::size()); k += Vec::size()) {
+          for (k = 0; k < K - (K % kVecSize); k += kVecSize) {
             Vec src_vec = Vec::loadu(src_data + col * K + k);
-            Vectorized<float> src_vec0, src_vec1;
+            fVec src_vec0, src_vec1;
             std::tie(src_vec0, src_vec1) = convert_to_float<scalar_t>(src_vec);
-            Vectorized<float> buf_vec0, buf_vec1;
-            buf_vec0 = update<Vectorized<float>, reduce>(Vectorized<float>::loadu(buffer_ptr + k), src_vec0);
-            buf_vec1 = update<Vectorized<float>, reduce>(Vectorized<float>::loadu(buffer_ptr + k + Vectorized<float>::size()), src_vec1);
+            fVec buf_vec0, buf_vec1;
+            buf_vec0 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k), src_vec0);
+            buf_vec1 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k + kfVecSize), src_vec1);
             buf_vec0.store(buffer_ptr + k);
-            buf_vec1.store(buffer_ptr + k + Vectorized<float>::size());
+            buf_vec1.store(buffer_ptr + k + fVec::size());
           }
           for (; k < K; k++) {
             float src_val = float(src_data[col * K + k]);
