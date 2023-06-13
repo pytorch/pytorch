@@ -383,7 +383,7 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
-            (target,) = [i for i in instructions if i.offset == offset]
+            target = next(i for i in instructions if i.offset == offset)
 
             prefix = []
             if is_py311_plus:
@@ -435,7 +435,7 @@ class ContinueExecutionCache:
             # remove starts_line for any instructions before the graph break instruction
             # this will ensure the instructions after the break have the correct line numbers
             for inst in instructions:
-                if inst.offset and inst.offset >= target.offset:
+                if inst.offset == target.offset:
                     break
                 inst.starts_line = None
 
