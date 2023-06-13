@@ -542,9 +542,11 @@ class Optimizer:
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()
 
-        per_device_and_dtype_grads: DefaultDict[
-            torch.device, DefaultDict[torch.dtype, List[torch.Tensor]]
-        ] = defaultdict(lambda: defaultdict(list))
+        per_device_and_dtype_grads: Optional[DefaultDict[torch.device, DefaultDict[torch.dtype, List[torch.Tensor]]]]
+        if foreach:
+            per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+        else:
+            per_device_and_dtype_grads = None
 
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
@@ -560,8 +562,10 @@ class Optimizer:
                             if (not foreach or p.grad.is_sparse):
                                 p.grad.zero_()
                             else:
+                                assert per_device_and_dtype_grads is not None
                                 per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
             if foreach:
+                assert per_device_and_dtype_grads is not None
                 for per_dtype_grads in per_device_and_dtype_grads.values():
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)
