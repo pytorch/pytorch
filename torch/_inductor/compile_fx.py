@@ -212,14 +212,16 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                         return x
 
                 assert torch._guards.TracingContext.get()
-                real_inputs = torch._guards.TracingContext.get().params_flat + V.get_real_inputs()
-                real_inputs = [materialize(x) for x in real_inputs]
+                real_inputs = [
+                    materialize(x)
+                    for x in torch._guards.TracingContext.get().params_flat
+                    + V.get_real_inputs()
+                ]
 
                 with torch.utils._python_dispatch._disable_current_modes():
                     compiled(real_inputs)
 
                 real_inputs = None
-                V.set_real_inputs(None)
 
                 # second pass
                 kwargs_patched = {**kwargs, "cpp_wrapper": True}
@@ -735,7 +737,6 @@ def compile_fx(
             )
 
     if config.cpp_wrapper:
-        V.set_real_inputs(example_inputs_)
         with config.patch(
             {
                 "cpp_wrapper": False,
@@ -744,7 +745,7 @@ def compile_fx(
                 # CudaWrapperCodeGen relies on kernel name to find the autotuned cubin file
                 "triton.unique_kernel_names": True,
             }
-        ):
+        ), V.set_real_inputs(example_inputs_):
             return compile_fx(
                 model_,
                 example_inputs_,
