@@ -47,7 +47,6 @@ from torch.ao.quantization.backend_config import (
 from torch.ao.quantization.qconfig import (
     default_per_channel_symmetric_qnnpack_qat_qconfig,
     default_per_channel_symmetric_qnnpack_qconfig,
-    default_symmetric_qnnpack_qconfig,
     default_symmetric_qnnpack_qat_qconfig,
     float_qparams_weight_only_qconfig,
     per_channel_weight_observer_range_neg_127_to_127,
@@ -66,9 +65,6 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
-)
-from torch.ao.quantization import (
-    default_dynamic_qconfig,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 
@@ -1532,130 +1528,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         )
 
 
-class TestQuantizePT2EOps(QuantizationTestCase):
-    def test_gru(self):
-        """ this is a test for annotating fp32 GRU so that it produces
-        q -> dq -> fp32_gru -> q -> dq, this is currently enough for our use cases,
-        but we may change the annotation to be more precise in the future
-        """
-        class RNNDynamicModel(torch.nn.Module):
-            def __init__(self, mod_type):
-                super().__init__()
-                self.qconfig = default_dynamic_qconfig
-                if mod_type == 'GRU':
-                    self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
-                if mod_type == 'LSTM':
-                    self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
-
-            def forward(self, input_tensor, hidden_tensor):
-                input_tensor = 1 * input_tensor
-                hidden_tensor = 1 * hidden_tensor
-                output_tensor, hidden_out = self.mod(input_tensor, hidden_tensor)
-                return 1 * output_tensor, 1 * hidden_out
-
-        with override_quantized_engine("qnnpack"):
-            model_fx = RNNDynamicModel("GRU")
-            module_types = [torch.nn.GRU]
-            niter = 10
-            example_inputs = (
-                # input_tensor
-                torch.tensor([[100, -155],
-                              [-155, 100],
-                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1),
-                # hidden_tensor
-                # (D * num_layers, N, H_out)
-                torch.tensor([[[100, -155]]], dtype=torch.float).repeat(1, 3, 1),
-            )
-            model_graph = copy.deepcopy(model_fx)
-
-            qconfig_mapping = QConfigMapping().set_object_type(operator.mul, default_symmetric_qnnpack_qconfig)
-            model_fx = prepare_fx(model_fx, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
-            model_fx(*example_inputs)
-            model_fx = _convert_to_reference_decomposed_fx(model_fx)
-
-            torchdynamo.config.allow_rnn = True
-            model_graph, guards = torchdynamo.export(
-                model_graph,
-                *copy.deepcopy(example_inputs),
-                aten_graph=True,
-                tracing_mode="real",
-            )
-            quantizer = QNNPackQuantizer()
-            operator_config = get_symmetric_quantization_config(
-                is_per_channel=False, is_dynamic=False
-            )
-            quantizer.set_global(operator_config)
-            model_graph = prepare_pt2e_quantizer(model_graph, quantizer)
-            model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
-            self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
-
-    def test_linear_gru(self):
-        """ this test is to make sure GRU annotation does not interfere with linear annotation
-        """
-        class RNNDynamicModel(torch.nn.Module):
-            def __init__(self, mod_type):
-                super().__init__()
-                self.qconfig = default_dynamic_qconfig
-                self.linear = torch.nn.Linear(2, 2)
-                if mod_type == 'GRU':
-                    self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
-                if mod_type == 'LSTM':
-                    self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
-
-            def forward(self, input_tensor, hidden_tensor):
-                input_tensor = self.linear(input_tensor)
-                input_tensor = 1 * input_tensor
-                hidden_tensor = 1 * hidden_tensor
-                output_tensor, hidden_out = self.mod(input_tensor, hidden_tensor)
-                return 1 * output_tensor, 1 * hidden_out
-
-        with override_quantized_engine("qnnpack"):
-            model_fx = RNNDynamicModel("GRU")
-            module_types = [torch.nn.GRU]
-            niter = 10
-            example_inputs = (
-                # input_tensor
-                torch.tensor([[100, -155],
-                              [-155, 100],
-                              [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1),
-                # hidden_tensor
-                # (D * num_layers, N, H_out)
-                torch.tensor([[[100, -155]]], dtype=torch.float).repeat(1, 3, 1),
-            )
-            model_graph = copy.deepcopy(model_fx)
-
-            qconfig_mapping = (
-                QConfigMapping().set_object_type(
-                    operator.mul, default_symmetric_qnnpack_qconfig
-                ).set_object_type(
-                    torch.nn.Linear, default_symmetric_qnnpack_qconfig
-                )
-            )
-            model_fx = prepare_fx(model_fx, qconfig_mapping, example_inputs, backend_config=get_qnnpack_backend_config())
-            model_fx(*example_inputs)
-            model_fx = _convert_to_reference_decomposed_fx(model_fx)
-
-            torchdynamo.config.allow_rnn = True
-            model_graph, guards = torchdynamo.export(
-                model_graph,
-                *copy.deepcopy(example_inputs),
-                aten_graph=True,
-                tracing_mode="real",
-            )
-            quantizer = QNNPackQuantizer()
-            operator_config = get_symmetric_quantization_config(
-                is_per_channel=False, is_dynamic=False
-            )
-            quantizer.set_global(operator_config)
-            model_graph = prepare_pt2e_quantizer(model_graph, quantizer)
-            model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
-            self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
-
-
-# TODO: express this using self._test_quantizer
 class TestQuantizePT2EModels(PT2EQuantizationTestCase):
+
+    # TODO: express this using self._test_quantizer
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
     def test_resnet18_with_quantizer_api(self):
