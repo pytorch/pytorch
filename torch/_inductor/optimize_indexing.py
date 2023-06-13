@@ -105,6 +105,7 @@ def get_expr_range(expr, vars_ranges: dict):
             if (
                 len(diff_free_symbols) == 1
                 and symbol in diff_free_symbols
+                and symbol in vars_ranges
                 and vars_ranges[symbol].lower == vars_ranges[symbol].upper
             ):
                 monotonic_increasing.append(symbol)
@@ -129,7 +130,7 @@ def get_expr_range(expr, vars_ranges: dict):
         if free_symbols(min_val):
             min_val = -math.inf
         if free_symbols(max_val):
-            max_val = -math.inf
+            max_val = math.inf
         return ValueRanges(min_val, max_val)
     else:
         # bail on optimizing, have not run into this yet
