@@ -299,7 +299,7 @@ fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
   const auto res0_ = reshape_dim_outof(0, batch_size, std::get<0>(res));
   const auto res1_ = reshape_dim_outof(0, batch_size, std::get<1>(res));
   const auto res2_ = reshape_dim_outof(0, batch_size, std::get<2>(res));
-  const auto res3_ = reshape_dim_outof(0, batch_size, std::get<2>(res));
+  const auto res3_ = reshape_dim_outof(0, batch_size, std::get<3>(res));
   return std::make_tuple(res0_, 0, res1_, 0, res2_, 0, res3_, 0);
 }
 
