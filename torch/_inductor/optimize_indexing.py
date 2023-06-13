@@ -65,8 +65,8 @@ def range_expressable_in_32_bits(range):
 
 
 def get_expr_range(expr, vars_ranges: dict):
-    free_symbols = list(expr.free_symbols)
-    if len(free_symbols) == 0:
+    fs = list(expr.free_symbols)
+    if len(fs) == 0:
         return ValueRanges(expr, expr)
 
     def replace_symbols_for_deriv(expr):
