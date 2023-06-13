@@ -409,6 +409,8 @@ def has_incompatible_cudagraph_ops(gm):
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
+        "run_with_rng_state",
+        "run_and_save_rng_state",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
