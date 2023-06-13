@@ -186,6 +186,17 @@ class TestControlFlow(TestCase):
         true_outs = fwbw(control_flow.map, f, x, y)
         fake_outs = fwbw(_fake_map, f, x, y)
         self.assertEqual(true_outs, fake_outs)
+    
+    def test_scan_simple(self):
+        def f(carry, x):
+            return carry, x
+
+        init = torch.tensor(10)
+        x = torch.rand(10, 2)
+        carry_out, ys = control_flow.scan(f, init, x)
+        print(carry_out)
+        print(ys)
+        self.assertTrue(False)
 
 
 class TestControlFlowTraced(TestCase):
