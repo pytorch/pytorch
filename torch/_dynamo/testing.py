@@ -246,7 +246,7 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
 def requires_static_shapes(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        if config.dynamic_shapes:
+        if not config.assume_static_by_default or config.automatic_dynamic_shapes:
             raise unittest.SkipTest("requires static shapes")
         return fn(*args, **kwargs)
 
