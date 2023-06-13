@@ -15,7 +15,7 @@ namespace c10 {
 /// A DeviceIndex is not independently meaningful without knowing
 /// the DeviceType it is associated; try to use Device rather than
 /// DeviceIndex directly.
-using DeviceIndex = int32_t;
+using DeviceIndex = int8_t;
 
 /// Represents a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
@@ -174,15 +174,13 @@ struct C10_API Device final {
     // This is safe to do, because backends that use the DeviceIndex
     // have a later check when we actually try to switch to that device.
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        index_ >= -1, "Device index must be -1 or non-negative, got ", index_);
+        index_ >= -1,
+        "Device index must be -1 or non-negative, got ",
+        static_cast<int>(index_));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         !is_cpu() || index_ <= 0,
         "CPU device index must be -1 or zero, got ",
-        index_);
-    // If we don't check cpu index in release builds, set it to -1.
-    if (is_cpu() && index_ > 0) {
-      index_ = -1;
-    }
+        static_cast<int>(index_));
   }
 };
 
@@ -197,7 +195,7 @@ struct hash<c10::Device> {
     // Are you here because this static assert failed?  Make sure you ensure
     // that the bitmasking code below is updated accordingly!
     static_assert(sizeof(c10::DeviceType) == 1, "DeviceType is not 8-bit");
-    static_assert(sizeof(c10::DeviceIndex) == 4, "DeviceIndex is not 32-bit");
+    static_assert(sizeof(c10::DeviceIndex) == 1, "DeviceIndex is not 8-bit");
     // Note [Hazard when concatenating signed integers]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // We must first convert to a same-sized unsigned type, before promoting to
@@ -208,10 +206,10 @@ struct hash<c10::Device> {
     // Technically, by C/C++ integer promotion rules, we only need one of the
     // uint32_t casts to the result type, but we put in both for explicitness's
     // sake.
-    uint64_t bits = static_cast<uint64_t>(static_cast<uint8_t>(d.type()))
-            << 32 |
-        static_cast<uint64_t>(static_cast<uint32_t>(d.index()));
-    return std::hash<uint64_t>{}(bits);
+    uint32_t bits = static_cast<uint32_t>(static_cast<uint8_t>(d.type()))
+            << 16 |
+        static_cast<uint32_t>(static_cast<uint8_t>(d.index()));
+    return std::hash<uint32_t>{}(bits);
   }
 };
 } // namespace std

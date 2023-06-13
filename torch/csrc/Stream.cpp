@@ -31,7 +31,6 @@ static PyObject* THPStream_pynew(
     return nullptr;
   }
 
-  TORCH_CHECK(isValidDeviceType(static_cast<c10::DeviceType>(device_type)));
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
     return nullptr;
