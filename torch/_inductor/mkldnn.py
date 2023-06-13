@@ -3,12 +3,12 @@ from functools import reduce
 from typing import Optional
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 import torch.nn.functional as F
 
 from torch._dynamo.utils import detect_fake_mode
 from torch.fx.experimental.optimization import replace_node_module
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
 from . import config
@@ -256,7 +256,10 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     if not is_cpu:
         return gm
     fake_mode = detect_fake_mode(example_inputs)
-    if config.cpp.weight_prepack:
+    # NB: free_symbols test here is a BIG hammer.  ShapeProp doesn't
+    # work with symbolic shapes though, see
+    # https://github.com/pytorch/pytorch/pull/103512
+    if config.cpp.weight_prepack and not any(free_symbols(e) for e in example_inputs):
         ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
         gm = pack_module(gm)
     return gm
@@ -282,21 +285,31 @@ def pack_module(gm: torch.fx.GraphModule):
                     and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
                 ):
                     continue
-                computation_node_input_size = (
-                    node.args[0].meta.get("tensor_meta").shape
-                )
-                if any(size == 0 for size in computation_node_input_size):
-                    continue
-                if type(cur_module) in [torch.nn.Linear]:
-                    # for fp32 linear, only packed when has mkl.
-                    if (
-                        cur_module.weight.dtype == torch.float32
-                        and (not torch._C.has_mkl)
-                    ) or len(computation_node_input_size) < 2:
+                if free_symbols(node.args[0].meta.get("tensor_meta").shape):
+                    computation_node_input_size = None
+                    # Conv2d and ConvTranspose2d weight format are dependent on input size,
+                    # but ShapeProp may be failed to get the input size, so we skip them.
+                    if not (
+                        type(cur_module) in [torch.nn.Linear]
+                        and cur_module.weight.dtype == torch.bfloat16
+                    ):
                         continue
                 else:
-                    if len(computation_node_input_size) != 4:
+                    computation_node_input_size = (
+                        node.args[0].meta.get("tensor_meta").shape
+                    )
+                    if any(size == 0 for size in computation_node_input_size):
                         continue
+                    if type(cur_module) in [torch.nn.Linear]:
+                        # for fp32 linear, only packed when has mkl.
+                        if (
+                            cur_module.weight.dtype == torch.float32
+                            and (not torch._C.has_mkl)
+                        ) or len(computation_node_input_size) < 2:
+                            continue
+                    else:
+                        if len(computation_node_input_size) != 4:
+                            continue
                 if type(cur_module) in [nn.Conv2d] and isinstance(
                     cur_module.padding, str
                 ):
