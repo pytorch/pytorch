@@ -23,7 +23,11 @@ def make_fx_check(
         "op(*args, **kwargs) and make_fx(op)(*args, **kwargs) produced different "
         "values. This could mean that your abstract impls (meta/FakeTensor impls) "
         "are incorrect, that your operator is not completely traceable (e.g., "
-        "it relies on some global state), or that there is a bug in make_fx."
+        "it relies on some global state), or that there is a bug in make_fx. "
+        "Note that if you passed a python function (and not an operator) to "
+        "make_fx_check, it is still possible that the python function will still "
+        "work with torch.compile because it handles capturing pieces of "
+        "your python code to compile."
     )
 
     # Randomize the data and run the traced graph with it, to catch bugs
