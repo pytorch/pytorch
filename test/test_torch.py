@@ -32,7 +32,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, skipIfTorchInductor, slowTest,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest,
     TEST_WITH_CROSSREF, skipIfTorchDynamo,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
@@ -519,7 +519,6 @@ class TestTorchDeviceType(TestCase):
 
     # collected tests of ops that used scalar_check in Declarations.cwrap for
     # correctness
-    @skipIfTorchInductor("segfaults")
     def test_scalar_check(self, device):
         zero_d = torch.randn((), device=device)
         one_d = torch.randn((1,), device=device)
@@ -981,7 +980,6 @@ class TestTorchDeviceType(TestCase):
             torch.set_default_tensor_type(default_type)
 
     # TODO: this test should be in test_nn.py
-    @skipIfTorchInductor("Please convert all Tensors to FakeTensors")
     def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
         in_channels = 64
         out_channels = 128
@@ -3260,7 +3258,6 @@ else:
 
     # FIXME: move to test indexing
     @onlyCPU
-    @skipIfTorchInductor("FIXME")
     def test_errors_index_copy(self, device):
         # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
         idx_dim = 8
@@ -3643,7 +3640,6 @@ else:
     @dtypes(*floating_and_complex_types())
     @dtypesIfCPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     @dtypesIfCUDA(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @skipIfTorchInductor("FIXME")
     def test_scatter_reduce_non_unique_index(self, device, dtype):
         height = 2
         width = 2
@@ -4401,7 +4397,6 @@ else:
 
     # FIXME: move to test distributions
     @onlyCUDA
-    @skipIfTorchInductor("out_wrapper does not check devices correctly")
     def test_multinomial_device_constrain(self, device):
         x = torch.empty(3, device="cpu")
         y = torch.empty(3, device=device)
@@ -4574,7 +4569,6 @@ else:
         y = ndhwc.permute(0, 1, 4, 3, 2).permute(0, 1, 4, 3, 2)
         self.assertTrue(y.is_contiguous(memory_format=torch.channels_last_3d))
 
-    @skipIfTorchInductor("To be supported")
     def test_memory_format_propagation_rules(self, device):
 
         contiguous = torch.rand(10, 3, 5, 5, device=device)
@@ -4618,7 +4612,6 @@ else:
             self.assertEqual(ambiguous.stride(), result.stride())
 
     @skipIfMps
-    @skipIfTorchInductor("To be supported")
     def test_memory_format_empty_like(self, device):
         def test_helper(x, memory_format):
             xc = x.contiguous(memory_format=memory_format)
@@ -4661,7 +4654,6 @@ else:
             x.is_contiguous(memory_format=torch.channels_last_3d), x_rep.is_contiguous(memory_format=torch.channels_last_3d))
 
     # FIXME: make this a elementwise unary and elementwise binary OpInfo test
-    @skipIfTorchInductor("To be supported")
     def test_memory_format_operators(self, device):
         def _chunk_op(x, y):
             x1, x2 = x.chunk(2, dim=1)
@@ -4874,7 +4866,6 @@ else:
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
-    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory_from_constructor(self, device):
         def _get_like(t, **kwargs):
             return [
@@ -5096,7 +5087,6 @@ else:
             x = x.permute(permutation)
             self.assertEqual(x.stride(), transformation_fn(x, memory_format=torch.preserve_format).stride())
 
-    @skipIfTorchInductor("To be supported")
     def test_memory_format_to(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -5114,7 +5104,6 @@ else:
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
-    @skipIfTorchInductor("To be supported")
     def test_memory_format_type(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -5132,7 +5121,6 @@ else:
             self._test_memory_format_transformations(
                 device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
-    @skipIfTorchInductor("To be supported")
     def test_memory_format_clone(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -5176,7 +5164,6 @@ else:
                 self._test_memory_format_transformations(
                     device, get_generator(mf, shape), transformation_fn, mf, compare_data=False, default_is_preserve=True)
 
-    @skipIfTorchInductor("To be supported")
     def test_memory_format_type_shortcuts(self, device):
         def get_generator(memory_format, shape, dtype):
             def input_generator_fn(device):
@@ -5210,7 +5197,6 @@ else:
                 device, get_generator(mf, shape, torch.float64), get_fn('float'), mf, default_is_preserve=True)
 
     @onlyCUDA
-    @skipIfTorchInductor("To be supported")
     def test_memory_format_cpu_and_cuda_ops(self, device):
         def get_generator(memory_format, shape):
             def input_generator_fn(device):
@@ -5411,7 +5397,6 @@ else:
     # FIXME: get PyTorch/XLA to run test_testing
     # This test should ideally be in test_testing.py,
     # but since pytorch/xla runs tests from test_torch.py, we have it here.
-    @skipIfTorchInductor("random_.from needs to be renamed")
     def test_assertRaisesRegex_ignore_msg_non_native_device(self, device):
         # Verify that self.assertRaisesRegex only checks the Error and ignores
         # message for non-native devices.
@@ -5586,7 +5571,6 @@ class TestDevicePrecision(TestCase):
 
     # FIXME: moved to indexing test suite
     @deviceCountAtLeast(1)
-    @skipIfTorchInductor("FIXME")
     def test_advancedindex_mixed_cpu_devices(self, devices) -> None:
         def test(x: torch.Tensor, ia: torch.Tensor, ib: torch.Tensor) -> None:
             # test getitem
@@ -5620,7 +5604,6 @@ class TestDevicePrecision(TestCase):
             test(x, ia, ib)
 
     @deviceCountAtLeast(1)
-    @skipIfTorchInductor("FIXME")
     def test_advancedindex_mixed_devices_error(self, devices) -> None:
         def test(x: torch.Tensor, ia: torch.Tensor, ib: torch.Tensor) -> None:
             # test getitem
@@ -5976,17 +5959,6 @@ class TestTorch(TestCase):
                     for size in [(2, 512, 256), (5, 256, 256)]:
                         helper(dim, dtype, device, size, size)
 
-                # Check broadcast cases on CPU
-                size_result = (2, 512, 256)
-                size_source = (1, 512, 256)
-                helper(dim, dtype, 'cpu', size_result, size_source)
-                size_result = (2, 512, 512)
-                size_source = (1, 512, 1)
-                helper(dim, dtype, 'cpu', size_result, size_source)
-                size_result = (2, 512, 256)
-                size_source = (2, 1, 256)
-                helper(dim, dtype, 'cpu', size_result, size_source)
-
                 # Check bound
                 result = torch.zeros(1, 512, 256, dtype=dtype)
                 source = torch.ones(1, 512, 256, dtype=dtype)
@@ -6166,89 +6138,94 @@ class TestTorch(TestCase):
     # NOTE: test_equal will be deprecated in favor of torch.testing.assert_close
     #   once torch.testing is out of beta
     def test_equal(self):
-        # Contiguous, 1D
-        t1 = torch.tensor((3., 4., 9., 10.))
-        t2 = t1.contiguous()
-        t3 = torch.tensor((1., 9., 3., 10.))
-        t4 = torch.tensor((3., 4., 9.))
-        t5 = torch.tensor([])
-        self.assertTrue(t1.equal(t2))
-        self.assertFalse(t1.equal(t3))
-        self.assertFalse(t1.equal(t4))
-        self.assertFalse(t1.equal(t5))
-        self.assertTrue(torch.equal(t1, t2))
-        self.assertFalse(torch.equal(t1, t3))
-        self.assertFalse(torch.equal(t1, t4))
-        self.assertFalse(torch.equal(t1, t5))
+        devices = [torch.cpu, torch.cuda]
+        for device in ["cpu", "cuda"]:
+            if device == "cuda" and not torch.cuda.is_available():
+                continue
 
-        # Non contiguous, 2D
-        s = torch.tensor(((1, 2, 3, 4), (5, 6, 7, 8)))
-        s1 = s[:, 1:3]
-        s2 = s1.clone()
-        s3 = torch.tensor(((2, 3), (6, 7)))
-        s4 = torch.tensor(((0, 0), (0, 0)))
+            # Contiguous, 1D
+            t1 = torch.tensor((3., 4., 9., 10.), device=device)
+            t2 = t1.contiguous()
+            t3 = torch.tensor((1., 9., 3., 10.), device=device)
+            t4 = torch.tensor((3., 4., 9.), device=device)
+            t5 = torch.tensor([], device=device)
+            self.assertTrue(t1.equal(t2))
+            self.assertFalse(t1.equal(t3))
+            self.assertFalse(t1.equal(t4))
+            self.assertFalse(t1.equal(t5))
+            self.assertTrue(torch.equal(t1, t2))
+            self.assertFalse(torch.equal(t1, t3))
+            self.assertFalse(torch.equal(t1, t4))
+            self.assertFalse(torch.equal(t1, t5))
 
-        self.assertFalse(s1.is_contiguous())
-        self.assertTrue(s1.equal(s2))
-        self.assertTrue(s1.equal(s3))
-        self.assertFalse(s1.equal(s4))
-        self.assertTrue(torch.equal(s1, s2))
-        self.assertTrue(torch.equal(s1, s3))
-        self.assertFalse(torch.equal(s1, s4))
+            # Non contiguous, 2D
+            s = torch.tensor(((1, 2, 3, 4), (5, 6, 7, 8)), device=device)
+            s1 = s[:, 1:3]
+            s2 = s1.clone()
+            s3 = torch.tensor(((2, 3), (6, 7)), device=device)
+            s4 = torch.tensor(((0, 0), (0, 0)), device=device)
 
-        # Different dtypes
-        x = torch.tensor((1, 2, 3), dtype=torch.float)
-        y = torch.tensor((1, 2, 3), dtype=torch.int)
-        z = torch.tensor((1, -1), dtype=torch.int)
-        self.assertTrue(torch.equal(x, y))
-        self.assertFalse(torch.equal(z, x))
+            self.assertFalse(s1.is_contiguous())
+            self.assertTrue(s1.equal(s2))
+            self.assertTrue(s1.equal(s3))
+            self.assertFalse(s1.equal(s4))
+            self.assertTrue(torch.equal(s1, s2))
+            self.assertTrue(torch.equal(s1, s3))
+            self.assertFalse(torch.equal(s1, s4))
 
-        # Fast path test: tensor flags, like neg and conj
-        neg_0 = torch.tensor((1, 2, 3), dtype=torch.float)
-        neg_1 = neg_0._neg_view()
-        self.assertTrue(neg_1.is_neg())
-        self.assertEqual(neg_0.data_ptr(), neg_1.data_ptr())
-        self.assertEqual(neg_0.storage_offset(), neg_1.storage_offset())
-        self.assertEqual(neg_0.stride(), neg_1.stride())
-        self.assertEqual(neg_0.size(), neg_1.size())
-        self.assertFalse(torch.equal(neg_0, neg_1))
-        # FIXME: Disable the following check due to the inductor failure
-        # See https://github.com/pytorch/pytorch/issues/100340 and
-        # https://github.com/pytorch/pytorch/issues/98175
-        if not TEST_WITH_TORCHINDUCTOR:
-            self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
+            # Different dtypes
+            x = torch.tensor((1, 2, 3), dtype=torch.float, device=device)
+            y = torch.tensor((1, 2, 3), dtype=torch.int, device=device)
+            z = torch.tensor((1, -1), dtype=torch.int, device=device)
+            self.assertTrue(torch.equal(x, y))
+            self.assertFalse(torch.equal(z, x))
 
-        conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j])
-        conj_1 = conj_0.conj()
-        self.assertTrue(conj_1.is_conj())
-        self.assertEqual(conj_0.data_ptr(), conj_1.data_ptr())
-        self.assertEqual(conj_0.storage_offset(), conj_1.storage_offset())
-        self.assertEqual(conj_0.stride(), conj_1.stride())
-        self.assertEqual(conj_0.size(), conj_1.size())
-        self.assertFalse(torch.equal(conj_0, conj_1))
-        # FIXME: Disable the following check due to the inductor failure
-        # See https://github.com/pytorch/pytorch/issues/100340 and
-        # https://github.com/pytorch/pytorch/issues/98175
-        if not TEST_WITH_TORCHINDUCTOR:
-            self.assertTrue(torch.equal(conj_0, conj_1.conj()))
+            # Fast path test: tensor flags, like neg and conj
+            neg_0 = torch.tensor((1, 2, 3), dtype=torch.float, device=device)
+            neg_1 = neg_0._neg_view()
+            self.assertTrue(neg_1.is_neg())
+            self.assertEqual(neg_0.data_ptr(), neg_1.data_ptr())
+            self.assertEqual(neg_0.storage_offset(), neg_1.storage_offset())
+            self.assertEqual(neg_0.stride(), neg_1.stride())
+            self.assertEqual(neg_0.size(), neg_1.size())
+            self.assertFalse(torch.equal(neg_0, neg_1))
+            # FIXME: Disable the following check due to the inductor failure
+            # See https://github.com/pytorch/pytorch/issues/100340 and
+            # https://github.com/pytorch/pytorch/issues/98175
+            if not TEST_WITH_TORCHINDUCTOR:
+                self.assertTrue(torch.equal(neg_0, neg_1._neg_view()))
 
-        # Fast path test: two tensors share the same storage, but different dtype
-        s_0 = torch.rand((2, 3), dtype=torch.float)
-        s_1 = s_0.view(dtype=torch.int32)
-        self.assertEqual(s_0.data_ptr(), s_1.data_ptr())
-        self.assertEqual(s_0.storage_offset(), s_1.storage_offset())
-        self.assertEqual(s_0.stride(), s_1.stride())
-        self.assertEqual(s_0.size(), s_1.size())
-        self.assertFalse(torch.equal(s_0, s_1))
+            conj_0 = torch.tensor([1.0 + 2.0j, 2.0 + 1.0j], device=device)
+            conj_1 = conj_0.conj()
+            self.assertTrue(conj_1.is_conj())
+            self.assertEqual(conj_0.data_ptr(), conj_1.data_ptr())
+            self.assertEqual(conj_0.storage_offset(), conj_1.storage_offset())
+            self.assertEqual(conj_0.stride(), conj_1.stride())
+            self.assertEqual(conj_0.size(), conj_1.size())
+            self.assertFalse(torch.equal(conj_0, conj_1))
+            # FIXME: Disable the following check due to the inductor failure
+            # See https://github.com/pytorch/pytorch/issues/100340 and
+            # https://github.com/pytorch/pytorch/issues/98175
+            if not TEST_WITH_TORCHINDUCTOR:
+                self.assertTrue(torch.equal(conj_0, conj_1.conj()))
 
-        # Fast path test: two tensors share the same storage, but different strides
-        t_0 = torch.rand((2, 3), dtype=torch.float)
-        t_1 = t_0.t()
-        self.assertEqual(t_0.data_ptr(), t_1.data_ptr())
-        self.assertEqual(t_0.storage_offset(), t_1.storage_offset())
-        self.assertNotEqual(t_0.stride(), t_1.stride())
-        self.assertNotEqual(t_0.size(), t_1.size())
-        self.assertFalse(torch.equal(t_0, t_1))
+            # Fast path test: two tensors share the same storage, but different dtype
+            s_0 = torch.rand((2, 3), dtype=torch.float, device=device)
+            s_1 = s_0.view(dtype=torch.int32)
+            self.assertEqual(s_0.data_ptr(), s_1.data_ptr())
+            self.assertEqual(s_0.storage_offset(), s_1.storage_offset())
+            self.assertEqual(s_0.stride(), s_1.stride())
+            self.assertEqual(s_0.size(), s_1.size())
+            self.assertFalse(torch.equal(s_0, s_1))
+
+            # Fast path test: two tensors share the same storage, but different strides
+            t_0 = torch.rand((2, 3), dtype=torch.float, device=device)
+            t_1 = t_0.t()
+            self.assertEqual(t_0.data_ptr(), t_1.data_ptr())
+            self.assertEqual(t_0.storage_offset(), t_1.storage_offset())
+            self.assertNotEqual(t_0.stride(), t_1.stride())
+            self.assertNotEqual(t_0.size(), t_1.size())
+            self.assertFalse(torch.equal(t_0, t_1))
 
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
@@ -7429,7 +7406,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertRaises(RuntimeError, lambda: x.new(z.storage()))
 
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
-    @skipIfTorchInductor("pin_memory isn't yet supported in TorchInductor")
     def test_pin_memory(self):
         x = torch.randn(3, 5)
         self.assertFalse(x.is_pinned())
@@ -7649,7 +7625,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 weight), torch.tensor(bias), 1, epsilon, True)
         torch.testing.assert_close(expected_norm, actual_norm)
 
-    @skipIfTorchInductor("To be supported")
     def test_memory_format(self):
         def test_helper(x, memory_format):
             y = x.contiguous(memory_format=memory_format)
@@ -7840,7 +7815,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
         self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/97414")
     def test_upsample_nearest2d_meta(self):
         # TODO: the out tests cannot be triggered by test_nn.py because
         # we don't actually do out= arguments for nn functions, so there
@@ -8186,7 +8160,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(y[:, 40], range(4000, 4100))
 
     # FIXME: Port to a more appropriate test suite
-    @skipIfTorchInductor("FIXME")
     def test_copy_broadcast(self):
         torch.zeros(5, 6).copy_(torch.zeros(6))
         self.assertRaises(RuntimeError, lambda: torch.zeros(5, 6).copy_(torch.zeros(30)))
@@ -8200,7 +8173,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # storage to a single storage would cause RuntimeError to be thrown
         self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
 
-    @skipIfTorchInductor("FIXME")
     def test_copy_float16(self):
         # Check that fbgemm code no longer reads memory out of bounds, see
         # copy_impl and fbgemm::Float16ToFloat_ref.
@@ -8384,7 +8356,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             s0 = t0.as_subclass(BadSubTensor)
 
     # FIXME: Port to a test suite that better fits slicing
-    @skipIfTorchInductor("FIXME")
     def test_slice(self):
         empty = torch.empty(0, 4)
         x = torch.arange(0., 16).view(4, 4)
@@ -8731,16 +8702,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         T()
 
-    def test_storage_base_init(self):
-        # Direct construction not OK
-        self.assertRaises(RuntimeError, lambda: torch._C.StorageBase())
-
-        # But construction of subclass is OK
-        class T(torch._C.StorageBase):
-            pass
-
-        T()
-
     def test_tensor_base_new(self):
 
         # OK to call super().__new__, see
@@ -8752,18 +8713,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         x = torch.ones(5)
         test_tensor = TestTensor(x)
-
-    def test_storage_base_new(self):
-
-        # OK to call super().__new__, see
-        # https://github.com/pytorch/pytorch/issues/57421
-        class TestStorage(torch._C.StorageBase):
-            @staticmethod
-            def __new__(cls, x, *args, **kwargs):
-                return super().__new__(cls, x, *args, **kwargs)
-
-        x = torch.UntypedStorage(5)
-        test_storage = TestStorage(x)
 
     def test_pyobj_preserved(self):
         x = torch.empty(2)
@@ -8789,160 +8738,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del z  # it's dead again
         self.assertEqual(type(y.grad), MyTensor)
 
-    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
-    def test_storage_dealloc(self):
-        m, t = Tracker.make()
-        s0 = torch.UntypedStorage(10)
-        s1 = s0
-        s0._tracker = t
-        del t
-
-        self.assertFalse(m[0])
-        del s0
-        self.assertFalse(m[0])
-        del s1
-        self.assertTrue(m[0])
-
-    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
-    def test_storage_from_tensor_dealloc(self):
-        m, t = Tracker.make()
-        a = torch.randn(10)
-        s0 = a.untyped_storage()
-        s0._tracker = t
-        del t
-
-        s1 = a.untyped_storage()
-        self.assertTrue(s0 is s1)
-        self.assertTrue(hasattr(s1, '_tracker'))
-
-        del a
-
-        self.assertFalse(m[0])
-        del s0
-        self.assertFalse(m[0])
-        del s1
-        self.assertTrue(m[0])
-
-    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
-    def test_storage_from_tensor_dealloc_zombie(self):
-        m, t = Tracker.make()
-        a = torch.randn(10)
-        s0 = a.untyped_storage()
-        s0._tracker = t
-        del t
-
-        s1 = a.untyped_storage()
-        self.assertTrue(s0 is s1)
-        self.assertTrue(hasattr(s1, '_tracker'))
-
-        self.assertFalse(m[0])
-        del s0
-        self.assertFalse(m[0])
-        del s1
-        self.assertFalse(m[0])
-        del a
-        self.assertTrue(m[0])
-
-    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
-    def test_storage_from_tensor_dealloc_resurrected(self):
-        m, t = Tracker.make()
-        a = torch.randn(10)
-        s0 = a.untyped_storage()
-        s0._tracker = t
-        del t
-
-        s1 = a.untyped_storage()
-        self.assertTrue(s0 is s1)
-        self.assertTrue(hasattr(s1, '_tracker'))
-
-        self.assertFalse(m[0])
-        del s0
-        self.assertFalse(m[0])
-        del s1
-        self.assertFalse(m[0])
-
-        s0 = a.untyped_storage()
-        self.assertTrue(isinstance(s0, torch.UntypedStorage))
-
-        del a
-        self.assertFalse(m[0])
-        del s0
-        self.assertTrue(m[0])
-
-    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
-    def test_storage_dealloc_resurrected(self):
-        m, t = Tracker.make()
-        s = torch.UntypedStorage(10)
-        s._tracker = t
-        del t
-
-        a = torch.tensor(s)
-        self.assertFalse(m[0])
-        del s
-
-        self.assertFalse(m[0])
-
-        s = a.untyped_storage()
-        self.assertTrue(isinstance(s, torch.UntypedStorage))
-
-        del a
-        self.assertFalse(m[0])
-        del s
-        self.assertTrue(m[0])
-
-    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
-    def test_storage_dealloc_subclass_zombie(self):
-        class MyStorage(torch.UntypedStorage):
-            finalized_count = 0
-
-            def __del__(self):
-                MyStorage.finalized_count += 1
-
-        m, t = Tracker.make()
-        s = MyStorage(10)
-        s._tracker = t
-        del t
-
-        a = torch.tensor(s)
-        self.assertFalse(m[0])
-        del s
-
-        self.assertEqual(MyStorage.finalized_count, 0)
-        self.assertFalse(m[0])
-
-        del a
-        self.assertEqual(MyStorage.finalized_count, 1)
-        self.assertTrue(m[0])
-
-    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
-    def test_storage_dealloc_subclass_resurrected(self):
-        class MyStorage(torch.UntypedStorage):
-            finalized_count = 0
-
-            def __del__(self):
-                MyStorage.finalized_count += 1
-
-        m, t = Tracker.make()
-        s = MyStorage(10)
-        s._tracker = t
-        del t
-
-        a = torch.tensor(s)
-        self.assertFalse(m[0])
-        del s
-
-        self.assertEqual(MyStorage.finalized_count, 0)
-        self.assertFalse(m[0])
-
-        s = a.untyped_storage()
-        del a
-        self.assertFalse(m[0])
-        self.assertEqual(MyStorage.finalized_count, 0)
-        self.assertTrue(isinstance(s, MyStorage))
-        del s
-        self.assertEqual(MyStorage.finalized_count, 1)
-        self.assertTrue(m[0])
-
     def test_tensor_slot_dealloc(self):
 
         class SlotTensor1(torch._C._TensorBase):
@@ -8964,41 +8759,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
-    def test_storage_slot_dealloc(self):
-
-        class SlotStorage1(torch._C.StorageBase):
-            __slots__ = ['slot1']
-
-        class SlotStorage2(SlotStorage1):
-            __slots__ = ['slot2']
-
-        m1, t1 = Tracker.make()
-        m2, t2 = Tracker.make()
-        slot_storage = SlotStorage2(torch.UntypedStorage(2))
-        slot_storage.slot1 = t1
-        slot_storage.slot2 = t2
-        del t1
-        del t2
-        self.assertFalse(m1[0])
-        self.assertFalse(m2[0])
-        del slot_storage
-        self.assertTrue(m1[0])
-        self.assertTrue(m2[0])
-
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tensor_dict_dealloc(self):
         m, t = Tracker.make()
         x = torch.empty(2)
-        x.arf = t
-        del t
-        self.assertFalse(m[0])
-        del x
-        self.assertTrue(m[0])
-
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    def test_storage_dict_dealloc(self):
-        m, t = Tracker.make()
-        x = torch.UntypedStorage(2)
         x.arf = t
         del t
         self.assertFalse(m[0])
@@ -9017,35 +8781,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del fin_tensor
         self.assertTrue(m[0])
 
-    def test_storage_finalizer_dealloc(self):
-        m = [False]
-
-        class FinalizerStorage(torch._C.StorageBase):
-            def __del__(self):
-                m[0] = True
-
-        fin_storage = FinalizerStorage(torch.UntypedStorage(2))
-        self.assertFalse(m[0])
-        del fin_storage
-        self.assertTrue(m[0])
-
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_tensor_weakref_dealloc(self):
+
         x = torch.empty(2)
-        m = [False]
-
-        def cb(r):
-            m[0] = True
-
-        wref = weakref.ref(x, cb)
-        del x
-        self.assertTrue(m[0])
-        self.assertEqual(wref(), None)
-
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_storage_weakref_dealloc(self):
-
-        x = torch.UntypedStorage(2)
         m = [False]
 
         def cb(r):
@@ -9099,49 +8838,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    def test_storage_cycle_via_dict(self):
-        m1, t1 = Tracker.make()
-        x = torch.UntypedStorage(2)
-        x._tracker = t1
-        del t1
-
-        m2, t2 = Tracker.make()
-        y = torch.UntypedStorage(2)
-        y._tracker = t2
-        del t2
-
-        x._loop = y
-        y._loop = x
-
-        # C++ reference should keep the cycle live!
-        # This exercise THPVariable_subtype_traverse
-        # NB: Because z.grad is a reference done entirely in C++, cycles
-        # involving it directly are NOT broken by Python GC; you've
-        # set up a good old C++ reference cycle which we cannot safely
-        # break (because C++ references are allowed to be accessed
-        # multithreaded-ly) (TODO: except maybe if you can prove that
-        # only Python has access to the C++ object, in which case you can
-        # also prove that no multithreaded access occurs)
-        z = torch.UntypedStorage(2)
-        z.grad = x
-
-        del x
-        del y
-
-        gc.collect()
-        self.assertFalse(m1[0])
-        self.assertFalse(m2[0])
-
-        with disable_gc():
-            del z
-            self.assertFalse(m1[0])
-            self.assertFalse(m2[0])
-
-        gc.collect()
-        self.assertTrue(m1[0])
-        self.assertTrue(m2[0])
-
     def test_tensor_cycle_via_slots(self):
         m1 = [False]
         m2 = [False]
@@ -9160,38 +8856,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         x = SlotTensor1(torch.empty(2))
         y = SlotTensor2(torch.empty(2))
-
-        x.slot1 = y
-        y.slot2 = x
-
-        del x
-        with disable_gc():
-            del y
-            self.assertFalse(m1[0])
-            self.assertFalse(m2[0])
-
-        gc.collect()
-        self.assertTrue(m1[0])
-        self.assertTrue(m2[0])
-
-    def test_storage_cycle_via_slots(self):
-        m1 = [False]
-        m2 = [False]
-
-        class SlotStorage1(torch._C.StorageBase):
-            __slots__ = ['slot1']
-
-            def __del__(self):
-                m1[0] = True
-
-        class SlotStorage2(SlotStorage1):
-            __slots__ = ['slot2']
-
-            def __del__(self):
-                m2[0] = True
-
-        x = SlotStorage1(torch.UntypedStorage(2))
-        y = SlotStorage2(torch.UntypedStorage(2))
 
         x.slot1 = y
         y.slot2 = x
@@ -9234,7 +8898,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m2[0])
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_tensor_dead_weak_ref(self):
+    def test_dead_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
         y = torch.empty(2)
@@ -9250,24 +8914,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         self.assertRaises(RuntimeError, lambda: x.sigmoid())
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_storage_dead_weak_ref(self):
-        x = torch.UntypedStorage(2)
-        w_x = weakref.ref(x)
-        y = torch.tensor(x)
-        del x
-
-        x = w_x()
-        # Ideally, x would keep the storage live.  But CPython doesn't
-        # provide enough hooks to do this.  So it will go dead and x
-        # will transmute into storage with null StorageImpl. Not great, but the
-        # best we can do.
-        del y
-
-        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x[0])
-        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x.float())
-
-    def test_tensor_resurrected_weak_ref(self):
+    def test_resurrected_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
         y = torch.empty(2)
@@ -9280,42 +8927,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del y
         x.sigmoid()
 
-    def test_storage_resurrected_weak_ref(self):
-        x = torch.UntypedStorage(2)
-        w_x = weakref.ref(x)
-        y = torch.tensor(x)
-        del x
-
-        x = w_x()
-        # Use this to manually fix weak reference after dereferencing them
-        x._fix_weakref()
-        del y
-        x.float()
-
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_tensor_fix_weakref_no_leak(self):
+    def test_fix_weakref_no_leak(self):
         import weakref
 
         called = False
 
         a = torch.randn(1)
-
-        def callback(w):
-            nonlocal called
-            called = True
-        wa = weakref.ref(a, callback)
-        a._fix_weakref()
-        del a
-
-        self.assertTrue(called)
-
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_storage_fix_weakref_no_leak(self):
-        import weakref
-
-        called = False
-
-        a = torch.UntypedStorage(1)
 
         def callback(w):
             nonlocal called

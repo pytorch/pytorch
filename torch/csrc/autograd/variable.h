@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/function_hook.h>
+#include <torch/csrc/profiler/combined_traceback.h>
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
@@ -594,6 +595,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version_;
   CreationMeta creation_meta_;
+  std::shared_ptr<torch::CapturedTraceback> creation_traceback_;
 
  public:
   /// requires_grad is a backward AD field so we only use the view specific
@@ -635,11 +637,12 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
     return creation_meta_;
   }
 
-  void set_creation_meta(CreationMeta new_creation_meta) {
-    TORCH_CHECK(
-        has_bw_view(), "creation_meta can only exist for backward views.");
-    creation_meta_ = new_creation_meta;
+  const std::shared_ptr<torch::CapturedTraceback>& get_creation_traceback()
+      const {
+    return creation_traceback_;
   }
+
+  void set_creation_meta(CreationMeta new_creation_meta);
 
   bool has_fw_view() const {
     return shared_view_info_ || forward_info_.has_value();
