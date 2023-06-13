@@ -215,7 +215,6 @@ repository <https://github.com/pytorch/examples/tree/main/mnist_hogwild>`__.
 
        #### define the num threads used in current sub-processes
        torch.set_num_threads(floor(N/M))
-    
 
        train_loader = torch.utils.data.DataLoader(dataset, **dataloader_kwargs)
 
