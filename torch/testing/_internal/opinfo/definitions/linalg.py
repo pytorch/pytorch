@@ -32,11 +32,9 @@ from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
-    get_all_complex_dtypes,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
-    IS_MACOS,
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
