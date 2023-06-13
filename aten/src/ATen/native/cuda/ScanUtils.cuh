@@ -16,6 +16,30 @@ constexpr inline integer ceil_div(integer n, integer m) {
   return (n + m - 1) / m;
 }
 
+template <typename integer>
+constexpr inline integer get_log_num_threads_x_inner_scan(integer num_rows, integer row_size) {
+  integer log_num_threads_x = 0;
+  integer log_num_threads_y = 0;
+  while (((integer)1 << log_num_threads_x) < row_size) {
+    ++log_num_threads_x;
+  }
+  while (((integer)1 << log_num_threads_y) < num_rows) {
+    ++log_num_threads_y;
+  }
+  // we want to keep the ratio between the x-threads and y-threads about the same as
+  // the ratio between the row_size and num_rows, but the total number of threads in
+  // a block should be about 512
+  integer diff = log_num_threads_x - log_num_threads_y;
+  // 9 is from log2(512)
+  log_num_threads_x = ((integer)9 + diff) / (integer)2;
+  // I found that in having larger log_num_threads_x can give significant speed up in some cases,
+  // but detrimental in another case, so just keep the lower bound to be log2(16) == 4 to make it
+  // similar to the previous implementation
+  // Keeping the upper bound to be log2(512) == 9 as the maximum number of threads in a block.
+  log_num_threads_x = std::min(std::max((integer)4, log_num_threads_x), (integer)9);
+  return log_num_threads_x;
+}
+
 template<typename scalar_t, typename idx_t, typename BinaryOperation>
 __device__ void binary_op_update(const scalar_t lhs, scalar_t& rhs, const idx_t lhs_idx, idx_t& rhs_idx, BinaryOperation binary_op) {
   if(!at::_isnan(rhs) && (at::_isnan(lhs) || !binary_op(rhs, lhs))) {
@@ -265,10 +289,12 @@ __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src
  * Each thread block processes one or more sets of contiguous rows (processing multiple rows
  * per thread block is quicker than processing a single row, especially for short rows).
  */
-template<typename T, int num_threads_x, int num_threads_y, class BinaryFunction>
+template<typename T, class BinaryFunction>
 __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const T *src_,
                                       const uint32_t num_rows, const uint32_t row_size,
+                                      const uint32_t log_num_threads_x,
                                       T init, BinaryFunction binary_op){
+  const uint32_t num_threads_x = 1 << log_num_threads_x;
   for (uint32_t block_row = blockIdx.x * blockDim.y;
        block_row < num_rows;
        block_row += blockDim.y * gridDim.x) {
@@ -307,9 +333,10 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
 
       // Parallel reduction with Sklansky method. The diagram can be seen on this paper:
       // https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
-      for (uint32_t s = 1; s <= num_threads_x; s <<= 1) {
+      for (uint32_t m = 0; m <= log_num_threads_x; ++m) {
         if (row_exists) {
-          uint32_t a = (threadIdx.x / s) * (2 * s) + s;
+          uint32_t s = 1 << m; // s = 2 ^ m
+          uint32_t a = ((threadIdx.x >> m) << (m + 1)) | s; // a = (threadIdx.x / s) * (2 * s) + s
           uint32_t ti = a + (threadIdx.x % s);
           uint32_t si = a - 1;
           row_buf[ti] = binary_op(row_buf[ti], row_buf[si]);
@@ -330,8 +357,7 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
 
 template <
     typename T,
-    int num_threads_x,
-    int num_threads_y,
+    int num_threads,
     class BinaryFunction>
 __global__ typename std::enable_if<!c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
@@ -339,19 +365,20 @@ tensor_kernel_scan_innermost_dim(
     const T* src_,
     const uint32_t num_rows,
     const uint32_t row_size,
+    const uint32_t log_num_threads_x,
     T init,
     BinaryFunction binary_op) {
-  __shared__ T sbuf[num_threads_y][2 * num_threads_x];
-  T* row_buf = sbuf[threadIdx.y];
+  __shared__ T sbuf[num_threads * 2];
+  const uint32_t num_threads_x = 1 << log_num_threads_x;
+  T* row_buf = sbuf + num_threads_x * 2 * threadIdx.y;
 
-  tensor_kernel_scan_innermost_dim_impl<T, num_threads_x, num_threads_y>(
-      row_buf, tgt_, src_, num_rows, row_size, init, binary_op);
+  tensor_kernel_scan_innermost_dim_impl<T>(
+      row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
 }
 
 template <
     typename T,
-    int num_threads_x,
-    int num_threads_y,
+    int num_threads,
     class BinaryFunction>
 __global__ typename std::enable_if<c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
@@ -359,6 +386,7 @@ tensor_kernel_scan_innermost_dim(
     const T* src_,
     const uint32_t num_rows,
     const uint32_t row_size,
+    const uint32_t log_num_threads_x,
     T init,
     BinaryFunction binary_op) {
   // As we cannot directly initialize shared array for complex types
@@ -367,12 +395,13 @@ tensor_kernel_scan_innermost_dim(
   // We instead get the base scalar type and allocate twice number of
   // elements required of base type and reinterpret them as complex.
   using base_t = typename scalar_value_type<T>::type;
-  __shared__ base_t sbuf[num_threads_y][4 * num_threads_x];
+  const uint32_t num_threads_x = 1 << log_num_threads_x;
+  __shared__ base_t sbuf[4 * num_threads];
 
-  T* row_buf = reinterpret_cast<T*>(sbuf[threadIdx.y]);
+  T* row_buf = reinterpret_cast<T*>(sbuf + num_threads_x * 4 * threadIdx.y);
 
-  tensor_kernel_scan_innermost_dim_impl<T, num_threads_x, num_threads_y>(
-      row_buf, tgt_, src_, num_rows, row_size, init, binary_op);
+  tensor_kernel_scan_innermost_dim_impl<T>(
+      row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
 }
 
 
@@ -410,16 +439,20 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
   int64_t row_size = self.size(ndim - 1);
   int64_t num_rows = self.numel() / row_size;
 
-  dim3 threads(16, 32);
+  // assuming max_num_threads per block is 512
+  const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan<uint32_t>(num_rows, row_size);
+  const uint32_t num_threads_x = (1 << log_num_threads_x);
+  const uint32_t num_threads_y = 512 / num_threads_x;
+  dim3 threads(num_threads_x, num_threads_y);
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
   dim3 grid(std::min(maxGridDim, ceil_div(num_rows, int64_t{threads.y})));
 
   check_fits_in_unsigned(num_rows, "Number of rows (self.numel()/self.size(self.dim()-1))");
   check_fits_in_unsigned(row_size, "row_size");
 
-  tensor_kernel_scan_innermost_dim<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  tensor_kernel_scan_innermost_dim<scalar_t, 512><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
-    num_rows, row_size, init, binary_op);
+    num_rows, row_size, log_num_threads_x, init, binary_op);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
