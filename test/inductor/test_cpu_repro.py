@@ -397,6 +397,26 @@ class CPUReproTests(TestCase):
             (torch.randn(1, 32, 4, 4).bfloat16(),),
         )
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_fp32_load_with_to_bf16(self):
+        # From llama model.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cache_k = torch.zeros(8, 4, 2, 2)
+
+            def forward(self, x, xk):
+                bsz, seqlen, _ = x.shape
+                self.cache_k = self.cache_k.to(x)
+                self.cache_k[:bsz, 1 : 1 + seqlen] = xk
+                return self.cache_k
+
+        ref_model = Model().eval()
+        opt_model = torch.compile()(Model().eval())
+        x = torch.randn(4, 2, 2).bfloat16()
+        xk = torch.randn(4, 2, 2, 2).bfloat16()
+        self.assertEqual(opt_model(x, xk), ref_model(x, xk))
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
@@ -730,6 +750,7 @@ class CPUReproTests(TestCase):
             "bitwise_right_shift",
             "bitwise_or",
             "bitwise_xor",
+            "to_dtype_bitcast",
         ]
         union = {*cpp_vec_op_list, *diff}
         self.assertTrue(
@@ -1015,6 +1036,21 @@ class CPUReproTests(TestCase):
         def fn(x):
             res = x.relu()
             return res
+
+        x = torch.randn((100, 100), dtype=torch.bfloat16)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.cpp_to_dtype_count == 2
+        if codecache.valid_vec_isa_list():
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_memory_copy_with_fusion(self):
+        def fn(x):
+            res = x.relu()
+            x.copy_(res)
+            return (res,)
 
         x = torch.randn((100, 100), dtype=torch.bfloat16)
 
