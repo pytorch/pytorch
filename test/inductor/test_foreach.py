@@ -244,6 +244,7 @@ class ForeachTests(TestCase):
                 torch.rand(10, 10, device="cuda:0"),
                 torch.rand(20, 20, device="cuda:0"),
             ),
+            reference_in_float=False,
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
@@ -301,6 +302,7 @@ class ForeachTests(TestCase):
                 torch.rand(10, 10, device="cuda:0"),
                 torch.rand(20, 20, device="cuda:0"),
             ),
+            reference_in_float=False,
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
@@ -344,6 +346,7 @@ class ForeachTests(TestCase):
                 torch.rand(10, 10, device="cuda:0"),
                 torch.rand(20, 20, device="cuda:0"),
             ),
+            reference_in_float=False,
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
@@ -367,6 +370,7 @@ class ForeachTests(TestCase):
                 torch.rand(10, 10, device="cuda:0"),
                 torch.rand(20, 20, device="cuda:0"),
             ),
+            reference_in_float=False,
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
