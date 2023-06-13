@@ -586,7 +586,7 @@ _memory_over_time_template = r"""
 <head></head>
 <body>
 <script type="module">
-import {main} from "./MemoryPlot.js"
+import {main} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch/torch/utils/viz/MemoryPlot.js"
 let alloc_data = $PLOT_DATA
 main(alloc_data)
 </script>
@@ -723,7 +723,7 @@ html, body {
 </head>
 <body>
 <script type="module">
-import {main} from "./StatePlot.js"
+import {main} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch/torch/utils/viz/StatePlot.js"
 let trace_data = $PLOT_DATA
 main(trace_data)
 </script>
