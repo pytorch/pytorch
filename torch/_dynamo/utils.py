@@ -1486,8 +1486,6 @@ def tensor_always_has_static_shape(
     """
     if type(tensor) is torch.nn.Parameter:
         return True, TensorStaticReason.PARAMETER
-    if config.dynamic_shapes is False:
-        return True, TensorStaticReason.CONFIG_NOT_DYN
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     if guard_source.is_nn_module():
