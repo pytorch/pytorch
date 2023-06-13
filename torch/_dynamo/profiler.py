@@ -128,6 +128,8 @@ class Profiler:
 
         unique_graphs = Profiler.unique_graphs
         Profiler.unique_graphs = 0
+        # we counted one extra op that is part of the profiler setup code
+        total_ops -= 1
 
         return ProfileResult(
             captured=ProfileMetrics(

@@ -1,33 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import operator
-from typing import Iterable, List, Sequence, Union
+from typing import cast, Iterable, List, Sequence, Union
 
 import torch
 from torch.distributed._tensor.api import DTensor
-
-
-# pyre-fixme[3]: Return type must be annotated.
-# pyre-fixme[2]: Parameter must be annotated.
-def unwrap_single_placement(e):
-    if not isinstance(e, DTensor):
-        return None
-    assert len(e.placements) == 1, "more than one placement!"
-    return e.placements[0]
-
-
-# convenient wrapper to register custom operator impls
-# pyre-fixme[3]: Return type must be annotated.
-# pyre-fixme[2]: Parameter must be annotated.
-def register_impl(func):
-    # pyre-fixme[53]: Captured variable `func` is not annotated.
-    # pyre-fixme[3]: Return type must be annotated.
-    # pyre-fixme[2]: Parameter must be annotated.
-    def wrapper(impl):
-        DTensor._custom_dispatch_ops[func] = impl
-        return impl
-
-    return wrapper
+from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 
 
 # convenient wrapper to register sharding propagation rules
@@ -41,6 +19,19 @@ def register_prop_rule(op):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
             DTensor._propagator.register_sharding_prop_rule(overload, impl)
+        return impl
+
+    return wrapper
+
+
+def register_op_strategy(op):
+    # pyre-fixme[53]: Captured variable `func` is not annotated.
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
+    def wrapper(impl):
+        overloads = op if isinstance(op, list) else [op]
+        for overload in overloads:
+            DTensor._propagator.register_op_strategy(overload, impl)
         return impl
 
     return wrapper
@@ -79,3 +70,33 @@ def normalize_dims(dims: Union[int, Sequence[int]], ndim: int) -> Sequence[int]:
 
 def prod(xs: Iterable[int]) -> int:
     return functools.reduce(operator.mul, xs, 1)
+
+
+def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
+    """
+    Check if the shape is shardable according to the spec.
+    """
+    # number of shards in each tensor dimension
+    shards_map = [1] * len(shape)
+    for i, placement in enumerate(spec.placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            shards_map[shard_dim] *= spec.mesh.size(i)
+
+    for i, dim_size in enumerate(shape):
+        # TODO: maybe we should determine is_shardable based on
+        #       whether it's evenly sharded or not
+        if dim_size < shards_map[i]:
+            return False
+
+    return True
+
+
+def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
+    """Return True if tensor dim is sharded"""
+    return any(p.is_shard(dim) for p in spec.placements)
+
+
+def is_tensor_partial(spec: DTensorSpec) -> bool:
+    """Return True if tensor is partial on the mesh"""
+    return any(p.is_partial() for p in spec.placements)

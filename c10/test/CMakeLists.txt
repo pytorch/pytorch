@@ -1,6 +1,6 @@
 # ---[ Test binaries.
 
-file(GLOB_RECURSE C10_ALL_TEST_FILES *.cpp)
+file(GLOB_RECURSE C10_ALL_TEST_FILES *_test.cpp)
 if(BUILD_TEST)
   foreach(test_src ${C10_ALL_TEST_FILES})
     get_filename_component(test_file_name ${test_src} NAME_WE)

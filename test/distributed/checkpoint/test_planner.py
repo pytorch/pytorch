@@ -18,7 +18,13 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
 )
-from torch.distributed.checkpoint.metadata import BytesStorageMetadata, MetadataIndex, TensorStorageMetadata
+from torch.distributed.checkpoint.metadata import (
+    BytesStorageMetadata,
+    MetadataIndex,
+    TensorStorageMetadata,
+    ChunkStorageMetadata,
+)
+
 from torch.testing._internal.distributed.distributed_utils import (
     with_fake_comms,
     with_dist
@@ -30,6 +36,9 @@ from torch.distributed.checkpoint.default_planner import (
     create_default_local_load_plan,
     _create_default_local_metadata
 )
+
+from torch.distributed.checkpoint.planner_helpers import create_read_items_for_chunk_list
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -264,6 +273,47 @@ class TestSavePlan(TestCase):
         self.assertEqual(high_ri.dest_index, MetadataIndex("st", [40]))
         self.assertEqual(high_ri.dest_offsets, torch.Size([20]))
         self.assertEqual(high_ri.lengths, torch.Size([20]))
+
+class TestPlannerHelpers(TestCase):
+    def test_create_read_item_from_chunks(self):
+        tensor_md = TensorStorageMetadata(
+            properties=TensorProperties.create_from_tensor(torch.empty([16])),
+            size=torch.Size([16]),
+            chunks=[
+                ChunkStorageMetadata(
+                    offsets=torch.Size([0]),
+                    sizes=torch.Size([8])
+                ),
+                ChunkStorageMetadata(
+                    offsets=torch.Size([8]),
+                    sizes=torch.Size([8])
+                )
+            ]
+        )
+
+        chunk = ChunkStorageMetadata(
+            offsets=torch.Size([4]),
+            sizes=torch.Size([7])
+        )
+        read_items = create_read_items_for_chunk_list("foo", tensor_md, [chunk])
+
+        self.assertEqual(2, len(read_items))
+        self.assertEqual(MetadataIndex("foo", [4]), read_items[0].dest_index)
+        self.assertEqual(torch.Size([0]), read_items[0].dest_offsets)
+
+        self.assertEqual(MetadataIndex("foo", [0]), read_items[0].storage_index)
+        self.assertEqual(torch.Size([4]), read_items[0].storage_offsets)
+
+        self.assertEqual(torch.Size([4]), read_items[0].lengths)
+
+
+        self.assertEqual(MetadataIndex("foo", [4]), read_items[1].dest_index)
+        self.assertEqual(torch.Size([4]), read_items[1].dest_offsets)
+
+        self.assertEqual(MetadataIndex("foo", [8]), read_items[1].storage_index)
+        self.assertEqual(torch.Size([0]), read_items[1].storage_offsets)
+
+        self.assertEqual(torch.Size([3]), read_items[1].lengths)
 
 if __name__ == "__main__":
     run_tests()

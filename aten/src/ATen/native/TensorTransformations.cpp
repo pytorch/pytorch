@@ -17,6 +17,7 @@
 #include <ATen/ops/atleast_2d_native.h>
 #include <ATen/ops/atleast_3d_native.h>
 #include <ATen/ops/cat.h>
+#include <ATen/ops/chalf_native.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/flip_native.h>
 #include <ATen/ops/fliplr_native.h>
@@ -99,7 +100,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   return out_tensor;
 }
 
-Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
+Tensor roll(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) { // Used by CPU and MPS dispatch.
   if (dims.size() != 1 || shifts.size() != 1) {
     return roll_common(self, shifts, dims);
   }

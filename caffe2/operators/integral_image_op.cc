@@ -17,7 +17,7 @@ template <>
 bool IntegralImageOp<float, CPUContext>::RunOnDevice() {
   const auto& X = Input(0);
 
-  CAFFE_ENFORCE_EQ(X.dim(), 4, "Only supports 4D tensors for the momement");
+  CAFFE_ENFORCE_EQ(X.dim(), 4, "Only supports 4D tensors for the moment");
 
   vector<int64_t> out_shape(X.sizes().vec());
   out_shape[2] += 1; // H + 1 output size

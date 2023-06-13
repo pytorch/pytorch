@@ -1,4 +1,6 @@
 import contextlib
+import dataclasses
+import functools
 import itertools
 import logging
 import re
@@ -9,19 +11,28 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+import torch
+import torch.fx
+
 from .. import metrics
 from ..utils import (
     DeferredLineBase,
     free_symbol_startswith,
+    get_sympy_Expr_dtype,
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
-    sympy_symbol,
     unique,
 )
-from ..virtualized import ops, V
+from ..virtualized import ops, OpsValue, V
 
-log = logging.getLogger(__name__)
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
+
+
+def data_type_logger(msg):
+    if schedule_log.isEnabledFor(logging.DEBUG):
+        schedule_log.debug("Data type propagation: %s", msg)
+
 
 TensorArg = namedtuple("TensorArg", ["name", "buffer", "dtype"])
 SizeArg = namedtuple("SizeArg", ["name", "expr"])
@@ -34,9 +45,156 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
     return [*index, sympy_dot(index_vars, FlexibleLayout.contiguous_strides(sizes))]
 
 
+@functools.lru_cache(None)
+def boolean_ops():
+    return (
+        "is_inf",
+        "is_nan",
+        "bitwise_xor",
+        "logical_not",
+        "signbit",
+        "le",
+        "lt",
+        "ge",
+        "gt",
+        "eq",
+        "ne",
+    )
+
+
+class DataTypePropagation:
+    def __init__(self, body) -> None:
+        self.body = body
+        self.graphs = {"root": body.root_block.graph}
+        for k, v in body.subblocks.items():
+            self.graphs[k] = v.graph
+
+    def deduce_node_dtype_by_inputs(self, node: torch.fx.Node):
+        inputs = node.all_input_nodes
+        input_nodes = [
+            n for n in inputs if isinstance(n, torch.fx.Node) and n.op != "placeholder"
+        ]
+        if len(input_nodes) == 0:
+            return None
+
+        all_input_nodes_propogated = all(
+            OptimizationContext.key in n.meta
+            and n.meta[OptimizationContext.key].dtype is not None
+            for n in input_nodes
+        )
+        if not all_input_nodes_propogated:
+            return None
+
+        return functools.reduce(
+            torch.promote_types,
+            [n.meta[OptimizationContext.key].dtype for n in input_nodes],
+        )
+
+    def deduce_node_dtype_by_subgraph(self, node: torch.fx.Node):
+        sub_graph = self.graphs[node.target]
+        dtype = self.propagate_graph(sub_graph)
+        assert dtype
+        return dtype
+
+    def deduce_node_dtype(self, node: torch.fx.Node):
+        if node.target in boolean_ops():
+            return torch.bool
+
+        if node.op == "placeholder":
+            return None
+
+        if node.target == "output":
+            # we can infer output node if it only have 1 arg
+            if len(node.args) != 1:
+                return None
+
+        if node.target in (
+            "constant",
+            "to_dtype",
+            "index_expr",
+        ):
+            return node.args[-1]
+
+        if node.target in (
+            "rand",
+            "randn",
+        ):
+            return torch.float
+
+        if node.target in (
+            "get_index",
+            "index_expr",
+        ):
+            return torch.int64
+
+        if node.target in (
+            "load",
+            "store",
+        ):
+            buf_name = node.args[1]
+            return V.graph.get_dtype(buf_name)
+
+        if node.target == "reduction":
+            _, _, dtype, _, _, _, _ = node.args
+            return dtype
+
+        if node.target.startswith("masked_subblock"):
+            return self.deduce_node_dtype_by_subgraph(node)
+
+        return self.deduce_node_dtype_by_inputs(node)
+
+    def propagate_graph(self, graph: torch.fx.Graph):
+        assert graph.nodes
+        graph_dtype = None
+        # For masked_subblock, we use output's dtype to represent
+        # the dtype of this subgraph. For other cases, graph_dtype
+        # might be None
+        for node in graph.nodes:
+            if OptimizationContext.key in node.meta:
+                opt_ctx = node.meta[OptimizationContext.key]
+            else:
+                opt_ctx = OptimizationContext()
+
+            opt_ctx.dtype = self.deduce_node_dtype(node)
+            node.meta[OptimizationContext.key] = opt_ctx
+            if node.target == "output":
+                graph_dtype = opt_ctx.dtype
+        return graph_dtype
+
+    def propagate(self):
+        self.propagate_graph(self.graphs["root"])
+
+    @classmethod
+    def propagate_loopbody(cls, body):
+        return cls(body).propagate()
+
+    @classmethod
+    def propagate_scheduler_node(cls, node):
+        from ..ir import LoopBody
+        from ..scheduler import SchedulerNode
+
+        assert isinstance(node, SchedulerNode)
+        assert isinstance(node._body, LoopBody)
+        DataTypePropagation.propagate_loopbody(node._body)
+
+
 class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
+        def all_in_parens(string):
+            if string[0] != "(" or len(string) < 2:
+                return False
+            count = 1
+            for i, char in enumerate(string[1:]):
+                if char == "(":
+                    count += 1
+                elif char == ")":
+                    count -= 1
+                if count == 0 and i != len(string) - 2:
+                    return False
+            assert count == 0
+            return True
+
         if (
             isinstance(string, CSEVariable)
             or re.match(r"^[a-z0-9_.]+$", string, re.I)
@@ -44,13 +202,23 @@ class ExprPrinter(Printer):
             or string == ""
         ):
             return string
+        # don't put extra parens for strings that are already wrapped in parens
+        if all_in_parens(string):
+            return string
         return f"({string})"
 
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
+        # NB: Remember this is sizevar computation!  You don't typically
+        # expect to have to do floating point computation including exponents
+        # in sizevar compute.  Instead of adding support for floating
+        # point pow, you should make upstream retranslate the Sympy expression
+        # into Tensor expressions earlier and do that instead.
+        if exp == 0.5:
+            return self._helper_sqrt(base)
         base = self._print(base)
-        assert exp.is_integer
+        assert exp == int(exp), exp
         exp = int(exp)
         if exp > 0:
             return "*".join([self.paren(base)] * exp)
@@ -88,9 +256,16 @@ class PythonPrinter(ExprPrinter):
         div = self.paren(self.doprint(div))
         return f"({x} // {div})"
 
+    def _helper_sqrt(self, expr):
+        return f"math.sqrt({self._print(expr)})"
+
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"math.floor({self.paren(self._print(expr.args[0]))})"
+        return f"math.floor({self._print(expr.args[0])})"
+
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"math.ceil({self._print(expr.args[0])})"
 
 
 class OpOverrides:
@@ -117,12 +292,6 @@ class OpOverrides:
     @staticmethod
     def square(x):
         return ops.mul(x, x)
-
-    @staticmethod
-    def sign(x):
-        left = ops.where(ops.lt("0", x), "1", "0")
-        right = ops.where(ops.lt(x, "0"), "1", "0")
-        return ops.sub(left, right)
 
     @staticmethod
     def bitwise_not(x):
@@ -159,6 +328,10 @@ class OpOverrides:
         r = ops.mod(a, b)
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
 
+    @staticmethod
+    def load_seed(name, offset):
+        return ops.load(name, sympy.Integer(offset))
+
 
 class DeferredLine(DeferredLineBase):
     """A line that can be 'unwritten' by adding name to V.graph.removed_buffers"""
@@ -177,21 +350,6 @@ class DeferredLine(DeferredLineBase):
 
     def _new_line(self, line):
         return DeferredLine(self.name, line)
-
-
-class DeferredIndentedBuffer(IndentedBuffer):
-    def __init__(self, initial_indent=0):
-        super().__init__(initial_indent)
-
-    def writeline(self, name, line):
-        if name is None:
-            return super().writeline(line)
-        assert "buf" in name
-        return super().writeline(DeferredLine(name, line))
-
-    def writelines(self, name, lines):
-        for line in lines:
-            self.writeline(name, line)
 
 
 class BracesBuffer(IndentedBuffer):
@@ -283,6 +441,16 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
+    def seed_offset(self, name, value):
+        if value in self.sizevars:
+            return self.sizevars[value]
+        if name in self.sizevars.values():
+            name = (
+                f"{name}{sum(1 for v in self.sizevars.values() if v.startswith(name))}"
+            )
+        self.sizevars[value] = name
+        return name
+
     def size(self, name):
         if str(name) == "seed":
             self.sizevars["seed"] = "seed"
@@ -305,9 +473,11 @@ class KernelArgs:
 
         # TODO(jansel): replace this with data from scheduler
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
-        buffer_types.update(
-            {name: val.get_dtype() for name, val in V.graph.graph_inputs.items()}
-        )
+        for name, val in V.graph.graph_inputs.items():
+            if isinstance(val, sympy.Expr):
+                buffer_types[name] = get_sympy_Expr_dtype(val)
+            else:
+                buffer_types[name] = val.get_dtype()
         buffer_types.update(
             {name: val.dtype for name, val in V.graph.constants.items()}
         )
@@ -316,11 +486,13 @@ class KernelArgs:
         arg_defs = []
         arg_types = []
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.input_buffers.items():
@@ -328,7 +500,7 @@ class KernelArgs:
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"const {cpp_dtype}* __restrict__ {inner}")
+            arg_defs.append(f"const {cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
         for outer, inner in self.output_buffers.items():
@@ -336,7 +508,7 @@ class KernelArgs:
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
@@ -350,6 +522,8 @@ class KernelArgs:
         call_args = []
         precompile_args = []
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
             precompile_args.append(
@@ -369,13 +543,15 @@ class KernelArgs:
             precompile_args.append(TensorArg(inner, outer, V.graph.get_dtype(outer)))
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
-            call_args.append(str(outer))
+            call_args.append(outer)
             precompile_args.append(SizeArg(inner, outer))
 
         return arg_defs, call_args, precompile_args
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
             for other in inplaced.other_names:
                 if other in V.graph.inplaced_to_remove:
                     continue
@@ -392,11 +568,28 @@ class KernelArgs:
             name, self.inplace_buffers
         )
 
+    # Includes inplace buffers, excludes removed buffers.  Essentially,
+    # after you do a call into this kernel, which buffers actually contain
+    # updated data?  Modeled off of python_argdefs.
+    def live_output_buffers(self):
+        live_outs = set()
+        for inplaced in unique(self.inplace_buffers.values()):
+            if inplaced == "REMOVED":
+                continue
+            live_outs.add(inplaced.other_names[-1])
+        for outer, inner in self.output_buffers.items():
+            if outer in self.inplace_buffers or inner == "REMOVED":
+                continue
+            live_outs.add(outer)
+        return live_outs
+
 
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
-    The backends can inherit from this class and overload the "create_cse_var" Kernel to do that.
-    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py."""
+    To do so, the backends can simply overload `Kernel.create_cse_var`
+    The "CSEVariable.update_on_args" method gives you a hook for annotations
+    See example of TritonCSEVariable in triton.py
+    """
 
     def __init__(self, name):
         self.name = name
@@ -468,38 +661,34 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: typing.Union[str, CSEVariable],
+        expr: typing.Union[str, CSEVariable, OpsValue],
         write=True,
-        append_broadcast=None,
+        assignment=True,
     ) -> CSEVariable:
+        if isinstance(expr, OpsValue):
+            expr = expr.value
+
         assert isinstance(expr, (str, CSEVariable)), type(expr)
+        assert write or assignment
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
-        if append_broadcast:
-            assert isinstance(append_broadcast, str)
-            cache_key = expr + append_broadcast
-        if cache_key not in self.cache:
-            var = self.newvar()
+        var = self.cache.get(cache_key, None)
+        if not var:
+            var = self.newvar() if assignment else None
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
                     V.kernel.current_node.codegen_originating_info(
                         buffer, only_once=True
                     )
-                if append_broadcast:
-                    var_suffix = "_load"
+                if assignment:
+                    line = f"{self.prefix}{var} = {expr}{self.suffix}"
                 else:
-                    var_suffix = ""
-                buffer.writeline(
-                    f"{self.prefix}{var}{var_suffix} = {expr}{self.suffix}"
-                )
-                if append_broadcast:
-                    buffer.writeline(
-                        f"{self.prefix}{var} = tl.broadcast_to({var}{var_suffix}, {append_broadcast})"
-                    )
+                    line = f"{expr}{self.suffix}"
+                buffer.writeline(line)
 
-        return self.cache[cache_key]
+        return var
 
     def newvar(self) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
@@ -534,7 +723,7 @@ class Kernel(CodeGen):
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
-        self.stores = DeferredIndentedBuffer()
+        self.stores = IndentedBuffer()
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.current_node = None
@@ -544,8 +733,10 @@ class Kernel(CodeGen):
     def set_current_node(self, node):
         prior = self.current_node
         self.current_node = node
-        yield
-        self.current_node = prior
+        try:
+            yield
+        finally:
+            self.current_node = prior
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
@@ -559,11 +750,13 @@ class Kernel(CodeGen):
         self.compute = cb
         self.stores = sb
         self.cse = cse.clone()
-        yield
-        self.loads = loads
-        self.compute = compute
-        self.stores = stores
-        self.cse = cse
+        try:
+            yield
+        finally:
+            self.loads = loads
+            self.compute = compute
+            self.stores = stores
+            self.cse = cse
 
     def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()
@@ -600,8 +793,9 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(index_var):
-                return sympy_symbol(str(index_var))
+            def indirect_indexing(index_var, size, check=True):
+                # Skip CSE since this doesn't return an expression
+                return self.indirect_indexing(index_var, size, check)
 
             @staticmethod
             def load(name: str, index: sympy.Expr):
@@ -646,6 +840,8 @@ class Kernel(CodeGen):
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:
+        # adds the necessary kernel args for index expressions
+        # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
         index = V.graph.sizevars.simplify(index)
@@ -659,3 +855,20 @@ class Kernel(CodeGen):
 
     def create_cse_var(self, *args, **kwargs):
         return CSEVariable(*args, **kwargs)
+
+
+@dataclasses.dataclass
+class OptimizationContext:
+    key: typing.ClassVar[str] = "opt_ctx"
+
+    # Load value as mask
+    is_load_as_mask: bool = False
+
+    dtype: torch.dtype = None
+    ops_name: str = ""
+    is_most_inner_loop_irrevelant: bool = False
+
+    # Load uint8 value as float32
+    is_load_uint8_as_float: bool = False
+    # Store float32 value as uint8
+    is_store_float_as_uint8: bool = False

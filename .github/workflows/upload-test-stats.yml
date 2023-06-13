@@ -2,7 +2,7 @@ name: Upload test stats
 
 on:
   workflow_run:
-    workflows: [pull, trunk, periodic, inductor]
+    workflows: [pull, trunk, periodic, inductor, unstable, slow, unstable-periodic, inductor-periodic]
     types:
       - completed
 
@@ -37,7 +37,7 @@ jobs:
         run: echo "${TRIGGERING_WORKFLOW}"
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - run: |
           pip3 install requests==2.26
@@ -91,8 +91,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN}}
-          MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN}}
         run: |
           curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/rate_limit
           curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $PYTORCHBOT_TOKEN" https://api.github.com/rate_limit
-          curl -H "Accept: application/vnd.github.v3+json" -H "Authorization: token $MERGEBOT_TOKEN" https://api.github.com/rate_limit

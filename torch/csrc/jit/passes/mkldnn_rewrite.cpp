@@ -52,7 +52,7 @@ void insertPrePackedConvOpForNode(Node* n) {
       Symbol::fromQualString("mkldnn_prepacked::conv2d_prepack"), 1);
 
   // skip input value
-  for (auto i = 1; i < n->inputs().size(); i++) {
+  for (const auto i : c10::irange(1, n->inputs().size())) {
     Value* v = n->input(i);
     prepack_node->addInput(v);
   }

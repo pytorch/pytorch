@@ -7,9 +7,9 @@ This directory contains workflows and scripts to support our CI infrastructure t
 
 ## Workflows
 
-- Pull CI (`pull.yml`) is run on PRs and on master.
+- Pull CI (`pull.yml`) is run on PRs and on main.
 - Trunk CI (`trunk.yml`) is run on trunk to validate incoming commits. Trunk jobs are usually more expensive to run so we do not run them on PRs unless specified.
-- Scheduled CI (`periodic.yml`) is a subset of trunk CI that is run every few hours on master.
+- Scheduled CI (`periodic.yml`) is a subset of trunk CI that is run every few hours on main.
 - Binary CI is run to package binaries for distribution for all platforms.
 
 ## Templates

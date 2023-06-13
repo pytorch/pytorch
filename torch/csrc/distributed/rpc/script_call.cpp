@@ -83,6 +83,10 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
 
 std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
     std::vector<at::IValue>& ivalues) {
+  TORCH_INTERNAL_ASSERT(
+      ivalues.size() > 1,
+      "At least 2 IValues are required to build a ScriptCall.");
+
   // Last element in the vector is always qualifiedName for both
   // builitin operator and TorchScript function
   // If the qualifiedName is not a builtin operator name, then treat it

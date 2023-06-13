@@ -1,6 +1,6 @@
 mkl=2021.2.0
 mkl-include=2021.2.0
-numpy=1.18.5
+numpy=1.21.2
 pyyaml=5.3
 setuptools=46.0.0
 cmake=3.22.*

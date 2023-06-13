@@ -8,7 +8,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-/** \brief Freeze Module, i.e., Assume all atrributes are constants.
+/** \brief Freeze Module, i.e., Assume all attributes are constants.
  *
  * Freezing module is a functionality that allows the JIT to internalize
  * immutable attributes. Combined with inlining, the module is aggressively

@@ -283,7 +283,9 @@ static void upsample_bilinear2d_out_cuda_template(
     return;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
     // heuristic: only use channels_last path when it's faster than the contiguous path
     if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 16 && \
           output.is_contiguous(memory_format)) {
@@ -307,8 +309,8 @@ static void upsample_bilinear2d_out_cuda_template(
 
       at::Tensor input_cl = input.contiguous(at::MemoryFormat::ChannelsLast);
 
-      const scalar_t* idata = input_cl.data_ptr<scalar_t>();
-      scalar_t* odata = output.data_ptr<scalar_t>();
+      const scalar_t* idata = input_cl.const_data_ptr<scalar_t>();
+      scalar_t* odata = output.mutable_data_ptr<scalar_t>();
 
       const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
           input_height, output_height, align_corners, scales_h);
@@ -395,15 +397,17 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     return;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output_.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      grad_output_.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
     if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
           grad_input.is_contiguous(memory_format)) {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
       Tensor grad_output = grad_output_.contiguous(at::MemoryFormat::ChannelsLast);
 
-      auto idata = grad_input.data_ptr<scalar_t>();
-      auto odata = grad_output.data_ptr<scalar_t>();
+      auto idata = grad_input.mutable_data_ptr<scalar_t>();
+      auto odata = grad_output.const_data_ptr<scalar_t>();
 
       const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
           input_height, output_height, align_corners, scales_h);
@@ -432,8 +436,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       Tensor grad_input_c = grad_input.is_contiguous() ? grad_input : at::zeros(grad_input.sizes(), grad_input.options());
       Tensor grad_output = grad_output_.contiguous();
 
-      auto idata = grad_input_c.data_ptr<scalar_t>();
-      auto odata = grad_output.data_ptr<scalar_t>();
+      auto idata = grad_input_c.mutable_data_ptr<scalar_t>();
+      auto odata = grad_output.const_data_ptr<scalar_t>();
 
       const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
           input_height, output_height, align_corners, scales_h);
@@ -695,7 +699,8 @@ static void upsample_gen2d_aa_out_cuda_template(
   int block_x = std::min<int>(maxThreadsDim[0], at::cuda::warp_size());
   int grid_x = std::min<int>(maxGridSize[0], ceil_div(output_width, block_x));
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
@@ -796,7 +801,8 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
   int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
   const dim3 grid(grid_x, grid_y);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_gen2d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 

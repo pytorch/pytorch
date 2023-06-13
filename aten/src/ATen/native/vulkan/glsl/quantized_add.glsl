@@ -27,11 +27,15 @@ void main() {
     const ivec3 input0_pos = pos % uBlock.isize0.xyz;
     const ivec3 input1_pos = pos % uBlock.isize1.xyz;
 
-    vec4 texel0 = texelFetch(uInput0, input0_pos, 0);
-    vec4 texel1 = texelFetch(uInput1, input1_pos, 0);
+    const vec4 v0 = uBlock.isize0.w == 1
+                      ? texelFetch(uInput0, input0_pos, 0).xxxx
+                      : texelFetch(uInput0, input0_pos, 0);
+    const vec4 v1 = uBlock.isize1.w == 1
+                      ? texelFetch(uInput1, input1_pos, 0).xxxx
+                      : texelFetch(uInput1, input1_pos, 0);
 
-    vec4 deq_in_0 = uBlock.in_scale.x * (texel0 - uBlock.in_zero_point.x);
-    vec4 deq_in_1 = uBlock.in_scale.y * (texel1 - uBlock.in_zero_point.y);
+    vec4 deq_in_0 = uBlock.in_scale.x * (v0 - uBlock.in_zero_point.x);
+    vec4 deq_in_1 = uBlock.in_scale.y * (v1 - uBlock.in_zero_point.y);
 
     vec4 res = deq_in_0 + deq_in_1;
     vec4 q_res = roundEven(res / uBlock.out_scale.x) + uBlock.out_zero_point.x;

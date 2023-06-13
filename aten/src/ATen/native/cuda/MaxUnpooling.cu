@@ -93,7 +93,7 @@ __global__ void max_unpooling2d_backward_kernel(
 
 template <typename T>
 __global__ void max_unpooling3d_backward_kernel(
-    T* gradOutputData,
+    const T* gradOutputData,
     int64_t oT,
     int64_t oH,
     int64_t oW,
@@ -183,14 +183,14 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
               self.numel(),
-              self.data_ptr<scalar_t>(),
-              indices.data_ptr<int64_t>(),
+              self.const_data_ptr<scalar_t>(),
+              indices.const_data_ptr<int64_t>(),
               numChannels,
               inputHeight,
               inputWidth,
               oheight,
               owidth,
-              output.data_ptr<scalar_t>());
+              output.mutable_data_ptr<scalar_t>());
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         }));
   }
@@ -372,7 +372,7 @@ Tensor& max_unpooling3d_forward_out_cuda(const Tensor& self_,
               at::cuda::getCurrentCUDAStream()>>>(
               self.packed_accessor64<scalar_t, 4>(),
               indices.packed_accessor64<int64_t, 4>(),
-              output.data_ptr<scalar_t>(),
+              output.mutable_data_ptr<scalar_t>(),
               oT,
               oH,
               oW,
@@ -474,14 +474,14 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
             0,
             at::cuda::getCurrentCUDAStream()>>>(
             count,
-            grad_output.data_ptr<scalar_t>(),
-            indices.data_ptr<int64_t>(),
+            grad_output.const_data_ptr<scalar_t>(),
+            indices.const_data_ptr<int64_t>(),
             nInputPlane,
             nInputRows,
             nInputCols,
             oheight,
             owidth,
-            grad_input.data_ptr<scalar_t>());
+            grad_input.mutable_data_ptr<scalar_t>());
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }));
   return grad_input;
@@ -581,7 +581,7 @@ at::Tensor& max_unpooling3d_backward_out_cuda(const Tensor& grad_output_,
               block,
               0,
               at::cuda::getCurrentCUDAStream()>>>(
-              grad_output.data_ptr<scalar_t>(),
+              grad_output.const_data_ptr<scalar_t>(),
               oT,
               oH,
               oW,

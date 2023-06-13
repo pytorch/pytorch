@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/CachedTensorUtils.h>
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/TensorOperators.h>
 #include <torch/csrc/Export.h>
@@ -113,7 +114,7 @@ struct TORCH_API AccumulateGrad : public Node {
       if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
           !new_grad.is_sparse_csr() &&
           !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
-          new_grad.use_count() <= num_expected_refs &&
+          at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
           (new_grad.is_mkldnn() ||
            utils::obeys_layout_contract(new_grad, variable))) {
         // we aren't setting up for double-backward
@@ -138,10 +139,17 @@ struct TORCH_API AccumulateGrad : public Node {
         // shallow copy. We need a shallow copy so that modifying the original
         // grad tensor doesn't modify the grad we accumulate.
         // We only skip clone if indices and values themselves are contiguous
-        // for backward compatiblity reasons. Since without this optimization,
+        // for backward compatibility reasons. Since without this optimization,
         // earlier we would clone the entire SparseTensor which cloned indices
         // and values.
         // For details see https://github.com/pytorch/pytorch/issues/34375.
+
+        // No scenario where we expect this to be true currently
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            !at::caching::is_cached_tensor(new_grad._indices()) &&
+            !at::caching::is_cached_tensor(new_grad._values()) &&
+            !at::caching::is_cached_tensor(new_grad));
+
         update_grad(at::_sparse_coo_tensor_unsafe(
             new_grad._indices(),
             new_grad._values(),

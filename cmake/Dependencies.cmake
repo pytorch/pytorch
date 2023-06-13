@@ -84,44 +84,28 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
   enable_ubsan()
 endif()
 
-# For MSVC,
-# 1. Remove /Zi, /ZI and /Z7 for Release, MinSizeRel and Default builds
-# 2. Switch off incremental linking in debug builds
-# 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
-#    for Debug and RelWithDebInfo builds
-if(MSVC)
-  # skip unwanted includes from windows.h
-  add_definitions(-DWIN32_LEAN_AND_MEAN)
-
-  # Windows SDK broke compatibility since version 25131, but introduced this define for backward compatibility.
-  add_definitions(-D_UCRT_LEGACY_INFINITY)
-
-  foreach(flag_var
-      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
-    if(${flag_var} MATCHES "/Z[iI7]")
-      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
+if(USE_ASAN OR USE_TSAN)
+  find_package(Sanitizer REQUIRED)
+  if(USE_ASAN)
+    if(TARGET Sanitizer::address)
+      list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Sanitizer::address)
+    else()
+      message(WARNING "Not ASAN found. Suppress this warning with -DUSE_ASAN=OFF.")
+      caffe2_update_option(USE_ASAN OFF)
     endif()
-  endforeach(flag_var)
-  if(MSVC_Z7_OVERRIDE)
-    foreach(flag_var
-        CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO
-        CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-      if(${flag_var} MATCHES "/Z[iI]")
-        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-      endif()
-    endforeach(flag_var)
-  endif(MSVC_Z7_OVERRIDE)
-  foreach(flag_var
-      CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO
-      CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
-      CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
-      CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
-    if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
-      string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
+    if(TARGET Sanitizer::undefined)
+      list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Sanitizer::undefined)
     endif()
-  endforeach(flag_var)
-endif(MSVC)
+  endif()
+  if(USE_TSAN)
+    if(TARGET Sanitizer::thread)
+      list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Sanitizer::thread)
+    else()
+      message(WARNING "Not TSAN found. Suppress this warning with -DUSE_TSAN=OFF.")
+      caffe2_update_option(USE_TSAN OFF)
+    endif()
+  endif()
+endif()
 
 # ---[ Threads
 find_package(Threads REQUIRED)
@@ -171,6 +155,7 @@ endif()
 
 # ---[ BLAS
 
+set(AT_MKLDNN_ACL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -1085,6 +1070,11 @@ if(BUILD_PYTHON)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
+  if(NOT PYTHONLIBS_VERSION_STRING)
+    message(FATAL_ERROR
+      "Python development libraries could not be found.")
+  endif()
+
   if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -1186,6 +1176,9 @@ if(USE_OPENMP AND NOT TARGET caffe2::openmp)
   include(${CMAKE_CURRENT_LIST_DIR}/Modules/FindOpenMP.cmake)
   if(OPENMP_FOUND)
     message(STATUS "Adding OpenMP CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
+    if(APPLE AND USE_MPS)
+      string(APPEND CMAKE_OBJCXX_FLAGS " ${OpenMP_CXX_FLAGS}")
+    endif()
     if(OpenMP_CXX_LIBRARIES)
       message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
     endif()
@@ -1273,14 +1266,9 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
     list(APPEND HIP_CXX_FLAGS -DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
-    list(APPEND HIP_CXX_FLAGS -Wno-macro-redefined)
-    list(APPEND HIP_CXX_FLAGS -Wno-inconsistent-missing-override)
-    list(APPEND HIP_CXX_FLAGS -Wno-exceptions)
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-negative)
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
-    list(APPEND HIP_CXX_FLAGS -Wno-unused-command-line-argument)
     list(APPEND HIP_CXX_FLAGS -Wno-duplicate-decl-specifier)
-    list(APPEND HIP_CXX_FLAGS -Wno-implicit-int-float-conversion)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
@@ -1299,7 +1287,7 @@ if(USE_ROCM)
     # host linker to link.
     list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
     foreach(pytorch_rocm_arch ${PYTORCH_ROCM_ARCH})
-      list(APPEND HIP_CLANG_FLAGS --amdgpu-target=${pytorch_rocm_arch})
+      list(APPEND HIP_CLANG_FLAGS --offload-arch=${pytorch_rocm_arch})
     endforeach()
 
     set(Caffe2_HIP_INCLUDE
@@ -1316,7 +1304,7 @@ if(USE_ROCM)
     # If you get this wrong, you'll get a complaint like 'ld: cannot find -lrocblas-targets'
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse)
+        roc::rocblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
     else()
       list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
         roc::rocblas roc::rocfft hip::hiprand roc::hipsparse)
@@ -1740,6 +1728,7 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   set(AT_MKLDNN_ENABLED 0)
+  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1747,6 +1736,9 @@ if(NOT INTERN_BUILD_MOBILE)
         "Not compiling with MKLDNN. "
         "Turn this warning off by USE_MKLDNN=OFF.")
       set(USE_MKLDNN OFF)
+    endif()
+    if(USE_MKLDNN_ACL)
+      set(AT_MKLDNN_ACL_ENABLED 1)
     endif()
   endif()
   if(USE_MKLDNN)
@@ -1811,6 +1803,8 @@ if(NOT INTERN_BUILD_MOBILE)
   else(NOT C_HAS_THREAD)
     add_compile_options(-DTH_HAVE_THREAD)
   endif(NOT C_HAS_THREAD)
+
+  find_package(ZVECTOR) # s390x simd support
 endif()
 
 #

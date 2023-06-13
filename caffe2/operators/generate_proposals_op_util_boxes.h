@@ -27,7 +27,7 @@ const float PI = 3.14159265358979323846;
 // weights: weights [wx, wy, ww, wh] for the deltas
 // bbox_xform_clip: minimum bounding box width and height in log-space after
 //     transofmration
-// correct_transform_coords: Correct bounding box transform coordates. Set to
+// correct_transform_coords: Correct bounding box transform coordinates. Set to
 //     true to match the detectron code, set to false for backward compatibility
 // return: pixel coordinates of the bounding boxes
 //     size (M, 4), format [x1; y1; x2; y2]

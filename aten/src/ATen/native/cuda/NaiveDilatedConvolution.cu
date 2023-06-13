@@ -232,18 +232,18 @@ void slow_conv_dilated_all_cuda_template(
   /* MSVC does not like #ifdef-s inside the CPP macro
      AT_DISPATCH_FLOATING_TYPES_AND_HALF. So, we define the code
      branching outside the CPP macro: */
-#define CALCULATE_GRAD_BIAS                          \
-  at::cuda::blas::gemv<scalar_t>(                    \
-      /*trans=*/'t',                                 \
-      /*    m=*/output_vsize,                        \
-      /*    n=*/nOutputPlane,                        \
-      /*alpha=*/static_cast<scalar_t>(1),            \
-      /*    A=*/grad_output_n.data_ptr<scalar_t>(),  \
-      /*  lda=*/output_vsize,                        \
-      /*    x=*/ones.data_ptr<scalar_t>(),           \
-      /* incx=*/1,                                   \
-      /* beta=*/static_cast<scalar_t>(1),            \
-      /*    y=*/grad_bias.data_ptr<scalar_t>(),      \
+#define CALCULATE_GRAD_BIAS                                \
+  at::cuda::blas::gemv<scalar_t>(                          \
+      /*trans=*/'t',                                       \
+      /*    m=*/output_vsize,                              \
+      /*    n=*/nOutputPlane,                              \
+      /*alpha=*/static_cast<scalar_t>(1),                  \
+      /*    A=*/grad_output_n.const_data_ptr<scalar_t>(),  \
+      /*  lda=*/output_vsize,                              \
+      /*    x=*/ones.const_data_ptr<scalar_t>(),           \
+      /* incx=*/1,                                         \
+      /* beta=*/static_cast<scalar_t>(1),                  \
+      /*    y=*/grad_bias.mutable_data_ptr<scalar_t>(),    \
       /* incy=*/1)
 #else
 #define CALCULATE_GRAD_BIAS grad_bias += grad_output_n.sum(dims)
@@ -275,7 +275,7 @@ void slow_conv_dilated_all_cuda_template(
             // Extract columns:
             hvol2col<scalar_t, dim>(
                 stream,
-                input_n.data_ptr<scalar_t>(),
+                input_n.const_data_ptr<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,
@@ -283,7 +283,7 @@ void slow_conv_dilated_all_cuda_template(
                 stride_size,
                 pad_size,
                 dilation_size,
-                columns.data_ptr<scalar_t>());
+                columns.mutable_data_ptr<scalar_t>());
             /* For gemm argument derivation, see
                slow_conv_dilated_all_cuda_template in
                ATen/native/DilatedConvolution.cpp */
@@ -294,12 +294,12 @@ void slow_conv_dilated_all_cuda_template(
                 /*     n=*/nOutputPlane,
                 /*     k=*/columns.size(0),
                 /* alpha=*/static_cast<scalar_t>(1),
-                /*     A=*/columns.data_ptr<scalar_t>(),
+                /*     A=*/columns.const_data_ptr<scalar_t>(),
                 /*   lda=*/columns.size(1),
-                /*     B=*/weight.data_ptr<scalar_t>(),
+                /*     B=*/weight.const_data_ptr<scalar_t>(),
                 /*   ldb=*/columns.size(0),
                 /*  beta=*/static_cast<scalar_t>(1),
-                /*     C=*/output_n.data_ptr<scalar_t>(),
+                /*     C=*/output_n.mutable_data_ptr<scalar_t>(),
                 /*   ldc=*/columns.size(1));
 
           } else {
@@ -319,19 +319,19 @@ void slow_conv_dilated_all_cuda_template(
                 /*     n=*/columns.size(0),
                 /*     k=*/nOutputPlane,
                 /* alpha=*/static_cast<scalar_t>(1),
-                /*     A=*/grad_output_n.data_ptr<scalar_t>(),
+                /*     A=*/grad_output_n.const_data_ptr<scalar_t>(),
                 /*   lda=*/columns.size(1),
-                /*     B=*/weight.data_ptr<scalar_t>(),
+                /*     B=*/weight.const_data_ptr<scalar_t>(),
                 /*   ldb=*/columns.size(0),
                 /*  beta=*/static_cast<scalar_t>(0),
-                /*     C=*/columns.data_ptr<scalar_t>(),
+                /*     C=*/columns.mutable_data_ptr<scalar_t>(),
                 /*   ldc=*/columns.size(1));
             // Unpack columns back into input:
             Tensor grad_input_n = grad_input.select(0, elt);
 
             col2hvol<scalar_t, dim>(
                 stream,
-                columns.data_ptr<scalar_t>(),
+                columns.const_data_ptr<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,
@@ -339,7 +339,7 @@ void slow_conv_dilated_all_cuda_template(
                 stride_size,
                 pad_size,
                 dilation_size,
-                grad_input_n.data_ptr<scalar_t>());
+                grad_input_n.mutable_data_ptr<scalar_t>());
           }
 
           // Gradient of weight:
@@ -347,7 +347,7 @@ void slow_conv_dilated_all_cuda_template(
             // Extract columns:
             hvol2col<scalar_t, dim>(
                 stream,
-                input_n.data_ptr<scalar_t>(),
+                input_n.const_data_ptr<scalar_t>(),
                 nInputPlane,
                 input_size,
                 output_size,
@@ -355,7 +355,7 @@ void slow_conv_dilated_all_cuda_template(
                 stride_size,
                 pad_size,
                 dilation_size,
-                columns.data_ptr<scalar_t>());
+                columns.mutable_data_ptr<scalar_t>());
             scalar_t scale = static_cast<scalar_t>(
                 1); // TODO: expose as argument?
             /* For gemm argument derivation, see
@@ -368,12 +368,12 @@ void slow_conv_dilated_all_cuda_template(
                 /*     n=*/nOutputPlane,
                 /*     k=*/columns.size(1),
                 /* alpha=*/scale,
-                /*     A=*/columns.data_ptr<scalar_t>(),
+                /*     A=*/columns.const_data_ptr<scalar_t>(),
                 /*   lda=*/columns.size(1),
-                /*     B=*/grad_output_n.data_ptr<scalar_t>(),
+                /*     B=*/grad_output_n.const_data_ptr<scalar_t>(),
                 /*   ldb=*/columns.size(1),
                 /*  beta=*/static_cast<scalar_t>(1),
-                /*     C=*/grad_weight.data_ptr<scalar_t>(),
+                /*     C=*/grad_weight.mutable_data_ptr<scalar_t>(),
                 /*   ldc=*/columns.size(0));
           }
 

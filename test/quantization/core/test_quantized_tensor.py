@@ -1513,7 +1513,7 @@ class TestQuantizedTensor(TestCase):
 
         # Now try decomposed pattern
         (scale_decomposed, zero_point_decomposed) = torch.ops.quantized_decomposed.choose_qparams.tensor(
-            X, quant_min, quant_max, dtype)
+            X, quant_min, quant_max, torch.Tensor([torch.finfo(torch.float32).eps]), dtype)
         quantized_decomposed_X = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
             X, scale_decomposed, zero_point_decomposed, quant_min, quant_max, dtype)
 

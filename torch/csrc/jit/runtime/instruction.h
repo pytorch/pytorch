@@ -58,7 +58,7 @@ namespace jit {
   _(UNCHECKED_CAST, "") /* perform an unchecked cast operation */              \
   _(__IS__, "") /* performs `is` operator from Python */                       \
   _(UN_INITIALIZED,                                                            \
-    "") /* sets default values to varaibles that are  un initialized */        \
+    "") /* sets default values to variables that are uninitialized */          \
   _(__ISNOT__, "") /* performs `is not` operator from Python  */               \
   _(FORMAT, "I") /* performs string format function `f strings` or `{}.format` \
                      the number of inputs in stored in X */                    \
@@ -95,6 +95,7 @@ std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 bool isOpSupportedInMobile(OpCode op);
 char const* toString(OpCode op);
+OpCode parseOpCode(const char* str);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 } // namespace jit

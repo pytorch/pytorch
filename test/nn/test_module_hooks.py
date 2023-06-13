@@ -248,6 +248,19 @@ class TestModuleHooks(TestCase):
         model(x).sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
+        # Backward pre hook can affect subsequent gradient computation
+        a = torch.ones(2, requires_grad=True)
+        model = nn.Linear(2, 2)
+
+        def fn(_unused_module, grad_output):
+            return (grad_output[0] * 0,)
+
+        model.register_full_backward_pre_hook(fn)
+
+        out = model(a)
+        out.sum().backward()
+        self.assertEqual(a.grad, torch.zeros_like(a))
+
     @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_mixed_hooks(self):
         fired_hooks: List[int] = []

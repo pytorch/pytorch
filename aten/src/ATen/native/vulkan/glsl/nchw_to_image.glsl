@@ -24,6 +24,9 @@ layout(set = 0, binding = 2) uniform PRECISION restrict Block {
   // xyz contain the extents of the output texture, w contains HxW to help
   // calculate buffer offsets
   ivec4 out_extents;
+  // x: number of texels spanned by one channel
+  // y: number of channels
+  ivec2 c_info;
 }
 uBlock;
 
@@ -39,8 +42,12 @@ void main() {
     return;
   }
 
+  const int n_index = int(pos.z / uBlock.c_info.x);
+  const int c_index = (pos.z % uBlock.c_info.x) * 4;
+  int d_offset = (n_index * uBlock.c_info.y) + c_index;
+
   const int base_index =
-      pos.x + uBlock.out_extents.x * pos.y + (4 * uBlock.out_extents.w) * pos.z;
+      pos.x + uBlock.out_extents.x * pos.y + uBlock.out_extents.w * d_offset;
   const ivec4 buf_indices =
       base_index + ivec4(0, 1, 2, 3) * uBlock.out_extents.w;
 
@@ -48,6 +55,14 @@ void main() {
   float val_y = uBuffer.data[buf_indices.y];
   float val_z = uBuffer.data[buf_indices.z];
   float val_w = uBuffer.data[buf_indices.w];
+
+  vec4 texel = ivec4(val_x, val_y, val_z, val_w);
+
+  if (c_index + 3 >= uBlock.c_info.y) {
+    ivec4 c_ind = ivec4(c_index) + ivec4(0, 1, 2, 3);
+    vec4 valid_c = vec4(lessThan(c_ind, ivec4(uBlock.c_info.y)));
+    texel = texel * valid_c;
+  }
 
   imageStore(uImage, pos, vec4(val_x, val_y, val_z, val_w));
 }

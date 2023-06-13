@@ -10,6 +10,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -25,14 +26,19 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
 #include <set>
 #include <unordered_set>
 #include <utility>
+
+using torch::impl::py_context_manager;
+using torch::impl::py_context_manager_DEPRECATED;
 
 namespace {
 
@@ -173,7 +179,16 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("HPU", c10::DeviceType::HPU)
       .value("VE", c10::DeviceType::VE)
       .value("Lazy", c10::DeviceType::Lazy)
-      .value("IPU", c10::DeviceType::IPU);
+      .value("IPU", c10::DeviceType::IPU)
+      .value("PrivateUse1", c10::DeviceType::PrivateUse1);
+
+  using torch::autograd::CreationMeta;
+  py::enum_<CreationMeta>(m, "CreationMeta")
+      .value("DEFAULT", CreationMeta::DEFAULT)
+      .value("IN_CUSTOM_FUNCTION", CreationMeta::IN_CUSTOM_FUNCTION)
+      .value("MULTI_OUTPUT_NODE", CreationMeta::MULTI_OUTPUT_NODE)
+      .value("NO_GRAD_MODE", CreationMeta::NO_GRAD_MODE)
+      .value("INFERENCE_MODE", CreationMeta::INFERENCE_MODE);
 
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
@@ -204,6 +219,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       // shapes of input tensors
       .def("shapes", [](const KinetoEvent& e) { return e.shapes().vec(); })
       .def("dtypes", [](const KinetoEvent& e) { return e.dtypes().vec(); })
+      .def(
+          "concrete_inputs",
+          [](const KinetoEvent& e) {
+            std::vector<py::object> as_pyobj;
+            std::transform(
+                e.concreteInputs().begin(),
+                e.concreteInputs().end(),
+                std::back_inserter(as_pyobj),
+                [](const c10::IValue& val) {
+                  return torch::jit::toPyObject(val);
+                });
+            return as_pyobj;
+          })
       // stack traces of the PyTorch CPU events
       .def("stack", [](const KinetoEvent& e) { return e.stack().vec(); })
       // type of the RecordFunction that generated a PyTorch CPU event
@@ -226,6 +254,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       // Whether this is async event or not
       .def("is_async", [](const KinetoEvent& e) { return e.isAsync(); })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
+      .def("privateuse1_elapsed_us", &KinetoEvent::privateuse1ElapsedUs)
       .def("nbytes", [](const KinetoEvent& e) { return e.nBytes(); });
 
   m.def("_soft_assert_raises", &setSoftAssertRaises);
@@ -297,6 +326,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::getNumGPUs() > 0) {
       activities.insert(ActivityType::CUDA);
     }
+#elif defined(USE_KINETO)
+    if (at::hasXPU()) {
+      activities.insert(ActivityType::XPU);
+    }
+    if (at::hasMTIA()) {
+      activities.insert(ActivityType::MTIA);
+    }
 #endif
     return activities;
   });
@@ -347,6 +383,20 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     torch::autograd::PyDefaultSavedVariableHooks::pop_hooks();
   });
 
+  m.def("_get_creation_meta", [](const at::Tensor& t) {
+    auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+    TORCH_CHECK(meta != nullptr);
+    return meta->get_creation_meta();
+  });
+
+  m.def(
+      "_set_creation_meta",
+      [](const at::Tensor& t, CreationMeta new_creation_meta) {
+        auto* meta = torch::autograd::impl::get_view_autograd_meta(t);
+        TORCH_CHECK(meta != nullptr);
+        meta->set_creation_meta(new_creation_meta);
+      });
+
   _C_m.def(
       "_register_py_class_for_device",
       [](const std::string& device, py::object python_type_class) {
@@ -356,28 +406,24 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   _C_m.def("_activate_cuda_trace", []() { activateCUDATrace(); });
 
-  py::class_<c10::InferenceMode>(_C_m, "_InferenceMode").def(py::init<bool>());
+  py_context_manager_DEPRECATED<c10::InferenceMode, bool>(
+      _C_m, "_InferenceMode");
+  py_context_manager<at::impl::RestorePythonTLSSnapshot>(
+      _C_m, "_RestorePythonTLSSnapshot");
 
-  py::class_<at::impl::RestorePythonTLSSnapshot>(
-      _C_m, "_RestorePythonTLSSnapshot")
-      .def(py::init<>());
-
-  py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
-      .def(py::init<>());
-  py::class_<EnableTorchFunction>(_C_m, "_EnableTorchFunction")
-      .def(py::init<>());
-  py::class_<EnablePythonDispatcher>(_C_m, "_EnablePythonDispatcher")
-      .def(py::init<>());
-  py::class_<c10::impl::DisablePythonDispatcher>(
-      _C_m, "_DisablePythonDispatcher")
-      .def(py::init<>());
-  py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
-  py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
-      .def(py::init<bool>());
-  py::class_<DisableAutocast>(std::move(_C_m), "_DisableAutocast")
-      .def(py::init<>());
-  py::class_<ViewReplayEnabled>(_C_m, "_ViewReplayEnabled")
-      .def(py::init<bool>());
+  py_context_manager_DEPRECATED<torch::DisableTorchDispatch>(
+      _C_m, "_DisableTorchDispatch");
+  py_context_manager_DEPRECATED<EnableTorchFunction>(
+      _C_m, "_EnableTorchFunction");
+  py_context_manager_DEPRECATED<EnablePythonDispatcher>(
+      _C_m, "_EnablePythonDispatcher");
+  py_context_manager<c10::impl::DisablePythonDispatcher>(
+      _C_m, "_DisablePythonDispatcher");
+  py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
+  py_context_manager_DEPRECATED<MultithreadingEnabled, bool>(
+      _C_m, "_MultithreadingEnabled");
+  py_context_manager<DisableAutocast>(_C_m, "_DisableAutocast");
+  py_context_manager<ViewReplayEnabled, bool>(_C_m, "_ViewReplayEnabled");
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
@@ -762,6 +808,15 @@ static PyObject* len_torch_dispatch_stack(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+      THPVariable_Check(tensor), "increment_version expect a Tensor as input");
+  torch::autograd::increment_version((THPVariable_Unpack(tensor)));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
     {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -795,6 +850,7 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
+    {"_increment_version", THPModule_increment_version, METH_O, nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,

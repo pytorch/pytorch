@@ -4,7 +4,7 @@ from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _di
                         _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
                         _fused_doc, _maximize_doc, _default_to_fused_or_foreach)
 from typing import List, Optional
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ["AdamW", "adamw"]
 
@@ -57,11 +57,14 @@ class AdamW(Optimizer):
             # Suppor AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
+            fused_supported_devices = _get_fused_kernels_supported_devices()
             if not all(
-                p.is_cuda and torch.is_floating_point(p)
+                p.device.type in fused_supported_devices and
+                torch.is_floating_point(p)
                 for pg in self.param_groups for p in pg['params']
             ):
-                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
+                raise RuntimeError("`fused=True` requires all the params to be floating point Tensors of "
+                                   f"supported devices: {fused_supported_devices}.")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
@@ -105,8 +108,10 @@ class AdamW(Optimizer):
 
             # State initialization
             if len(state) == 0:
+                # note(crcrpar): Deliberately host `step` on CPU if both capturable and fused are off.
+                # This is because kernel launches are costly on CUDA and XLA.
                 state["step"] = (
-                    torch.zeros((1,), dtype=torch.float, device=p.device)
+                    torch.zeros((), dtype=torch.float, device=p.device)
                     if group["capturable"] or group["fused"]
                     else torch.tensor(0.0)
                 )
@@ -300,9 +305,7 @@ def adamw(
     # and pass False to use_fused. This is not a mistake--we want to give the fused impl
     # bake-in time before making it the default, even if it is typically faster.
     if fused is None and foreach is None:
-        _, foreach = _default_to_fused_or_foreach(
-            [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps],
-            differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
     if fused is None:
         fused = False
     if foreach is None:
@@ -476,7 +479,7 @@ def _multi_tensor_adamw(
 
     assert grad_scale is None and found_inf is None
 
-    grouped_tensors = _group_tensors_by_device_and_dtype([
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([
         params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
          device_max_exp_avg_sqs, device_state_steps) in grouped_tensors.values():
@@ -593,7 +596,8 @@ def _fused_adamw(
         raise RuntimeError("_fused_adamw is not differentiable")
     grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
     found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
-    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
     for (device, dtype) in grouped_tensors:
         (
             device_params,
@@ -603,16 +607,15 @@ def _fused_adamw(
             device_max_exp_avg_sqs,
             device_state_steps,
         ) = grouped_tensors[(device, dtype)]
-        if grad_scale is not None and found_inf is not None:
+        device_grad_scale, device_found_inf = None, None
+        if grad_scale is not None:
             if device not in grad_scale_dict:
                 grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
+            device_grad_scale = grad_scale_dict[device]
+        if found_inf is not None:
             if found_inf not in found_inf_dict:
                 found_inf_dict[device] = found_inf.to(device, non_blocking=True)
-            device_grad_scale = grad_scale_dict[device]
             device_found_inf = found_inf_dict[device]
-        else:
-            device_grad_scale = None
-            device_found_inf = None
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adamw_(
             device_params,

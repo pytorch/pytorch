@@ -669,7 +669,7 @@ def create_add_loggers_graph(
     qconfig_mapping: QConfigMapping,
     node_name_to_qconfig: Dict[str, QConfigAny],
 ) -> None:
-    """
+    r"""
     Given a model, a model graph partition (currently a set of matched
     subgraphs) and instructions how to transform each subgraph
     (currently quantizing it according to qconfig_mapping), modifies

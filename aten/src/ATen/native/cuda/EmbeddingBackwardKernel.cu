@@ -45,7 +45,7 @@ int64_t ceil_div(int64_t x, int64_t y) {
 template <typename index_t>
 __global__
 void krn_partials_per_segment(index_t *ret, const index_t *segment_offsets,
-                              int64_t *num_of_segments_ptr, int64_t numel) {
+                              const int64_t *num_of_segments_ptr, int64_t numel) {
   int64_t num_of_segments = *num_of_segments_ptr;
   const int id = blockIdx.x * blockDim.x + threadIdx.x;
   if(id < num_of_segments) {
@@ -63,7 +63,7 @@ void krn_partial_segment_offset(
         const index_t *partials_per_segment,
         const index_t *partials_per_segment_offset,
         const index_t *segment_offsets,
-        int64_t *num_of_segments_ptr) {
+        const int64_t *num_of_segments_ptr) {
   int64_t num_of_segments = *num_of_segments_ptr;
   const int id = blockIdx.x * blockDim.x + threadIdx.x;
   if(id < num_of_segments) {
@@ -79,11 +79,11 @@ void krn_partial_segment_offset(
 
 template <typename scalar_t, typename index_t>
 __global__ void compute_grad_weight_bags(
-    index_t *indices, scalar_t *gradOutput,
-    index_t *offset2bag, index_t *count, ptrdiff_t numel,
+    const index_t *indices, const scalar_t *gradOutput,
+    const index_t *offset2bag, const index_t *count, ptrdiff_t numel,
     int64_t stride, int mode_mean, const index_t *bag_size,
-    scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
-    index_t* segment_offsets, int64_t *num_of_segments_ptr,
+    const scalar_t* per_sample_weights, int64_t per_sample_weights_stride,
+    const index_t* segment_offsets, const int64_t *num_of_segments_ptr,
     acc_type<scalar_t, true> *grad_weight_per_segment,
     const int64_t stride_warped) {
 
@@ -122,13 +122,13 @@ __global__ void compute_grad_weight_bags(
 
 template <typename scalar_t, typename index_t>
 __global__ void compute_grad_weight(
-    index_t *indices,
-    scalar_t *gradOutput,
-    index_t *count,
+    const index_t *indices,
+    const scalar_t *gradOutput,
+    const index_t *count,
     ptrdiff_t numel,
     int64_t stride,
-    index_t* segment_offsets,
-    int64_t *num_of_segments_ptr,
+    const index_t* segment_offsets,
+    const int64_t *num_of_segments_ptr,
     acc_type<scalar_t, true> *grad_weight_per_segment,
     const int64_t stride_warped) {
 
@@ -158,10 +158,10 @@ __global__ void compute_grad_weight(
 // This kernel assumes that all input tensors are contiguous.
 template <typename scalar_t, typename index_t>
 __global__ void sum_and_scatter(
-    index_t *input, scalar_t *gradWeight, int64_t stride,
-    index_t* segment_offsets, int64_t *num_of_segments_ptr,
+    const index_t *input, scalar_t *gradWeight, int64_t stride,
+    const index_t* segment_offsets, const int64_t *num_of_segments_ptr,
     const acc_type<scalar_t, true> *grad_weight_per_segment,
-    const index_t *segment_sizes_offsets, int64_t *num_of_partial_segments_ptr,
+    const index_t *segment_sizes_offsets, const int64_t *num_of_partial_segments_ptr,
     const int64_t padding_idx,
     const int64_t stride_warped) {
 
@@ -190,15 +190,17 @@ __global__ void sum_and_scatter(
 }
 
 template<typename index_t>
-__global__ void compute_num_of_partial_segments(index_t *partials_per_segment, index_t *partials_per_segment_offset, int64_t *num_of_segments_ptr, int64_t *output) {
+__global__ void compute_num_of_partial_segments(const index_t *partials_per_segment, const index_t *partials_per_segment_offset, const int64_t *num_of_segments_ptr, int64_t *output) {
   int64_t num_of_segments = *num_of_segments_ptr;
   *output = partials_per_segment[num_of_segments-1] +
             partials_per_segment_offset[num_of_segments-1];
 }
 
+#if !CUB_SUPPORTS_UNIQUE_BY_KEY()
 __global__ void write_num_of_segments_for_legacy_thrust_path(int64_t *num_of_segments_ptr, int64_t num_of_segments) {
   *num_of_segments_ptr = num_of_segments;
 }
+#endif
 
 } // anon namespace
 
@@ -231,7 +233,7 @@ Tensor embedding_backward_cuda_kernel(
   // Unit: index in `sorted_indices` and `orig_indices`
   auto segment_offsets = at::empty({numel}, orig_indices.options());
   auto num_of_segments_tensor = at::empty({}, grad.options().dtype(kLong));
-  int64_t *num_of_segments_ptr = num_of_segments_tensor.data_ptr<int64_t>();
+  int64_t *num_of_segments_ptr = num_of_segments_tensor.mutable_data_ptr<int64_t>();
 #if !CUB_SUPPORTS_UNIQUE_BY_KEY()
   AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
     int64_t num_of_segments = embedding_backward_cuda_kernel_unique_by_key<index_t>(sorted_indices, segment_offsets);
@@ -240,10 +242,9 @@ Tensor embedding_backward_cuda_kernel(
   });
 #else
   AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
-    auto num_of_segments_tensor = at::empty({}, grad.options().dtype(kLong));
     cuda::cub::unique_by_key(
-      sorted_indices.data_ptr<index_t>(), thrust::make_counting_iterator(0),
-      nullptr, segment_offsets.data_ptr<index_t>(),
+      sorted_indices.const_data_ptr<index_t>(), thrust::make_counting_iterator(0),
+      nullptr, segment_offsets.mutable_data_ptr<index_t>(),
       num_of_segments_ptr, sorted_indices.numel());
   });
 #endif
@@ -257,8 +258,8 @@ Tensor embedding_backward_cuda_kernel(
     auto partials_per_segment = at::empty({max_segments}, orig_indices.options());
     {
       krn_partials_per_segment<<<ceil_div(max_segments, 32), 32, 0, stream>>> (
-              partials_per_segment.data_ptr<index_t>(),
-              segment_offsets.data_ptr<index_t>(),
+              partials_per_segment.mutable_data_ptr<index_t>(),
+              segment_offsets.const_data_ptr<index_t>(),
               num_of_segments_ptr,
               numel);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -270,16 +271,16 @@ Tensor embedding_backward_cuda_kernel(
     // Unit: index in `partial_segment_offset`
     auto partials_per_segment_offset = at::empty({max_segments}, orig_indices.options());
     cuda::cub::exclusive_sum(
-        partials_per_segment.data_ptr<index_t>(),
-        partials_per_segment_offset.data_ptr<index_t>(),
+        partials_per_segment.const_data_ptr<index_t>(),
+        partials_per_segment_offset.mutable_data_ptr<index_t>(),
         max_segments);
 
     // The total number of partial-segments is the sum of `partials_per_segment_offset`
     auto num_of_partial_segments_tensor = at::empty({}, grad.options().dtype(kLong));
-    int64_t *num_of_partial_segments_ptr = num_of_partial_segments_tensor.data_ptr<int64_t>();
+    int64_t *num_of_partial_segments_ptr = num_of_partial_segments_tensor.mutable_data_ptr<int64_t>();
     compute_num_of_partial_segments<index_t><<<1, 1, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      partials_per_segment.data_ptr<index_t>(),
-      partials_per_segment_offset.data_ptr<index_t>(),
+      partials_per_segment.const_data_ptr<index_t>(),
+      partials_per_segment_offset.const_data_ptr<index_t>(),
       num_of_segments_ptr, num_of_partial_segments_ptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -290,10 +291,10 @@ Tensor embedding_backward_cuda_kernel(
     auto partial_segment_offset = at::empty({max_partial_segment}, orig_indices.options());
     {
       krn_partial_segment_offset<<<ceil_div(max_segments, 32), 32, 0, stream>>> (
-              partial_segment_offset.data_ptr<index_t>(),
-              partials_per_segment.data_ptr<index_t>(),
-              partials_per_segment_offset.data_ptr<index_t>(),
-              segment_offsets.data_ptr<index_t>(),
+              partial_segment_offset.mutable_data_ptr<index_t>(),
+              partials_per_segment.const_data_ptr<index_t>(),
+              partials_per_segment_offset.const_data_ptr<index_t>(),
+              segment_offsets.const_data_ptr<index_t>(),
               num_of_segments_ptr);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
@@ -318,26 +319,26 @@ Tensor embedding_backward_cuda_kernel(
         // Compute the sum of each partial-segment and handle bags
         if (offset2bag.defined()) {
               compute_grad_weight_bags<scalar_t><<<grid, block, 0, stream>>>(
-                orig_indices.data_ptr<index_t>(),
-                grad.data_ptr<scalar_t>(),
-                offset2bag.data_ptr<index_t>(),
-                count.defined() ? count.data_ptr<index_t>() : nullptr, numel, stride,
-                mode_mean, bag_size.data_ptr<index_t>(),
-                per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
+                orig_indices.const_data_ptr<index_t>(),
+                grad.const_data_ptr<scalar_t>(),
+                offset2bag.const_data_ptr<index_t>(),
+                count.defined() ? count.const_data_ptr<index_t>() : nullptr, numel, stride,
+                mode_mean, bag_size.const_data_ptr<index_t>(),
+                per_sample_weights.defined() ? per_sample_weights.const_data_ptr<scalar_t>() : NULL,
                 per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-                partial_segment_offset.data_ptr<index_t>(),
-                num_of_partial_segments_ptr, grad_weight_per_segment.data_ptr<partial_weight_t>(),
+                partial_segment_offset.const_data_ptr<index_t>(),
+                num_of_partial_segments_ptr, grad_weight_per_segment.mutable_data_ptr<partial_weight_t>(),
                 stride_warped);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
         } else {
               compute_grad_weight<scalar_t><<<grid, block, 0, stream>>>(
-                orig_indices.data_ptr<index_t>(),
-                grad.data_ptr<scalar_t>(),
-                count.defined() ? count.data_ptr<index_t>() : nullptr,
+                orig_indices.const_data_ptr<index_t>(),
+                grad.const_data_ptr<scalar_t>(),
+                count.defined() ? count.const_data_ptr<index_t>() : nullptr,
                 numel, stride,
-                partial_segment_offset.data_ptr<index_t>(),
+                partial_segment_offset.const_data_ptr<index_t>(),
                 num_of_partial_segments_ptr,
-                grad_weight_per_segment.data_ptr<partial_weight_t>(),
+                grad_weight_per_segment.mutable_data_ptr<partial_weight_t>(),
                 stride_warped);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
@@ -346,12 +347,12 @@ Tensor embedding_backward_cuda_kernel(
         // into `grad_weight`.
         const int grid2 = ceil_div(max_segments*stride_warped, block);
             sum_and_scatter<scalar_t><<<grid2, block, 0, stream>>>(
-              sorted_indices.data_ptr<index_t>(),
-              grad_weight.data_ptr<scalar_t>(),
+              sorted_indices.const_data_ptr<index_t>(),
+              grad_weight.mutable_data_ptr<scalar_t>(),
               stride,
-              segment_offsets.data_ptr<index_t>(),
-              num_of_segments_ptr, grad_weight_per_segment.data_ptr<partial_weight_t>(),
-              partials_per_segment_offset.data_ptr<index_t>(),
+              segment_offsets.const_data_ptr<index_t>(),
+              num_of_segments_ptr, grad_weight_per_segment.const_data_ptr<partial_weight_t>(),
+              partials_per_segment_offset.const_data_ptr<index_t>(),
               num_of_partial_segments_ptr,
               padding_idx,
               stride_warped);

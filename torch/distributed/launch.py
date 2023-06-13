@@ -13,7 +13,7 @@ each distributed process will be operating on a single GPU. This can achieve
 well-improved single-node training performance. It can also be used in
 multi-node distributed training, by spawning up multiple processes on each node
 for well-improved multi-node distributed training performance as well.
-This will especially be benefitial for systems with multiple Infiniband
+This will especially be beneficial for systems with multiple Infiniband
 interfaces that have direct-GPU support, since all of them can be utilized for
 aggregated communication bandwidth.
 

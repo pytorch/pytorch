@@ -66,6 +66,37 @@ TensorMetadata::TensorMetadata(
 // == PyTorch Ops =============================================================
 // ============================================================================
 
+namespace {
+struct TagToIOType {
+  InputOutputEncoder::Tag tag;
+  InputOutputEncoder::IOType io_type;
+};
+
+constexpr int tagCount = ((int)InputOutputEncoder::Tag::TERMINATOR) + 1;
+constexpr std::array<TagToIOType, tagCount> tag_map = {{
+    {InputOutputEncoder::Tag::Tensor, InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::UndefinedTensor,
+     InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::TensorListBegin,
+     InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::ScalarList,
+     InputOutputEncoder::IOType::ConcreteInputs},
+    {InputOutputEncoder::Tag::Scalar, InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::Other, InputOutputEncoder::IOType::Shapes},
+    {InputOutputEncoder::Tag::TERMINATOR, InputOutputEncoder::IOType::None},
+}};
+
+constexpr bool allTagsMapped(int idx = 0) {
+  return tag_map[idx].tag == InputOutputEncoder::Tag::TERMINATOR ||
+      ((idx == (int)tag_map[idx].tag) && allTagsMapped(idx + 1));
+}
+static_assert(allTagsMapped(), "tag_map is out of order");
+
+constexpr InputOutputEncoder::IOType tagToIOType(InputOutputEncoder::Tag tag) {
+  return tag_map[(int)tag].io_type;
+}
+} // namespace
+
 // ----------------------------
 // |  Input / Output encoder  |
 // ----------------------------
@@ -86,6 +117,9 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
         push(t);
       }
       tags_.emplace_back(Tag::TERMINATOR);
+    } else if (isSupportedScalarList(value)) {
+      tags_.emplace_back(Tag::ScalarList);
+      ivalues_.emplace_back(value);
     } else {
       tags_.emplace_back(Tag::Other);
     }
@@ -107,13 +141,46 @@ void InputOutputEncoder::push(const at::Tensor& t) {
   }
 }
 
-// This is a custom-iterator-like getter to obtain input shapes and dtypes.
-auto InputOutputEncoder::getNextShapesAndDtypes() {
+bool InputOutputEncoder::isSupportedScalarList(
+    const c10::IValue& list_candidate) {
+  // Scalar list can be very long. If a list is too long, we shouldn't
+  // collect it. This function checks whether the list is a scalar list
+  // and whether its length is sufficiently short.
+
+  if (!get_record_concrete_inputs_enabled()) {
+    return false;
+  }
+
+  if (!list_candidate.isList()) {
+    return false;
+  }
+  auto list_ref = list_candidate.toListRef();
+  if (C10_UNLIKELY(list_ref.size() == 0)) {
+    return true;
+  }
+  if (C10_UNLIKELY(!list_ref[0].isScalar())) {
+    return false;
+  }
+  if (C10_UNLIKELY(list_ref.size() > SCALAR_LIST_LENGTH_LIMIT)) {
+    return false;
+  }
+  return true;
+}
+
+// This function returns a lambda which is is a custom-iterator-like getter.
+// Each invocation of the lambda returns input values for one op.
+//
+// io_type is used to filter the ivalues between 'Shapes' and 'Concrete Args'.
+// Shapes are used to represent the shapes of tensors. We save only the shapes
+//   of the tensors because tensors can be large.
+// Concrete args are separated to clarify that they are the actual values.
+auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
   return [this,
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_strides_it = tensor_sizes_strides_.begin(),
-          ivals_it = ivalues_.begin()]() mutable {
+          ivals_it = ivalues_.begin(),
+          io_type]() mutable {
     auto decode_tensor = [&]() -> TensorMetadata {
       const auto& raw_metadata = *tensor_metadata_it++;
       std::vector<int64_t> sizes;
@@ -130,11 +197,19 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
     };
 
     std::vector<op_input_t> out;
+    auto push_value = [&out, io_type](const Tag& tag, op_input_t input) {
+      if (io_type == tagToIOType(tag)) {
+        out.push_back(std::move(input));
+      } else {
+        out.push_back(c10::nullopt);
+      }
+    };
+
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
       switch (*tag_it) {
         case Tag::Tensor:
-          out.emplace_back(decode_tensor());
+          push_value(*tag_it, decode_tensor());
           break;
 
         case Tag::TensorListBegin: {
@@ -143,16 +218,17 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             TORCH_INTERNAL_ASSERT(*tag_it == Tag::Tensor, (int)(*tag_it));
             arg.emplace_back(decode_tensor());
           }
-          out.emplace_back(std::move(arg));
+          push_value(Tag::TensorListBegin, std::move(arg));
         } break;
 
+        case Tag::ScalarList:
         case Tag::Scalar:
-          out.emplace_back(*ivals_it++);
+          push_value(*tag_it, *ivals_it++);
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          out.emplace_back(c10::nullopt);
+          push_value(*tag_it, c10::nullopt);
           break;
 
         case Tag::TERMINATOR:
@@ -167,6 +243,14 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
     }
     return out;
   };
+}
+
+auto InputOutputEncoder::getInputShapeGenerator() {
+  return getIValueGenerator(IOType::Shapes);
+}
+
+auto InputOutputEncoder::getConcreteInputGenerator() {
+  return getIValueGenerator(IOType::ConcreteInputs);
 }
 
 void InputOutputEncoder::clear() {
@@ -251,12 +335,16 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 
   if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
-      out->fallback_ = torch_ops_.gpu_fallback_.emplace_back();
+      out->fallback_ = torch_ops_.device_fallback_.emplace_back();
       torch::profiler::impl::cudaStubs()->record(
-          nullptr, &out->fallback_->cuda_event_start_, nullptr);
+          nullptr, &out->fallback_->device_event_start_, nullptr);
     } catch (const std::exception& e) {
       LOG(WARNING) << "Failed to record CUDA event. " << e.what();
     }
+  } else if (config_.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
+    out->fallback_ = torch_ops_.device_fallback_.emplace_back();
+    torch::profiler::impl::privateuse1Stubs()->record(
+        nullptr, &out->fallback_->device_event_start_, nullptr);
   }
 
   event->start_time_ = torch::profiler::impl::getApproximateTime();
@@ -329,20 +417,23 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     }
   }
 
-  auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
+  auto input_shape_getter = inputs_outputs_.getInputShapeGenerator();
+  auto concrete_input_getter = inputs_outputs_.getConcreteInputGenerator();
 
   // TODO: CTAD will take care of template args when we move to C++17
   auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
   auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
   auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
-  auto gpu_fallback = StealOrDefault<decltype(gpu_fallback_)>(gpu_fallback_);
+  auto gpu_fallback =
+      StealOrDefault<decltype(device_fallback_)>(device_fallback_);
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
     ExtraFields<EventType::TorchOp> e{
         std::move(event->basic_fields_),
         ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(event),
         time_converter(event->end_time_),
-        input_getter(),
+        input_shape_getter(),
+        concrete_input_getter(),
         jit_stack(),
         jit_module(),
         extra_args(),
@@ -578,12 +669,125 @@ void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
 }
 
+// Assumption: Total threads number will not exceed 2^16-1, and total ops will
+// not exceed 2^48 -1.
+static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
+  return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
+}
+
+#ifdef USE_KINETO
+void generateForwardBackwardLink(
+    const Result& profiler_result,
+    uint64_t& fwd_bwd_link_id,
+    libkineto::GenericTraceActivity& activity,
+    std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>&
+        tidSeq2activity) {
+  const ExtraFields<EventType::TorchOp>& extra_fields =
+      c10::get<ExtraFields<EventType::TorchOp>>(profiler_result.extra_fields_);
+  if (extra_fields.forward_tid_ > 0) {
+    // act is backward op.
+    uint64_t key = getForwardThreadKey(
+        extra_fields.forward_tid_, extra_fields.sequence_number_);
+    auto iter = tidSeq2activity.find(key);
+    if (iter != tidSeq2activity.end()) {
+      libkineto::GenericTraceActivity* fwd = iter->second;
+      fwd->flow.start = true;
+      activity.flow.id = fwd->flow.id = fwd_bwd_link_id;
+      activity.flow.type = fwd->flow.type = libkineto::kLinkFwdBwd;
+      ++fwd_bwd_link_id;
+
+      // If there are multiple events that match this sequence/tid pair, we
+      // should delete this entry in the map to avoid inserting multiple "end"
+      // flow events.
+      tidSeq2activity.erase(iter);
+    }
+  } else if (profiler_result.start_tid_ != 0) {
+    // act is forward op.
+    uint64_t key = getForwardThreadKey(
+        profiler_result.start_tid_, extra_fields.sequence_number_);
+    // Assumption: Among all ops with same sequence number,
+    // the one with biggest start time is most likely launching backward op.
+    auto iter = tidSeq2activity.find(key);
+    if (iter == tidSeq2activity.end()) {
+      tidSeq2activity[key] = &activity;
+    } else {
+      // Now the sequence number is only incremented on creating a "Node"
+      // object for backward pass, by calling
+      // "at::sequence_number::get_and_increment()". Among all ops with same
+      // sequence number, the one with biggest startTime is the one launching
+      // backward op.
+      if (activity.startTime >= iter->second->startTime) {
+        tidSeq2activity[key] = &activity;
+      }
+    }
+  }
+}
+#endif // USE_KINETO
+
+void generateForwardBackwardLinks(
+    std::unique_ptr<torch::profiler::impl::kineto::trace_t>& cpu_trace,
+    const std::vector<std::shared_ptr<Result>>& results) {
+#ifndef USE_KINETO
+}
+#else // USE_KINETO
+  TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == results.size());
+
+  // startThreadId_seqNum to pointer of activity.
+  // Low-16bits of startThreadId and low-48bits seqNum are concatenated into
+  // one uint64_t variable as key.
+
+  std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
+      tidSeq2activity;
+  uint64_t fwd_bwd_link_id = 1;
+
+  using result_activity_t =
+      std::pair<Result*, libkineto::GenericTraceActivity*>;
+  std::vector<result_activity_t> torch_events;
+
+  for (const auto idx : c10::irange(cpu_trace->activities.size())) {
+    auto& profiler_result = results[idx];
+    auto& activity = cpu_trace->activities[idx];
+
+    // add information about an associated forward op, if a sequence number
+    // is available (e.g. during training)
+
+    profiler_result->visit_if_base<ExtraFields<EventType::TorchOp>>(
+        [&](const auto& e) {
+          if (e.sequence_number_ >= 0) {
+            torch_events.emplace_back(profiler_result.get(), activity.get());
+          }
+        });
+  }
+
+  // We need to visit the events in chronological order.
+  // So we sort them by end_time_ns_ before processing.
+  std::sort(
+      torch_events.begin(),
+      torch_events.end(),
+      [](const result_activity_t& left, const result_activity_t& right) {
+        auto left_end_time =
+            c10::get<ExtraFields<EventType::TorchOp>>(left.first->extra_fields_)
+                .end_time_ns_;
+        auto right_end_time = c10::get<ExtraFields<EventType::TorchOp>>(
+                                  right.first->extra_fields_)
+                                  .end_time_ns_;
+        return left_end_time < right_end_time;
+      });
+
+  for (auto& [profiler_result, activity] : torch_events) {
+    generateForwardBackwardLink(
+        *profiler_result, fwd_bwd_link_id, *activity, tidSeq2activity);
+  }
+}
+#endif // USE_KINETO
+
 static constexpr const char* indexKey = "Ev Idx";
 
 void passEventsToKineto(
     const std::vector<std::shared_ptr<Result>>& results,
     uint64_t start_time_us,
-    uint64_t end_time_us) {
+    uint64_t end_time_us,
+    const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
   TraceWrapper cpu_trace(start_time_us, "PyTorch Profiler");
 
@@ -601,7 +805,21 @@ void passEventsToKineto(
     TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
     if (activity) {
       addMetadata(activity, indexKey, std::to_string(i));
+
+      // There is a longstanding regression for initializing
+      // on-demand Kineto activity handling. Enabling this path
+      // for Profiler API could cause side effects as much has changed since.
+      // Make a surgical fix here until we holistically assess the on-demand
+      // vs API path framentation, which has been snowballing in complexity
+      // and thus flakiness.
+      if (config.global()) {
+        e->kineto_activity_ = activity;
+      }
     }
+  }
+
+  if (get_fwd_bwd_enabled()) {
+    generateForwardBackwardLinks(cpu_trace.get(), results);
   }
 
   // Kineto adds the events that it collected.
@@ -865,7 +1083,7 @@ trace_ptr_t addKinetoEvents(
     uint64_t end_time_us,
     const ProfilerConfig& config) {
   using namespace torch::profiler::impl::kineto;
-  passEventsToKineto(results, start_time_us, end_time_us);
+  passEventsToKineto(results, start_time_us, end_time_us, config);
 
   // In on demand mode kineto is directly controlled by other machinery.
   if (config.global()) {
@@ -1130,9 +1348,9 @@ RecordQueue::getRecords(
     auto materialize = [&](auto& events) {
       for (auto& i : events) {
         time_t start_time_ns;
-        if constexpr (std::is_same<
+        if constexpr (std::is_same_v<
                           std::remove_reference_t<decltype(i)>,
-                          ExtraFields<EventType::Backend>>::value) {
+                          ExtraFields<EventType::Backend>>) {
           start_time_ns = i.start_time_us_ * 1000;
         } else {
           start_time_ns = converter(i.start_time_);
@@ -1200,6 +1418,44 @@ RecordQueue::getRecords(
 
   build_tree(out);
   return {out, std::move(trace)};
+}
+
+namespace {
+std::function<bool()>& record_concrete_inputs_enabled_fn() {
+  static std::function<bool()> fn = []() { return true; };
+  return fn;
+}
+} // namespace
+
+bool get_record_concrete_inputs_enabled() {
+  return record_concrete_inputs_enabled_fn()();
+}
+
+void set_record_concrete_inputs_enabled_fn(std::function<bool()> fn) {
+  record_concrete_inputs_enabled_fn() = std::move(fn);
+}
+
+void set_record_concrete_inputs_enabled_val(bool val) {
+  record_concrete_inputs_enabled_fn() = [val]() { return val; };
+}
+
+namespace {
+std::function<bool()>& fwd_bwd_enabled_fn() {
+  static std::function<bool()> fn = []() { return true; };
+  return fn;
+}
+} // namespace
+
+bool get_fwd_bwd_enabled() {
+  return fwd_bwd_enabled_fn()();
+}
+
+void set_fwd_bwd_enabled_fn(std::function<bool()> fn) {
+  fwd_bwd_enabled_fn() = std::move(fn);
+}
+
+void set_fwd_bwd_enabled_val(bool val) {
+  fwd_bwd_enabled_fn() = [val]() { return val; };
 }
 
 } // namespace impl

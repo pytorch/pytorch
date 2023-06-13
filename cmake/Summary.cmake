@@ -23,7 +23,6 @@ function(caffe2_print_configuration_summary)
   message(STATUS "")
 
   message(STATUS "  TORCH_VERSION         : ${TORCH_VERSION}")
-  message(STATUS "  CAFFE2_VERSION        : ${CAFFE2_VERSION}")
   message(STATUS "  BUILD_CAFFE2          : ${BUILD_CAFFE2}")
   message(STATUS "  BUILD_CAFFE2_OPS      : ${BUILD_CAFFE2_OPS}")
   message(STATUS "  BUILD_STATIC_RUNTIME_BENCHMARK: ${BUILD_STATIC_RUNTIME_BENCHMARK}")

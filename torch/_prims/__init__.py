@@ -1,6 +1,5 @@
 import contextlib
 import itertools
-import math
 import operator
 import weakref
 from enum import Enum
@@ -13,7 +12,9 @@ import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
+from torch._prims.debug_prims import register_debug_prims
 from torch._prims.nvfuser_prims import register_nvprims
+from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
     check,
     Dim,
@@ -188,6 +189,7 @@ __all__ = [
     "amin",
     "prod",
     "sum",
+    "xor_sum",
     "var",
     #
     # Tensor Creation Prims
@@ -264,6 +266,7 @@ def _make_prim(
     meta: Callable,
     impl_aten: Callable,
     doc: str,
+    tags: Optional[Sequence[torch.Tag]] = None,
 ):
     """
     Creates a primitive operation.
@@ -299,6 +302,8 @@ def _make_prim(
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
+    if tags:
+        _prim._tags = tags
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
@@ -347,7 +352,7 @@ def _elementwise_meta(
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    strides = utils.compute_elementwise_output_strides(*args_)
+    l2p_perm = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
     shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
     # Acquires the dtype
@@ -398,7 +403,8 @@ def _elementwise_meta(
             else:
                 dtype = dtype
 
-        return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
+        assert shape is not None
+        return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
 
     # Number case
     # TODO: fix number type promotion (bool, complex->float)
@@ -939,6 +945,7 @@ bitwise_xor = _make_elementwise_binary_prim(
 #   doc="",
 # )
 
+
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
@@ -1046,7 +1053,7 @@ lt = _make_elementwise_binary_prim(
 )
 
 
-# Note: the following impls are because torch.maximum and torch.mininum do not support scalar inputs
+# Note: the following impls are because torch.maximum and torch.minimum do not support scalar inputs
 def _maximum_aten(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ) -> TensorLikeType:
@@ -1149,6 +1156,7 @@ zeta = _make_elementwise_binary_prim(
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
 
 #
 # View operations
@@ -1400,7 +1408,9 @@ collapse_view = _make_prim(
 def _conj_meta(a: TensorLikeType) -> TensorLikeType:
     if not a.dtype.is_complex:
         raise RuntimeError("Expected complex dtype in prims.conj")
-    return a.as_strided(a.shape, a.stride(), a.storage_offset())
+    out = a.as_strided(a.shape, a.stride(), a.storage_offset())
+    torch._C._set_conj(out, not a.is_conj())
+    return out
 
 
 _conj_doc = """
@@ -1520,7 +1530,7 @@ def _slice_meta(
 
     new_shape = []
     for x, y, z in zip(start_indices, limit_indices, _strides):
-        new_shape.append(math.floor((y - x) / z))
+        new_shape.append(1 + (y - x - 1) // z)
 
     new_strides = []
     for x, y in zip(a.stride(), _strides):
@@ -1699,6 +1709,7 @@ split_dim = _make_prim(
     return_type=RETURN_TYPE.VIEW,
     doc=_split_dim_doc,
 )
+
 
 # Note: allows dimensions to be specified redundantly
 def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
@@ -1979,7 +1990,6 @@ rev = _make_prim(
 def _where_meta(
     pred: TensorLikeType, a: TensorLikeType, b: TensorLikeType
 ) -> TensorLikeType:
-
     return _elementwise_meta(
         a,
         b,
@@ -2003,6 +2013,7 @@ where = _make_prim(
     doc=_where_doc,
 )
 
+
 #
 # Type conversions
 #
@@ -2021,7 +2032,6 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
 
 
 def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
-
     # Propagates requires grad when possible
     if not utils.is_grad_dtype(dtype):
         requires_grad = False
@@ -2077,6 +2087,7 @@ device_put = _make_prim(
     doc=_device_put_doc,
 )
 
+
 # NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
 def _item_meta(a: TensorLikeType) -> FakeTensor:
@@ -2098,6 +2109,7 @@ item = _make_prim(
     return_type=RETURN_TYPE.NEW,
     doc=_item_doc,
 )
+
 
 # NOTE: need to model meta scalars
 # See https://github.com/pytorch/pytorch/issues/78070
@@ -2148,14 +2160,14 @@ def _minimum_value_aten(dtype: torch.dtype):
 
 
 _minimum_value_doc = """
-    Return the mimimum finite value for a dtype.
+    Return the minimum finite value for a dtype.
 """
 
 # TODO: create a new return type for scalars?
 # FIXME: currently returns integers for boolean tensors
 # https://github.com/pytorch/pytorch/issues/78071
 minimum_value = _make_prim(
-    schema="minium_value(ScalarType dtype) -> Scalar",
+    schema="minimum_value(ScalarType dtype) -> Scalar",
     meta=_minimum_value_meta,
     impl_aten=_minimum_value_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2298,6 +2310,10 @@ _sum_doc = """
     Computes the sum of elements in the input tensor over the list of dimensions
     specified in the dim argument
     """
+_xor_sum_doc = """
+    Computes the xor sum of elements in the input tensor over the list of dimensions
+    specified in the dim argument
+    """
 _prod_doc = """
     Computes the product of elements in the input tensor over the list of dimensions
     specified in the dim argument
@@ -2329,7 +2345,7 @@ def _make_reduction_prim(name: str, impl_aten, doc):
 def _make_var_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, int correction, ScalarType? output_dtype=None) -> Tensor",
+        schema=f"{name}(Tensor inp, int[]? dims, *, float correction, ScalarType? output_dtype=None) -> Tensor",
         meta=_var_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,
@@ -2341,6 +2357,22 @@ sum = _make_reduction_prim(
     name="sum",
     impl_aten=torch.sum,
     doc=_sum_doc,
+)
+
+
+def _xor_sum_aten(
+    inp: TensorLikeType,
+    dims: Optional[DimsSequenceType],
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    raise NotImplementedError("xor_sum only implemented with inductor")
+
+
+xor_sum = _make_reduction_prim(
+    name="xor_sum",
+    impl_aten=_xor_sum_aten,
+    doc=_xor_sum_doc,
 )
 
 
@@ -2703,6 +2735,10 @@ def _svd_meta(
     is_cuda = A.device.type == "cuda"
     strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
+    # Also makes sure this is CUDA or HIP:
+    # https://pytorch.org/docs/stable/notes/hip.html#checking-for-hip
+    if A.numel() != 0 and Vh.is_complex() and torch.cuda.is_available():
+        Vh = Vh.conj()
     return U, S, Vh
 
 
@@ -2730,6 +2766,7 @@ svd = _make_prim(
 #
 # Randomness Prims
 #
+
 
 # TODO: add generator support
 # NOTE: there is currently no way of acquiring the "default" torch generator
@@ -2781,7 +2818,7 @@ _normal_doc = """
 
 normal = _make_prim(
     schema=(
-        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device,  bool requires_grad) -> Tensor"
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device, bool requires_grad) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_normal_meta,
@@ -2958,3 +2995,5 @@ fft_c2r = _make_prim(
 )
 
 register_nvprims()
+register_rng_prims()
+register_debug_prims()

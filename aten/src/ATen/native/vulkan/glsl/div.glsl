@@ -27,9 +27,17 @@ void main() {
     const vec4 v0 = uBlock.isize0.w == 1
                       ? texelFetch(uInput0, input0_pos, 0).xxxx
                       : texelFetch(uInput0, input0_pos, 0);
-    const vec4 v1 = uBlock.isize1.w == 1
-                      ? texelFetch(uInput1, input1_pos, 0).xxxx
-                      : texelFetch(uInput1, input1_pos, 0);
+    vec4 v1 = uBlock.isize1.w == 1
+                ? texelFetch(uInput1, input1_pos, 0).xxxx
+                : texelFetch(uInput1, input1_pos, 0);
+
+    const int c_index = (pos.z % ((uBlock.size.w + 3) / 4)) * 4;
+    if (uBlock.isize1.w != 1 && c_index + 3 >= uBlock.size.w) {
+      ivec4 c_ind = ivec4(c_index) + ivec4(0, 1, 2, 3);
+      vec4 mask = vec4(lessThan(c_ind, ivec4(uBlock.size.w)));
+      v1 = v1 * mask + vec4(1, 1, 1, 1) - mask;
+    }
+
     imageStore(uOutput, pos, v0 / v1);
   }
 }

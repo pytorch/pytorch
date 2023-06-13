@@ -11,12 +11,9 @@ import functools
 from typing import Any, Dict, Union
 
 import sympy
-from sympy.logic.boolalg import BooleanAtom
+from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
-
-
-SympyBoolean = sympy.logic.boolalg.Boolean
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -24,7 +21,10 @@ SympyBoolean = sympy.logic.boolalg.Boolean
 
 @functools.lru_cache(None)
 def handlers():
+    from torch._inductor.ir import CleanDiv
     from torch.fx.experimental.symbolic_shapes import FloorDiv, Pow, TrueDiv
+
+    # TODO: CeilDiv, ModularIndexing
 
     HANDLERS = {
         sympy.Or: "or_",
@@ -38,6 +38,7 @@ def handlers():
         sympy.Not: "not_",
         TrueDiv: "truediv",
         FloorDiv: "div",
+        CleanDiv: "div",
         sympy.Add: "add",
         sympy.Mul: "mul",
         Pow: "pow",
@@ -66,7 +67,7 @@ def sympy_interp(
     # sometimes?
     if isinstance(expr, sympy.Integer):
         return analysis.constant(int(expr), torch.int64)
-    elif isinstance(expr, sympy.Float):
+    elif isinstance(expr, sympy.Number):
         return analysis.constant(float(expr), torch.double)
     elif isinstance(expr, BooleanAtom):
         return analysis.constant(bool(expr), torch.bool)
@@ -81,8 +82,9 @@ def sympy_interp(
 
     # Recursive case
     args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
-    handler = getattr(analysis, handlers()[expr.func])
-    if handler in ASSOCIATIVE_OPS:
+    handler_name = handlers()[expr.func]
+    handler = getattr(analysis, handler_name)
+    if handler_name in ASSOCIATIVE_OPS:
         assert len(args) > 1
         acc = handler(args[0], args[1])
         for i in range(2, len(args)):

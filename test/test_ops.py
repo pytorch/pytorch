@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     noncontiguous_like,
     TEST_WITH_ASAN,
     TEST_WITH_UBSAN,
-    skipIfRocm,
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
@@ -148,7 +147,7 @@ class TestCommon(TestCase):
             if isinstance(result, torch.Tensor):
                 self.assertTrue(result.device == cuda_device)
             elif is_iterable_of_tensors(result):
-                self.assertTrue(all(map(lambda t: t.device == cuda_device, result)))
+                self.assertTrue(all((t.device == cuda_device for t in result)))
             else:
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
@@ -177,6 +176,7 @@ class TestCommon(TestCase):
             "aten.min.dim_min",
             "aten.min.names_dim",
             "aten.min.names_dim_min",
+            "aten.min.unary_out",
             # not pointwise
             "aten.isin.Tensor_Tensor",
             "aten.isin.Tensor_Tensor_out",
@@ -315,6 +315,8 @@ class TestCommon(TestCase):
                 continue
             except torch._subclasses.fake_tensor.DataDependentOutputException:
                 continue
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                continue
 
             if isinstance(result, torch.Tensor):
                 self.assertTrue(isinstance(meta_result, FakeTensor))
@@ -344,13 +346,8 @@ class TestCommon(TestCase):
             if isinstance(sample.input, torch.Tensor) and sample.input.ndim == 0 and skip_zero_dim:
                 continue
 
-            is_lower_than_cuda11_0 = (
-                (torch.version.cuda is not None)
-                and ([int(x) for x in torch.version.cuda.split(".")] < [11, 0]))
-
             if (
                 skip_bfloat
-                and is_lower_than_cuda11_0
                 and (
                     (
                         isinstance(sample.input, torch.Tensor)
@@ -544,6 +541,17 @@ class TestCommon(TestCase):
 
     @skipMeta
     @onlyNativeDeviceTypes
+    @ops([op for op in op_db if op.error_inputs_sparse_func is not None], dtypes=OpDTypes.none)
+    @parametrize("layout", (torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc, torch.sparse_coo))
+    def test_errors_sparse(self, device, op, layout):
+        for ei in op.error_inputs_sparse(device, layout):
+            si = ei.sample_input
+            with self.assertRaisesRegex(ei.error_type, ei.error_regex):
+                out = op(si.input, *si.args, **si.kwargs)
+                self.assertFalse(isinstance(out, type(NotImplemented)))
+
+    @skipMeta
+    @onlyNativeDeviceTypes
     @ops([op for op in python_ref_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_errors(self, device, op):
@@ -710,7 +718,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple(map(lambda t: t.stride(), out))
+                return tuple((t.stride() for t in out))
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -723,7 +731,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple(map(lambda t: t.data_ptr(), out))
+                return tuple((t.data_ptr() for t in out))
 
             @suppress_warnings
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
@@ -830,7 +838,7 @@ class TestCommon(TestCase):
                     return (out.stride(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple(map(lambda t: t.stride(), out))
+                return tuple((t.stride() for t in out))
 
             # Extracts data pointers from a tensor or iterable of tensors into a tuple
             # NOTE: only extracts on the CPU and CUDA device types since some
@@ -843,7 +851,7 @@ class TestCommon(TestCase):
                     return (out.data_ptr(),)
 
                 # assumes (see above) that out is an iterable of tensors
-                return tuple(map(lambda t: t.data_ptr(), out))
+                return tuple((t.data_ptr() for t in out))
 
             def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
                 out = _apply_out_transform(transform, expected)
@@ -1052,7 +1060,10 @@ class TestCommon(TestCase):
                 if isinstance(
                     expected_forward, torch.Tensor
                 ) and dtype in op.supported_backward_dtypes(torch.device(device).type):
-                    output_process_fn_grad(expected_forward).sum().backward()
+                    out = output_process_fn_grad(expected_forward).sum()
+                    if out.dtype.is_complex:
+                        out = out.abs()
+                    out.backward()
                     expected_grad = tensor.grad
 
                 # Test eager consistency
@@ -1097,7 +1108,10 @@ class TestCommon(TestCase):
                     if expected_grad is not None and (
                         variant not in inplace_ops or op.supports_inplace_autograd
                     ):
-                        output_process_fn_grad(variant_forward).sum().backward()
+                        out = output_process_fn_grad(variant_forward).sum()
+                        if out.dtype.is_complex:
+                            out = out.abs()
+                        out.backward()
                         self.assertEqual(expected_grad, tensor.grad)
 
         _test_consistency_helper(samples, variants)
@@ -1565,8 +1579,8 @@ class TestMathBits(TestCase):
                     if isinstance(sample.input, torch.Tensor)
                     else sample.input[0]
                 )
-                expected_forward.sum().backward(retain_graph=True)
-                forward_with_mathview.sum().backward(retain_graph=True)
+                expected_forward.sum().abs().backward(retain_graph=True)
+                forward_with_mathview.sum().abs().backward(retain_graph=True)
                 if tensor.grad is not None:
                     cloned1_tensor = (
                         cloned1 if isinstance(cloned1, torch.Tensor) else cloned1[0]
@@ -1727,11 +1741,11 @@ class TestRefsOpsInfo(TestCase):
     skip_ref_ops = {
         '_refs.bitwise_right_shift',
         '_refs.copy_to',
+        '_refs.empty_permuted',
         '_refs.empty_strided',
         '_refs.equal',
         '_refs.full',
         '_refs.full_like',
-        '_refs.item',
         '_refs.to',
         '_refs.ones',
         '_refs.ones_like',
@@ -1809,6 +1823,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.movedim',
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
+        '_refs.nn.functional.smooth_l1_loss',
         '_refs.nn.functional.log_softmax',
         '_refs.nn.functional.poisson_nll_loss',
         '_refs.nn.functional.softmax',
@@ -1840,6 +1855,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.scalar_tensor',  # missing "layout"
         # other
         '_refs.empty',  # intentional; direct empty is faster and has less guards
+        '_refs.empty_permuted',  # intentional; direct empty is faster and has less guards
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
@@ -1973,7 +1989,7 @@ fake_tensor_stride_failing_ops = {
     "linalg.svd",
 }
 
-fake_backward_xfails = fake_tensor_stride_failing_ops | {
+fake_backward_skips = {
     "linalg.cond",
     "linalg.matrix_norm",
     "linalg.norm",
@@ -1986,12 +2002,10 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "cholesky",
 }
 
-fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
+fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("_segment_reduce", "lengths"),
-    xfail("norm", "nuc"),
-    xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),
-}
+} | {skip(stride_skip) for stride_skip in fake_tensor_stride_failing_ops}
 
 fake_autocast_backward_xfails = {
     skip("nn.functional.binary_cross_entropy"),
@@ -2061,6 +2075,8 @@ class TestFakeTensor(TestCase):
                 self.assertTrue(name not in dynamic_output_op_tests and name not in data_dependent_op_tests)
 
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
+                pass
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
@@ -2147,21 +2163,22 @@ class TestFakeTensor(TestCase):
             )
 
             # TODO: enable check_aliasing, batch norm fails
-            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
-                with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
-                    composite_compliance.compute_expected_grads(
-                        op.get_op(), args, kwargs,
-                        sample.output_process_fn_grad,
-                        op.gradcheck_wrapper)
+            try:
+                with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
+                    with warnings.catch_warnings(), context(), torch.autograd.set_multithreading_enabled(False):
+                        composite_compliance.compute_expected_grads(
+                            op.get_op(), args, kwargs,
+                            sample.output_process_fn_grad,
+                            op.gradcheck_wrapper)
+            except torch._subclasses.fake_tensor.UnsupportedOperatorException:
+                pass
 
-    @skipIfRocm
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_no_amp', fake_backward_xfails)
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
-    @skipIfRocm
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)

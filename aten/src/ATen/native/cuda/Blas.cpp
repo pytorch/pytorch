@@ -146,23 +146,15 @@ static bool getDisableAddmmCudaLt() {
     return false;
 }
 
-uint8_t getAlignment(const Tensor &t) {
-  // alignment are in bytes
-  uint8_t alignment = 1;
-  uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
-  for (; alignment < 4; alignment *= 2) {
-    if (address % (alignment * 2)) {
-      return alignment;
-    }
-  }
-  return alignment;
-}
-
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
+  TORCH_CHECK(
+    mat1.dtype() == mat2.dtype(),
+    "expected mat1 and mat2 to have the same dtype, but got: ", mat1.dtype(), " != ", mat2.dtype()
+  )
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
   checkAllSameGPU(__func__, args);
@@ -185,18 +177,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // leading dim >> rows when they are sliced from a large tensor
     // see fbcode/caffe2/test/test_linalg.py:test_corner_cases_of_cublasltmatmul
     if (!disable_addmm_cuda_lt) {
-      auto self_alignment = getAlignment(self);
-      auto mat1_alignment = getAlignment(mat1);
-      auto mat2_alignment = getAlignment(mat2);
-      // due to a heuristic bug, cuBlasLt requires all alignments > 2 or the same ( == 2)
-      // should we err on the side of caution and remove the second dispatch path?
-      bool alignment_ok = (self_alignment > 2 &&
-                           mat1_alignment > 2 &&
-                           mat2_alignment > 2) ||
-                          (self_alignment == 2 &&
-                           mat1_alignment == 2 &&
-                           mat2_alignment == 2);
-
       useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
           self.is_contiguous() &&
@@ -204,7 +184,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
            scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
-          alignment_ok &&
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
           mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
           mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
@@ -305,7 +284,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               mat1_ld,
               mat2_->data_ptr<scalar_t>(),
               mat2_ld,
-              self.data_ptr<scalar_t>(),
+              self.const_data_ptr<scalar_t>(),
               result_->data_ptr<scalar_t>(),
               result_ld,
 #if 0
@@ -333,9 +312,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           using opmath_t = at::opmath_type<scalar_t>;
           opmath_t alpha_val = alpha.to<opmath_t>();
           opmath_t beta_val = beta.to<opmath_t>();
-          scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
-          scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
-          scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+          const scalar_t* mat1_ptr = mat1_->const_data_ptr<scalar_t>();
+          const scalar_t* mat2_ptr = mat2_->const_data_ptr<scalar_t>();
+          scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
           at::cuda::blas::gemm<scalar_t>(
               transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
               transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
@@ -428,9 +407,9 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
     using opmath_t = at::opmath_type<scalar_t>;
     opmath_t alpha_val = alpha.to<opmath_t>();
     opmath_t beta_val = beta.to<opmath_t>();
-    scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
-    scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+    const scalar_t* batch1_ptr = batch1_->const_data_ptr<scalar_t>();
+    const scalar_t* batch2_ptr = batch2_->const_data_ptr<scalar_t>();
+    scalar_t* result_ptr = result_->mutable_data_ptr<scalar_t>();
     at::cuda::blas::bgemm<scalar_t>(
       transpose_batch1 ? batch1_->is_conj() ? 'c' : 't' : 'n',
       transpose_batch2 ? batch2_->is_conj() ? 'c' : 't' : 'n',
@@ -560,11 +539,11 @@ return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
         at::cuda::blas::dot<scalar_t>(
             handle,
             n,
-            self.data_ptr<scalar_t>(),
+            self.const_data_ptr<scalar_t>(),
             incx,
-            other.data_ptr<scalar_t>(),
+            other.const_data_ptr<scalar_t>(),
             incy,
-            result.data_ptr<scalar_t>());
+            result.mutable_data_ptr<scalar_t>());
 
         return result;
       });
@@ -609,11 +588,11 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
     at::cuda::blas::vdot<scalar_t>(
         handle,
         n,
-        self.data_ptr<scalar_t>(),
+        self.const_data_ptr<scalar_t>(),
         incx,
-        other.data_ptr<scalar_t>(),
+        other.const_data_ptr<scalar_t>(),
         incy,
-        result.data_ptr<scalar_t>());
+        result.mutable_data_ptr<scalar_t>());
 
     return result;
   });
@@ -653,23 +632,97 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
         auto alpha = alpha_.to<scalar_t>();
         if (mat.stride(0) == 1 && mat.stride(1) >= std::max<int64_t>(1, mat.size(0))) {
           at::cuda::blas::gemv<scalar_t>('n',
-            mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1), vec_contiguous.data_ptr<scalar_t>(),
-            vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+            mat.size(0), mat.size(1), alpha, mat.const_data_ptr<scalar_t>(), mat.stride(1), vec_contiguous.const_data_ptr<scalar_t>(),
+            vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else if (mat.stride(1) == 1 && mat.stride(0) >= std::max<int64_t>(1, mat.size(1))) {
           at::cuda::blas::gemv<scalar_t>('t',
-            mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
-            vec_contiguous.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+            mat.size(1), mat.size(0), alpha, mat.const_data_ptr<scalar_t>(), mat.stride(0),
+            vec_contiguous.const_data_ptr<scalar_t>(), vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
         else {
           Tensor cmat = mat.contiguous();
           at::cuda::blas::gemv<scalar_t>('t',
-              mat.size(1), mat.size(0), alpha, cmat.data_ptr<scalar_t>(), cmat.stride(0),
-              vec_contiguous.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
+              mat.size(1), mat.size(0), alpha, cmat.const_data_ptr<scalar_t>(), cmat.stride(0),
+              vec_contiguous.const_data_ptr<scalar_t>(), vec_stride, beta, result.mutable_data_ptr<scalar_t>(), r_stride);
         }
       });
     }
   }
+}
+
+Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
+  // NOTE: cuBLAS is currently broken for some combination of transposed inputs.
+  TORCH_CHECK(self.dim() == 2, "Expected self to be of dimension 2 but got ", self.dim());
+  TORCH_CHECK(mat2.dim() == 2, "Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  TORCH_CHECK(self.size(0) > 16, "self.size(0) needs to be greater than 16, but got ", self.size(0));
+  TORCH_CHECK(self.size(1) > 0 && self.size(1) % 8 == 0, "self.size(1) needs to be greater than 0 and a multiple of 8, but got ", self.size(1));
+  TORCH_CHECK(self.size(1) == mat2.size(0), "self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
+  TORCH_CHECK(mat2.size(1) > 0 && mat2.size(1) % 8 == 0, "mat2.size(1) needs to be greater than 0 and a multiple of 8, but got ", mat2.size(1));
+
+  TORCH_CHECK(result.dtype() == at::kInt, "Expected result dtype to be of type kInt but got ", result.dtype());
+  TORCH_CHECK(result.size(0) == self.size(0), "Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
+  TORCH_CHECK(result.size(1) == mat2.size(1), "Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
+
+  TORCH_CHECK(result.dim() == 2, "Expected result to be of dimension 2 but got ", result.dim());
+
+  TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
+
+#if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION) && CUDA_VERSION == 11070
+  auto mat1 = self;
+  IntArrayRef mat1_sizes = mat1.sizes();
+  IntArrayRef mat2_sizes = mat2.sizes();
+  bool transpose_result;
+  c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
+  bool transpose_mat1;
+  bool transpose_mat2;
+  c10::MaybeOwned<Tensor> mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
+  c10::MaybeOwned<Tensor> mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
+
+  if (transpose_result) {
+    transpose_mat1 = !transpose_mat1;
+    transpose_mat2 = !transpose_mat2;
+    mat1_sizes = mat1_->sizes();
+    mat2_sizes = mat2_->sizes();
+  }
+
+  int64_t m = mat1_sizes[transpose_result ? 1 : 0];
+  int64_t k = mat1_sizes[transpose_result ? 0 : 1];
+  int64_t n = mat2_sizes[transpose_result ? 0 : 1];
+  int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
+  int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
+  int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
+
+  at::cuda::blas::int8_gemm(
+      transpose_mat1,
+      transpose_mat2,
+      m,
+      n,
+      k,
+      mat1_->data_ptr<int8_t>(),
+      mat1_ld,
+      mat2_->data_ptr<int8_t>(),
+      mat2_ld,
+      result_->data_ptr<int32_t>(),
+      result_ld);
+
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
+  }
+#else
+#if !defined(USE_ROCM) && !defined(_MSC_VER) && defined(CUDA_VERSION)
+  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for CUDA ", CUDA_VERSION);
+#else
+  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for this platform.");
+#endif
+#endif
+
+  return result;
+}
+
+Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
+  return _int_mm_out_cuda(self, mat2, result);
 }
 
 } // namespace at::native

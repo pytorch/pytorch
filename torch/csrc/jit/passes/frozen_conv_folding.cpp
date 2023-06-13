@@ -66,7 +66,7 @@ bool FoldFrozenConvBatchnorm(Block* b) {
       auto bn_rm_ivalue = bn->namedInput("running_mean");
       auto bn_rv_ivalue = bn->namedInput("running_var");
       // check running_mean and running_var has value, if they are
-      // None(track_running_stats=False), skiping the folding path.
+      // None(track_running_stats=False), skipping the folding path.
       if (bn_rm_ivalue->type() == NoneType::get() &&
           bn_rv_ivalue->type() == NoneType::get()) {
         continue;
@@ -191,7 +191,7 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
       constant_as<Tensor>(conv->namedInput("weight")).value();
 
   // avoid fusing op that causes type promotion
-  // resticting to float avoids int/float difficulties with scalar overload
+  // restricting to float avoids int/float difficulties with scalar overload
   if (!weight_tensor.is_floating_point()) {
     return false;
   }

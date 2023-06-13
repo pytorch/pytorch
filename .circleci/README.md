@@ -106,7 +106,7 @@ All binaries are built in CircleCI workflows except Windows. There are checked-i
 
 Some quick vocab:
 
-* A \**workflow** is a CircleCI concept; it is a DAG of '**jobs**'. ctrl-f 'workflows' on https://github.com/pytorch/pytorch/blob/master/.circleci/config.yml to see the workflows.
+* A \**workflow** is a CircleCI concept; it is a DAG of '**jobs**'. ctrl-f 'workflows' on https://github.com/pytorch/pytorch/blob/main/.circleci/config.yml to see the workflows.
 * **jobs** are a sequence of '**steps**'
 * **steps** are usually just a bash script or a builtin CircleCI command. *All steps run in new environments, environment variables declared in one script DO NOT persist to following steps*
 * CircleCI has a **workspace**, which is essentially a cache between steps of the *same job* in which you can store artifacts between steps.
@@ -117,8 +117,8 @@ The nightly binaries have 3 workflows. We have one job (actually 3 jobs:  build,
 
 1. binary_builds
     1. every day midnight EST
-    2. linux: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/linux-binary-build-defaults.yml
-    3. macos: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/macos-binary-build-defaults.yml
+    2. linux: https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/linux-binary-build-defaults.yml
+    3. macos: https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/macos-binary-build-defaults.yml
     4. For each binary configuration, e.g. linux_conda_3.7_cpu there is a
         1. binary_linux_conda_3.7_cpu_build
             1. Builds the build. On linux jobs this uses the 'docker executor'.
@@ -133,12 +133,12 @@ The nightly binaries have 3 workflows. We have one job (actually 3 jobs:  build,
             2. Uploads the package
 2. update_s3_htmls
     1. every day 5am EST
-    2. https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/binary_update_htmls.yml
+    2. https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/binary_update_htmls.yml
     3. See below for what these are for and why they're needed
     4. Three jobs that each examine the current contents of aws and the conda repo and update some html files in s3
 3. binarysmoketests
     1. every day
-    2. https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/nightly-build-smoke-tests-defaults.yml
+    2. https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/nightly-build-smoke-tests-defaults.yml
     3. For each binary configuration, e.g. linux_conda_3.7_cpu there is a
         1. smoke_linux_conda_3.7_cpu
             1. Downloads the package from the cloud, e.g. using the official pip or conda instructions
@@ -146,26 +146,26 @@ The nightly binaries have 3 workflows. We have one job (actually 3 jobs:  build,
 
 ## How are the jobs structured?
 
-The jobs are in https://github.com/pytorch/pytorch/tree/master/.circleci/verbatim-sources. Jobs are made of multiple steps. There are some shared steps used by all the binaries/smokes. Steps of these jobs are all delegated to scripts in https://github.com/pytorch/pytorch/tree/master/.circleci/scripts .
+The jobs are in https://github.com/pytorch/pytorch/tree/main/.circleci/verbatim-sources. Jobs are made of multiple steps. There are some shared steps used by all the binaries/smokes. Steps of these jobs are all delegated to scripts in https://github.com/pytorch/pytorch/tree/main/.circleci/scripts .
 
-* Linux jobs: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/linux-binary-build-defaults.yml
+* Linux jobs: https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/linux-binary-build-defaults.yml
     * binary_linux_build.sh
     * binary_linux_test.sh
     * binary_linux_upload.sh
-* MacOS jobs: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/macos-binary-build-defaults.yml
+* MacOS jobs: https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/macos-binary-build-defaults.yml
     * binary_macos_build.sh
     * binary_macos_test.sh
     * binary_macos_upload.sh
-* Update html jobs: https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/binary_update_htmls.yml
+* Update html jobs: https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/binary_update_htmls.yml
     * These delegate from the pytorch/builder repo
-    * https://github.com/pytorch/builder/blob/master/cron/update_s3_htmls.sh
-    * https://github.com/pytorch/builder/blob/master/cron/upload_binary_sizes.sh
-* Smoke jobs (both linux and macos): https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/nightly-build-smoke-tests-defaults.yml
+    * https://github.com/pytorch/builder/blob/main/cron/update_s3_htmls.sh
+    * https://github.com/pytorch/builder/blob/main/cron/upload_binary_sizes.sh
+* Smoke jobs (both linux and macos): https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/nightly-build-smoke-tests-defaults.yml
     * These delegate from the pytorch/builder repo
-    * https://github.com/pytorch/builder/blob/master/run_tests.sh
-    * https://github.com/pytorch/builder/blob/master/smoke_test.sh
-    * https://github.com/pytorch/builder/blob/master/check_binary.sh
-* Common shared code (shared across linux and macos): https://github.com/pytorch/pytorch/blob/master/.circleci/verbatim-sources/nightly-binary-build-defaults.yml
+    * https://github.com/pytorch/builder/blob/main/run_tests.sh
+    * https://github.com/pytorch/builder/blob/main/smoke_test.sh
+    * https://github.com/pytorch/builder/blob/main/check_binary.sh
+* Common shared code (shared across linux and macos): https://github.com/pytorch/pytorch/blob/main/.circleci/verbatim-sources/nightly-binary-build-defaults.yml
     * binary_checkout.sh - checks out pytorch/builder repo. Right now this also checks out pytorch/pytorch, but it shouldn't. pytorch/pytorch should just be shared through the workspace. This can handle being run before binary_populate_env.sh
     * binary_populate_env.sh - parses BUILD_ENVIRONMENT into the separate env variables that make up a binary configuration. Also sets lots of default values, the date, the version strings, the location of folders in s3, all sorts of things. This generally has to be run before other steps.
     * binary_install_miniconda.sh - Installs miniconda, cross platform. Also hacks this for the update_binary_sizes job that doesn't have the right env variables
@@ -308,7 +308,7 @@ Note that the Windows Python wheels are still built in conda environments. Some 
 
 * These should all be consolidated
 * These must run on all OS types: MacOS, Linux, and Windows
-* These all run smoke tests at the moment. They inspect the packages some, maybe run a few import statements. They DO NOT run the python tests nor the cpp tests. The idea is that python tests on master and PR merges will catch all breakages. All these tests have to do is make sure the special binary machinery didn’t mess anything up.
+* These all run smoke tests at the moment. They inspect the packages some, maybe run a few import statements. They DO NOT run the python tests nor the cpp tests. The idea is that python tests on main and PR merges will catch all breakages. All these tests have to do is make sure the special binary machinery didn’t mess anything up.
 * There are separate run_tests.sh and smoke_test.sh because one used to be called by the smoke jobs and one used to be called by the binary test jobs (see circleci structure section above). This is still true actually, but these could be united into a single script that runs these checks, given an installed pytorch package.
 
 ### Note on libtorch
@@ -340,7 +340,7 @@ The Dockerfiles are available in pytorch/builder, but there is no circleci job o
 
 tl;dr make a PR that looks like https://github.com/pytorch/pytorch/pull/21159
 
-Sometimes we want to push a change to master and then rebuild all of today's binaries after that change. As of May 30, 2019 there isn't a way to manually run a workflow in the UI. You can manually re-run a workflow, but it will use the exact same git commits as the first run and will not include any changes. So we have to make a PR and then force circleci to run the binary workflow instead of the normal tests. The above PR is an example of how to do this; essentially you copy-paste the binarybuilds workflow steps into the default workflow steps. If you need to point the builder repo to a different commit then you'd need to change https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/binary_checkout.sh#L42-L45 to checkout what you want.
+Sometimes we want to push a change to mainand then rebuild all of today's binaries after that change. As of May 30, 2019 there isn't a way to manually run a workflow in the UI. You can manually re-run a workflow, but it will use the exact same git commits as the first run and will not include any changes. So we have to make a PR and then force circleci to run the binary workflow instead of the normal tests. The above PR is an example of how to do this; essentially you copy-paste the binarybuilds workflow steps into the default workflow steps. If you need to point the builder repo to a different commit then you'd need to change https://github.com/pytorch/pytorch/blob/main/.circleci/scripts/binary_checkout.sh#L42-L45 to checkout what you want.
 
 ## How to test changes to the binaries via .circleci
 

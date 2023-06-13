@@ -1,12 +1,12 @@
 #pragma once
 
+#include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 
 #include <limits>
-#include <memory>
 
 namespace c10 {
 
@@ -43,6 +43,35 @@ class C10_API SymFloat {
   SymFloat operator-(const SymFloat&) const;
   SymFloat operator*(const SymFloat&) const;
   SymFloat operator/(const SymFloat&) const;
+
+  SymBool sym_eq(const SymFloat&) const;
+  SymBool sym_ne(const SymFloat&) const;
+  SymBool sym_lt(const SymFloat&) const;
+  SymBool sym_le(const SymFloat&) const;
+  SymBool sym_gt(const SymFloat&) const;
+  SymBool sym_ge(const SymFloat&) const;
+
+  bool operator==(const SymFloat& o) const {
+    return sym_eq(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator!=(const SymFloat& o) const {
+    return sym_ne(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator<(const SymFloat& o) const {
+    return sym_lt(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator<=(const SymFloat& o) const {
+    return sym_le(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator>(const SymFloat& o) const {
+    return sym_gt(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator>=(const SymFloat& o) const {
+    return sym_ge(o).guard_bool(__FILE__, __LINE__);
+  }
+
+  SymFloat min(const SymFloat& sci) const;
+  SymFloat max(const SymFloat& sci) const;
 
   // Need guidance on where to put this code
   SymFloat sqrt() const;

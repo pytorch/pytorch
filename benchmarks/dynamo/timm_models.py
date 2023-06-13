@@ -5,13 +5,12 @@ import os
 import re
 import subprocess
 import sys
-import time
 import warnings
 
 import torch
-from common import BenchmarkRunner, main
+from common import BenchmarkRunner, download_retry_decorator, main
 
-from torch._dynamo.testing import collect_results
+from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
 
 
@@ -44,7 +43,7 @@ with open(filename, "r") as fh:
 
 BATCH_SIZE_DIVISORS = {
     "beit_base_patch16_224": 2,
-    "cait_m36_384": 2,
+    "cait_m36_384": 4,
     "convit_base": 2,
     "convmixer_768_32": 2,
     "convnext_base": 2,
@@ -68,16 +67,14 @@ BATCH_SIZE_DIVISORS = {
     "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set("botnet26t_256")
+REQUIRE_HIGHER_TOLERANCE = set("sebotnet33ts_256")
 
-SKIP = {
-    # Unusual training setup
-    "levit_128",
-}
-
-
-MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
-    "cait_m36_384": 4,
+SCALED_COMPUTE_LOSS = {
+    "ese_vovnet19b_dw",
+    "fbnetc_100",
+    "mnasnet_100",
+    "mobilevit_s",
+    "sebotnet33ts_256",
 }
 
 
@@ -172,53 +169,45 @@ class TimmRunnner(BenchmarkRunner):
         super().__init__()
         self.suite_name = "timm_models"
 
+    @download_retry_decorator
+    def _download_model(self, model_name):
+        model = create_model(
+            model_name,
+            in_chans=3,
+            scriptable=False,
+            num_classes=None,
+            drop_rate=0.0,
+            drop_path_rate=None,
+            drop_block_rate=None,
+            pretrained=True,
+            # global_pool=kwargs.pop('gp', 'fast'),
+            # num_classes=kwargs.pop('num_classes', None),
+            # drop_rate=kwargs.pop('drop', 0.),
+            # drop_path_rate=kwargs.pop('drop_path', None),
+            # drop_block_rate=kwargs.pop('drop_block', None),
+        )
+        return model
+
     def load_model(
         self,
         device,
         model_name,
         batch_size=None,
     ):
+        if self.args.enable_activation_checkpointing:
+            raise NotImplementedError(
+                "Activation checkpointing not implemented for Timm models"
+            )
 
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
 
         # _, model_dtype, data_dtype = self.resolve_precision()
         channels_last = self._args.channels_last
-
-        tries = 1
-        success = False
-        model = None
-        total_allowed_tries = 5
-        while not success and tries <= total_allowed_tries:
-            try:
-                model = create_model(
-                    model_name,
-                    in_chans=3,
-                    scriptable=False,
-                    num_classes=None,
-                    drop_rate=0.0,
-                    drop_path_rate=None,
-                    drop_block_rate=None,
-                    pretrained=True,
-                    # global_pool=kwargs.pop('gp', 'fast'),
-                    # num_classes=kwargs.pop('num_classes', None),
-                    # drop_rate=kwargs.pop('drop', 0.),
-                    # drop_path_rate=kwargs.pop('drop_path', None),
-                    # drop_block_rate=kwargs.pop('drop_block', None),
-                )
-                success = True
-            except Exception as e:
-                tries += 1
-                if tries <= total_allowed_tries:
-                    wait = tries * 30
-                    print(
-                        f"Failed to load model: {e}. Trying again ({tries}/{total_allowed_tries}) after {wait}s"
-                    )
-                    time.sleep(wait)
+        model = self._download_model(model_name)
 
         if model is None:
             raise RuntimeError(f"Failed to load model '{model_name}'")
-
         model.to(
             device=device,
             memory_format=torch.channels_last if channels_last else None,
@@ -240,13 +229,6 @@ class TimmRunnner(BenchmarkRunner):
             )
         batch_size = batch_size or recorded_batch_size
 
-        # Control the memory footprint for few models
-        if self.args.accuracy and model_name in MAX_BATCH_SIZE_FOR_ACCURACY_CHECK:
-            batch_size = min(batch_size, MAX_BATCH_SIZE_FOR_ACCURACY_CHECK[model_name])
-
-        # example_inputs = torch.randn(
-        #     (batch_size,) + input_size, device=device, dtype=data_dtype
-        # )
         torch.manual_seed(1337)
         input_tensor = torch.randint(
             256, size=(batch_size,) + input_size, device=device
@@ -265,6 +247,10 @@ class TimmRunnner(BenchmarkRunner):
         self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
+
+        if model_name in SCALED_COMPUTE_LOSS:
+            self.compute_loss = self.scaled_compute_loss
+
         if is_training and not use_eval_mode:
             model.train()
         else:
@@ -316,7 +302,11 @@ class TimmRunnner(BenchmarkRunner):
     def compute_loss(self, pred):
         # High loss values make gradient checking harder, as small changes in
         # accumulation order upsets accuracy checks.
-        return self.loss(pred, self.target) / 10.0
+        return reduce_to_scalar_loss(pred)
+
+    def scaled_compute_loss(self, pred):
+        # Loss values need zoom out further.
+        return reduce_to_scalar_loss(pred) / 1000.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast():

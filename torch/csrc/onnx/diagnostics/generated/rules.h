@@ -85,6 +85,22 @@ enum class Rule : uint32_t {
   kFxFrontendDynamoMakeFx,
 
   /**
+   * @brief FX graph transformation before ONNX export.
+   */
+  kFxPass,
+
+  /**
+   * @brief Cannot find symbolic function to convert the "call_function" FX node
+   * to ONNX.
+   */
+  kNoSymbolicFunctionForCallFunction,
+
+  /**
+   * @brief Result from FX graph analysis to reveal unsupported FX nodes.
+   */
+  kUnsupportedFxNodeAnalysis,
+
+  /**
    * @brief The formatted str for argument to display is too verbose.
    */
   kArgFormatTooVerbose,
@@ -104,6 +120,9 @@ static constexpr const char* const kPyRuleNames[] = {
     "atenlib_fx_to_onnx",
     "fx_node_to_onnx",
     "fx_frontend_dynamo_make_fx",
+    "fx_pass",
+    "no_symbolic_function_for_call_function",
+    "unsupported_fx_node_analysis",
     "arg_format_too_verbose",
 };
 

@@ -6,15 +6,20 @@ import warnings
 import functools
 import math
 
-from typing import Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
+from torch import Tensor
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
+from torch.utils._foreach_utils import (_get_fused_kernels_supported_devices,
+                                        _get_foreach_kernels_supported_devices)
 from torch._utils import is_compiling
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ['Optimizer', 'register_optimizer_step_pre_hook', 'register_optimizer_step_post_hook']
 _global_optimizer_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_optimizer_post_hooks: Dict[int, Callable] = OrderedDict()
+_foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
 class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
@@ -56,23 +61,26 @@ def _dispatch_sqrt(x: float):  # float annotation is needed because of torchscri
 
 # For any optimizer with a faster implementation, we attempt to default to the
 # fastest + stablest whenever possible. For foreach, the requirements are to have
-# native tensors all on CUDA. For fused, there's currently the additional requirement
+# native params all on CUDA. For fused, there's currently the additional requirement
 # that the tensors' dtypes must be floating point. Neither alternative supports
 # torch.jit.script nor differentiable, so we fall back to the single tensor
 # implementation in those cases.
-def _default_to_fused_or_foreach(tensorlists: List[List[torch.Tensor]],
+def _default_to_fused_or_foreach(params: List[torch.Tensor],
                                  differentiable: bool,
                                  use_fused: bool = False) -> Tuple[bool, bool]:
     if torch.jit.is_scripting() or differentiable:
         return False, False
-    all_tensors = []
-    for tensorlist in tensorlists:
-        all_tensors.extend(tensorlist)
+
+    fused_supported_devices = _get_fused_kernels_supported_devices()
+    foreach_supported_devices = _get_foreach_kernels_supported_devices()
     fused = use_fused and all(
-        p is None or (type(p) == torch.Tensor and p.is_cuda and torch.is_floating_point(p)) for p in all_tensors
+        p is None or (type(p) in _foreach_supported_types and
+                      p.device.type in fused_supported_devices and
+                      torch.is_floating_point(p)) for p in params
     )
     foreach = not fused and all(
-        p is None or (type(p) == torch.Tensor and p.is_cuda) for p in all_tensors
+        p is None or (type(p) in _foreach_supported_types and
+                      p.device.type in foreach_supported_devices) for p in params
     )
     return fused, foreach
 
@@ -228,7 +236,11 @@ class Optimizer:
 
     # Currently needed by Adam and AdamW
     def _cuda_graph_capture_health_check(self):
-        if torch.has_cuda and torch.cuda.is_available():
+        # If we are compiling, we take the capturable path automatically
+        # One caveat here is that if we are compiling, we *permit* step/param tensors to be on CPU
+        # so we do not explicitly enable the capturable flag. Inductor will decide whether cudagraphs
+        # can be enabled based on whether there is input mutation or CPU tensors.
+        if not is_compiling() and torch.has_cuda and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
 
             if capturing and not all(group['capturable'] for group in self.param_groups):
@@ -289,6 +301,18 @@ class Optimizer:
                 return out
 
         return wrapper
+
+    @staticmethod
+    def _group_tensors_by_device_and_dtype(tensorlistlist, with_indices=False):
+        """Groups a list of lists of tensors by device and dtype.
+        Skips this step if we are compiling since this will occur during inductor lowering."""
+        if is_compiling():
+            if with_indices:
+                indices = list(range(len(tensorlistlist[0])))
+                tensorlistlist.append(indices)
+            return {(None, None): tensorlistlist}
+        else:
+            return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)
 
     def _patch_step_function(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
@@ -370,6 +394,27 @@ class Optimizer:
             'param_groups': param_groups,
         }
 
+    @staticmethod
+    def _process_value_according_to_param_policy(param: Tensor, value: Tensor, param_id: int = None,
+                                                 param_groups: List[Dict[Any, Any]] = None, key=None) -> Tensor:
+        # Floating-point types are a bit special here. They are the only ones
+        # that are assumed to always match the type of params.
+        # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
+        # UNLESS fused or capturable, see note [special device hosting for step]
+        fused = False
+        capturable = False
+        for pg in param_groups:
+            if param_id in pg["params"]:
+                fused = pg["fused"] if "fused" in pg else False
+                capturable = pg["capturable"] if "capturable" in pg else False
+                break
+
+        if key != "step" or capturable or fused:
+            if param.is_floating_point():
+                return value.to(dtype=param.dtype, device=param.device)
+            return value.to(device=param.device)
+        return value
+
     def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
 
@@ -393,25 +438,17 @@ class Optimizer:
                              "that doesn't match the size of optimizer's group")
 
         # Update the state
-        id_map = {old_id: p for old_id, p in
-                  zip(chain.from_iterable((g['params'] for g in saved_groups)),
-                      chain.from_iterable((g['params'] for g in groups)))}
+        id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
+                      chain.from_iterable((g['params'] for g in groups))))
 
-        def cast(param, value, key=None):
+        def cast(param, value, param_id=None, param_groups=None, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
-                # Floating-point types are a bit special here. They are the only ones
-                # that are assumed to always match the type of params.
-                # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-                if (key != "step"):
-                    if param.is_floating_point():
-                        value = value.to(param.dtype)
-                    value = value.to(param.device)
-                return value
+                return Optimizer._process_value_according_to_param_policy(param, value, param_id, param_groups, key)
             elif isinstance(value, dict):
-                return {k: cast(param, v, key=k) for k, v in value.items()}
+                return {k: cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
             elif isinstance(value, container_abcs.Iterable):
-                return type(value)(cast(param, v) for v in value)
+                return type(value)(cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)
             else:
                 return value
 
@@ -422,7 +459,7 @@ class Optimizer:
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = cast(param, v)
+                state[param] = cast(param, v, param_id=k, param_groups=state_dict['param_groups'])
             else:
                 state[k] = v
 
@@ -435,7 +472,7 @@ class Optimizer:
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
     def zero_grad(self, set_to_none: bool = True):
-        r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
+        r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
 
         Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
@@ -449,7 +486,7 @@ class Optimizer:
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        foreach = self.defaults.get('foreach', False)
+        foreach = self.defaults.get('foreach', False) or self.defaults.get('fused', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()
@@ -471,7 +508,7 @@ class Optimizer:
                             else:
                                 per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
             if foreach:
-                for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for per_dtype_grads in per_device_and_dtype_grads.values():
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)
 

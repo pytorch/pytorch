@@ -99,9 +99,9 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
 
 Operation createLlgaKernel(const Node* node) {
   auto kernel = std::make_shared<fuser::onednn::LlgaKernel>(node);
-  return [kernel](Stack* stack) {
+  return [kernel](Stack& stack) {
     RECORD_FUNCTION(kernel->debugName(), std::vector<c10::IValue>());
-    kernel->run(*stack);
+    kernel->run(stack);
     return 0;
   };
 }
@@ -118,7 +118,7 @@ RegisterOperators oneDNNFusionGroupOp({
 // But if we have any scalar inputs to guard in the future, some logic here
 // would have to be changed.
 Operation createLlgaGuardKernel(const Node* node) {
-  return [node](Stack* stack) {
+  return [node](Stack& stack) {
 #ifdef GRAPH_DEBUG_ENABLED
     GRAPH_DEBUG("Guarding node: ", node->kind().toQualString());
 #endif

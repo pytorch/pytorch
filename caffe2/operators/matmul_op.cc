@@ -42,7 +42,7 @@ separate the first and second dimensions of the respective matrices using
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/matmul_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/matmul_op.cc
 
 <details>
 

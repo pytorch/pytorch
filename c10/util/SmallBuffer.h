@@ -4,8 +4,8 @@
 
 /** Helper class for allocating temporary fixed size arrays with SBO.
  *
- * This is intentionally much simpler than SmallVector, to improve performace at
- * the expense of many features:
+ * This is intentionally much simpler than SmallVector, to improve performance
+ * at the expense of many features:
  * - No zero-initialization for numeric types
  * - No resizing after construction
  * - No copy/move

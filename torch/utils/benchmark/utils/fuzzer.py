@@ -216,7 +216,7 @@ class FuzzedTensor:
             min_elements:
                 The minimum number of parameters that this Tensor must have for a
                 set of parameters to be valid. (Otherwise they are resampled.)
-            max_elemnts:
+            max_elements:
                 Like `min_elements`, but setting an upper bound.
             max_allocation_bytes:
                 Like `max_elements`, but for the size of Tensor that must be

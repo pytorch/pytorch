@@ -70,6 +70,69 @@ SymFloat SymFloat::operator/(const SymFloat& sci) const {
   return SymFloat(res[0]->truediv(res[1]));
 }
 
+SymBool SymFloat::sym_eq(const SymFloat& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ == sci.data_;
+  }
+  auto res = normalize_symfloats(*this, sci);
+  return res[0]->eq(res[1]);
+}
+
+SymBool SymFloat::sym_ne(const SymFloat& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ != sci.data_;
+  }
+  auto res = normalize_symfloats(*this, sci);
+  return res[0]->ne(res[1]);
+}
+
+SymBool SymFloat::sym_lt(const SymFloat& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ < sci.data_;
+  }
+  auto res = normalize_symfloats(*this, sci);
+  return res[0]->lt(res[1]);
+}
+
+SymBool SymFloat::sym_le(const SymFloat& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ <= sci.data_;
+  }
+  auto res = normalize_symfloats(*this, sci);
+  return res[0]->le(res[1]);
+}
+
+SymBool SymFloat::sym_gt(const SymFloat& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ > sci.data_;
+  }
+  auto res = normalize_symfloats(*this, sci);
+  return res[0]->gt(res[1]);
+}
+
+SymBool SymFloat::sym_ge(const SymFloat& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ >= sci.data_;
+  }
+  auto res = normalize_symfloats(*this, sci);
+  return res[0]->ge(res[1]);
+}
+
+SymFloat SymFloat::min(const SymFloat& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return std::min(data_, sci.data_);
+  }
+  auto res = normalize_symfloats(*this, sci);
+  return SymFloat(res[0]->sym_min(res[1]));
+}
+SymFloat SymFloat::max(const SymFloat& sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return std::max(data_, sci.data_);
+  }
+  auto res = normalize_symfloats(*this, sci);
+  return SymFloat(res[0]->sym_max(res[1]));
+}
+
 std::ostream& operator<<(std::ostream& os, const SymFloat& s) {
   if (s.is_symbolic()) {
     os << s.toSymNodeImpl()->str();

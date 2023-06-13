@@ -112,7 +112,7 @@ class SpatialBNOp : public Operator<Context> {
       if (mean.numel() != C) {
         running_mean = Output(RUNNING_MEAN, {C}, at::dtype<T>());
         C10_LOG_EVERY_MS(WARNING, 1000)
-            << "[Depreacated] Running mean is not initialized in "
+            << "[Deprecated] Running mean is not initialized in "
                "SpatialBatchNorm Op";
         math::Set<T, Context>(
             C, T(0), running_mean->template mutable_data<T>(), &context_);

@@ -14,6 +14,7 @@ import torch
 from torch import nn, optim
 
 from torch.distributed.pipeline.sync.batchnorm import DeferredBatchNorm
+from torch.testing._internal.common_utils import run_tests
 
 CHUNKS = 4
 
@@ -192,3 +193,7 @@ def test_input_requiring_grad():
 
     assert not dbn.sum.requires_grad
     assert dbn.sum.grad_fn is None
+
+
+if __name__ == "__main__":
+    run_tests()

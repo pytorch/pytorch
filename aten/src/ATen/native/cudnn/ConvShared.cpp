@@ -375,7 +375,7 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
 
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
+  Tensor grad_output = grad_output_t.to(input.suggest_memory_format());
 
   Tensor grad_input, grad_weight;
   if (input.numel() == 0) {

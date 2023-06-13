@@ -22,14 +22,8 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import (
-    concatMap,
-    context,
-    FileManager,
-    NamespaceHelper,
-    Target,
-    YamlLoader,
-)
+from torchgen.utils import concatMap, context, FileManager, NamespaceHelper, Target
+from torchgen.yaml_utils import YamlLoader
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -45,7 +39,6 @@ def parse_backend_yaml(
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     backend_indices: Dict[DispatchKey, BackendIndex],
 ) -> ParsedExternalYaml:
-
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
         for f in concatMap(
@@ -532,7 +525,6 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
 def run(
     source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str] = None
 ) -> None:
-
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.absolute()
     template_dir = os.path.join(pytorch_root, "aten/src/ATen/templates")

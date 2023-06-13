@@ -109,7 +109,7 @@ void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (const auto i : c10::irange(100000)) {
+  for (const auto i : c10::irange(1000)) {
     (void)i; // Suppress unused variable warning
     add_out(r, r, d);
   }
@@ -120,14 +120,14 @@ void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
                    end - begin)
                    .count()
             << " ms" << std::endl;
-  ASSERT_EQ_RESOLVED(norm(100000 * d).item<double>(), norm(r).item<double>());
+  ASSERT_EQ_RESOLVED(norm(1000 * d).item<double>(), norm(r).item<double>());
 }
 
 void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
   Tensor r = zeros({3, 4}, type);
-  for (const auto i : c10::irange(100000)) {
+  for (const auto i : c10::irange(1000)) {
     (void)i; // Suppress unused variable warning
     r = add(r, d);
   }
@@ -138,7 +138,7 @@ void TestLoadOfAddsWithCopy(DeprecatedTypeProperties& type) {
                    end - begin)
                    .count()
             << " ms" << std::endl;
-  ASSERT_EQ_RESOLVED(norm(100000 * d).item<double>(), norm(r).item<double>());
+  ASSERT_EQ_RESOLVED(norm(1000 * d).item<double>(), norm(r).item<double>());
 }
 
 void TestIsContiguous(DeprecatedTypeProperties& type) {

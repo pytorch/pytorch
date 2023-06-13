@@ -15,6 +15,7 @@ _TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
 _int = builtins.int
 _float = builtins.float
 _bool = builtins.bool
+_complex = builtins.complex
 
 _dtype = torch.dtype
 _device = torch.device

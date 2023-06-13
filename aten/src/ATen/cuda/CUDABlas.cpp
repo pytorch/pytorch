@@ -104,6 +104,39 @@ static void _cublasAdjustLdLevel3(
       *ldb = std::max<int64_t>(k, 1);
   }
 }
+
+uint32_t _getAlignment(uintptr_t address) {
+  // alignment are in bytes
+  uint32_t alignment = 256;
+  for (; ; alignment /= 2) {
+    if (!(address % alignment)) {
+      return alignment;
+    }
+  }
+}
+
+static size_t _parseChosenWorkspaceSize() {
+  const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+  if (val) {
+    try {
+      workspace_size = std::stoi(val);
+    } catch(std::invalid_argument const& e) {
+      TORCH_WARN("invalid CUBLAS_LT_WORKSPACE_SIZE,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    } catch(std::out_of_range const& e) {
+      TORCH_WARN("CUBLAS_LT_WORKSPACE_SIZE out of range,",
+                 " using default workspace size of ", workspace_size, " bytes.");
+    }
+  }
+  return workspace_size * 1024;
+}
+
+static size_t _getWorkspaceSize() {
+  static size_t workspace_size = _parseChosenWorkspaceSize();
+  return workspace_size;
+}
+
 } // anonymous namespace
 
 namespace at {
@@ -443,7 +476,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         CUDA_R_16F,
         ldc,
         CUDA_R_32F,
-        CUBLAS_GEMM_DFALT_TENSOR_OP));
+        CUBLAS_GEMM_DEFAULT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
@@ -541,7 +574,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
       CUDA_R_16BF,
       ldc,
       CUDA_R_32F,
-      CUBLAS_GEMM_DFALT_TENSOR_OP));
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
 }
 #endif // !defined(USE_ROCM)
@@ -640,18 +673,18 @@ void gemm_and_bias(
   cudaDataType_t abcType = CUDA_R_32F;
   cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
   cudaDataType_t scaleType = CUDA_R_32F;
-  if (std::is_same<Dtype, double>::value) {
+  if constexpr (std::is_same_v<Dtype, double>) {
     abcType = CUDA_R_64F;
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
-  } else if (std::is_same<Dtype, float>::value) {
+  } else if constexpr (std::is_same_v<Dtype, float>) {
     if (at::globalContext().allowTF32CuBLAS()) {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
     abcType = CUDA_R_32F;
-  } else if (std::is_same<Dtype, at::Half>::value) {
+  } else if constexpr (std::is_same_v<Dtype, at::Half>) {
     abcType = CUDA_R_16F;
-  } else if (std::is_same<Dtype, at::BFloat16>::value) {
+  } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
   }
 
@@ -696,12 +729,33 @@ void gemm_and_bias(
   CuBlasLtMatmulPreference preference;
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
-  size_t workspaceSize = 1024 * 1024;
+  size_t workspaceSize = _getWorkspaceSize();
   TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
       preference.descriptor(),
       CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
       &workspaceSize,
       sizeof(workspaceSize)));
+
+  uint32_t a_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat1_ptr));
+  uint32_t b_alignment = _getAlignment(reinterpret_cast<uintptr_t>(mat2_ptr));
+  uint32_t c_alignment = _getAlignment(reinterpret_cast<uintptr_t>(result_ptr));
+  uint32_t d_alignment = _getAlignment(reinterpret_cast<uintptr_t>(bias));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_A_BYTES,
+      &a_alignment, sizeof(a_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_B_BYTES,
+      &b_alignment, sizeof(b_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES,
+      &c_alignment, sizeof(c_alignment)));
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
+      preference.descriptor(),
+      CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES,
+      &d_alignment, sizeof(d_alignment)));
 
   auto workspace = at::empty(
       {static_cast<int64_t>(workspaceSize)},
@@ -834,6 +888,98 @@ template void gemm_and_bias(
     at::BFloat16* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
+
+void int8_gemm(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    const int8_t* mat1_ptr,
+    int64_t mat1_ld,
+    const int8_t* mat2_ptr,
+    int64_t mat2_ld,
+    int32_t* result_ptr,
+    int64_t result_ld) {
+
+  cublasComputeType_t computeType = CUBLAS_COMPUTE_32I;
+  cudaDataType_t scaleType = CUDA_R_32I;
+
+  cudaDataType_t abType = CUDA_R_8I;
+  cudaDataType_t cType = CUDA_R_32I;
+
+  CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
+  cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+      computeDesc.descriptor(),
+      CUBLASLT_MATMUL_DESC_TRANSA,
+      &transa,
+      sizeof(transa)));
+  cublasOperation_t transb = transpose_mat2 ? CUBLAS_OP_T : CUBLAS_OP_N;
+  TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
+      computeDesc.descriptor(),
+      CUBLASLT_MATMUL_DESC_TRANSB,
+      &transb,
+      sizeof(transb)));
+
+
+  CuBlasLtMatrixLayout Adesc(
+      abType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
+  CuBlasLtMatrixLayout Bdesc(
+      abType, transpose_mat2 ? n : k, transpose_mat2 ? k : n, mat2_ld);
+  CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
+
+  cublasLtHandle_t ltHandle =
+      reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
+
+  at::opmath_type<int8_t> alpha_val = 1.0;
+  float beta_val = 0;
+  cublasStatus_t cublasStatus = cublasLtMatmul(
+      ltHandle,
+      computeDesc.descriptor(),
+      &alpha_val,
+      mat1_ptr,
+      Adesc.descriptor(),
+      mat2_ptr,
+      Bdesc.descriptor(),
+      &beta_val,
+      result_ptr,
+      Cdesc.descriptor(),
+      result_ptr,
+      Cdesc.descriptor(),
+      nullptr, // Heuristics don't seem to work for int8
+      nullptr, // Non-zero workspace doesn't seem to work.
+      0,
+      at::cuda::getCurrentCUDAStream());
+  TORCH_CHECK(
+      cublasStatus == CUBLAS_STATUS_SUCCESS,
+      "CUDA error: ",
+      at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
+      " when calling cublasLtMatmul with transpose_mat1 ",
+      transpose_mat1,
+      " transpose_mat2 ",
+      transpose_mat2,
+      " m ",
+      m,
+      " n ",
+      n,
+      " k ",
+      k,
+      " mat1_ld ",
+      mat1_ld,
+      " mat2_ld ",
+      mat2_ld,
+      " result_ld ",
+      result_ld,
+      " abType ",
+      abType,
+      " cType ",
+      cType,
+      " computeType ",
+      computeType,
+      " scaleType ",
+      scaleType);
+}
 #endif // !defined(USE_ROCM) && !defined(_MSC_VER)
 
 template <>
