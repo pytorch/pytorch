@@ -221,7 +221,7 @@ class GraphLowering(torch.fx.Interpreter):
             log.debug("Only a few conv, skip layout optimization")
             return False
 
-        if any(free_symbols(n.args[1].meta["val"]) for n in conv_nodes):
+        if any(free_symbols(n.args[idx].meta["val"]) for n in conv_nodes for idx in [0, 1]):
             log.debug(
                 "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
             )
