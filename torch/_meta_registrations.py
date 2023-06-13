@@ -106,6 +106,14 @@ def linalg_cross(self, other, *, dim=-1):
     return self.new_empty(out_shape)
 
 
+@register_meta(aten.linalg_matrix_exp)
+@out_wrapper()
+def linalg_matrix_exp(self):
+    squareCheckInputs(self, "linalg.matrix_exp")
+    checkFloatingOrComplex(self, "matrix_exp")
+    return torch.empty_like(self)
+
+
 @register_meta(
     [aten.cummax.default, aten.cummax.out, aten.cummin.default, aten.cummin.out]
 )
@@ -364,7 +372,7 @@ def checkFloatingOrComplex(
         t.is_floating_point() or t.is_complex(),
         lambda: f"{f_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
-    if allow_low_precision_dtypes:
+    if not allow_low_precision_dtypes:
         check(
             dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
             lambda: f"{f_name}: Low precision dtypes not supported. Got {dtype}",
@@ -1320,7 +1328,7 @@ def meta_conv(
     return out
 
 
-if torch._C.has_mkldnn:
+if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
         "mkldnn", "IMPL", "Meta"
     )
