@@ -182,6 +182,11 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   CHECK_NORMAL_STD(std);
+  if (self.numel() == 0) {
+    // return earlier for not invoking normal_kernel
+    // see https://github.com/pytorch/pytorch/issues/103418 for more details
+    return self;
+  }
   if (self.is_complex()) {
     auto float_tensor = at::view_as_real(self);
     // variance for normal distribution of the real and imaginary values
@@ -262,6 +267,9 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generato
 
 template<template<typename> class uniform_kernel, typename RNG>
 at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optional<Generator> generator) {
+  if (self.numel() == 0) {
+    return self;
+  }
   if (self.is_complex()) {
     auto float_tensor = at::view_as_real(self);
     uniform_impl_<uniform_kernel, RNG>(float_tensor, from, to, generator);
