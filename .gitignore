@@ -351,6 +351,8 @@ pr.diff
 .buckd/
 .lsp-buck-out/
 .lsp.buckd/
+.pylsp-buck-out/
+.pylsp.buckd/
 buck-out/
 
 # Downloaded libraries
