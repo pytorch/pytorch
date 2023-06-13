@@ -227,7 +227,7 @@ class Optimizer:
                             "an iterable of Tensors or dicts, but got " +
                             torch.typename(params))
 
-        self.state: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
+        self.state: DefaultDict[torch.Tensor, Dict[Any, Any]] = defaultdict(dict)
         self.param_groups: List[Dict[str, Any]] = []
 
         param_groups = list(params)
@@ -506,7 +506,7 @@ class Optimizer:
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
-        state: DefaultDict[str, Dict[Any, Any]] = defaultdict(dict)
+        state: DefaultDict[torch.Tensor, Dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
