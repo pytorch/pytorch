@@ -18,6 +18,7 @@ DistillGPT2,pass,6
 ElectraForCausalLM,pass,6
 ElectraForQuestionAnswering,pass,6
 GPT2ForSequenceClassification,pass,8
+GoogleFnet,pass,6
 LayoutLMForMaskedLM,pass,6
 LayoutLMForSequenceClassification,pass,8
 M2M100ForConditionalGeneration,fail_accuracy,6
