@@ -190,18 +190,23 @@ def tensor_has_hints(t):
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
         return val.node.expr.free_symbols
+    elif isinstance(val, sympy.Expr):
+        return val.free_symbols
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
+        return (
+            free_symbols(val.size()) |
+            free_symbols(val.stride()) |
+            free_symbols(val.storage_offset())
+        )
+    elif isinstance(val, (tuple, list)):
         r = set()
-        for s in val.size():
+        for s in val:
             r |= free_symbols(s)
-        for s in val.stride():
-            r |= free_symbols(s)
-        r |= free_symbols(val.storage_offset())
         return r
     else:
-        raise AssertionError(f"cannot compute free_symbols of {val}")
+        raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!

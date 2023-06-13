@@ -493,8 +493,7 @@ class GraphLowering(torch.fx.Interpreter):
         if (
             config.static_weight_shapes
             and len(self.graph_inputs) < self.num_static_inputs
-            and not example._has_symbolic_sizes_strides
-        ):
+        ) or not example._has_symbolic_sizes_strides:
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
         else:
