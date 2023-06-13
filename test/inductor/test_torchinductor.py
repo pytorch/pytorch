@@ -22,10 +22,11 @@ import numpy as np
 import torch
 
 import torch._dynamo
-import torch.nn as nn
 import torch.fx.traceback as fx_traceback
+import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
+from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -46,7 +47,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch._functorch.aot_autograd import aot_export_module
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -2359,10 +2359,13 @@ class CommonTemplate:
                 return (output,)
 
         mod = Model()
-        mod.cuda().to(memory_format=torch.contiguous_format)
+        if self.device == "cpu":
+            mod.cpu().to(memory_format=torch.contiguous_format)
+        else:
+            mod.cuda().to(memory_format=torch.contiguous_format)
         mod.train()
-        x = torch.rand(100, 16, 32, 32, device="cuda", requires_grad=True)
-        target = torch.rand(1, device="cuda")
+        x = torch.rand(100, 16, 32, 32, device=self.device, requires_grad=True)
+        target = torch.rand(1, device=self.device)
 
         # Use dynamo export to get the fx graph module
         g_mod, _ = torch._dynamo.export(mod, x, target)
