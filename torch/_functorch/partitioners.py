@@ -205,6 +205,13 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     return fwd_module, bwd_module
 
 
+def has_backward_edge(node, forward_node_names):
+    for user in node.users:
+        if user.name not in forward_node_names:
+            return True
+    return False
+
+
 def default_partition(
     joint_module: fx.GraphModule, _joint_inputs, *, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
@@ -255,7 +262,9 @@ def default_partition(
             users = node.users
             assert all(user.target == operator.getitem for user in users)
             for user in users:
-                saved_values.append(user)
+                # Save the user only if it has a backward edge
+                if has_backward_edge(user, forward_node_names):
+                    saved_values.append(user)
         else:
             backward_usages = [n for n in node.users if n.name not in forward_node_names]
             if 'tensor_meta' in node.meta and all(is_sym_node(n) for n in backward_usages):
