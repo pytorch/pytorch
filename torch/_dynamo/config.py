@@ -105,9 +105,6 @@ replay_record_enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
 
-# Show a warning on every graph break
-print_graph_breaks = False
-
 # Show a warning for every specialization
 print_specializations = False
 

@@ -22,6 +22,7 @@ import numpy as np
 import torch
 
 import torch._dynamo
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
@@ -3929,6 +3930,7 @@ class CommonTemplate:
         self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
     @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -3941,6 +3943,7 @@ class CommonTemplate:
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
     @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
@@ -4727,6 +4730,7 @@ class CommonTemplate:
         self.common(fn2, [torch.randn(55)])
 
     @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_dropout(self):
         random.seed(1234)
         torch.manual_seed(1234)
@@ -4751,6 +4755,7 @@ class CommonTemplate:
         self.assertTrue(400 < result2.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result2.mean().item() < 1.1)
 
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_dropout_deterministic(self):
         @torch._dynamo.optimize("inductor")
         def fn(a):
@@ -5709,6 +5714,7 @@ class CommonTemplate:
             inputs = (inputs[1], inputs[0])
             self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_list_clearing(self):
         if self.device == "cpu":
             contexts = [contextlib.nullcontext]
