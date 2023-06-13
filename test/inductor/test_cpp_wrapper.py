@@ -189,6 +189,7 @@ if RUN_CPU:
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
+        BaseTest("test_view_as_complex"),
     ]:
         make_test_case(
             item.name,
