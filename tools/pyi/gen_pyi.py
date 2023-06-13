@@ -383,7 +383,7 @@ def gen_nn_functional(fm: FileManager) -> None:
                 )
             ],
             "log_sigmoid": ["def log_sigmoid(input: Tensor) -> Tensor: ..."],
-            "gelu": ["def gelu(input: Tensor, approximate: str = ...): ..."],
+            "gelu": ["def gelu(input: Tensor, approximate: str = ...) -> Tensor: ..."],
             "softplus": [
                 "def softplus({}) -> Tensor: ...".format(
                     ", ".join(
