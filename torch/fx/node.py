@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 __all__ = ['Node', 'map_arg', 'map_aggregate', "has_side_effect"]
 
-BaseArgumentTypes = Union[str, int, float, bool, complex, torch.dtype,
+BaseArgumentTypes = Union[str, int, float, bool, complex, type, torch.dtype,
                           torch.Tensor, torch.device, torch.memory_format, torch.layout]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 

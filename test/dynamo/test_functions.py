@@ -1110,6 +1110,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a = x.numpy()
         return a.max(axis=0), a.all(axis=0)
 
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_dtype_argument_to_function(x):
+        import numpy as np
+        a = x.numpy()
+        xn = 450
+        yn = 375
+        xmin = -2.25
+        xmax = 0.75
+        ymin = -1.25
+        ymax = 1.25
+        x_values = np.linspace(xmin, xmax, xn, dtype=np.float64)
+        y_values = np.linspace(ymin, ymax, yn, dtype=np.float64)
+        return a, x_values, y_values
+
 
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))
