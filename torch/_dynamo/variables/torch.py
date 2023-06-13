@@ -239,10 +239,13 @@ class TorchVariable(VariableTracker):
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
         elif self.value is torch._functorch.eager_transforms.grad_impl:
-            return TorchHigherOrderOperatorVariable(
+            # `torch.func.grad` doesn't respect outer context setting
+            # disabling the grad modes, so temporarily turn on `GradMode`
+            op = TorchHigherOrderOperatorVariable(
                 self.value,
                 source=self.source,
             ).call_function(tx, args, kwargs)
+            return op
         elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
@@ -1413,7 +1416,45 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 aux = body_r_proxy[1].node.meta["example_value"]
                 example_value = (example_value, aux)
 
-            return wrap_fx_proxy(tx=tx, proxy=grad_output, example_value=example_value)
+            # Call contiguous on all the computed grads.
+            fx_proxy = wrap_fx_proxy(
+                tx=tx, proxy=grad_output, example_value=example_value
+            )
+
+            return fx_proxy
+            # # Returned value is a Tensor
+            # if not has_aux.value and isinstance(argnums.value, int):
+            #     return fx_proxy.call_method(tx, "contiguous", (), {})
+
+            # # Return value is a tuple.
+            # argnums_v = (
+            #     (argnums.value,) if isinstance(argnums.value, int) else argnums.value
+            # )
+
+            # if has_aux.value:
+            #     # Return -> Tuple(Tuple(grads), NestedStructure(aux))
+            #     grads = fx_proxy.call_method(
+            #         tx, "__getitem__", (ConstantVariable(0),), {}
+            #     )
+            #     aux = fx_proxy.call_method(
+            #         tx, "__getitem__", (ConstantVariable(1),), {}
+            #     )
+            # else:
+            #     # Return -> Tuple(grads)
+            #     grads = fx_proxy
+
+            # items = []
+            # for idx in range(len(argnums_v)):
+            #     proxy = grads.call_method(
+            #         tx, "__getitem__", (ConstantVariable(idx),), {}
+            #     ).call_method(tx, "contiguous", (), {})
+            #     items.append(proxy)
+            
+            # # Repack the output
+            # if has_aux.value:
+            #     return TupleVariable([TupleVariable(items), aux])
+            # else:
+            #     return TupleVariable(items)
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 

@@ -34,7 +34,11 @@ class ContextWrappingVariable(VariableTracker):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
-        self._call_func(tx, self.initial_values)
+        if not tx.output.is_root_tracer():
+            # SUPER AWFUL HACK! (DISCUSS)
+            self._call_func(tx, (True,))
+        else:
+            self._call_func(tx, self.initial_values)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def reconstruct(self, codegen):

@@ -230,6 +230,11 @@ class CommonListMethodsVariable(BaseListVariable):
             new_rec_contains = self.recursively_contains.union(arg.recursively_contains)
             if arg.mutable_local is not None:
                 new_rec_contains.add(arg.mutable_local)
+            # HACK:
+            # For `speculate_subgraph`, we don't use root tracer,
+            # so here we ban `append` on list which is used in `subgraph`.
+            if not tx.output.is_root_tracer():
+                unimplemented(f"list was mutated.")
             tx.replace_all(
                 self,
                 type(self)(
