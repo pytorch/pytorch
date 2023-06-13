@@ -256,7 +256,9 @@ class _DDPSink(Function):
         ddp_weakref = ctx.ddp_weakref()
         reducer = ddp_weakref.reducer
         static_graph = ddp_weakref.static_graph
-        delay_ar_enqueued = ddp_weakref.static_graph_delay_allreduce_enqueued
+        delay_ar_enqueued = (
+            static_graph and ddp_weakref.static_graph_delay_allreduce_enqueued
+        )
         if static_graph and not delay_ar_enqueued:
             Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 reducer._delay_all_reduce
