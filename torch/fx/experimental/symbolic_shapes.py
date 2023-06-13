@@ -193,12 +193,15 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
+        return (
+            free_symbols(val.size()) |
+            free_symbols(val.stride()) |
+            free_symbols(val.storage_offset())
+        )
+    elif isinstance(val, (tuple, list)):
         r = set()
-        for s in val.size():
+        for s in val:
             r |= free_symbols(s)
-        for s in val.stride():
-            r |= free_symbols(s)
-        r |= free_symbols(val.storage_offset())
         return r
     else:
         raise AssertionError(f"cannot compute free_symbols of {val}")
@@ -296,6 +299,14 @@ def guard_scalar(a):
     else:
         raise AssertionError(f"unrecognized scalar {a}")
 
+def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
+    if r := shape_env.var_to_range.get(s, None):
+        shape_env.var_to_range[s] = ValueRanges(
+            builtins.max(r.lower, min), builtins.min(r.upper, max)
+        )
+    else:
+        shape_env.var_to_range[s] = ValueRanges(min, max)
+
 # inclusive both ways
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     """
@@ -346,7 +357,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
             # shape_env's var_to_range
             sym_integer = sympy.Integer(a)
             shape_env = fake_mode.shape_env
-            shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
+            _constrain_symbol_range(shape_env, sym_integer, min, max)
             shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
         return
@@ -361,11 +372,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    r = a.node.shape_env.var_to_range[a.node.expr]
-    a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
-        builtins.max(r.lower, min), builtins.min(r.upper, max)
-    )
-
+    _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
 
 def constrain_unify(a, b):
     """

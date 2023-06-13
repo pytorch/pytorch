@@ -704,8 +704,8 @@ class GraphModuleDeserializer:
                     self.symbol_name_to_symbol[val.expr_str] = sym
 
                     if vr := self.symbol_name_to_range.get(val.expr_str):
-                        self.shape_env.var_to_range[sym] = symbolic_shapes.ValueRanges(
-                            vr.lower, vr.upper
+                        symbolic_shapes._constrain_symbol_range(
+                            self.shape_env, sym, vr.lower, vr.upper
                         )
 
             return self.shape_env.create_symintnode(sym, hint=val.hint)
