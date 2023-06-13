@@ -601,6 +601,12 @@ class IterationRangesRoot(IterationRanges):
         convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
         return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}{convert}"
 
+    def scalar_code(self, value):
+        index_dtype = self.kernel.index_dtype
+        ndim = self.kernel.triton_tensor_ndim()
+        size = [1] * ndim
+        return f"tl.full({size}, {value}, {index_dtype})"
+
     def get_pid(self):
         key = f"tl.program_id({self.index})"
         pid = self.pid_cache.get(key, key)
@@ -618,11 +624,14 @@ class IterationRangesRoot(IterationRanges):
                 f"{self.name} = {self.ranges_code()}",
             )
         else:
-            ranges_code = f" + {self.ranges_code()}" if not no_x_dim else ""
+            if not no_x_dim:
+                line = f"{xoffset} + {self.ranges_code()}"
+            else:
+                line = self.scalar_code(f"{x}offset")
             code.writelines(
                 [
                     f"{x}offset = {self.get_pid()} * {x.upper()}BLOCK",
-                    f"{self.name} = {x}offset {ranges_code}",
+                    f"{self.name} = {line}",
                 ]
             )
         code.writeline(f"{x}mask = {self.name} < {x}numel")
@@ -1271,13 +1280,11 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction_size_str(self):
-        if self.no_x_dim:
-            return ""
-        else:
-            sizes = [":" for _ in self.range_trees]
-            sizes[-1] = "None"
-            return f"[{', '.join(sizes)}]"
+    def reduction_resize(self, value):
+        ndims = self.triton_tensor_ndim()
+        if ndims == 1:
+            return f"triton_helpers.promote_to_tensor({value})"
+        return f"tl.expand_dims({value}, axis=-1)"
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
@@ -1298,16 +1305,16 @@ class TritonKernel(Kernel):
             use_helper = reduction_type in {"max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
             if reduction_type in {"max", "min"}:
-                return f"{module}.{reduction_type}2({value}, {dim}){self.reduction_size_str()}"
-            return (
-                f"{module}.{reduction_type}({value}, {dim}){self.reduction_size_str()}"
+                return self.reduction_resize(f"{module}.{reduction_type}2({value}, {dim})")
+            return self.reduction_resize(
+                f"{module}.{reduction_type}({value}, {dim})"
             )
 
         def final_argreduce(buffer, result_var, value, index):
             buffer.splice(
                 f"""\
                 _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
-                {result_var} = {result_var}_tmp{self.reduction_size_str()}
+                {result_var} = {self.reductions_resize(f'{result_var}_tmp')}
                 """
             )
 
@@ -1692,12 +1699,15 @@ class TritonKernel(Kernel):
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
+    def triton_tensor_ndim(self):
+        no_x_dim = int(bool(self.no_x_dim))
+        no_r_dim = self.numels[-1] == 1
+        return len(self.range_trees) - no_x_dim - no_r_dim
+
     def indexing_size_str(self, i=None, x=None):
         # no_x_dim is sympy.logic.boolalg.BooleanTrue
         no_x_dim = int(bool(self.no_x_dim))
-        sizes = ["None"] * (
-            len(self.range_trees) - int(self.numels[-1] == 1) - no_x_dim
-        )
+        sizes = ["None"] * self.triton_tensor_ndim()
         if i is not None:
             idx = i - no_x_dim
             sizes[idx] = ":"
