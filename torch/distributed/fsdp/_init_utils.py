@@ -881,7 +881,7 @@ def _move_module_to_device(
         _move_states_to_device(params, buffers, device_from_device_id)
         return
     param = next(_get_orig_params(module, ignored_params), None)
-    if param.device == torch.device("cpu"):
+    if param is not None and param.device == torch.device("cpu"):
         _warn_cpu_init()
 
 
