@@ -415,9 +415,10 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     Tracks an autograd.Function() context using mutation tracking in side_effects.py
     """
 
-    def __init__(self, value, value_type=None, inference=False, **kwargs):
+    def __init__(self, value, value_type=None, inference=False, _saved_tensors=[], **kwargs):
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
+        self._saved_tensors = _saved_tensors
 
     @staticmethod
     def create(tx):
@@ -453,8 +454,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             tx.output.side_effects.track_save_for_backward(self, args)
 
         options = VariableTracker.propagate(self, args, kwargs.values())
-        if not hasattr(self, "_saved_tensors"):
-            self._saved_tensors = []
         for arg in args:
             # as_proxy can return constant values or other non proxy values
             if isinstance(arg.as_proxy(), torch.fx.Proxy):

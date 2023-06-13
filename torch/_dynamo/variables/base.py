@@ -1,5 +1,6 @@
 import collections
 from typing import Any, Callable, Dict, List, Optional, Set
+import inspect
 
 from .. import variables
 from ..exc import unimplemented
@@ -191,13 +192,19 @@ class VariableTracker(metaclass=HasPostInit):
 
         if not is_from_local_source(self.source):
             raise NotImplementedError()
+        
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
 
         # Note - this scope construction is mirrored in guards
         # A subsequent PR will introduce a util.
         scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
-        _input_associated_real_value = eval(self.source.name(), scope)
+        try:
+            _input_associated_real_value = eval(self.source.name(), scope)
+        except:
+            # TODO(voz): Check in on this and find owner of SuperSource.
+            # We seem to have bugs in SuperSource producing code that does not eval properly.
+            raise NotImplementedError()
 
         if _input_associated_real_value is None:
             raise NotImplementedError()
@@ -205,14 +212,25 @@ class VariableTracker(metaclass=HasPostInit):
         from .builder import VariableBuilder
 
         real_value = getattr(_input_associated_real_value, name)
-        return VariableBuilder(tx, AttrSource(self.source, name))(real_value)
+        if callable(real_value): 
+            # Callables have more nuanced handling, and we should let the existing system delegate here.
+            # Raising was past behavior and so should always be sound to fall back.
+            # Note - at a certain point we may want to handle 
+            raise NotImplementedError()
+        
+        return VariableBuilder(tx, AttrSource(self.source, name))(real_value).add_options(self) 
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)
-        value = self.dynamic_getattr(tx, name)
+        try:
+            value = self.dynamic_getattr(tx, name)
+        except NotImplementedError:
+            # Don't reraise - there are classes that can check const_getattr here.
+            value = None
         if value:
             return value
+
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError()
