@@ -313,6 +313,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
+    # TODO disable by default
+    multi_kernel = os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "1") == "1"
+
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
 

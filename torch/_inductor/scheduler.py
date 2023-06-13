@@ -1279,12 +1279,12 @@ class Scheduler:
         # Assign a special value instead of deleting the entry
         # because we still rely on output_buffers's length to
         # generate unique arg name.
-        log.debug("remove_buffer(%r)", name)
+        print("remove_buffer(%r)", name)
         V.kernel.args.output_buffers[name] = "REMOVED"
         V.graph.removed_buffers.add(name)
 
     def remove_inplace_buffer(self, name):
-        log.debug("removing_inplace_buffer(%r)", name)
+        print("removing_inplace_buffer(%r)", name)
         V.kernel.args.inplace_buffers[name] = "REMOVED"
         V.graph.removed_buffers.add(name)
 
