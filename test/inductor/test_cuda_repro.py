@@ -759,7 +759,6 @@ class CudaReproTests(TestCase):
             self.assertEqual(res1, res2)
 
     def test_issue103481(self):
-
         def fn(x, y):
             # NOTE: 6 dimensions is important! does not fail for 5 dimensions
             mean = torch.mean(x, [2, 3, 4, 5], keepdim=True)

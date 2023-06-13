@@ -1305,16 +1305,16 @@ class TritonKernel(Kernel):
             use_helper = reduction_type in {"max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
             if reduction_type in {"max", "min"}:
-                return self.reduction_resize(f"{module}.{reduction_type}2({value}, {dim})")
-            return self.reduction_resize(
-                f"{module}.{reduction_type}({value}, {dim})"
-            )
+                return self.reduction_resize(
+                    f"{module}.{reduction_type}2({value}, {dim})"
+                )
+            return self.reduction_resize(f"{module}.{reduction_type}({value}, {dim})")
 
         def final_argreduce(buffer, result_var, value, index):
             buffer.splice(
                 f"""\
                 _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
-                {result_var} = {self.reductions_resize(f'{result_var}_tmp')}
+                {result_var} = {self.reduction_resize(f'{result_var}_tmp')}
                 """
             )
 
