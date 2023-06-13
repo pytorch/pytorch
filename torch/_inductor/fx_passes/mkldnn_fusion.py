@@ -10,7 +10,7 @@ from ..virtualized import ops
 from .post_grad import register_lowering_pattern
 
 
-if torch._C.has_mkldnn:
+if torch._C._has_mkldnn:
     aten = torch.ops.aten
     mkldnn = torch.ops.mkldnn
     _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())

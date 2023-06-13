@@ -471,6 +471,30 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+    if x.get_dtype() == dtype:
+        return x
+
+    def _get_primitive_bitwidth(dtype):
+        if dtype.is_floating_point:
+            return torch.finfo(dtype).bits
+        else:
+            return torch.iinfo(dtype).bits
+
+    src_bits = _get_primitive_bitwidth(x.get_dtype())
+    dst_bits = _get_primitive_bitwidth(dtype)
+    if src_bits != dst_bits:
+        raise NotImplementedError(
+            f"bitcast {x.get_dtype()} to different bitwidth type {dtype} is not supported yet."
+        )
+
+    def _to_dtype_bitcast(x):
+        return ops.to_dtype_bitcast(x, dtype)
+
+    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
+
+
 @register_lowering(prims.device_put, type_promotion_kind=None)
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
@@ -946,7 +970,7 @@ def glu(x, dim=-1):
 
 
 def register_onednn_fusion_ops():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
@@ -1467,7 +1491,7 @@ make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 
-make_fallback(aten.view_as_complex.default, require_contiguous)
+make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
 # It's not necessarily a priority to implement these
@@ -1573,7 +1597,6 @@ make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten.vdot)
-make_fallback(aten.view_as_complex)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
@@ -1609,6 +1632,10 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
+
+
+make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
+make_fallback(torch._prims.rng_prims.run_with_rng_state)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
@@ -4188,9 +4215,7 @@ try:
 
     @register_lowering(c10d_functional.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
-        return TensorBox.create(
-            ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
-        )
+        return ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
 
     @register_lowering(c10d_functional.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
@@ -4206,8 +4231,7 @@ try:
 
     @register_lowering(c10d_functional.all_reduce_coalesced)
     def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
-        result = ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
-        return list(map(TensorBox.create, result))
+        return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
 
 except ImportError:
     log.info(
