@@ -188,6 +188,16 @@ jobs:
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
 
+  linux-bionic-cuda11_8-py3_10-gcc9-test:
+    name: linux-bionic-cuda11.8-py3.10-gcc9
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_8-py3_10-gcc9-build
+    with:
+      timeout-minutes: 360
+      build-environment: linux-bionic-cuda11.8-py3.10-gcc9
+      docker-image: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-cuda11_8-py3_10-gcc9-build.outputs.test-matrix }}
+
   linux-bionic-cuda12_1-py3_10-gcc9-build:
     name: linux-bionic-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
