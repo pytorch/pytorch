@@ -14,8 +14,6 @@ def compile(*args, **kwargs):
     """
     See :func:`torch.compile` for details on the arguments for this function.
     """
-    import torch._dynamo
-
     return torch.compile(*args, **kwargs)
 
 def reset() -> None:
