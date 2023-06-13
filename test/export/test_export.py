@@ -3,11 +3,13 @@ import unittest
 
 import torch
 import torch._dynamo as torchdynamo
-from torch._export import export, dynamic_dim
+from torch._export import export, dynamic_dim, unlift_exported_program_lifted_states
 from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+from functorch.experimental.control_flow import cond
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -213,6 +215,76 @@ class TestExport(TestCase):
             "on a value which we evaluated to have a static value of 3. "
         ):
             export(f, example_inputs, constraints)
+
+    def test_export_unlift(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x):
+                return x.cos() + self.buffer.sin()
+
+        ep = export(Foo(), (torch.ones(6, 4),), _add_runtime_assertions=False)
+        gm = unlift_exported_program_lifted_states(ep)
+        self.assertEqual(gm(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
+
+        class FooContainerInputOutput(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x):
+                return x[0][0].cos() + x[0][1].sin() + self.buffer.sin()
+
+        inp = ((torch.ones(6, 4), torch.ones(6, 4)),)
+        ep = export(FooContainerInputOutput(), (inp,), _add_runtime_assertions=False)
+        gm = unlift_exported_program_lifted_states(ep)
+        self.assertEqual(gm(inp), FooContainerInputOutput()(inp))
+
+        class FooContainerInputOutputV2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x, y):
+                return x[0].cos() + y[0].sin() + self.buffer.sin()
+
+        inp = ((torch.ones(6, 4),), (torch.ones(6, 4),))
+        ep = export(FooContainerInputOutputV2(), inp, _add_runtime_assertions=False)
+        gm = unlift_exported_program_lifted_states(ep)
+        self.assertEqual(gm(*inp), FooContainerInputOutputV2()(*inp))
+
+    def test_export_cond(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self):
+                return self.buffer.cos()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = A()
+
+            def forward(self, x):
+                def true_fn(x):
+                    return x.cos() + self.a().sum()
+
+                def false_fn(x):
+                    return x.sin()
+
+                return cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        inp = torch.ones(6, 4)
+        constraints = [dynamic_dim(inp, 0)]
+        ep = export(Foo(), (inp,), constraints=constraints, _add_runtime_assertions=False)
+        print(ep.graph)
+        gm = unlift_exported_program_lifted_states(ep)
+        print(gm.graph)
+        print(gm.true_graph_0.graph)
 
 
 if __name__ == '__main__':
