@@ -63,7 +63,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
                                                 const uint32_t num_threads, const uint32_t log_num_threads_x,
                                                 scalar_t init, BinaryFunction binary_op) {
   // dynamic memory allocation for vbuf and ibuf
-  extern __shared__ char buf[];
+  alignas(sizeof(double)) extern __shared__ char buf[];
   scalar_t* vbuf = reinterpret_cast<scalar_t*>(buf); // the size is num_threads * 2
   int64_t* ibuf = reinterpret_cast<int64_t*>(vbuf + num_threads * 2);
   const uint32_t num_threads_x = 1 << log_num_threads_x;
@@ -377,7 +377,7 @@ __global__ void tensor_kernel_scan_innermost_dim(
     const uint32_t log_num_threads_x,
     T init,
     BinaryFunction binary_op) {
-  extern __shared__ char sbuf[];
+  alignas(sizeof(double)) extern __shared__ char sbuf[];
   T* sbuf2 = reinterpret_cast<T*>(sbuf);
   const uint32_t num_threads_x = 1 << log_num_threads_x;
   T* row_buf = reinterpret_cast<T*>(sbuf2 + num_threads_x * 2 * threadIdx.y);
