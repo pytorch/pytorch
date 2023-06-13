@@ -75,6 +75,7 @@ from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
@@ -746,7 +747,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if (
             stack_values
             and all(
-                not isinstance(v, UnspecializedPythonVariable) for v in stack_values
+                not isinstance(v, (UnspecializedPythonVariable, NumpyNdarrayVariable))
+                for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
