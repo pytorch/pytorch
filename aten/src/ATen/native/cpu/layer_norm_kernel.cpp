@@ -122,20 +122,9 @@ void layer_norm_kernel_mixed_type(
       int64_t d = 0;
       for (; d < N - (N % bVec::size()); d += bVec::size()) {
         bVec x_bvec = bVec::loadu(X_ptr + d);
-        fVec x_fvec0, x_fvec1;
-        std::tie(x_fvec0, x_fvec1) = convert_to_float<T>(x_bvec);
-        fVec gamma_fvec0, gamma_fvec1;
-        if (gamma_null) {
-          gamma_fvec0 = gamma_fvec1 = fVec(1);
-        } else {
-          std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data + d);
-        }
-        fVec beta_fvec0, beta_fvec1;
-        if (beta_null) {
-          beta_fvec0 = beta_fvec1 = fVec(0);
-        } else {
-          std::tie(beta_fvec0, beta_fvec1) = load2f(beta_data + d);
-        }
+        auto [x_fvec0, x_fvec1] = convert_to_float<T>(x_bvec);
+        auto [gamma_fvec0, gamma_fvec1] = gamma_null ? std::make_tuple(fVec(1), fVec(1)) : load2f(gamma_data + d);
+        auto [beta_fvec0, beta_fvec1] = beta_null ? std::make_tuple(fVec(0), fVec(0)) : load2f(beta_data + d);
         fVec y_fvec0 = (x_fvec0 * fVec(scale) + fVec(bias)) * gamma_fvec0 + beta_fvec0;
         fVec y_fvec1 = (x_fvec1 * fVec(scale) + fVec(bias)) * gamma_fvec1 + beta_fvec1;
         bVec y_bvec = convert_from_float<T>(y_fvec0, y_fvec1);

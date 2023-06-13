@@ -126,7 +126,8 @@ def mps_ops_grad_modifier(ops):
         # round not working properly for float16
         'round': [torch.float16],
 
-        # Mixed datatype is recommended for layer_norm float16 on CPU
+        # layer_norm float16 cannot meet the precision requirements on CPU in some cases.
+        # It is recommended to use mixed datatype for layer_norm float16 on CPU.
         'nn.functional.layer_norm': [torch.float16],
     }
 
