@@ -315,13 +315,7 @@ def _multi_tensor_radam(
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, state_steps])
-    for ((
-        grouped_params,
-        grouped_grads,
-        grouped_exp_avgs,
-        grouped_exp_avg_sqs,
-        grouped_state_steps,
-    ), _) in grouped_tensors.values():
+    for grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs, grouped_state_steps in grouped_tensors.values():
         # Update steps
         torch._foreach_add_(grouped_state_steps, 1)
 

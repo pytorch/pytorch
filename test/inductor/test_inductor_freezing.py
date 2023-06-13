@@ -268,21 +268,21 @@ class OptimizeForInferenceTemplate(TestCase):
 
 if HAS_CPU and not torch.backends.mps.is_available():
 
-    class CpuTests(TestCase):
+    class FreezingCpuTests(TestCase):
         common = check_model
         device = "cpu"
         autocast = torch.cpu.amp.autocast
 
-    copy_tests(OptimizeForInferenceTemplate, CpuTests, "cpu")
+    copy_tests(OptimizeForInferenceTemplate, FreezingCpuTests, "cpu")
 
 if HAS_CUDA and not TEST_WITH_ASAN:
 
-    class CudaTests(TestCase):
+    class FreezingCudaTests(TestCase):
         common = check_model_cuda
         device = "cuda"
         autocast = torch.cuda.amp.autocast
 
-    copy_tests(OptimizeForInferenceTemplate, CudaTests, "cuda")
+    copy_tests(OptimizeForInferenceTemplate, FreezingCudaTests, "cuda")
 
 
 del OptimizeForInferenceTemplate
