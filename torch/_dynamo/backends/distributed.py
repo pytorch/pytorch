@@ -35,7 +35,8 @@ class Bucket:
     param_ids: List = field(default_factory=list)
 
     # keep track of any buckets that were extended for logging purposes
-    extended_to_capture_external_output: bool = False
+    opcount_increased_to_capture_external_output: int = 0
+    paramsize_before_opcount_increase: int = 0
 
 
 def bucket_has_external_output(bucket: Bucket) -> bool:
@@ -60,31 +61,43 @@ def pretty_print_buckets(buckets: List[Bucket]):
             rows.append((idx, bucket.size, bucket.params[0]))
             for param in bucket.params[1:]:
                 rows.append((None, None, param))
-        if bucket.extended_to_capture_external_output:
-            extended_buckets.append(idx)
+        if bucket.opcount_increased_to_capture_external_output > 0:
+            extended_buckets.append(
+                (
+                    idx,
+                    bucket.opcount_increased_to_capture_external_output,
+                    bucket.size - bucket.paramsize_before_opcount_increase,
+                )
+            )
 
-    try:
-        from tabulate import tabulate
+    if len(rows):
+        try:
+            from tabulate import tabulate
 
-        # TODO: Do you really want to log.info this?  It would get
-        # suppressed if log level is too low
-        log.info(
-            "\nDDPOptimizer bucket assignments\n%s",
-            tabulate(rows, headers=headers, tablefmt="simple_grid"),
-        )
-    except ImportError:
-        log.info(
-            "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
-        )
+            log.debug(
+                "\nDDPOptimizer produced the following bucket assignments:\n%s",
+                tabulate(rows, headers=headers, tablefmt="simple_grid"),
+            )
 
-    if len(extended_buckets):
-        log.warning(
-            "Buckets %s were extended beyond their requested parameter capacities in order to ensure each subgraph has "
-            " an output node, required for fx graph partitioning. This can be the case when a subgraph would have "
-            " only contained nodes performing inplace mutation, and returning no logical outputs. This should not "
-            " be a problem, unless it results in too few graph partitions for optimal DDP performance.",
-            extended_buckets,
-        )
+            if len(extended_buckets):
+                log.warning(
+                    "These buckets were extended beyond their requested parameter capacities"
+                    " in order to ensure each subgraph has"
+                    " an output node, required for fx graph partitioning. This can be the case when a subgraph would have"
+                    " only contained nodes performing inplace mutation, and returning no logical outputs. This should not"
+                    " be a problem, unless it results in too few graph partitions for optimal DDP performance."
+                    "\n%s",
+                    tabulate(
+                        extended_buckets,
+                        headers=("Index", "Extra Ops", "Extra Param Size (b)"),
+                    ),
+                )
+        except ImportError:
+            log.info(
+                "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
+            )
+    else:
+        log.debug("DDPOptimizer captured no parameters and did not split this graph.")
 
 
 class DDPOptimizer:
@@ -201,9 +214,9 @@ class DDPOptimizer:
                     # to increase chances it contains at least one node that is either a global output or
                     # passed as input to a subsequent graph
 
-                    # TODO(whc) can we DCE first and then make any guarantee it is
-                    # impossible to have an outputless subgraph?
-                    buckets[0].extended_to_capture_external_output = True
+                    if buckets[0].opcount_increased_to_capture_external_output == 0:
+                        buckets[0].paramsize_before_opcount_increase = buckets[0].size
+                    buckets[0].opcount_increased_to_capture_external_output += 1
 
             if node.op == "call_module":
                 target = gm.get_submodule(node.target)
