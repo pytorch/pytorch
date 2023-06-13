@@ -15,7 +15,7 @@ S3_RESOURCE = boto3.resource("s3")
 
 # NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
 # 2 more times
-TOTAL_RETRY_COUNT = 3 * 3
+MAX_RETRY_IN_NON_DISABLED_MODE = 3 * 3
 
 
 def _get_request_headers() -> Dict[str, str]:
@@ -210,6 +210,6 @@ def is_rerun_disabled_tests(tests: Dict[str, Dict[str, int]]) -> bool:
     each test is run multiple times
     """
     return all(
-        t.get("num_green", 0) + t.get("num_red", 0) > TOTAL_RETRY_COUNT
+        t.get("num_green", 0) + t.get("num_red", 0) > MAX_RETRY_IN_NON_DISABLED_MODE
         for t in tests.values()
     )
