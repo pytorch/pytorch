@@ -2370,9 +2370,13 @@ class CommonTemplate:
         # aot_export requires a graph mod input of fwd graph
         # returns the full fwd/bwd graph in graph mod format
         with torch.enable_grad(), fx_traceback.preserve_node_meta():
-            fx_g, signature = aot_export_module(g_mod, [x, target],
-                    trace_joint=True, output_loss_index=0,
-                    skip_flatten_joint=True)
+            fx_g, signature = aot_export_module(
+                g_mod,
+                [x, target],
+                trace_joint=True,
+                output_loss_index=0,
+                skip_flatten_joint=True,
+            )
 
         # Testing aot full graph
         seq_id_list = []
