@@ -696,158 +696,83 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
     }
   });
 
-  // TODO: do blocking on col dimension to reduce WR bandwidth
-  at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
-    for (const auto m : c10::irange(begin, end)) {
-      int64_t row = row_index[m];
-      int64_t off_start = row_index_offset[m];
-      int64_t off_end = row_index_offset[m + 1];
-      scalar_t* self_ptr = self_data + row * K;
+  const bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
+  if constexpr (!is_reduced_type) {
+    // TODO: do blocking on col dimension to reduce WR bandwidth
+    at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
+      for (const auto m : c10::irange(begin, end)) {
+        int64_t row = row_index[m];
+        int64_t off_start = row_index_offset[m];
+        int64_t off_end = row_index_offset[m + 1];
+        scalar_t* self_ptr = self_data + row * K;
 
-      // step 1: reinit rows in `self` if needed
-      init<scalar_t, reduce>(self_ptr, K, include_self);
+        // step 1: reinit rows in `self` if needed
+        init<scalar_t, reduce>(self_ptr, K, include_self);
 
-      // step 2: reduce
-      for (const auto n : c10::irange(off_start, off_end)) {
-        int64_t col = sorted_col_index_values[n];
-        update<scalar_t, reduce>(self_ptr, src_data + col * K, K);
+        // step 2: reduce
+        for (const auto n : c10::irange(off_start, off_end)) {
+          int64_t col = sorted_col_index_values[n];
+          update<scalar_t, reduce>(self_ptr, src_data + col * K, K);
+        }
+
+        // step 3: finalize
+        int64_t count = include_self ? 1 : 0;
+        count += off_end - off_start;
+        write<scalar_t, reduce>(self_ptr, count, K);
       }
+    });
+  } else {
+    Tensor buffer = at::zeros({num_threads, K}, self.options().dtype(kFloat));
+    float* buffer_data = buffer.data_ptr<float>();
+    using Vec = vec::Vectorized<scalar_t>;
 
-      // step 3: finalize
-      int64_t count = include_self ? 1 : 0;
-      count += off_end - off_start;
-      write<scalar_t, reduce>(self_ptr, count, K);
-    }
-  });
-}
+    // TODO: do blocking on col dimension to reduce WR bandwidth
+    at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
+      int tid = at::get_thread_num();
+      TORCH_CHECK(tid < num_threads,
+                  "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+      float* buffer_ptr = buffer_data + tid * K;
+      for (const auto m : c10::irange(begin, end)) {
+        int64_t row = row_index[m];
+        int64_t off_start = row_index_offset[m];
+        int64_t off_end = row_index_offset[m + 1];
+        scalar_t* self_ptr = self_data + row * K;
 
-template <typename scalar_t, ReductionType reduce>
-void cpu_scatter_reduce_expanded_index_reduction(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
-  int64_t* index_data = index.data_ptr<int64_t>();
-  scalar_t* self_data = self.data_ptr<scalar_t>();
-  scalar_t* src_data = src.data_ptr<scalar_t>();
+        // step 1: reinit rows in `self` if needed
+        if (!include_self) {
+          init<float, reduce>(buffer_ptr, K, include_self);
+        } else {
+          vec::convert(self_ptr, buffer_ptr, K);
+        }
 
-  const int64_t M = ensure_nonempty_size(self, 0);
-  const int64_t nnz = ensure_nonempty_size(index, 0);
-  const int64_t K = index.numel() / nnz;
+        // step 2: reduce
+        uint64_t k = 0;
+        for (const auto n : c10::irange(off_start, off_end)) {
+          int64_t col = sorted_col_index_values[n];
+          for (k = 0; k < K - (K % Vec::size()); k += Vec::size()) {
+            Vec src_vec = Vec::loadu(src_data + col * K + k);
+            Vectorized<float> src_vec0, src_vec1;
+            std::tie(src_vec0, src_vec1) = convert_to_float<scalar_t>(src_vec);
+            Vectorized<float> buf_vec0, buf_vec1;
+            buf_vec0 = update<Vectorized<float>, reduce>(Vectorized<float>::loadu(buffer_ptr + k), src_vec0);
+            buf_vec1 = update<Vectorized<float>, reduce>(Vectorized<float>::loadu(buffer_ptr + k + Vectorized<float>::size()), src_vec1);
+            buf_vec0.store(buffer_ptr + k);
+            buf_vec1.store(buffer_ptr + k + Vectorized<float>::size());
+          }
+          for (; k < K; k++) {
+            float src_val = float(src_data[col * K + k]);
+            buffer_ptr[k] = update<float, reduce>(buffer_ptr[k], src_val);
+          }
+        }
+        vec::convert(buffer_ptr, self_ptr, K);
 
-  const int64_t index_upper_bound = M;
-
-  auto keys = std::make_unique<int64_t[]>(nnz);
-  auto values = std::make_unique<int64_t[]>(nnz);
-  auto keys_tmp = std::make_unique<int64_t[]>(nnz);
-  auto values_tmp = std::make_unique<int64_t[]>(nnz);
-  at::parallel_for(0, nnz, 1, [&](int64_t begin, int64_t end) {
-    for (const auto i : c10::irange(begin, end)) {
-      int64_t index = index_data[i];
-      TORCH_CHECK(index >= 0 && index < index_upper_bound,
-                  "index ", index,
-                  " is out of bounds for dimension ", 0,
-                  " with size ", index_upper_bound);
-      keys[i] = index;
-      values[i] = i;
-    }
-  });
-
-  int64_t* sorted_col_index_keys = nullptr;
-  int64_t* sorted_col_index_values = nullptr;
-  std::tie(sorted_col_index_keys, sorted_col_index_values) = radix_sort_parallel(
-      keys.get(),
-      values.get(),
-      keys_tmp.get(),
-      values_tmp.get(),
-      nnz,
-      M);
-
-  int num_threads = at::get_num_threads();
-  std::vector<int64_t> num_uniq(num_threads, 0);
-  at::parallel_for(1, nnz, 1, [&](int64_t begin, int64_t end) {
-    int tid = at::get_thread_num();
-    for(const auto i : c10::irange(begin, end)) {
-      if (sorted_col_index_keys[i] != sorted_col_index_keys[i - 1]) {
-        num_uniq[tid]++;
+        // step 3: finalize
+        int64_t count = include_self ? 1 : 0;
+        count += off_end - off_start;
+        write<scalar_t, reduce>(self_ptr, count, K);
       }
-    }
-  });
-  num_uniq[0]++;
-  for (const auto n : c10::irange(1, num_threads)) {
-    num_uniq[n] += num_uniq[n - 1];
+    });
   }
-
-  // in case some rows are not written into, num_nonzero_rows will be smaller than M
-  int64_t num_nonzero_rows = num_uniq[num_threads - 1];
-  auto row_index_tmp = std::make_unique<int64_t[]>(num_nonzero_rows);
-  auto row_index_offset_tmp = std::make_unique<int64_t[]>(num_nonzero_rows + 1);
-  int64_t* row_index = row_index_tmp.get();
-  int64_t* row_index_offset = row_index_offset_tmp.get();
-  row_index[0] = sorted_col_index_keys[0];
-  row_index_offset[0] = 0;
-  row_index_offset[num_nonzero_rows] = nnz;
-
-  at::parallel_for(1, nnz, 1, [&](int64_t begin, int64_t end) {
-    int tid = at::get_thread_num();
-    int64_t* t_index = row_index + ((tid == 0) ? 1 : num_uniq[tid - 1]);
-    int64_t* t_index_offset = row_index_offset + ((tid == 0) ? 1 : num_uniq[tid - 1]);
-    for (const auto i : c10::irange(begin, end)) {
-      if (sorted_col_index_keys[i] != sorted_col_index_keys[i - 1]) {
-        *t_index = sorted_col_index_keys[i];
-        *t_index_offset = i;
-        t_index++;
-        t_index_offset++;
-      }
-    }
-  });
-
-  Tensor buffer = at::zeros({num_threads, K}, self.options().dtype(kFloat));
-  float* buffer_data = buffer.data_ptr<float>();
-  using Vec = vec::Vectorized<scalar_t>;
-
-  // TODO: do blocking on col dimension to reduce WR bandwidth
-  at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
-    int tid = at::get_thread_num();
-    TORCH_CHECK(tid < num_threads,
-                "expect thread id smaller than ", num_threads, ", got thread id ", tid);
-    float* buffer_ptr = buffer_data + tid * K;
-    for (const auto m : c10::irange(begin, end)) {
-      int64_t row = row_index[m];
-      int64_t off_start = row_index_offset[m];
-      int64_t off_end = row_index_offset[m + 1];
-      scalar_t* self_ptr = self_data + row * K;
-
-      // step 1: reinit rows in `self` if needed
-      if (!include_self) {
-        init<float, reduce>(buffer_ptr, K, false);
-      } else {
-        vec::convert(self_ptr, buffer_ptr, K);
-      }
-
-      // step 2: reduce
-      uint64_t k = 0;
-      for (const auto n : c10::irange(off_start, off_end)) {
-        int64_t col = sorted_col_index_values[n];
-        for (k = 0; k < K - (K % Vec::size()); k += Vec::size()) {
-          Vec src_vec = Vec::loadu(src_data + col * K + k);
-          Vectorized<float> src_vec0, src_vec1;
-          std::tie(src_vec0, src_vec1) = convert_to_float<scalar_t>(src_vec);
-          Vectorized<float> buf_vec0, buf_vec1;
-          buf_vec0 = update<Vectorized<float>, reduce>(Vectorized<float>::loadu(buffer_ptr + k), src_vec0);
-          buf_vec1 = update<Vectorized<float>, reduce>(Vectorized<float>::loadu(buffer_ptr + k + Vectorized<float>::size()), src_vec1);
-          buf_vec0.store(buffer_ptr + k);
-          buf_vec1.store(buffer_ptr + k + Vectorized<float>::size());
-        }
-        for (; k < K; k++) {
-          float src_val = float(src_data[col * K + k]);
-          buffer_ptr[k] = update<float, reduce>(buffer_ptr[k], src_val);
-        }
-      }
-      vec::convert(buffer_ptr, self_ptr, K);
-
-      // step 3: finalize
-      int64_t count = include_self ? 1 : 0;
-      count += off_end - off_start;
-      write<scalar_t, reduce>(self_ptr, count, K);
-    }
-  });
 }
 
 template <typename scalar_t>
@@ -889,37 +814,21 @@ void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index,
 }
 
 void scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
-  if (at::isReducedFloatingType(self.scalar_type())) {
-    AT_DISPATCH_REDUCED_FLOATING_TYPES(
-      self.scalar_type(), "scatter_add_expanded_index", [&] () {
-        cpu_scatter_reduce_expanded_index_reduction<scalar_t, ReductionType::SUM>(self, index, src, /*include_self*/true);
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(
-      self.scalar_type(), "scatter_add_expanded_index", [&] () {
-        cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::SUM>(self, index, src, /*include_self*/true);
-    });
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND(
+    ScalarType::BFloat16, self.scalar_type(), "scatter_add_expanded_index", [&] {
+      cpu_scatter_reduce_expanded_index<scalar_t, ReductionType::SUM>(self, index, src, /*include_self*/true);
+  });
 }
 
 void scatter_reduce_expanded_index_kernel(
     const Tensor& self, const Tensor& index, const Tensor& src,
     const ReductionType& reduction, bool include_self) {
-  if (at::isReducedFloatingType(self.scalar_type())) {
-    AT_DISPATCH_REDUCED_FLOATING_TYPES(
-      self.scalar_type(), "scatter_reduce_expanded_index", [&] {
-      AT_DISPATCH_REDUCTION_TYPES(reduction, [&]() {
-        cpu_scatter_reduce_expanded_index_reduction<scalar_t, reduce>(self, index, src, include_self);
-      });
+  AT_DISPATCH_FLOATING_TYPES_AND(
+    ScalarType::BFloat16, self.scalar_type(), "scatter_reduce_expanded_index", [&] {
+    AT_DISPATCH_REDUCTION_TYPES(reduction, [&]() {
+      cpu_scatter_reduce_expanded_index<scalar_t, reduce>(self, index, src, include_self);
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(
-      self.scalar_type(), "scatter_reduce_expanded_index", [&] {
-      AT_DISPATCH_REDUCTION_TYPES(reduction, [&]() {
-        cpu_scatter_reduce_expanded_index<scalar_t, reduce>(self, index, src, include_self);
-      });
-    });
-  }
+  });
 }
 
 void gather_expanded_index_kernel(const Tensor& result, const Tensor& self, const Tensor& index) {
