@@ -1478,16 +1478,10 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config = dict()
+        self.config: Dict[str, Any] = dict()
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
-        if dynamic:
-            # cudagraphs conflicts with dynamic shapes
-            self.config["triton.cudagraphs"] = False
-            assert "triton.cudagraphs" not in (
-                options or ()
-            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
 
         # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
         if self.config.get("triton.cudagraphs", False):
@@ -1581,10 +1575,26 @@ def compile(model: Optional[Callable] = None, *,
     """
     Optimizes given model/function using TorchDynamo and specified backend.
 
+    Concretely, for every frame executed within the compiled region, we will attempt
+    to compile it and cache the compiled result on the code object for future
+    use.  A single frame may be compiled multiple times if previous compiled
+    results are not applicable for subsequent calls (this is called a "guard
+    failure), you can use TORCH_LOGS=guards to debug these situations.
+    Multiple compiled results can be associated with a frame up to
+    ``torch._dynamo.config.cache_size_limit``, which defaults to 64; at which
+    point we will fall back to eager.  Note that compile caches are per
+    *code object*, not frame; if you dynamically create multiple copies of a
+    function, they will all share the same code cache.
+
     Args:
        model (Callable): Module/function to optimize
        fullgraph (bool): Whether it is ok to break model into several subgraphs
-       dynamic (bool): Use dynamic shape tracing
+       dynamic (bool): Use dynamic shape tracing.  When this is True, we will up-front attempt
+        to generate a kernel that is as dynamic as possible to avoid recompilations when
+        sizes change.  This may not always work as some operations/optimizations will
+        force specialization; use TORCH_LOGS=dynamic to debug overspecialization.
+        In particular, if you use "reduce-overhead", this will force sizes to be static
+        even with dynamic=True.
        backend (str or Callable): backend to be used
         - "inductor" is the default backend, which is a good balance between performance and overhead
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
@@ -1592,9 +1602,19 @@ def compile(model: Optional[Callable] = None, *,
         - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
         - "default" is the default mode, which is a good balance between performance and overhead
-        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
+
+        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
+          useful for small batches.  Reduction of overhead can come at the cost of more memory
+          usage, as we will cache the workspace memory required for the invocation so that we
+          do not have to reallocate it on subsequent runs.  Reduction of overhead is not guaranteed
+          to work; today, we only reduce overhead for CUDA only graphs which do not mutate inputs.
+          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
+          to debug.
+
         - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
+
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
         - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
         - `max_autotune` which will profile to pick the best matmul configuration

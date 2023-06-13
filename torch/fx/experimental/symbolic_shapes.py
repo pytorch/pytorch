@@ -193,12 +193,15 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
+        return (
+            free_symbols(val.size()) |
+            free_symbols(val.stride()) |
+            free_symbols(val.storage_offset())
+        )
+    elif isinstance(val, (tuple, list)):
         r = set()
-        for s in val.size():
+        for s in val:
             r |= free_symbols(s)
-        for s in val.stride():
-            r |= free_symbols(s)
-        r |= free_symbols(val.storage_offset())
         return r
     else:
         raise AssertionError(f"cannot compute free_symbols of {val}")
