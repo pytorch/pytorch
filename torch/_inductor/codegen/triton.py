@@ -2133,7 +2133,13 @@ class TritonScheduling:
                     kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
                     # TODO - mostly works but needs a couple fixes
-                    if not dynamo_config.dynamic_shapes:
+                    # Problem looks like free variables NYI: s0
+                    # We need to detect if the proposed ranges would have
+                    # symbols and bail out on this optimization if so
+                    if (
+                        not dynamo_config.dynamic_shapes
+                        and dynamo_config.assume_static_by_default
+                    ):
                         # TODO - use split ranges ?
                         indexing_dtype_strength_reduction(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
