@@ -5652,7 +5652,7 @@ def ___make_guard_fn():
         s0, s1, s2 = sympy.symbols("s0 s1 s2", integer=True)
 
         # Z3 symbols.
-        [validator.add_int(s) for s in (s0, s1, s2)]
+        [validator.add_var(s, int) for s in (s0, s1, s2)]
         z0, z1, z2 = [validator.z3var(s) for s in (s0, s1, s2)]
 
         return (s0, s1, s2), (z0, z1, z2), validator
@@ -5728,17 +5728,17 @@ def ___make_guard_fn():
             validator,
         ) = self._prepare_for_translation_validator()
 
-        validator.add_input(z0 > 5)
-        validator.add_input(z1 / 2 > z0)
+        validator.add_source_expr(z0 > 5)
+        validator.add_source_expr(z1 / 2 > z0)
 
         # Solutions for output is a subset of the solutions for the input.
-        validator.add_output(s0 > 20)
-        validator.add_output(s1 > s0**2)
+        validator.add_target_expr(s0 > 20)
+        validator.add_target_expr(s1 > s0**2)
 
         r = validator.validate()
         self.assertEqual(r.success, True, msg=f"failed with model: {r.model}")
         self.assertIsNone(r.model)
-        self.assertIsNone(r.failed_inputs)
+        self.assertIsNone(r.failed_source_expr)
 
     @torch._dynamo.config.patch(translation_validation=True)
     def test_translation_validator_unsat(self):
@@ -5748,17 +5748,17 @@ def ___make_guard_fn():
             validator,
         ) = self._prepare_for_translation_validator()
 
-        validator.add_input(z0 > 5)
-        validator.add_input(z1 / 2 > z0)
+        validator.add_source_expr(z0 > 5)
+        validator.add_source_expr(z1 / 2 > z0)
 
         # Solutions for output is a subset of the solutions for the input.
-        validator.add_output(s0 > 20)
-        validator.add_output(s1 > s0 + 2)
+        validator.add_target_expr(s0 > 20)
+        validator.add_target_expr(s1 > s0 + 2)
 
         r = validator.validate()
         self.assertEqual(r.success, False, msg=f"failed with model: {r.model}")
         self.assertIsNotNone(r.model)
-        self.assertIsNotNone(r.failed_inputs)
+        self.assertIsNotNone(r.failed_source_expr)
 
 
 class TestTracer(JitTestCase):
