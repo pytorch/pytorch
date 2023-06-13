@@ -2197,9 +2197,7 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self):
-        from torch._inductor.codegen.wrapper import pexpr
-
-        expr = pexpr(V.graph.sizevars.simplify(self.shape))
+        expr = V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
         if V.graph.cpp_wrapper:
             # wrap scalar to 0-d tensor for cpp wrapper
             return f"torch::tensor({expr})"
