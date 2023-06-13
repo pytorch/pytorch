@@ -215,7 +215,7 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 real_inputs = [
                     materialize(x)
                     for x in torch._guards.TracingContext.get().params_flat
-                    + V.get_real_inputs()
+                    + V.real_inputs
                 ]
 
                 with torch.utils._python_dispatch._disable_current_modes():

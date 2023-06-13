@@ -271,7 +271,7 @@ class _V:
     @property
     def real_inputs(self):
         """non-fake example inputs"""
-        return _fake_mode._get_handler()
+        return _real_inputs._get_handler()
 
     @property
     def fake_mode(self):
