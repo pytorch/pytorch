@@ -1478,8 +1478,8 @@ Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
 std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
     const Tensor& grad,
     const Tensor& self,
-    const Tensor& mat1,
-    const Tensor& mat2,
+    const c10::optional<Tensor>& mat1,
+    const c10::optional<Tensor>& mat2,
     const Scalar& alpha,
     const Scalar& beta,
     const std::array<bool, 3>& grad_input_mask) {
@@ -1492,9 +1492,14 @@ std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
   const auto mat1_requires_grad = grad_input_mask[1];
   const auto mat2_requires_grad = grad_input_mask[2];
   return std::make_tuple(
-      self_requires_grad ? maybe_multiply(grad, beta.conj()) : Tensor{},
-      mat1_requires_grad ? maybe_multiply(grad_projected.mm(mat2.mH()), alpha.conj()) : Tensor{},
-      mat2_requires_grad ? maybe_multiply(mat1.mH().mm(grad_projected), alpha.conj()) : Tensor{});
+      self_requires_grad ? maybe_multiply(grad, beta.conj())
+                         : Tensor{},
+      mat1_requires_grad
+          ? maybe_multiply(grad_projected.mm(mat2->mH()), alpha.conj())
+          : Tensor{},
+      mat2_requires_grad
+          ? maybe_multiply(mat1->mH().mm(grad_projected), alpha.conj())
+          : Tensor{});
 }
 
 Tensor sparse_sparse_matmul_backward(
