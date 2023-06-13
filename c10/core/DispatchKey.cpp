@@ -180,6 +180,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
 
+    case DispatchKey::PreDispatch:
+      return "PreDispatch";
+
     case DispatchKey::PythonDispatcher:
       return "PythonDispatcher";
 
@@ -300,6 +303,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::TESTING_ONLY_GenericWrapper},
       {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
       {"PythonDispatcher", c10::DispatchKey::PythonDispatcher},
+      {"PreDispatch", c10::DispatchKey::PreDispatch},
 
       {"CPU", c10::DispatchKey::CPU},
       {"CUDA", c10::DispatchKey::CUDA},
@@ -315,6 +319,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
       {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
       {"NestedTensorMeta", c10::DispatchKey::NestedTensorMeta},
+      {"NestedTensorPrivateUse1", c10::DispatchKey::NestedTensorPrivateUse1},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
       {"PrivateUse2", c10::DispatchKey::PrivateUse2},
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},
@@ -322,6 +327,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
       {"QuantizedCUDA", c10::DispatchKey::QuantizedCUDA},
       {"QuantizedXPU", c10::DispatchKey::QuantizedXPU},
+      {"QuantizedPrivateUse1", c10::DispatchKey::QuantizedPrivateUse1},
 
       {"SparseCPU", c10::DispatchKey::SparseCPU},
       {"SparseCUDA", c10::DispatchKey::SparseCUDA},
@@ -329,6 +335,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseXPU", c10::DispatchKey::SparseXPU},
       {"SparseVE", c10::DispatchKey::SparseVE},
       {"SparseMeta", c10::DispatchKey::SparseMeta},
+      {"SparsePrivateUse1", c10::DispatchKey::SparsePrivateUse1},
 
       {"AutogradCPU", c10::DispatchKey::AutogradCPU},
       {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},

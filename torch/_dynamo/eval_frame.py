@@ -7,7 +7,6 @@ import functools
 import inspect
 import logging
 import os
-import re
 import sys
 import textwrap
 import threading
@@ -144,6 +143,12 @@ class OptimizedModule(torch.nn.Module):
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._forward(*args, **kwargs)
 
+    def __dir__(self):
+        orig_mod_attrs = self._orig_mod.__dir__()
+        return orig_mod_attrs + [
+            attr for attr in super().__dir__() if attr not in orig_mod_attrs
+        ]
+
 
 def remove_from_cache(f):
     """
@@ -184,7 +189,10 @@ def enable_dynamic(enable: bool = True, export: bool = False):
     if not enable:
         yield
         return
-    with config.patch(dynamic_shapes=True):
+    # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
+    # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
+    # dynamic=True here to mean "fully dynamic from the start".
+    with config.patch(dynamic_shapes=True, assume_static_by_default=False):
         yield
 
 
@@ -552,6 +560,50 @@ def optimize(
     )
 
 
+@dataclasses.dataclass
+class ExplainOutput:
+    """
+    This is the output of :func:`torch._dynamo.explain()
+    There is no reason to create this class directly
+    """
+
+    graph_count: int
+    graph_break_count: int
+    op_count: int
+    out_guards: List[_guards.Guard]
+    graphs: List[torch.fx.GraphModule]
+    ops_per_graph: List[torch.fx.Node]
+    break_reasons: List[Any]  # TODO: Not sure if graph break is a type
+    compile_times: str
+
+    def __str__(self):
+        output = f"Graph Count: {self.graph_count}\n"
+        output += f"Graph Break Count: {self.graph_break_count}\n"
+        output += f"Op Count: {self.op_count}\n"
+
+        output += "Break Reasons:\n"
+        for idx, break_reason in enumerate(self.break_reasons):
+            output += f"  Break Reason {idx+1}:\n"
+            output += f"    Reason: {break_reason.reason}\n"
+            output += "    User Stack:\n"
+            for frame_summary in break_reason.user_stack:
+                output += f"      {frame_summary}\n"
+
+        output += "Ops per Graph:\n"
+        for idx, ops in enumerate(self.ops_per_graph):
+            output += f"  Ops {idx+1}:\n"
+            for op in ops:
+                output += f"    {op}\n"
+
+        output += "Out Guards:\n"
+        for i, guard in enumerate(self.out_guards):
+            output += f"  Guard {i+1}:\n"
+            output += f"    {str(guard)}"
+
+        output += f"Compile Times: {self.compile_times}\n"
+        return output
+
+
 # TODO(voz): Consider making "explain" output alongside a run / part of a run
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
@@ -585,7 +637,7 @@ def explain(f, *args, **kwargs):
 
     def guard_export_print(guards):
         nonlocal out_guards
-        out_guards.append(guards)
+        out_guards.extend(guards)
 
     with patch(f"{__name__}.most_recent_backend", None):
         opt_f = optimize(
@@ -608,25 +660,23 @@ def explain(f, *args, **kwargs):
     formatted_list = ""
     for idx, break_reason in enumerate(deduped_reasons.values()):
         formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
-        msg = f"{break_reason.reason}\n{formatted_stack}"
-        formatted_list += f"{idx + 1}. {msg} \n"
+        msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
+        formatted_list += msg
 
-    explanation = f"Dynamo produced {graph_count} graphs "
-    explanation += f"with {graph_count - 1} graph break and {op_count} ops"
-    explanation_verbose = explanation
-    explanation_verbose += f"\n Break reasons: \n\n{formatted_list}"
-
-    explanation_verbose += compile_times()
+    graph_break_count = graph_count - 1
+    compile_time = compile_times(repr="str")
 
     # TODO(voz): Do we want a decorator for this?
     reset()
-    return (
-        explanation,
+    return ExplainOutput(
+        graph_count,
+        graph_break_count,
+        op_count,
         out_guards,
         graphs,
         ops_per_graph,
         break_reasons,
-        explanation_verbose,
+        compile_time,
     )
 
 
@@ -703,6 +753,14 @@ class Constraint(ConstraintTarget):
             "dim": self.dim,
             "min": self.constraint_range.vr.lower,
             "max": self.constraint_range.vr.upper,
+            "shared": (
+                None
+                if self.shared is None
+                else {
+                    "t_id": self.shared.t_id,
+                    "dim": self.shared.dim,
+                }
+            ),
         }
 
     def __eq__(self, other):
@@ -778,14 +836,13 @@ def export(
     f: Callable[..., Any],
     *args,
     aten_graph: bool = False,
-    pre_autograd: bool = False,
+    pre_dispatch: bool = False,
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
-    functionalize: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -799,9 +856,10 @@ def export(
         aten_graph (bool): If True, exports a graph with ATen operators.
         If False, exports a graph with Python operators. Default is False.
 
-        pre_autograd (bool): If True, exports a graph with ATen operators,
-        but before autograd has run. This can be useful if you want to apply further tranformations
-        on a graph before running it through autograd.
+        pre_dispatch (bool): If True, exports a graph with ATen operators,
+        but before any logic in the PyTorch dispatcher has run.
+        This can be useful if you want to apply further tranformations on a graph before running it
+        through autograd, autocast, or any other functionalities that are integrated into the dispatcher.
         This flag is only valid if aten_graph=True is set.
         Default is False.
 
@@ -809,9 +867,6 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
-
-        functionalize (bool): If True, the resulting aten graph module will be functional. You will need to
-        set aten_graph=True to see the effect. By default, this flag will be false.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -834,17 +889,11 @@ def export(
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-    if pre_autograd:
-        assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
+    if pre_dispatch:
+        assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
     f = innermost_fn(f)
     call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
     original_signature = inspect.signature(call_to_inspect)
-
-    if functionalize and not aten_graph:
-        raise UserError(
-            UserErrorType.ANTI_PATTERN,
-            "TorchDynamo won't functionalize non-aten graphs. Please set `functionalize` to true",
-        )
 
     graph = None
     out_guards = None
@@ -920,6 +969,7 @@ def export(
         summarize_dim_constraints=True,
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
+        dynamic_shapes=tracing_mode == "symbolic",
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -929,7 +979,6 @@ def export(
             ),
             export=True,
             export_constraints=constraints,
-            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         try:
@@ -945,15 +994,25 @@ def export(
         assert dim_constraints is not None
         dim_constraints.solve()
         msg = dim_constraints.prettify_results(original_signature)
+        forced_specializations = dim_constraints.forced_specializations()
+        if forced_specializations:
+            msg = (
+                "Some dynamic dimensions need to be specialized because "
+                "the constraints inferred for them are too complex to specify.\n"
+                f"{forced_specializations}\n{msg}"
+            )
         if constraint_violation_error:
             constraint_violation_error.args = (
                 constraint_violation_error.args[0] + msg,
             )
         else:
-            log.info(
-                "Summary of dimension constraints:%s",
-                msg,
-            )
+            if forced_specializations:
+                constraint_violation_error = ConstraintViolationError(msg)
+            else:
+                log.info(
+                    "Summary of dimension constraints:%s",
+                    msg,
+                )
 
         # Error if we have any constraints on static values
         for k in shape_env.var_to_range.keys():
@@ -975,50 +1034,19 @@ def export(
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
+    # NB: This is mostly hitting the cache; Dynamo already converted these
+    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
     flat_results_traced, out_spec_traced = pytree.tree_flatten(result_traced)
 
     assert graph_captured_result is not None
     flat_both = list(graph_captured_result) + flat_args
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
-    # NB: This is mostly hitting the cache; Dynamo already converted these
-    example_fake_inputs = [fake_mode.from_tensor(t) for t in example_inputs]
-
     if aten_graph:
-        memo: Dict[torch.Tensor, torch.Tensor] = {}
-
-        def to_fun(t):
-            if isinstance(t, torch.Tensor):
-                if t in memo:
-                    return memo[t]
-                r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
-                memo[t] = r
-                return r
-            else:
-                return t
-
-        def from_fun(t):
-            if not isinstance(t, torch.Tensor) or not torch._is_functional_tensor(t):
-                return t
-            torch._sync(t)
-            return torch._from_functional_tensor(t)
-
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
-                if functionalize:
-                    torch._enable_functionalization(reapply_views=True)
-                    try:
-                        return pytree.tree_map(
-                            from_fun,
-                            torch.fx.Interpreter(graph).run(
-                                *pytree.tree_map(to_fun, args)
-                            ),
-                        )
-                    finally:
-                        torch._disable_functionalization()
-                else:
-                    return torch.fx.Interpreter(graph).run(*args)
+                return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
             try:
@@ -1027,7 +1055,7 @@ def export(
                     decomposition_table=decomposition_table,
                     tracing_mode="real",
                     _allow_non_fake_inputs=True,
-                    pre_autograd=pre_autograd,
+                    pre_dispatch=pre_dispatch,
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error
@@ -1047,14 +1075,6 @@ def export(
         if constraints
         else []
     )
-
-    if (shape_env := getattr(fake_mode, "shape_env", None)) is not None:
-        # Inline constraints added by users correspond to unbacked symbols in shape_env,
-        new_graph.meta["inline_constraints"] = {
-            k: v
-            for k, v in shape_env.var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
-        }
 
     def signature_to_fullargspec(sig: inspect.Signature):
         # Get a list of Parameter objects from the Signature object
@@ -1269,10 +1289,10 @@ class TorchPatcher:
             if opt in excluded_opts:
                 opt.step = disable(opt.step)
 
-            opt._cuda_graph_capture_health_check = disable(
-                opt._cuda_graph_capture_health_check
-            )
             opt.zero_grad = disable(opt.zero_grad)
+            opt.state_dict = disable(opt.state_dict)
+            opt.load_state_dict = disable(opt.load_state_dict)
+            opt.add_param_group = disable(opt.add_param_group)
 
             if hasattr(opt, "_init_group"):
                 opt._init_group = disable(opt._init_group)

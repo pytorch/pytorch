@@ -37,7 +37,7 @@ from torch.nn import functional as F
 
 _orig_module_call = torch.nn.Module.__call__
 
-# Custom operator that only supports CPU
+# Custom operator that only supports CPU and Meta
 lib = torch.library.Library("test_sample", "DEF")
 lib.define("foo(Tensor self) -> Tensor")
 lib.impl("foo", torch.sin, "CPU")
@@ -982,7 +982,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(
-            cnt.op_count, ifunspec(37, ifdyn(ifdynstaticdefault(15, 20), 4))
+            cnt.op_count, ifunspec(37, ifdyn(ifdynstaticdefault(4, 20), 4))
         )
 
     def test_hf_t5_forward(self):
@@ -1091,9 +1091,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertEqual(cnt.frame_count, 4)
+            self.assertEqual(cnt.frame_count, ifdyn(2, 4))
         else:
-            self.assertEqual(cnt.frame_count, 6)
+            self.assertEqual(cnt.frame_count, ifdyn(3, 6))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -1649,6 +1649,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         torch.manual_seed(1337)
         res = fn(y)
         self.assertTrue(same(ref, res))
+
+    def test_setitem_boolean_mask_diff(self):
+        def fn(x, b, y):
+            x = x.clone()
+            x[b] = y
+            return x
+
+        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        x = torch.randn(4, requires_grad=True)
+        b = torch.tensor([True, False, True, False])
+        y = torch.randn(2, requires_grad=True)
+        opt_fn(x, b, y)
+
+    def test_setitem_tuple_boolean_mask_diff(self):
+        def fn(x, b, y):
+            x = x.clone()
+            x[:, b] = y
+            return x
+
+        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        x = torch.randn(8, 4, requires_grad=True)
+        b = torch.tensor([True, False, True, False])
+        y = torch.randn(2, requires_grad=True)
+        opt_fn(x, b, y)
 
     def test_torch_tensor_ops(self):
         def fn(x):
@@ -2816,14 +2840,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_graph_break_unsupported_fake(self):
         counter = torch._dynamo.testing.CompileCounter()
 
+        torch._dynamo.config.verbose = True
+
         @torch._dynamo.optimize(counter)
         def f(x):
             return torch.ops.test_sample.foo(x + 1) + 1
 
         f(torch.randn(3))
 
-        self.assertEqual(counter.op_count, ifdyn(ifunspec(2, 3), 3))
-        self.assertEqual(counter.frame_count, ifdyn(ifunspec(2, 1), 1))
+        self.assertEqual(counter.op_count, 2)
+        self.assertEqual(counter.frame_count, 2)
 
     def test_delattr(self):
         class MyObj:
@@ -2867,6 +2893,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros([])
         obj1 = MyObj(x, x)
         self.assertRaises(AttributeError, lambda: fn(x, obj1))
+
+    def test_attached_attribute_in_dir(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(self.linear(x))
+
+        mod = torch.compile(MyModule(), backend="eager")
+        mod.is_compiled = True
+        self.assertTrue("is_compiled" in dir(mod))
 
     @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
@@ -3239,6 +3279,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         ref_exponent = torch.tensor([[0, 1, 2, 3]], dtype=torch.int32)
         self.assertEqual(ref_mantissa, mantissa)
         self.assertEqual(ref_exponent, exponent)
+
+    def test_dataclass_factory(self):
+        from dataclasses import dataclass, field
+        from typing import Any
+
+        @dataclass
+        class DClass:
+            sharding_contexts: Any = field(default_factory=list)
+            a: int = 1
+
+        def fn(x):
+            return DClass().a * x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        res = fn(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,11 @@ from ..utils import (
 )
 from .base import MutableLocal, VariableTracker
 from .dicts import DefaultDictVariable
-from .functions import NestedUserFunctionVariable, UserFunctionVariable
+from .functions import (
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -369,17 +373,41 @@ class AutogradFunctionVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ):
-        if name not in ["backward", "forward"]:
-            unimplemented(f"Unsupported method: {name}")
-
         if name == "backward":
             with tx.strict_translation_mode():
-                return tx.inline_call(
-                    tx, UserFunctionVariable(self.fn_cls.backward), args, kwargs
+                if isinstance(self.fn_cls.backward, types.FunctionType):
+                    backward = UserFunctionVariable(self.fn_cls.backward)
+                elif isinstance(self.fn_cls.backward, types.MethodType):
+                    backward = UserMethodVariable(
+                        self.fn_cls.backward.__func__,
+                        variables.UserDefinedClassVariable(self.fn_cls),
+                    )
+                    args = [backward.obj] + args
+                else:
+                    unimplemented(
+                        f"backward is a non-function or method: {self.fn_cls.backward}"
+                    )
+
+                return tx.inline_call(tx, backward, args, kwargs)
+
+        elif name == "forward":
+            if isinstance(self.fn_cls.forward, types.FunctionType):
+                forward = UserFunctionVariable(self.fn_cls.forward)
+            elif isinstance(self.fn_cls.forward, types.MethodType):
+                forward = UserMethodVariable(
+                    self.fn_cls.forward.__func__,
+                    variables.UserDefinedClassVariable(self.fn_cls),
                 )
-        return tx.inline_call(
-            tx, UserFunctionVariable(self.fn_cls.forward), args, kwargs
-        )
+                args = [forward.obj] + args
+            else:
+                unimplemented(
+                    f"forward is a non-function or method: {self.fn_cls.forward}"
+                )
+
+            return tx.inline_call(tx, forward, args, kwargs)
+
+        else:
+            unimplemented(f"Unsupported method: {name}")
 
 
 class AutogradFunctionContextVariable(UserDefinedObjectVariable):
@@ -618,10 +646,15 @@ class SkipFilesVariable(VariableTracker):
             or len(args) == 1
             and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
         ):
+            if len(args) == 0:
+                args = dict(kwargs) if kwargs else None
+            else:
+                args = args[0]
+
             return BuiltinVariable.call_dict_helper(
                 tx,
                 collections.OrderedDict,
-                None if len(args) == 0 else args[0],
+                args,
                 **options,
             )
         elif (
@@ -662,6 +695,34 @@ class SkipFilesVariable(VariableTracker):
                 items, mutable_local=MutableLocal(), **options
             )
         elif (
+            self.value is itertools.chain
+            and not kwargs
+            and all(arg.has_unpack_var_sequence(tx) for arg in args)
+        ):
+            seqs = [arg.unpack_var_sequence(tx) for arg in args]
+            items = []
+            for item in itertools.chain(*seqs):
+                items.append(item)
+            return variables.ListIteratorVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
+        elif (
+            self.value is itertools.combinations
+            and not kwargs
+            and len(args) == 2
+            and args[0].has_unpack_var_sequence(tx)
+            and args[1].is_python_constant()
+        ):
+            iterable = args[0].unpack_var_sequence(tx)
+            r = args[1].as_python_constant()
+
+            items = []
+            for item in itertools.combinations(iterable, r):
+                items.append(variables.TupleVariable(list(item), **options))
+            return variables.ListIteratorVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
+        elif (
             self.value is functools.wraps
             and not kwargs
             and len(args) == 1
@@ -674,6 +735,16 @@ class SkipFilesVariable(VariableTracker):
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps, **options)
+        elif self.value is collections.deque and not kwargs:
+            if len(args) == 0:
+                items = []
+            elif len(args) == 1 and args[0].has_unpack_var_sequence(tx):
+                items = args[0].unpack_var_sequence(tx)
+            else:
+                unimplemented("deque() with more than 1 arg not supported")
+            return variables.lists.DequeVariable(
+                items, mutable_local=MutableLocal(), **options
+            )
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -726,6 +797,8 @@ class NumpyVariable(VariableTracker):
             unimplemented(f"numpy.{self.value}()")
         import torch_np
 
+        from ..utils import numpy_to_tensor_wrapper
+
         from .builder import wrap_fx_proxy_cls
         from .tensor import NumpyNdarrayVariable
 
@@ -738,7 +811,7 @@ class NumpyVariable(VariableTracker):
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    func,
+                    numpy_to_tensor_wrapper(func),
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=None,

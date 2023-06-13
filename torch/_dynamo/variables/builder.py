@@ -47,7 +47,6 @@ from ..utils import (
     global_key_name,
     HAS_NUMPY,
     is_namedtuple,
-    is_numpy_int_type,
     is_typing,
     istype,
     np,
@@ -55,7 +54,6 @@ from ..utils import (
     preserve_rng_state,
     requires_higher_order_op,
     tensor_always_has_static_shape,
-    torch_np,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -72,7 +70,11 @@ from .dicts import (
     DefaultDictVariable,
     HFPretrainedConfigVariable,
 )
-from .functions import UserFunctionVariable, UserMethodVariable
+from .functions import (
+    CollectiveFunctionRewriteVariable,
+    UserFunctionVariable,
+    UserMethodVariable,
+)
 from .lists import (
     ListVariable,
     NamedTupleVariable,
@@ -94,8 +96,11 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
+
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
+from .optimizer import OptimizerVariable
 from .tensor import (
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
@@ -107,7 +112,11 @@ from .torch import (
     TorchHigherOrderOperatorVariable,
     TorchVariable,
 )
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .user_defined import (
+    ProcessGroupVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 
 log = logging.getLogger(__name__)
@@ -259,6 +268,8 @@ class VariableBuilder:
                 cls.wrap_literal,
             ),
         ]
+        if config.numpy_ndarray_as_tensor:
+            entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
         for ts, fn in entries:
@@ -443,6 +454,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later
+        elif CollectiveFunctionRewriteVariable.can_rewrite(value):
+            return CollectiveFunctionRewriteVariable(
+                CollectiveFunctionRewriteVariable.rewrite(value),
+                orig_fn=value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,
@@ -563,6 +581,18 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, torch.optim.Optimizer):
+            return OptimizerVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
+            )
+        elif ProcessGroupVariable.is_process_group(value):
+            return ProcessGroupVariable(
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -608,16 +638,7 @@ class VariableBuilder:
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        if (
-            istype(value, (tuple, list))
-            and all(
-                isinstance(x, int) or is_numpy_int_type(x) or x is None for x in value
-            )
-            and not config.dynamic_shapes
-        ):
-            guards = self.make_guards(GuardBuilder.EQUALS_MATCH)
-        else:
-            guards = self.make_guards(GuardBuilder.LIST_LENGTH)
+        guards = self.make_guards(GuardBuilder.LIST_LENGTH)
 
         for item in value:
             if item is value:
@@ -865,6 +886,41 @@ class VariableBuilder:
 
         return tensor_variable
 
+    def wrap_numpy_ndarray(self, value):
+        assert isinstance(value, np.ndarray)
+
+        source = self.get_source()
+        tensor_value = torch.from_numpy(value)
+
+        proxy = self.tx.output.root_tracer.create_graph_input(
+            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(tensor_value)
+        )
+        options = {"source": source}
+        numpy_ndarray_variable = wrap_fx_proxy_cls(
+            target_cls=NumpyNdarrayVariable,
+            tx=self.tx,
+            proxy=proxy,
+            example_value=tensor_value,
+            **options,
+        )
+
+        self.tx.output.input_source_to_var[source] = numpy_ndarray_variable
+        example_value = numpy_ndarray_variable.proxy.node.meta["example_value"]
+
+        # is_unspecialized should be true because we are wrapping a np.ndarray as argument input, and it needs to be
+        # converted to a tensor.
+        grapharg = GraphArg(
+            source,
+            tensor_value,
+            is_unspecialized=True,
+            fake_tensor=example_value,
+            is_tensor=True,
+            example_strong_ref=tensor_value,
+        )
+        proxy.node.meta["grapharg"] = grapharg
+
+        return numpy_ndarray_variable
+
     def wrap_unspecialized_primitive(self, value):
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
@@ -911,9 +967,8 @@ class VariableBuilder:
                 # and it is inappropriate to eagerly duck size them with
                 # real sizevars
                 if (
-                    frame_state_entry.scalar is None
-                    or not config.assume_static_by_default
-                ):
+                    config.automatic_dynamic_shapes and frame_state_entry.scalar is None
+                ) or not config.assume_static_by_default:
                     dynamic_dim = DimDynamic.DYNAMIC
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -1182,9 +1237,21 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif config.numpy_ndarray_as_tensor and isinstance(example_value, torch_np.ndarray):
+    elif (
+        isinstance(example_value, int)
+        and config.numpy_ndarray_as_tensor
+        and not config.dynamic_shapes
+    ):
         proxy.node.meta["example_value"] = example_value
-        return target_cls(proxy, **options)
+        return ConstantVariable(example_value, **options)
+    elif (
+        istype(example_value, torch.Size)
+        and all(isinstance(x, int) for x in example_value)
+        and target_cls is TupleVariable
+    ):  # convert torch.Size to tuple
+        return TupleVariable(
+            [ConstantVariable(x, **options) for x in example_value], **options
+        )
     elif isinstance(example_value, int) and proxy.node.target in [
         getattr,
         operator.getitem,
