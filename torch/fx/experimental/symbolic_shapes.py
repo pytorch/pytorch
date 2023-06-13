@@ -190,18 +190,23 @@ def tensor_has_hints(t):
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
         return val.node.expr.free_symbols
+    elif isinstance(val, sympy.Expr):
+        return val.free_symbols
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
+        return (
+            free_symbols(val.size()) |
+            free_symbols(val.stride()) |
+            free_symbols(val.storage_offset())
+        )
+    elif isinstance(val, (tuple, list)):
         r = set()
-        for s in val.size():
+        for s in val:
             r |= free_symbols(s)
-        for s in val.stride():
-            r |= free_symbols(s)
-        r |= free_symbols(val.storage_offset())
         return r
     else:
-        raise AssertionError(f"cannot compute free_symbols of {val}")
+        raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -2043,6 +2048,14 @@ class ShapeEnv:
                 dynamic_dims.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
 
+        # TODO: make this configurable from outside policy; we made a policy
+        # decision here where if all sizes are static, we are going to
+        # specialize all of the inner strides/offset too. We don't have to
+        # do this, and arguably we should ALWAYS allow for dynamic offset,
+        # this is cheap.
+        # TODO: This should be DYNAMIC, using DUCK for BC
+        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+
         assert len(dynamic_dims) == dim
         assert len(constraint_dims) == dim
 
@@ -2078,8 +2091,7 @@ class ShapeEnv:
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    # TODO: This should be DYNAMIC, using DUCK for BC
-                    dynamic_dim=DimDynamic.DUCK,
+                    dynamic_dim=dynamic_strides_offset,
                     constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
@@ -2094,8 +2106,7 @@ class ShapeEnv:
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex.storage_offset(),
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            # TODO: This should be DYNAMIC, using DUCK for BC
-            dynamic_dim=DimDynamic.DUCK,
+            dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
         ), hint=ex.storage_offset())
         return sym_sizes, sym_stride, sym_storage_offset
