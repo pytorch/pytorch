@@ -5,7 +5,7 @@ import operator
 import traceback
 from collections import OrderedDict
 from functools import partial
-from typing import Dict, List, NamedTuple, Tuple
+from typing import Dict, List, NamedTuple, Tuple, Set
 
 import sympy
 
@@ -73,7 +73,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
         # 2. b.shape[0] passed to constrain_as_value(...).
         # NOTE: cached_assertions will cause _AddRuntimeAssertionsForConstraintsPass stateful
         # but only within each pass - it will always be reset at start of each pass.
-        self.cached_assertions: Set[Symbol] = set()
+        self.cached_assertions: Set[sympy.Symbol] = set()
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         self.cached_assertions.clear()
