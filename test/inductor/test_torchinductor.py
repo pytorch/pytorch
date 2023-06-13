@@ -2371,12 +2371,13 @@ class CommonTemplate:
         # returns the full fwd/bwd graph in graph mod format
         with torch.enable_grad(), fx_traceback.preserve_node_meta():
             fx_g, signature = aot_export_module(g_mod, [x, target],
-                    trace_joint=True, output_loss_index=0)
+                    trace_joint=True, output_loss_index=0,
+                    skip_flatten_joint=True)
 
         # Testing aot full graph
         seq_id_list = []
         fwd_detected = False
-        bwd_detechted = False
+        bwd_detected = False
         for node in fx_g.graph.nodes:
             if "call_" in node.op:
                 seq_id = node.meta.get("seq_id", -1)

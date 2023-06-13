@@ -3757,6 +3757,7 @@ def aot_export_module(
     # If trace_joint is True, we expect your module to return a scalar loss.
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
+    skip_flatten_joint: int = False,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
     This function takes in a module, and returns:
@@ -3871,8 +3872,8 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             max_fwd_ops=max_fwd_ops,
         )
 
-    skip_flatten_joint = True
-    trace_joint = False
+    if skip_flatten_joint:
+        trace_joint = False
 
     if trace_joint:
         def flattened_joint(*args):
