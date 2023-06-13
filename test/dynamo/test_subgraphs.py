@@ -354,6 +354,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self._common(fn, 2, 6)
 
     @disable_cache_limit()
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_dynamic_shapes(self):
         if config.assume_static_by_default:
             return unittest.skip("Already covered identically in test_dynamic_kwarg")
@@ -363,7 +364,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_static = torch._dynamo.testing.CompileCounter()
-        with patch("torch._dynamo.config.dynamic_shapes", False):
+        with torch._dynamo.config.patch(assume_static_by_default=True):
             opt_fn = torch._dynamo.optimize(cnt_static)(fn)
             for i in range(2, 12):
                 opt_fn(torch.randn(i), torch.randn(i))
@@ -371,7 +372,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        with patch("torch._dynamo.config.dynamic_shapes", True):
+        with torch._dynamo.config.patch(assume_static_by_default=False):
             opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
             # NB: must not do 0, 1 as they specialized
             for i in range(2, 12):
