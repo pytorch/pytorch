@@ -46,6 +46,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
 #include <ATen/ops/is_coalesced_native.h>
@@ -55,6 +56,7 @@
 #include <ATen/ops/sparse_coo_tensor_native.h>
 #include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/_sparse_mask_projection_native.h>
 #include <ATen/ops/sparse_resize_and_clear_native.h>
 #include <ATen/ops/sparse_resize_native.h>
 #include <ATen/ops/to_dense_native.h>
@@ -744,6 +746,72 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
 }
 
 DEFINE_DISPATCH(sparse_mask_intersection_out_stub);
+DEFINE_DISPATCH(sparse_mask_projection_out_stub);
+
+using OptTensor = c10::optional<Tensor>;
+
+std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
+    const std::string& method_name,
+    const Tensor& t,
+    const Tensor& mask) {
+  // This is a helper function for operations that implement "sparse_mask"-like
+  // functionality, namely, projection of values of one tensor onto the other.
+  // These operations mostly rely on COO intersection primitives that heavily
+  // exploit coalesced inputs to avoid any syncs and calls to sort. The problem
+  // is that these primitives might project first argument onto second one or
+  // the other way around depending on which arguments are coalesced and which are
+  // larger. This function prepares inputs for `sparse_mask` such that `t` is
+  // projected onto `mask` by sorting `t` if uncoalesced and artifically marking it
+  // as coalesced all while `mask` is set to uncoalesced.
+  // The result of this projectionk is going to be uncoalesced, so it is up to the
+  // user to set the corresponding flag correctly with respect to the operations'
+  // semantics.
+
+  // We already assume that t.sizes() == mask.sizes()
+  TORCH_CHECK(t.sparse_dim() == mask.sparse_dim(),
+              method_name, "(): the number of sparse dimensions in `self` ",
+              "should match that of the `mask`. ",
+              "Got `self.sparse_dim() == ", t.sparse_dim(), "` != ",
+              "`mask.sparse_dim() == ", mask.sparse_dim(), "`.");
+
+  const auto wrapped_tensor = [](const Tensor& t,
+                                 const OptTensor& indices = c10::nullopt,
+                                 const OptTensor& values = c10::nullopt) -> Tensor {
+    auto res = at::empty({0}, t.options());
+    auto* res_sparse_impl = get_sparse_impl(res);
+    res_sparse_impl->raw_resize_(t.sparse_dim(), t.dense_dim(), t.sizes());
+    const auto res_indices = indices.has_value() ? *indices : t._indices();
+    const auto res_values = values.has_value() ? *values : t._values();
+    res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
+    res_sparse_impl->set_nnz_and_narrow(t._nnz());
+    res._coalesced_(false);
+    return res;
+  };
+
+  Tensor lhs;
+  OptTensor lhs_hash_opt;
+
+  std::tie(lhs, lhs_hash_opt) = [&]() -> auto {
+    if (t.is_coalesced()) {
+      return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt));
+    } else {
+      const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
+      const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));
+      // Probably worth having a dedicated kernel for.
+      const auto res_indices = t._indices().index_select(1, argsort_indices_hash);
+      const auto res_values = t._values().index_select(0, argsort_indices_hash);
+      const auto indices_hash_sorted = indices_hash.index_select(0, argsort_indices_hash);
+      // NOTE: res is not necessariy coalesced, but it is sorted.
+      // We mark it as "coalesced" to skip sorting in the intersection kernel.
+      auto res = wrapped_tensor(t, res_indices, res_values)._coalesced_(true);
+      return std::make_tuple(res, static_cast<OptTensor>(indices_hash_sorted));
+    }
+  }();
+
+  const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
+
+  return std::make_tuple(lhs, rhs, lhs_hash_opt);
+}
 
 SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
   TORCH_CHECK(
@@ -753,57 +821,25 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
       " but mask has size ",
       mask.sizes());
 
-  if (!mask.numel()) {
+  if (t.is_same(mask)) {
+    return t;
+  }
+
+  if (!mask.numel() || !mask._nnz()) {
     return mask.clone().to(t.device(), t.scalar_type());
   }
 
   if (t.layout() == at::kSparse) {
-    TORCH_CHECK(t.sparse_dim() == mask.sparse_dim(),
-                "sparse_mask(): the number of sparse dimensions in `self` ",
-                "should match that of the `mask`. ",
-                "Got `self.sparse_dim() == ", t.sparse_dim(), "` != ",
-                "`mask.sparse_dim() == ", mask.sparse_dim(), "`.");
-
-    using OptTensor = c10::optional<Tensor>;
-
-    const auto wrapped_tensor = [](const Tensor& t,
-                                   const OptTensor& indices = c10::nullopt,
-                                   const OptTensor& values = c10::nullopt) -> Tensor {
-      auto res = at::empty({0}, t.options());
-      auto* res_sparse_impl = get_sparse_impl(res);
-      res_sparse_impl->raw_resize_(t.sparse_dim(), t.dense_dim(), t.sizes());
-      const auto res_indices = indices.has_value() ? *indices : t._indices();
-      const auto res_values = values.has_value() ? *values : t._values();
-      res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
-      res_sparse_impl->set_nnz_and_narrow(t._nnz());
-      res._coalesced_(false);
+    if (!t._nnz()) {
+      auto res = mask.clone().to(t.device(), t.scalar_type());
+      res._values().zero_();
       return res;
-    };
-
-    using OptTensor = c10::optional<Tensor>;
-    Tensor lhs;
-    OptTensor lhs_hash_opt;
-
-    std::tie(lhs, lhs_hash_opt) = [&]() -> auto {
-      if (t.is_coalesced()) {
-        return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt));
-      } else {
-        const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
-        const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));
-        // Probably worth having a dedicated kernel for.
-        const auto res_indices = t._indices().index_select(1, argsort_indices_hash);
-        const auto res_values = t._values().index_select(0, argsort_indices_hash);
-        const auto indices_hash_sorted = indices_hash.index_select(0, argsort_indices_hash);
-        // NOTE: res is not necessariy coalesced, but it is sorted.
-        // We mark it as "coalesced" to skip sorting in the intersection kernel.
-        auto res = wrapped_tensor(t, res_indices, res_values)._coalesced_(true);
-        return std::make_tuple(res, static_cast<OptTensor>(indices_hash_sorted));
-      }
-    }();
-
-    const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
+    }
 
     auto res = at::empty({0}, t.options());
+    Tensor lhs, rhs;
+    OptTensor lhs_hash_opt;
+    std::tie(lhs, rhs, lhs_hash_opt) = sparse_mask_like_prepare_sparse_inputs("sparse_mask", t, mask);
     sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
     return res._coalesced_(mask.is_coalesced());
   }
@@ -814,6 +850,31 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
       at::ones({1}, mask_values.options()).expand_as(mask_values),
       mask.sizes())._coalesced_(mask.is_coalesced());
   return t.mul(mask_template).to(t.scalar_type());
+}
+
+Tensor sparse_mask_projection(const Tensor& t, const Tensor& mask) {
+  TORCH_INTERNAL_ASSERT(t.is_sparse());
+  TORCH_INTERNAL_ASSERT(mask.is_sparse());
+
+  TORCH_CHECK(
+      mask.sizes().equals(t.sizes()),
+      "_sparse_mask_projection(): operands have incompatible sizes; self has size ",
+      t.sizes(),
+      " but mask has size ",
+      mask.sizes());
+
+  if (!t.numel() || !t._nnz() || !mask._nnz()) {
+    auto res = t.clone();
+    res._values().zero_();
+    return res;
+  }
+
+  auto res = at::empty({0}, t.options());
+  Tensor lhs, rhs;
+  OptTensor lhs_hash_opt;
+  std::tie(lhs, rhs, lhs_hash_opt) = sparse_mask_like_prepare_sparse_inputs("_sparse_mask_projection", mask, t);
+  sparse_mask_projection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
+  return res._coalesced_(t.is_coalesced());
 }
 
 Tensor empty_like_sparse_coo(
