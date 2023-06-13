@@ -1451,6 +1451,27 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
+std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const std::array<bool, 3>& grad_input_mask) {
+  if (!grad.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+  const auto grad_projected = grad.sparse_mask(self);
+  const auto self_requires_grad = grad_input_mask[0];
+  const auto mat1_requires_grad = grad_input_mask[1];
+  const auto mat2_requires_grad = grad_input_mask[2];
+  return std::make_tuple(
+      self_requires_grad ? maybe_multiply(grad, beta.conj()) : Tensor{},
+      mat1_requires_grad ? maybe_multiply(grad_projected.mm(mat2.mH()), alpha.conj()) : Tensor{},
+      mat2_requires_grad ? maybe_multiply(mat1.mH().mm(grad_projected), alpha.conj()) : Tensor{});
+}
+
 Tensor sparse_sparse_matmul_backward(
     const Tensor& grad,
     const Tensor& a,
