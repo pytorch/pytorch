@@ -662,6 +662,16 @@ def from_fun(t):
     torch._sync(t)
     return torch._from_functional_tensor(t)
 
+def _get_hints(exprs):
+    """
+    Get the hints of a list/tuple of int/SymInt.
+    """
+    if isinstance(exprs, (list, tuple)):
+        return type(exprs)(_get_hints(e) for e in exprs)
+    elif isinstance(exprs, torch.SymInt):
+        return exprs.node.shape_env.size_hint(exprs.node.expr)
+    else:
+        return exprs
 
 # This is a version of functionalization that is specifically designed
 # for the AOTAutograd use case.
@@ -738,7 +748,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_metadata = True
                 else:
                     mutates_data = True
-                    mutates_metadata = not has_same_metadata(arg, new_arg)
+                    mutates_metadata = torch._functionalize_has_metadata_mutation(f_arg)
                 # Only track requires_grad info on *mutated* inputs,
                 # because they show up in the autograd.Function.forward as outputs
                 input_requires_grad_info.append(
@@ -1457,9 +1467,8 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
         args = list(args)
     assert isinstance(args, list)
 
-    if disable_amp:
-        guard = torch._C._DisableAutocast()
-    try:
+    context = torch._C._DisableAutocast if disable_amp else nullcontext
+    with context():
         if hasattr(f, "_boxed_call"):
             out = normalize_as_list(f(args))
         else:
@@ -1471,9 +1480,6 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
                 "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
             )
             out = normalize_as_list(f(*args))
-    finally:
-        if disable_amp:
-            del guard
     return out
 
 def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
@@ -1519,7 +1525,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     fw_module = aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     disable_amp = torch._C._is_any_autocast_enabled()
-    context = disable_autocast_manager if disable_amp else nullcontext
+    context = torch._C._DisableAutocast if disable_amp else nullcontext
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
@@ -1528,6 +1534,9 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             fake_mode = detect_fake_mode()
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
+
+        if torch._guards.TracingContext.get():
+            torch._guards.TracingContext.get().fw_metadata = fw_metadata
         compiled_fw = compiler(fw_module, flat_args)
 
     # This boxed_call handling happens inside create_runtime_wrapper as well.
@@ -1584,15 +1593,6 @@ def assert_functional_graph(fx_g: torch.fx.Graph, *, allow_input_mutations: bool
                 assert not n.target._schema.is_mutable, \
                     f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
     return copy_count
-
-
-@contextmanager
-def disable_autocast_manager():
-    guard = torch._C._DisableAutocast()
-    try:
-        yield
-    finally:
-        del guard
 
 
 def are_differentiable_views(view1, view2):
@@ -2778,6 +2778,19 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 # We are not clearing flat_args here because
                 # 1) There is a check in the the debug compiler at the end
                 # 2) It does not matter as these are fake tensors
+
+            if torch._guards.TracingContext.get():
+                torch._guards.TracingContext.get().fw_metadata = fw_metadata
+
+
+            # the compiler need to use this field to find the original modol outputs
+            # from the AOTAutograd fwd module's outputs. Thus compiler can make sure
+            # optimizations like layout optimization does not change those tensors'
+            # layout.
+            # TODO once https://github.com/pytorch/pytorch/pull/100652/files#r1212002707 is in
+            # change to access fw_metadata from the global tracing context.
+            fw_module.meta["original_output_start_index"] = fw_metadata.num_mutated_inputs
+
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, adjusted_flat_args
             )
@@ -2993,10 +3006,44 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
                     assert all(a is not None for a in all_args)
-                    context = disable_autocast_manager if disable_amp else nullcontext
+                    context = torch._C._DisableAutocast if disable_amp else nullcontext
+
+                    placeholder_list = fx_placeholder_vals(bw_module)
+
+                    # saved activations can have different stride to eager if
+                    # the compiler does layout optimization. We should restride the
+                    # tensor passed in for compiling the backward graph using the
+                    # saved tensor's stride.
+                    for i in range(len(placeholder_list)):
+                        ph_arg = placeholder_list[i]
+                        real_arg = all_args[i]
+                        if not isinstance(ph_arg, torch.Tensor):
+                            continue
+
+                        # Comparing ph_arg.stride() with real_arg.stride() directly may
+                        # cause dynamic dimensions in ph_arg being specialized to static
+                        # value. Using the hints to avoid that.
+                        if _get_hints(ph_arg.stride()) != real_arg.stride():
+                            # Note that here we use the stride of the real tensor to
+                            # restride a FakeTensor. This does not cause trouble
+                            # for dynamic shape since this code path only get
+                            # executed if layout optimization is enabled. And we
+                            # disable layout optimization for dynamic shape right
+                            # now.
+                            #
+                            # A solution that decide stride order based on real
+                            # tensor's stride and then apply that stride order to
+                            # the FakeTensor does not work smoothly since some
+                            # tensor's layout is not 'dense'. E.g. mixnet_l has a
+                            # tensor with size [8, 64, 112, 112] and strides
+                            # (2408448, 1, 21504, 192). The solution mentioned will
+                            # decide a stride of (802816, 1, 7168, 64) for this
+                            # tensor which is wrong.
+                            placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_arg.stride())
+
                     with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
                         CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, fx_placeholder_vals(bw_module)
+                            bw_module, placeholder_list
                         )
 
                 ctx.maybe_clear_saved_tensors()
@@ -3624,7 +3671,7 @@ def aot_module_simplified(
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
     params_flat, params_spec = pytree.tree_flatten(params)
-    params_flat = tuple(params_flat)
+    params_flat = list(params_flat)
     params_len = len(params_flat)
 
     functional_call = create_functional_call(mod, params_spec, params_len)
@@ -3639,6 +3686,9 @@ def aot_module_simplified(
     full_args = []
     # First, the params
     full_args.extend(params_flat)
+
+    if torch._guards.TracingContext.get():
+        torch._guards.TracingContext.get().params_flat = params_flat
 
     aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
@@ -3821,6 +3871,10 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
 
     full_args = []
     # First, the params
+    # NB: It is REQUIRED that parameters come first, Inductor infers "fixed"
+    # parameters by looking at the difference in parameter count outside
+    # and inside AOTAutograd, and assumes the prefix of arguments are fixed
+    # arguments
     full_args.extend(params_and_buffers_flat)
     # Next, the input args
     full_args.extend(args)

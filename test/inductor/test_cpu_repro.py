@@ -120,7 +120,7 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv2d_packed(self):
         options = itertools.product([[3, 56, 56]], [True, False], [0, (0,)])
@@ -146,7 +146,7 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_unsupported_conv_transpose(self):
         class Model(torch.nn.Module):
@@ -172,7 +172,7 @@ class CPUReproTests(TestCase):
             ):
                 compiled_m(input)
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_conv_used_from_multiple_places(self):
         class M(torch.nn.Module):
@@ -194,7 +194,7 @@ class CPUReproTests(TestCase):
                 (x,),
             )
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_used_from_multiple_places(self):
         class M(torch.nn.Module):
@@ -216,7 +216,7 @@ class CPUReproTests(TestCase):
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
         options = itertools.product(
@@ -242,9 +242,9 @@ class CPUReproTests(TestCase):
                         (v,),
                     )
 
-    @unittest.skipIf(not torch._C.has_mkldnn, "MKLDNN is not enabled")
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
-    def test_conv_transpose2d_packed(self):
+    def test_conv_transpose2d_packed_cpu(self):
         options = itertools.product([[1, 3, 28, 28], [3, 28, 28]], [0, (0,)])
         for x_shape, padding in options:
             mod = torch.nn.Sequential(
@@ -386,6 +386,36 @@ class CPUReproTests(TestCase):
             fn,
             (torch.randn(8),),
         )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_max_reduction_bfloat16(self):
+        def fn(x):
+            return torch.ops.aten.max(x, 1, keepdim=True)[0].float()
+
+        self.common(
+            fn,
+            (torch.randn(1, 32, 4, 4).bfloat16(),),
+        )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_fp32_load_with_to_bf16(self):
+        # From llama model.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cache_k = torch.zeros(8, 4, 2, 2)
+
+            def forward(self, x, xk):
+                bsz, seqlen, _ = x.shape
+                self.cache_k = self.cache_k.to(x)
+                self.cache_k[:bsz, 1 : 1 + seqlen] = xk
+                return self.cache_k
+
+        ref_model = Model().eval()
+        opt_model = torch.compile()(Model().eval())
+        x = torch.randn(4, 2, 2).bfloat16()
+        xk = torch.randn(4, 2, 2, 2).bfloat16()
+        self.assertEqual(opt_model(x, xk), ref_model(x, xk))
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -710,9 +740,17 @@ class CPUReproTests(TestCase):
             "isnan",
             "rand",
             "randint64",
+            "logical_and",
+            "logical_not",
+            "logical_or",
+            "logical_xor",
             "bitwise_and",
+            "bitwise_left_shift",
+            "bitwise_not",
+            "bitwise_right_shift",
             "bitwise_or",
             "bitwise_xor",
+            "to_dtype_bitcast",
         ]
         union = {*cpp_vec_op_list, *diff}
         self.assertTrue(
@@ -839,8 +877,14 @@ class CPUReproTests(TestCase):
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
     @patch("torch.cuda.is_available", lambda: False)
-    def test_vec_logical_and_or(self):
-        def wrap_fn(op: Callable):
+    def test_vec_logical(self):
+        def wrap_fn1(op: Callable):
+            def fn(x: torch.Tensor):
+                return torch.where(op(x), 1.0, 0.0)
+
+            return fn
+
+        def wrap_fn2(op: Callable):
             def fn(x: torch.Tensor, y: torch.Tensor):
                 return torch.where(op(x, y), 1.0, 0.0)
 
@@ -849,12 +893,22 @@ class CPUReproTests(TestCase):
         for dtype in vec_dtypes:
             x = torch.randn(64, dtype=dtype)
             y = torch.randn(64, dtype=dtype)
-            logical_fns = [torch.logical_and, torch.logical_or]
+            logical_fns = [
+                torch.logical_and,
+                torch.logical_not,
+                torch.logical_or,
+                torch.logical_xor,
+            ]
             for logical_fn in logical_fns:
-                _fn = wrap_fn(logical_fn)
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(_fn, (x, y))
+                if logical_fn == torch.logical_not:
+                    _fn = wrap_fn1(logical_fn)
+                    _args = (x,)
+                else:
+                    _fn = wrap_fn2(logical_fn)
+                    _args = (x, y)
+                self.common(_fn, _args)
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
@@ -982,6 +1036,21 @@ class CPUReproTests(TestCase):
         def fn(x):
             res = x.relu()
             return res
+
+        x = torch.randn((100, 100), dtype=torch.bfloat16)
+
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.cpp_to_dtype_count == 2
+        if codecache.valid_vec_isa_list():
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_memory_copy_with_fusion(self):
+        def fn(x):
+            res = x.relu()
+            x.copy_(res)
+            return (res,)
 
         x = torch.randn((100, 100), dtype=torch.bfloat16)
 
