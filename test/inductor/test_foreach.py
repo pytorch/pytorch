@@ -37,7 +37,25 @@ bin_ops_under_test = [
     torch._foreach_maximum,
 ]
 un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg]
+all_ops = parametrize(
+    "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__
+)
 bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
+
+
+def gen_args(op):
+    if op in un_ops_under_test:
+        return (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
+    else:
+        return (
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+            torch.rand(10, 10, device="cuda:0"),
+            torch.rand(20, 20, device="cuda:0"),
+        )
 
 
 @instantiate_parametrized_tests
@@ -55,17 +73,19 @@ class ForeachTests(TestCase):
         torch._inductor.metrics.reset()
 
     def _test_single_list(self, op):
-        def fn(a0, a1, b0, b1):
-            return op([a0, a1], [b0, b1])
+        if op in un_ops_under_test:
+
+            def fn(a0, a1):
+                return op([a0, a1])
+
+        else:
+
+            def fn(a0, a1, b0, b1):
+                return op([a0, a1], [b0, b1])
 
         self.check_model_cuda(
             fn,
-            (
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-            ),
+            gen_args(op),
         )
 
     def _test_single_scalar(self, op):
@@ -86,7 +106,7 @@ class ForeachTests(TestCase):
         self._test_single_list(op=torch._foreach_add)
 
     @requires_cuda()
-    @bin_ops
+    @all_ops
     def test_single_list(self, op):
         self._test_single_list(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -98,20 +118,23 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @all_ops
     def test_scheduler_fusion_list(self, op):
-        def fn(a0, a1, b0, b1):
-            c = op([a0, a1], [b0, b1])
-            return c, torch._foreach_add([a0, a1], c)
+        if op in un_ops_under_test:
+
+            def fn(a0, a1):
+                c = op([a0, a1])
+                return torch._foreach_sqrt(c)
+
+        else:
+
+            def fn(a0, a1, b0, b1):
+                c = op([a0, a1], [b0, b1])
+                return c, torch._foreach_add([a0, a1], c)
 
         self.check_model_cuda(
             fn,
-            (
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-            ),
+            gen_args(op),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -153,17 +176,27 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @all_ops
     def test_singleton_lists(self, op):
-        def fn(a0, b0):
-            return op([a0], [b0])
+        if op in un_ops_under_test:
+
+            def fn(a0):
+                return op([a0])
+
+            args = (torch.rand(10, 10, device="cuda:0"),)
+        else:
+
+            def fn(a0, b0):
+                return op([a0], [b0])
+
+            args = (
+                torch.rand(10, 10, device="cuda:0"),
+                torch.rand(10, 10, device="cuda:0"),
+            )
 
         self.check_model_cuda(
             fn,
-            (
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(10, 10, device="cuda:0"),
-            ),
+            args,
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -250,20 +283,23 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
-    @bin_ops
+    @all_ops
     def test_non_foreach_consumer_list(self, op):
-        def fn(a0, a1, b0, b1):
-            c = op([a0, a1], [b0, b1])
-            return torch.mul(c[0], a0)
+        if op in un_ops_under_test:
+
+            def fn(a0, a1):
+                c = op([a0, a1])
+                return torch.mul(c[0], a0)
+
+        else:
+
+            def fn(a0, a1, b0, b1):
+                c = op([a0, a1], [b0, b1])
+                return torch.mul(c[0], a0)
 
         self.check_model_cuda(
             fn,
-            (
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-            ),
+            gen_args(op),
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
@@ -286,22 +322,25 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
-    @bin_ops
+    @all_ops
     def test_non_foreach_producer_list(self, op):
-        def fn(a0, a1, b0, b1):
-            c0 = torch.add(a0, b0)
-            c1 = torch.add(a1, b1)
-            return op([a0, a1], [c0, c1])
-            # return [torch.sub(a0, c0), torch.sub(a1, c1)]
+        if op in un_ops_under_test:
+
+            def fn(a0, a1):
+                c0 = torch.add(a0, a0)
+                c1 = torch.mul(a1, a1)
+                return op([c0, c1])
+
+        else:
+
+            def fn(a0, a1, b0, b1):
+                c0 = torch.add(a0, b0)
+                c1 = torch.add(a1, b1)
+                return op([a0, a1], [c0, c1])
 
         self.check_model_cuda(
             fn,
-            (
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-            ),
+            gen_args(op),
             reference_in_float=False,
         )
 
@@ -328,24 +367,31 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     @requires_cuda()
-    @bin_ops
+    @all_ops
     def test_non_foreach_consumer_producer_list(self, op):
-        def fn(a0, a1, b0, b1):
-            c0 = torch.add(a0, b0)
-            c1 = torch.add(a1, b1)
-            d = op([a0, a1], [c0, c1])
-            e0 = torch.mul(d[0], a0)
-            e1 = torch.mul(d[1], a1)
-            return [e0, e1]
+        if op in un_ops_under_test:
+
+            def fn(a0, a1):
+                c0 = torch.add(a0, a0)
+                c1 = torch.mul(a1, a1)
+                d = op([c0, c1])
+                e0 = torch.mul(d[0], a0)
+                e1 = torch.mul(d[1], a1)
+                return [e0, e1]
+
+        else:
+
+            def fn(a0, a1, b0, b1):
+                c0 = torch.add(a0, b0)
+                c1 = torch.add(a1, b1)
+                d = op([a0, a1], [c0, c1])
+                e0 = torch.mul(d[0], a0)
+                e1 = torch.mul(d[1], a1)
+                return [e0, e1]
 
         self.check_model_cuda(
             fn,
-            (
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-                torch.rand(10, 10, device="cuda:0"),
-                torch.rand(20, 20, device="cuda:0"),
-            ),
+            gen_args(op),
             reference_in_float=False,
         )
 
