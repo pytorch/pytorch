@@ -1645,22 +1645,6 @@ if(NOT INTERN_BUILD_MOBILE)
                                  " -D__CUDA_NO_HALF2_OPERATORS__"
                                  " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
 
-  string(APPEND CMAKE_C_FLAGS_RELEASE " -DNDEBUG")
-  string(APPEND CMAKE_CXX_FLAGS_RELEASE " -DNDEBUG")
-  if(NOT GENERATOR_IS_MULTI_CONFIG)
-    if(${CMAKE_BUILD_TYPE} STREQUAL "Release")
-      message(STATUS "Adding -DNDEBUG to compile flags")
-      string(APPEND CMAKE_C_FLAGS " -DNDEBUG")
-      string(APPEND CMAKE_CXX_FLAGS " -DNDEBUG")
-    else()
-      message(STATUS "Removing -DNDEBUG from compile flags")
-      string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
-      string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
-    endif()
-  endif()
-  string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
-  string(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
-
   set(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
   if(USE_MAGMA)
