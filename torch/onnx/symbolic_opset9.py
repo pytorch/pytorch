@@ -5212,7 +5212,7 @@ def rand_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.from_value(
+        dtype = _type_utils.JitScalarType.from_value(
             self, _type_utils.JitScalarType.FLOAT
         )
     return g.op(
