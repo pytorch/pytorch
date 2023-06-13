@@ -1451,6 +1451,29 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
+Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
+  if (x.is_coalesced() && gx.is_coalesced()) {
+    if (x._nnz() >= gx._nnz()) {
+      // search into x is faster
+      return gx._sparse_mask_projection(x);
+    } else {
+      // search into gx is faster
+      return gx.sparse_mask(x);
+    }
+  } else if (x.is_coalesced()) {
+    return gx.sparse_mask(x);
+  } else if (gx.is_coalesced()) {
+    return gx._sparse_mask_projection(x);
+  } else {
+    if (x._nnz() >= gx._nnz()) {
+      // gx.coalesce() is likely faster
+      return gx.coalesce()._sparse_mask_projection(x);
+    } else {
+      // x.coalesce() is likely faster
+      return gx.sparse_mask(x.coalesce());
+    }
+  }
+
 std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -1462,6 +1485,7 @@ std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
   if (!grad.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
+
   const auto grad_projected = grad.sparse_mask(self);
   const auto self_requires_grad = grad_input_mask[0];
   const auto mat1_requires_grad = grad_input_mask[1];
@@ -1496,19 +1520,13 @@ Tensor sparse_sparse_matmul_backward(
   TORCH_CHECK(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
-  const auto mask_ones_like = [](const Tensor& t) -> Tensor {
-    return at::sparse_coo_tensor(
-        t._indices(),
-        at::ones({1}, t._values().options()).expand_as(t._values()),
-        t.sizes());
-  };
 
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
-    return a_grad.mul(mask_ones_like(a.coalesce()));
+    return sparse_mask_like_grad(a, a_grad);
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
-  return b_grad.mul(mask_ones_like(b.coalesce()));
+  return sparse_mask_like_grad(b, b_grad);
 }
 
 Tensor renorm_backward(
