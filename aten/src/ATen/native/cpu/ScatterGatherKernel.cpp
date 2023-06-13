@@ -619,6 +619,54 @@ std::pair<K*, V*> radix_sort_parallel(
 //
 //   step 2: spmm reduce, parallel on M and vectorize on K
 //
+
+template <typename scalar_t, ReductionType reduce>
+inline void _init(scalar_t* self_ptr, float* buffer_ptr, int64_t K, bool include_self) {
+  if constexpr (!is_reduced_floating_point_v<scalar_t>) {
+    init<scalar_t, reduce>(self_ptr, K, include_self);
+  } else {
+    if (!include_self) {
+      init<float, reduce>(buffer_ptr, K, include_self);
+    } else {
+      vec::convert(self_ptr, buffer_ptr, K);
+    }
+  }
+}
+
+template <typename scalar_t, ReductionType reduce>
+inline void _update(scalar_t* self_ptr, scalar_t* src_data, float* buffer_ptr, int64_t K, int64_t off_start, int64_t off_end, int64_t* sorted_col_index_values) {
+  using Vec = vec::Vectorized<scalar_t>;
+  using fVec = vec::Vectorized<float>;
+  if constexpr (!is_reduced_floating_point_v<scalar_t>) {
+    for (const auto n : c10::irange(off_start, off_end)) {
+      int64_t col = sorted_col_index_values[n];
+      update<scalar_t, reduce>(self_ptr, src_data + col * K, K);
+    }
+  } else {
+    int64_t k = 0;
+    constexpr int64_t kVecSize = Vec::size();
+    constexpr int64_t kfVecSize = fVec::size();
+    for (const auto n : c10::irange(off_start, off_end)) {
+      int64_t col = sorted_col_index_values[n];
+      for (k = 0; k < K - (K % kVecSize); k += kVecSize) {
+        Vec src_vec = Vec::loadu(src_data + col * K + k);
+        fVec src_vec0, src_vec1;
+        std::tie(src_vec0, src_vec1) = convert_to_float<scalar_t>(src_vec);
+        fVec buf_vec0, buf_vec1;
+        buf_vec0 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k), src_vec0);
+        buf_vec1 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k + kfVecSize), src_vec1);
+        buf_vec0.store(buffer_ptr + k);
+        buf_vec1.store(buffer_ptr + k + fVec::size());
+      }
+      for (; k < K; k++) {
+        float src_val = float(src_data[col * K + k]);
+        buffer_ptr[k] = update<float, reduce>(buffer_ptr[k], src_val);
+      }
+    }
+    vec::convert(buffer_ptr, self_ptr, K);
+  }
+}
+
 template <typename scalar_t, ReductionType reduce>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
   int64_t* index_data = index.data_ptr<int64_t>();
@@ -696,86 +744,34 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
     }
   });
 
-  const bool is_reduced_type = is_reduced_floating_point_v<scalar_t>;
-  if constexpr (!is_reduced_type) {
-    // TODO: do blocking on col dimension to reduce WR bandwidth
-    at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
-      for (const auto m : c10::irange(begin, end)) {
-        int64_t row = row_index[m];
-        int64_t off_start = row_index_offset[m];
-        int64_t off_end = row_index_offset[m + 1];
-        scalar_t* self_ptr = self_data + row * K;
+  Tensor buffer = at::zeros({num_threads, K}, self.options().dtype(kFloat));
+  float* buffer_data = buffer.data_ptr<float>();
 
-        // step 1: reinit rows in `self` if needed
-        init<scalar_t, reduce>(self_ptr, K, include_self);
+  // TODO: do blocking on col dimension to reduce WR bandwidth
+  at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    TORCH_CHECK(tid < num_threads,
+                "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+    float* buffer_ptr = buffer_data + tid * K;
 
-        // step 2: reduce
-        for (const auto n : c10::irange(off_start, off_end)) {
-          int64_t col = sorted_col_index_values[n];
-          update<scalar_t, reduce>(self_ptr, src_data + col * K, K);
-        }
+    for (const auto m : c10::irange(begin, end)) {
+      int64_t row = row_index[m];
+      int64_t off_start = row_index_offset[m];
+      int64_t off_end = row_index_offset[m + 1];
+      scalar_t* self_ptr = self_data + row * K;
 
-        // step 3: finalize
-        int64_t count = include_self ? 1 : 0;
-        count += off_end - off_start;
-        write<scalar_t, reduce>(self_ptr, count, K);
-      }
-    });
-  } else {
-    Tensor buffer = at::zeros({num_threads, K}, self.options().dtype(kFloat));
-    float* buffer_data = buffer.data_ptr<float>();
-    using Vec = vec::Vectorized<scalar_t>;
-    using fVec = vec::Vectorized<float>;
+      // step 1: reinit rows in `self` if needed
+      _init<scalar_t, reduce>(self_ptr, buffer_ptr, K, include_self);
 
-    // TODO: do blocking on col dimension to reduce WR bandwidth
-    at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
-      int tid = at::get_thread_num();
-      TORCH_CHECK(tid < num_threads,
-                  "expect thread id smaller than ", num_threads, ", got thread id ", tid);
-      float* buffer_ptr = buffer_data + tid * K;
-      for (const auto m : c10::irange(begin, end)) {
-        int64_t row = row_index[m];
-        int64_t off_start = row_index_offset[m];
-        int64_t off_end = row_index_offset[m + 1];
-        scalar_t* self_ptr = self_data + row * K;
+      // step 2: reduce
+      _update<scalar_t, reduce>(self_ptr, src_data, buffer_ptr, K, off_start, off_end, sorted_col_index_values);
 
-        // step 1: reinit rows in `self` if needed
-        if (!include_self) {
-          init<float, reduce>(buffer_ptr, K, include_self);
-        } else {
-          vec::convert(self_ptr, buffer_ptr, K);
-        }
-
-        // step 2: reduce
-        int64_t k = 0;
-        constexpr int64_t kVecSize = Vec::size();
-        constexpr int64_t kfVecSize = fVec::size();
-        for (const auto n : c10::irange(off_start, off_end)) {
-          int64_t col = sorted_col_index_values[n];
-          for (k = 0; k < K - (K % kVecSize); k += kVecSize) {
-            Vec src_vec = Vec::loadu(src_data + col * K + k);
-            fVec src_vec0, src_vec1;
-            std::tie(src_vec0, src_vec1) = convert_to_float<scalar_t>(src_vec);
-            fVec buf_vec0, buf_vec1;
-            buf_vec0 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k), src_vec0);
-            buf_vec1 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k + kfVecSize), src_vec1);
-            buf_vec0.store(buffer_ptr + k);
-            buf_vec1.store(buffer_ptr + k + fVec::size());
-          }
-          for (; k < K; k++) {
-            float src_val = float(src_data[col * K + k]);
-            buffer_ptr[k] = update<float, reduce>(buffer_ptr[k], src_val);
-          }
-        }
-        vec::convert(buffer_ptr, self_ptr, K);
-
-        // step 3: finalize
-        int64_t count = include_self ? 1 : 0;
-        count += off_end - off_start;
-        write<scalar_t, reduce>(self_ptr, count, K);
-      }
-    });
-  }
+      // step 3: finalize
+      int64_t count = include_self ? 1 : 0;
+      count += off_end - off_start;
+      write<scalar_t, reduce>(self_ptr, count, K);
+    }
+  });
 }
 
 template <typename scalar_t>
