@@ -436,7 +436,9 @@ class ContinueExecutionCache:
             # this will ensure the instructions after the break have the correct line numbers
             if is_py311_plus:
                 # In 3.11+ bytecode instruction size vary, so do bisect to find the index
-                target_ind = bisect.bisect_left(instructions, target.offset, key=lambda i:i.offset)
+                target_ind = bisect.bisect_left(
+                    instructions, target.offset, key=lambda i: i.offset
+                )
             else:
                 target_ind = target.offset // 2
 
