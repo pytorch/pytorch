@@ -1888,6 +1888,12 @@ def meta__foreach_add(self, other, alpha=1):
     return [torch.empty_like(s) for s in self]
 
 
+@register_meta([aten._foreach_sub.List])
+def meta__foreach_sub(self, other, alpha=1):
+    _check_foreach_binop_tensor_lists(self, other)
+    return [torch.empty_like(s) for s in self]
+
+
 @register_meta([aten._foreach_add_.List])
 def meta__foreach_add__list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
@@ -1896,6 +1902,12 @@ def meta__foreach_add__list(self, other, alpha=1):
 @register_meta([aten._foreach_div_.List])
 def meta__foreach_binop__list(self, other):
     _check_foreach_binop_tensor_lists(self, other)
+
+
+@register_meta([aten._foreach_maximum.List])
+def meta__foreach_maximum__list(self, other, alpha=1):
+    _check_foreach_binop_tensor_lists(self, other)
+    return [torch.empty_like(s) for s in self]
 
 
 @register_meta(
