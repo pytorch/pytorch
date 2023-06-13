@@ -3046,9 +3046,9 @@ def meta__scaled_dot_product_flash(
     else:
         debug_mask = torch.empty(0, dtype=query.dtype, device=query.device)
 
-    # Note [Seed and Offset]: device for seed and offset below depends on whether we are
+    # note: device for seed and offset below depends on whether we are
     # capturing or not, but at the time of tracing we don't know if we
-    # are going to use cudagraphs or not, so we return meta tensors here
+    # are going to use cudagraphs or not, so we return cpu tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
 
     return (
@@ -3082,8 +3082,8 @@ def meta__scaled_dot_product_flash_backward(
     max_k: int,
     dropout_p: float,
     is_causal: bool,
-    philox_seed: Tensor,
-    philox_offset: Tensor,
+    philox_seed: int,
+    philox_offset: int,
     scale: Optional[float] = None,
 ):
     batch_size = query.size(0)
@@ -3122,7 +3122,6 @@ def meta__scaled_dot_product_efficient(
     key: Tensor,
     value: Tensor,
     compute_log_sumexp: bool,
-    dropout_p=0.0,
     is_causal: bool = False,
     scale: Optional[float] = None,
 ):
@@ -3148,11 +3147,7 @@ def meta__scaled_dot_product_efficient(
 
     res = res.transpose(1, 2)
 
-    # See Note [Seed and Offset]:
-    seed = torch.empty((), dtype=torch.long, device="meta")
-    offset = torch.empty((), dtype=torch.long, device="meta")
-
-    return res, logsum_exp, seed, offset
+    return res, logsum_exp
 
 
 @register_meta(
@@ -3167,39 +3162,39 @@ def meta__scaled_dot_product_efficient_backward(
     value: Tensor,
     out: Tensor,
     logsumexp: Tensor,
-    philox_seed: Tensor,
-    philox_offset: Tensor,
-    dropout_p: float,
     is_causal: bool = False,
+    chunk_grad_outputs=False,
     scale: Optional[float] = None,
 ):
-    batch_size = query.size(0)
-    num_heads = query.size(1)
-    max_q = query.size(2)
-    head_dim = query.size(3)
+    grad_out = grad_out.transpose(1, 2)
+    query = query.transpose(1, 2)
+    key = key.transpose(1, 2)
+    value = value.transpose(1, 2)
 
-    max_k = key.size(2)
+    B = query.size(0)
+    M = query.size(1)
+    N = key.size(1)
+    nH = query.size(2)
+    K = query.size(3)
 
-    grad_q = torch.empty_permuted(
-        (batch_size, num_heads, max_q, head_dim),
-        (0, 2, 1, 3),
-        dtype=query.dtype,
-        device=query.device,
-    )
-    grad_k = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=key.dtype,
-        device=key.device,
-    )
-    grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
-        (0, 2, 1, 3),
-        dtype=value.dtype,
-        device=value.device,
-    )
+    grad_kv_needs_init = is_causal and N > M
 
-    return grad_q, grad_k, grad_v
+    grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
+    grad_k = (
+        torch.zeros(key.shape, dtype=key.dtype, device=key.device)
+        if grad_kv_needs_init
+        else torch.empty(key.shape, dtype=key.dtype, device=key.device)
+    )
+    grad_v = (
+        torch.zeros(value.shape, dtype=value.dtype, device=value.device)
+        if grad_kv_needs_init
+        else torch.empty(value.shape, dtype=value.dtype, device=value.device)
+    )
+    return (
+        grad_q.transpose(1, 2),
+        grad_k.transpose(1, 2),
+        grad_v.transpose(1, 2),
+    )
 
 
 @register_meta([aten.scatter_reduce.two, aten.scatter_reduce.two_out])
