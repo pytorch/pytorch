@@ -57,7 +57,6 @@ from .source import (
     TensorPropertySource,
 )
 from .utils import (
-    assert_no_fake_params_or_buffers,
     checkpoint_params,
     CleanupHook,
     clone_inputs,
@@ -853,7 +852,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
 
-        assert_no_fake_params_or_buffers(gm)
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
