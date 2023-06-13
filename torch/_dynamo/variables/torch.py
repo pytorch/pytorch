@@ -1035,6 +1035,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             # Then each branch graph will receive:
             # true_fn(x, a, b, c, a_false, b_false, d_false)
             # false_fn(x, a_true, b_true, c_true, a, b, d)
+            # https://github.com/pytorch/pytorch/issues/103530
             def fixup_branch_inps(graph, add_after, new_args, suffix) -> None:
                 inp_count = 0
                 for node in graph.nodes:
@@ -1092,7 +1093,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 )
 
             checkpoint = tx.copy_graphstate()
-            # To get the example output from map() we will need to prodive at least one sample to
+            # To get the example output from map() we will need to provide at least one sample to
             # the loop body. In our case we will always use xs[0], and our map() won't support zero
             # sized tensor during tracing.
             first_dim = args[1].call_method(

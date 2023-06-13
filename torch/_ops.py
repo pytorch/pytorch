@@ -244,6 +244,7 @@ class HigherOrderOperator(OperatorBase):
     def __call__(self, *args, **kwargs):
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
+        import torch._dynamo
         from torch._dynamo.eval_frame import disable
 
         @disable
