@@ -263,7 +263,6 @@ class _DDPSink(Function):
             Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 reducer._delay_all_reduce
             )
-            print(f"Enqueud delay allreduce")
             ddp_weakref.static_graph_delay_allreduce_enqueued = True
 
         return (None, *grad_outputs)

@@ -9780,11 +9780,12 @@ class DistributedTest:
                     super().__init__()
                     self.lin = nn.Linear(10, 10)
                     self.relu = nn.ReLU()
+
                 def forward(self, x):
                     return self.relu(self.lin(x))
 
             torch.cuda.set_device(self.rank)
-            torch.manual_seed(42 << 1337 % (self.rank +1))
+            torch.manual_seed(42 << 1337 % (self.rank + 1))
             model = Net().cuda(self.rank)
             from copy import deepcopy
             local_model = deepcopy(model)
