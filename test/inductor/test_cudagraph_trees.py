@@ -10,6 +10,7 @@ import warnings
 import torch
 
 import torch._dynamo
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
@@ -113,6 +114,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         "triton.slow_path_cudagraph_asserts": True,
                     }
                 )
+            )
+            self.graph_stack.enter_context(
+                dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
             )
             self.device_idx = torch.rand([0], device="cuda").device.index
             warnings.filterwarnings("ignore")

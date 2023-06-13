@@ -408,7 +408,7 @@ Tensor& zero_sparse_csr_(Tensor& self) {
     `result = csr.clone(); result.values.zero_();`
   */
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "zero_sparse_csr_", [](){});
-  get_sparse_csr_impl(self)->resize_and_clear_(self.sparse_dim(), self.sizes());
+  get_sparse_csr_impl(self)->resize_and_clear_(self.sparse_dim(), self.dense_dim(), self.sizes());
   return self;
 }
 
