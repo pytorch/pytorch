@@ -1196,8 +1196,8 @@ TORCH_IMPL_FUNC(softplus_out_mps)
   };
 
   MPSStream* stream = getCurrentMPSStream();
-  MPSScalar beta_scalar = getMPSScalar(beta, ScalarType::Float);
-  MPSScalar threshold_scalar = getMPSScalar(threshold, ScalarType::Float);
+  MPSScalar beta_scalar = getMPSScalar(beta, self.scalar_type());
+  MPSScalar threshold_scalar = getMPSScalar(threshold, self.scalar_type());
 
   @autoreleasepool {
     string key = "softplus_out_mps:" + getTensorsStringKey({self}) + ":" + std::to_string(beta.to<double>()) + ":" +
@@ -1206,9 +1206,9 @@ TORCH_IMPL_FUNC(softplus_out_mps)
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-      MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSDataType(ScalarType::Float));
+      MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
 
-      MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSDataType(ScalarType::Float));
+      MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
 
       MPSGraphTensor* reluTensor = [mpsGraph reLUWithTensor:inputTensor name:nil];
 
@@ -1258,8 +1258,8 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps)
   if (grad_input.numel() == 0)
     return;
 
-  MPSScalar beta_scalar = getMPSScalar(beta, ScalarType::Float);
-  MPSScalar threshold_scalar = getMPSScalar(threshold, ScalarType::Float);
+  MPSScalar beta_scalar = getMPSScalar(beta, self.scalar_type());
+  MPSScalar threshold_scalar = getMPSScalar(threshold, self.scalar_type());
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -1281,9 +1281,9 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps)
 
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-      MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(ScalarType::Float));
+      MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
 
-      MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(ScalarType::Float));
+      MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
 
       MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:getMPSDataType(self)];
       MPSGraphTensor* bxTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor

@@ -2,6 +2,7 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Export.h>
+#include <cstdint>
 #include <ostream>
 #include <string>
 
@@ -404,6 +405,12 @@ enum class DispatchKey : uint16_t {
   // aten/src/ATen/core/dispatch/backend_fallback_test.cpp
   // for a usage example
   TESTING_ONLY_GenericMode,
+
+  // This key is used for pre-dispatch tracing in make_fx.
+  // It has lower priority than the PythonDispatcher key
+  // because we use the PythonDispatcher to intercept the key from python,
+  // and avoid having to implement it in C++.
+  PreDispatch,
 
   // This is a bypass that allows you to skip running the C++ dispatcher
   // entirely

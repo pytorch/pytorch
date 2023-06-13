@@ -137,6 +137,7 @@ test_failures = {
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
     "test_uint_dynamic_shapes": TestFailure(("cpu",)),
+    "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
     #
     # Failed to find for loop/triton kernel:
     #
@@ -200,6 +201,9 @@ test_failures = {
         ("cpu", "cuda"), is_skip=True
     ),
     "test_cauchy_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_scaled_dot_product_efficient_attention_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
     "test_dropout_deterministic_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
@@ -269,6 +273,8 @@ test_failures = {
     #
     "test_cudnn_rnn_dynamic_shapes": TestFailure(("cuda",)),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(("cpu", "cuda")),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),

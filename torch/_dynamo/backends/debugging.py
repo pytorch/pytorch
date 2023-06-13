@@ -86,6 +86,10 @@ class ReluCompileError(Exception):
     pass
 
 
+class TestingOnlyCompileError(Exception):
+    pass
+
+
 @register_backend
 def relu_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs):
     for node in gm.graph.nodes:
@@ -112,4 +116,19 @@ def relu_accuracy_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs):
             node.args = (node.args[0], 1)
     gm.recompile()
 
+    return gm
+
+
+@register_backend
+def non_leaf_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs):
+    # Require at least one non-trivial thing in the graph,
+    # see https://github.com/pytorch/pytorch/issues/102898
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            break
+    else:
+        return gm
+    for t in example_inputs:
+        if not t.is_leaf:
+            raise TestingOnlyCompileError()
     return gm
