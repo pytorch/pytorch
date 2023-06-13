@@ -15,8 +15,9 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 
-from typing import Any, NamedTuple
+from typing import Any, List, NamedTuple, Set
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -284,6 +285,42 @@ CI_SKIP_OPTIMIZER = {
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
 }
+
+
+# Model Groups
+@dataclass(frozen=True)
+class ModelGroup:
+    name: str
+    models: Set[str]
+
+
+BLUEBERRY_MODELS = ModelGroup("Blueberries", {"llama", "nanogpt_generate"})
+
+
+@dataclass(frozen=True)
+class GroupMap:
+    groups: List[ModelGroup]
+
+    def model_group(self, model_name):
+        for group in self.groups:
+            if model_name in group.models:
+                return group.name
+        return None
+
+    @classmethod
+    def assert_single_group(cls, groups: List[ModelGroup]):
+        model_to_group = {}
+        for group in groups:
+            for model in group.models:
+                if model in model_to_group:
+                    raise ValueError(
+                        f"Model {model} appears in multiple groups, {model_to_group[model]} and {group.name}"
+                    )
+                model_to_group[model] = group.name
+        return cls(groups)
+
+
+ALL_MODEL_GROUPS = GroupMap.assert_single_group([BLUEBERRY_MODELS])
 
 
 def model_specified_by_path(path_and_class_str):
@@ -688,8 +725,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    first_headers = ["dev", "name", "batch_size"]
-    first_fields = [current_device, current_name, current_batch_size]
+    current_group = ALL_MODEL_GROUPS.model_group(current_name)
+    first_headers = ["dev", "name", "group", "batch_size"]
+    first_fields = [current_device, current_name, current_group, current_batch_size]
     if "tag" in kwargs:
         first_headers.append("tag")
         first_fields.append(kwargs["tag"])
@@ -1150,6 +1188,9 @@ class BenchmarkRunner:
         self._args = None
 
     def setup_amp(self):
+        if self.args.only in self.fp32_only_models:
+            return
+
         if self.args.amp and self.args.devices == ["cuda"]:
             # AMP training can lead to small loss values which can undeflow
             # gradient values returning in zero gradients. To solve this
@@ -1212,6 +1253,10 @@ class BenchmarkRunner:
 
     @property
     def non_deterministic_models(self):
+        return set()
+
+    @property
+    def fp32_only_models(self):
         return set()
 
     @property
@@ -2465,25 +2510,6 @@ def run(runner, args, original_dir=None):
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
-    if args.inductor or args.inductor_settings:
-        runner.skip_models.update(runner.failing_torchinductor_models)
-        if args.float16:
-            # TODO(jansel): check if correctness issue is real
-            runner.skip_models.add("yolov3")
-
-    if args.float16:
-        # these give `INCORRECT - Variation in Eager runs itself` sometimes
-        runner.non_deterministic_models.update(
-            {
-                "demucs",
-                "pyhpc_equation_of_state",
-                "timm_efficientdet",
-                "pyhpc_isoneutral_mixing",
-                "pyhpc_turbulent_kinetic_energy",
-                "shufflenet_v2_x1_0",
-            }
-        )
-
     if args.no_skip:
         runner.skip_models.clear()
 
@@ -2566,7 +2592,9 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
+        inductor_config.triton.cudagraphs = (
+            not args.disable_cudagraphs and not args.dynamic_shapes
+        )
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
         )
