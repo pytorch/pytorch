@@ -4437,6 +4437,21 @@ class LoopBody:
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
+    @cache_on_self
+    def get_nodes(self):
+        all_graphs = itertools.chain(
+            (self.root_block.graph,),
+            (block.graph for block in self.subblocks.values()),
+        )
+        return [node for graph in all_graphs for node in graph.nodes]
+
+    @cache_on_self
+    def bounds(self):
+        # Doing a local import to avoid dumping all the code here
+        from .bounds import BoundVars
+
+        return BoundVars(self)
+
     def debug_str(self):
         lines = [f"var_ranges = {dict(self.var_ranges)}"]
         lines.extend([f"{name} = {val}" for name, val in self.indexing_exprs.items()])
