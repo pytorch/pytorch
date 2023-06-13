@@ -51,7 +51,7 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
     return False
 
 
-def pretty_print_buckets(buckets: List[Bucket]):
+def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
     extended_buckets = []
@@ -63,25 +63,31 @@ def pretty_print_buckets(buckets: List[Bucket]):
         if bucket.extended_to_capture_external_output:
             extended_buckets.append(idx)
 
-    try:
-        from tabulate import tabulate
+    if len(rows):
+        log.info(
+            "\nDDPOptimizer used bucket cap %s and created %d buckets. Enable debug logs for detailed bucket info.",
+            bucket_bytes_cap,
+            len(buckets),
+        )
+        try:
+            from tabulate import tabulate
 
-        # TODO: Do you really want to log.info this?  It would get
-        # suppressed if log level is too low
-        log.info(
-            "\nDDPOptimizer bucket assignments\n%s",
-            tabulate(rows, headers=headers, tablefmt="simple_grid"),
-        )
-    except ImportError:
-        log.info(
-            "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
-        )
+            log.debug(
+                "\nDDPOptimizer produced the following bucket assignments:\n%s",
+                tabulate(rows, headers=headers, tablefmt="simple_grid"),
+            )
+        except ImportError:
+            log.info(
+                "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
+            )
+    else:
+        log.debug("DDPOptimizer captured no parameters and did not split this graph.")
 
     if len(extended_buckets):
         log.warning(
-            "Buckets %s were extended beyond their requested parameter capacities in order to ensure each subgraph has "
-            " an output node, required for fx graph partitioning. This can be the case when a subgraph would have "
-            " only contained nodes performing inplace mutation, and returning no logical outputs. This should not "
+            "Buckets %s were extended beyond their requested parameter capacities in order to ensure each subgraph has"
+            " an output node, required for fx graph partitioning. This can be the case when a subgraph would have"
+            " only contained nodes performing inplace mutation, and returning no logical outputs. This should not"
             " be a problem, unless it results in too few graph partitions for optimal DDP performance.",
             extended_buckets,
         )
@@ -233,11 +239,7 @@ class DDPOptimizer:
 
         # stash buckets for testing/debugging purposes
         self.buckets = buckets
-        log.info(
-            "DDPOptimizer used bucket cap %s and produced the following buckets:",
-            self.bucket_bytes_cap,
-        )
-        pretty_print_buckets(buckets)
+        pretty_print_buckets(buckets, self.bucket_bytes_cap)
 
         if len(buckets) == 1:
             # bypass split/fuse logic if there is only one bucket
