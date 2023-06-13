@@ -937,7 +937,7 @@ def is_warn_always_enabled():
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
 def _check_with(error_type, cond, message):
-    if not isinstance(cond, builtins.bool):
+    if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
     if cond:
@@ -1478,16 +1478,10 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config = dict()
+        self.config: Dict[str, Any] = dict()
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
-        if dynamic:
-            # cudagraphs conflicts with dynamic shapes
-            self.config["triton.cudagraphs"] = False
-            assert "triton.cudagraphs" not in (
-                options or ()
-            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
 
         # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
         if self.config.get("triton.cudagraphs", False):

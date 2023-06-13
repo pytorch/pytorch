@@ -35,8 +35,7 @@ from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.nn.parallel import DistributedDataParallel as DDP
+
 from torch.utils._pytree import tree_map, tree_map_only
 
 from tqdm.auto import tqdm, trange
@@ -1151,7 +1150,7 @@ class BenchmarkRunner:
         self._args = None
 
     def setup_amp(self):
-        if self.args.amp and self.args.training and self.args.devices == ["cuda"]:
+        if self.args.amp and self.args.devices == ["cuda"]:
             # AMP training can lead to small loss values which can undeflow
             # gradient values returning in zero gradients. To solve this
             # problem, PyTorch introduces GradScaler. GradScaler is a stateful
@@ -1390,8 +1389,18 @@ class BenchmarkRunner:
         def deepcopy_and_maybe_ddp(model):
             model = self.deepcopy_model(model)
             if self.args.ddp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use DDP without a distributed enabled build"
+                from torch.nn.parallel import DistributedDataParallel as DDP
+
                 model = DDP(model, find_unused_parameters=True)
             elif self.args.fsdp:
+                assert (
+                    torch.distributed.is_available()
+                ), "Can't use FSDP without a distributed enabled build"
+                from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
                 model = FSDP(model, use_orig_params=True)
                 if torch._inductor.config.triton.cudagraphs:
                     log.warning("Disabling cudagraphs for FSDP compatibility")
@@ -2550,7 +2559,9 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
+        inductor_config.triton.cudagraphs = (
+            not args.disable_cudagraphs and not args.dynamic_shapes
+        )
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
         )

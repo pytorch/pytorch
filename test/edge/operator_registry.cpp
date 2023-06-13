@@ -16,7 +16,7 @@ bool register_kernels(const ArrayRef<Kernel>& kernels) {
 bool KernelRegistry::register_kernels(
     const ArrayRef<Kernel>& kernels) {
   for (const auto& kernel : kernels) {
-    this->kernel_map_[kernel.name_] = kernel.kernel_;
+    this->kernels_map_[kernel.name_] = kernel.kernel_;
   }
   return true;
 }

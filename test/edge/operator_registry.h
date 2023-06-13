@@ -39,9 +39,9 @@ struct Kernel {
 bool hasKernelFn(const char* name);
 
 /**
- * See KernelRegistry::hasKernelFn()
+ * See KernelRegistry::getKernelFn()
  */
-KernelFunction& hasKernelFn(const char* name);
+KernelFunction& getKernelFn(const char* name);
 
 
 [[nodiscard]] bool register_kernels(const ArrayRef<Kernel>&);

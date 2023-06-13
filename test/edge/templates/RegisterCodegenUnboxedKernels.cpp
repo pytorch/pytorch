@@ -7,7 +7,7 @@ namespace executor {
 namespace {
 using KernelArrayRef = ::at::ArrayRef<::torch::executor::Kernel>;
 
-static Kernel operators_to_register[] = {
+static Kernel kernels_to_register[] = {
     ${unboxed_kernels} // Generated operators
 };
 
