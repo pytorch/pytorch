@@ -493,9 +493,6 @@ class BuiltinVariable(VariableTracker):
                     fn,
                     *proxy_args_kwargs(args, kwargs),
                 )
-                import pdb
-
-                pdb.set_trace()
                 if any(isinstance(arg, FakeItemVariable) for arg in args):
                     return wrap_fx_proxy_cls(
                         FakeItemVariable,
