@@ -163,12 +163,8 @@ class RandomSampler(Sampler[int]):
             yield from torch.randint(high=n, size=(self.num_samples % 32,), dtype=torch.int64, generator=generator).tolist()
         else:
             for _ in range(self.num_samples // n):
-                indices = torch.randperm(n, generator=generator).numpy()
-                for i in indices:
-                    yield i.item()
-            indices = torch.randperm(n, generator=generator)[:self.num_samples % n].numpy()
-            for i in indices:
-                yield i.item()
+                yield from map(int, torch.randperm(n, generator=generator).numpy())
+            yield from map(int, torch.randperm(n, generator=generator)[:self.num_samples % n].numpy())
 
     def __len__(self) -> int:
         return self.num_samples
