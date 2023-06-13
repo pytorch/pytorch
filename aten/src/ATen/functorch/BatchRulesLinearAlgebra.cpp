@@ -293,13 +293,13 @@ fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
   const auto key_ = key_bdim.has_value() ? reshape_dim_into(*key_bdim, 0, key) : key;
   const auto value_ = value_bdim ? reshape_dim_into(*value_bdim, 0, value) : value;
 
-  const auto res = at::_scaled_dot_product_efficient_attention(query_, key_,
-      value_, compute_log_sumexp, dropout_p, is_causal, scale);
+  const auto [res0, res1, res2, res3] = at::_scaled_dot_product_efficient_attention(
+      query_, key_, value_, compute_log_sumexp, dropout_p, is_causal, scale);
   const auto batch_size = query.size(*query_bdim);
-  const auto res0_ = reshape_dim_outof(0, batch_size, std::get<0>(res));
-  const auto res1_ = reshape_dim_outof(0, batch_size, std::get<1>(res));
-  const auto res2_ = reshape_dim_outof(0, batch_size, std::get<2>(res));
-  const auto res3_ = reshape_dim_outof(0, batch_size, std::get<3>(res));
+  const auto res0_ = reshape_dim_outof(0, batch_size, res0);
+  const auto res1_ = reshape_dim_outof(0, batch_size, res1);
+  const auto res2_ = reshape_dim_outof(0, batch_size, res2);
+  const auto res3_ = reshape_dim_outof(0, batch_size, res3);
   return std::make_tuple(res0_, 0, res1_, 0, res2_, 0, res3_, 0);
 }
 
@@ -325,14 +325,14 @@ threeOutputs _scaled_dot_product_efficient_attention_backward_batch_rule(
   const auto philox_seed_ = philox_seed_bdim.has_value() ? reshape_dim_into(*philox_seed_bdim, 0, philox_seed) : philox_seed;
   const auto philox_offset_ = philox_offset_bdim.has_value() ? reshape_dim_into(*philox_offset_bdim, 0, philox_offset) : philox_offset;
 
-  const auto res = at::_scaled_dot_product_efficient_attention_backward(
+  const auto [res0, res1, res2] = at::_scaled_dot_product_efficient_attention_backward(
       grad_out__, query_, key_, value_, out_, logsumexp_, philox_seed_, 
       philox_offset_, dropout_p, causal, scale);
 
   auto batch_size = query.size(*query_bdim);
-  auto res0_ = reshape_dim_outof(0, batch_size, std::get<0>(res));
-  auto res1_ = reshape_dim_outof(0, batch_size, std::get<1>(res));
-  auto res2_ = reshape_dim_outof(0, batch_size, std::get<2>(res));
+  auto res0_ = reshape_dim_outof(0, batch_size, res0);
+  auto res1_ = reshape_dim_outof(0, batch_size, res1);
+  auto res2_ = reshape_dim_outof(0, batch_size, res2);
   return std::make_tuple(res0_, 0, res1_, 0, res2_, 0);
 }
 
