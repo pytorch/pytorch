@@ -434,17 +434,9 @@ class ContinueExecutionCache:
             # because the line number table monotonically increases from co_firstlineno
             # remove starts_line for any instructions before the graph break instruction
             # this will ensure the instructions after the break have the correct line numbers
-            if is_py311_plus:
-                # In 3.11+ bytecode instruction size vary, so do bisect to find the index
-                target_ind = next(
-                    idx
-                    for (idx, inst) in enumerate(instructions)
-                    if inst.offset is not None and inst.offset >= target.offset
-                )
-            else:
-                target_ind = target.offset // 2
-
-            for inst in instructions[0:target_ind]:
+            for inst in instructions:
+                if inst.offset and inst.offset >= target.offset:
+                    break
                 inst.starts_line = None
 
             if cleanup:
@@ -605,9 +597,9 @@ def patch_setup_with(
 ):
     nonlocal need_skip
     need_skip = True
-    target_index = [
+    target_index = next(
         idx for idx, i in enumerate(instructions) if i.offset == offset
-    ][0]
+    )
     assert instructions[target_index].opname == "SETUP_WITH"
     convert_locals_to_cells(instructions, code_options)
 
