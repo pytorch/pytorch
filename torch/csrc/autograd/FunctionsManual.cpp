@@ -1473,6 +1473,7 @@ Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
       return gx.sparse_mask(x.coalesce());
     }
   }
+}
 
 std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
     const Tensor& grad,
