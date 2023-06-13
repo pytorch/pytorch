@@ -178,19 +178,14 @@ def setup_stacktrace_preservation_hooks(roots: List, max_seq_id: int = 0):
                 fx_traceback.set_bwd_seq_id(max_seq_id)
                 prev_stack = stack_
             meta = fx_traceback.get_current_meta()
-            print(f"Pre-hook for {op_name} called stack {stack_}")
-            print(f"Pre-hook max seq id {max_seq_id}")
 
         return prehook
 
     def get_posthook(special_stack_):
         def posthook(grad_input, grad_output):
             fx_traceback.set_stack_trace(special_stack_)
-
-            print("Post-hook called")
         return posthook
 
-    print(f"Setting up BWD w/ max seq_id {max_seq_id}")
     for node in iter_graph(roots):
         forward_node_stack = node.metadata.get("traceback_", [])
         forward_node_module_info = str(node.name)
@@ -3866,7 +3861,6 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
     # Next, the input args
     full_args.extend(args)
 
-    print(f"AOT exporting module w/ max fwd ops {max_fwd_ops} ")
     with ctx():
         fx_g, metadata, in_spec, out_spec = _aot_export_function(
             fn_to_trace,
@@ -3879,11 +3873,6 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
 
     skip_flatten_joint = True
     trace_joint = False
-    for node in fx_g.graph.nodes:
-        if "call_" in node.op:
-            seq_id = node.meta.get("seq_id", -1)
-            if seq_id >= 0:
-                print(f"Internal node {node.op} target {node.target} seq_id {seq_id}")
 
     if trace_joint:
         def flattened_joint(*args):
@@ -4040,8 +4029,6 @@ def _aot_export_function(
     flat_fn, out_spec = create_tree_flattened_fn(func, args)
     flat_args, in_spec = pytree.tree_flatten(args)
 
-
-    print(f"AOT creating dispatcher for module w/ max fwd ops {max_fwd_ops} ")
     # The export use case doesn't care about several bits of AOTConfig
     # (1) compilers (we just export the graph)
     # (2) partitioners (export is only full graph, user can partition themselves)

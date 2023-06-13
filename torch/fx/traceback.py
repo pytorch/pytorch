@@ -44,7 +44,6 @@ def set_bwd_seq_id(max_fwd_seq_id):
             bwd_seq_id = max_fwd_seq_id
         assert bwd_seq_id >= 0, f"Unexpected bwd seq id {bwd_seq_id}"
         current_meta["seq_id"] = bwd_seq_id
-        print(f"FX setting Bwd seq_id to {bwd_seq_id}")
         bwd_seq_id = bwd_seq_id - 1
 
 

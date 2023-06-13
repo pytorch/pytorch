@@ -2361,24 +2361,11 @@ class CommonTemplate:
         mod = Model()
         mod.cuda().to(memory_format=torch.contiguous_format)
         mod.train()
-        optimizer = torch.optim.SGD(mod.parameters(), lr=0.01)
         x = torch.rand(100, 16, 32, 32, device="cuda", requires_grad=True)
         target = torch.rand(1, device="cuda")
-        opt_mod = torch.compile(mod)
-        res = opt_mod(x, target)
-        #expected = mod(x, target)
-        #self.assertTrue(torch.allclose(res, expected))
-        res[0].backward(retain_graph=True)
-        optimizer.step()
-
 
         # Use dynamo export to get the fx graph module
         g_mod, _ = torch._dynamo.export(mod, x, target)
-
-        print(f"Finished dynamo export")
-        # Run it w/ inductor
-        #aot_fn = torch._dynamo.optimize("inductor")(g_mod)
-        #output = aot_fn(x, target)
 
         # aot_export requires a graph mod input of fwd graph
         # returns the full fwd/bwd graph in graph mod format
@@ -2402,7 +2389,6 @@ class CommonTemplate:
                         bwd_detected = True
         # Last node in list will be 0, just pop it to clear list
         seq_id_list.pop()
-        print(f"Fwd {fwd_detected} Bwd {bwd_detected} seq {seq_id_list}")
         self.assertTrue(fwd_detected and bwd_detected and not seq_id_list)
 
 

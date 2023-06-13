@@ -1132,8 +1132,6 @@ class SubgraphTracer(fx.Tracer):
         if inc_seq_id:
             tx.fwd_seq_id = tx.fwd_seq_id + 1
 
-        print(f"Tx Node {rv.node.name}")
-        print(f"Tx fwd_seq_id {tx.fwd_seq_id}")
         rv.node.meta["seq_id"] = tx.fwd_seq_id
 
         frame_summaries: List[traceback.FrameSummary] = []
