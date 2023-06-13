@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 
 import torch.fx
 
-__all__ = ["compile", "list_mode_options", "list_options"]
+__all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
 
 
 def compile(
@@ -101,3 +101,10 @@ def list_options() -> Dict[str, Any]:
     current_config: Dict[str, Any] = config.to_dict()  # type: ignore[attr-defined]
 
     return list(current_config.keys())
+
+
+def cudagraph_mark_step_begin():
+    "Indicates that a new iteration of inference or training is about to begin."
+    from .cudagraph_trees import mark_step_begin
+
+    mark_step_begin()

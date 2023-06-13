@@ -79,7 +79,12 @@ class PackedLinearWeightDynamicBackward
       // Per Channel quantizer does not support transpose.
       // Manual transpose is necessary
       original_weight = original_weight.dequantize();
-#if 1
+
+// kwanghoon(TODO): This is going to be a long term solution that is applicable
+// to every models One issue with quantizing a gradient, we can't get good
+// enough gradient to improve model accuracy when model become complicated As of
+// now, we can disable, and comeback when we figure it out better solution.
+#if 0
       // Enable Kernel backend for quantized backpropagaiton matrix
       // multiplication
       original_weight = at::permute(original_weight, {1, 0});
@@ -116,7 +121,7 @@ class PackedLinearWeightDynamicBackward
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unsupported quantization scheme.");
     }
-#if 0
+#if 1
     // Pure FP32 computation, useful for debugging purpose
     auto dLdX1 = torch::matmul(grad_output0, original_weight);
 #else

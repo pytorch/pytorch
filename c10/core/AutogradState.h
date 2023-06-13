@@ -18,7 +18,8 @@ struct C10_API AutogradState {
       : grad_mode_(grad_mode),
         inference_mode_(inference_mode),
         fw_grad_mode_(fw_grad_mode),
-        multithreading_enabled_(multithreading_enabled) {}
+        multithreading_enabled_(multithreading_enabled),
+        view_replay_enabled_(false) {}
 
   void set_grad_mode(bool enabled) {
     grad_mode_ = enabled;

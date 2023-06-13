@@ -436,7 +436,7 @@ namespace {
 
 }  // namespace
 
-Tensor _grid_sampler_2d_cpu_quantized(
+static Tensor _grid_sampler_2d_cpu_quantized(
     const Tensor& input,
     const Tensor& grid,
     int64_t interpolation_mode_,

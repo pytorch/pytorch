@@ -31,9 +31,6 @@ class PassBase(abc.ABC):
     the PassManager's `passes` attribute.
     """
 
-    def __init__(self) -> None:
-        pass
-
     def __call__(self, graph_module: GraphModule) -> Optional[PassResult]:
         """
         Runs the precondition check, the pass itself, and the postcondition check.
@@ -55,7 +52,7 @@ class PassBase(abc.ABC):
         """
         pass
 
-    def requires(self, graph_module: GraphModule) -> None:
+    def requires(self, graph_module: GraphModule) -> None:  # noqa: B027
         """
         This function will be called before the pass is run and will check that
         the given graph module contains the preconditions needed to run the
@@ -66,7 +63,7 @@ class PassBase(abc.ABC):
         """
         pass
 
-    def ensures(self, graph_module: GraphModule) -> None:
+    def ensures(self, graph_module: GraphModule) -> None:  # noqa: B027
         """
         This function will be called after the pass is run and will check that
         the given graph module contains the postconditions needed to run the

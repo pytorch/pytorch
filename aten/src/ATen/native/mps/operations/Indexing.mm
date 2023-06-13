@@ -24,6 +24,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/count_nonzero.h>
 #include <ATen/ops/index.h>
 #include <ATen/ops/index_add_native.h>
 #include <ATen/ops/index_put.h>
@@ -47,6 +48,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
   if (iter.numel() == 0) {
     return true;
   }
+  const bool serial_index_put = at::globalContext().deterministicAlgorithms() && !accumulate && !index_select;
 
   const Tensor& inputTensor = iter.tensor(1);
   Tensor outputTensor = iter.tensor(0);
@@ -60,7 +62,8 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       NSError* error = nil;
       constexpr uint32_t nOffsets = 3;
       const int64_t num_indices = index_size.size();
-      const uint32_t numThreads = iter.numel();
+      const uint32_t numIters = serial_index_put ? iter.numel() : 1;
+      uint32_t numThreads = iter.numel();
       const uint32_t nDim = iter.ndim();
       const IntArrayRef& iterShape = iter.shape();
       std::vector<uint32_t> iterShapeData(iterShape.size());
@@ -80,7 +83,7 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets =
           (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * sizeof(simd_uint3)).get();
       TORCH_CHECK(
@@ -101,12 +104,13 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
       MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:kernelOffsetsThreadGroupSize];
 
-      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate);
+      std::string indexFunction =
+          getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate, serial_index_put);
       id<MTLComputePipelineState> indexSelectPSO = nil;
       id<MTLBuffer> indexAB = nil;
 #if defined(__MAC_13_0)
       if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS)) {
-        indexSelectPSO = MPSDevice::getInstance()->metalIndexingFunction(indexFunction);
+        indexSelectPSO = MPSDevice::getInstance()->metalIndexingPSO(indexFunction);
         size_t argumentBufferLength = sizeof(uint64_t) * num_indices;
         indexAB = [[device newBufferWithLength:argumentBufferLength options:0] autorelease];
         uint64_t* indexABContents = (uint64_t*)(indexAB.contents);
@@ -155,6 +159,13 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
                          offset:outputTensor.storage_offset() * outputTensor.element_size()
                         atIndex:5];
       [computeEncoder setBytes:&num_indices length:sizeof(uint32_t) atIndex:6];
+      if (serial_index_put) {
+        [computeEncoder setBytes:&numIters length:sizeof(numIters) atIndex:7];
+        gridSize = MTLSizeMake(1, 1, 1);
+        numThreads = 1;
+      } else {
+        gridSize = MTLSizeMake(numThreads, 1, 1);
+      }
 
       NSUInteger tgSize = indexSelectPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
@@ -277,19 +288,26 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
     MPSGraphTensor* inputTensor_ = nil;
     MPSGraphTensor* outputTensor_ = nil;
     MPSGraphTensor* scatterDataTensor_ = nil;
-    MPSGraphTensor* countNonzeroTensor_ = nil;
   };
 
   stream->synchronize(SyncType::COMMIT_AND_WAIT);
-  Tensor count_nonzero = at::empty({1}, self.options().dtype(kInt));
-  Tensor out = at::empty(
-      {self.numel(), nDim == 0 ? 1 : nDim}, out_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  int64_t total_nonzero = at::count_nonzero(self).item<int64_t>();
+  at::native::resize_output(out_, {total_nonzero, nDim});
+  if (out_.numel() == 0) {
+    return out_;
+  }
+
+  bool contiguous_output = out_.is_contiguous();
+  Tensor out = out_;
+  if (!contiguous_output) {
+    out = at::empty(out_.sizes(), out_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  }
 
   int64_t _apparentInputShape = 1;
   for (auto dim : self.sizes()) {
     _apparentInputShape *= dim;
   }
-  MPSShape* apparentOutputShape = @[ @(self.numel() * nDim) ];
+  MPSShape* apparentOutputShape = @[ @(total_nonzero * nDim) ];
   MPSShape* apparentInputShape = @[ @(_apparentInputShape) ];
 
   // Pseudocode:
@@ -316,7 +334,6 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
       MPSGraphTensor* inputNotEqualToZeroTensor = [mpsGraph notEqualWithPrimaryTensor:inputTensor
                                                                       secondaryTensor:zeroTensor
                                                                                  name:nil];
-      MPSGraphTensor* countNonzero = [mpsGraph reductionSumWithTensor:inputNotEqualToZeroTensor axis:0 name:nil];
       MPSGraphTensor* maskTensor = [mpsGraph castTensor:inputNotEqualToZeroTensor
                                                  toType:MPSDataTypeInt32
                                                    name:@"castToInt32"];
@@ -366,11 +383,9 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->scatterDataTensor_ = scatterDataTensor;
       newCachedGraph->outputTensor_ = outputTensor;
-      newCachedGraph->countNonzeroTensor_ = countNonzero;
     });
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, apparentInputShape);
-    Placeholder countNonzeroPlaceholder = Placeholder(cachedGraph->countNonzeroTensor_, count_nonzero);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out, apparentOutputShape);
     Placeholder scatterPlaceholder = Placeholder(cachedGraph->scatterDataTensor_, out, apparentOutputShape);
 
@@ -382,15 +397,15 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-      countNonzeroPlaceholder.getMPSGraphTensor() : countNonzeroPlaceholder.getMPSGraphTensorData()
     };
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
-  int32_t total_nonzero = count_nonzero.item<int32_t>();
-  at::native::resize_output(out_, {total_nonzero, nDim});
-  out_.copy_(out.resize_({total_nonzero, nDim}));
+  if (!contiguous_output) {
+    out_.copy_(out);
+  }
+
   return out_;
 }
 
@@ -624,7 +639,7 @@ Tensor& index_select_out_mps(const Tensor& self, int64_t dim, const Tensor& inde
   }
 
   // Empty index
-  if (num_indices == 0) {
+  if (num_indices == 0 || self.numel() == 0) {
     return output;
   }
 
@@ -809,9 +824,8 @@ Tensor embedding_dense_backward_mps(const Tensor& grad_,
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "edb_mps:" + getMPSTypeString(grad_) + ":indices" + std::to_string(num_indices_dims) + ":num_weights" +
-        std::to_string(num_weights) + ":padding_idx" + std::to_string(padding_idx) + ":scaled" +
-        std::to_string(scale_grad_by_freq);
+    string key = "edb_mps:" + getTensorsStringKey({grad_, indices}) + ":num_weights" + std::to_string(num_weights) +
+        ":padding_idx" + std::to_string(padding_idx) + ":scaled" + std::to_string(scale_grad_by_freq);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* incomingGradTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_));
 

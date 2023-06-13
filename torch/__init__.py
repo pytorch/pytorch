@@ -19,16 +19,23 @@ import inspect
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
+# multipy/deploy is setting this import before importing torch, this is the most
+# reliable way we have to detect if we're running within deploy.
+# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
+def _running_with_deploy():
+    return sys.modules.get("torch._meta_registrations", None) is object
+
 from ._utils import _import_dotted_name, classproperty
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
+
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
-if sys.executable == 'torch_deploy':
+if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
 else:
     from .torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
 import builtins
 
 __all__ = [
@@ -157,7 +164,7 @@ def _preload_cuda_deps(lib_folder, lib_name):
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
+    if _running_with_deploy() or platform.system() == 'Windows':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
@@ -191,7 +198,7 @@ def _load_global_deps():
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        (sys.executable == "torch_deploy" or platform.system() != 'Windows'):
+        (_running_with_deploy() or platform.system() != 'Windows'):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -930,7 +937,7 @@ def is_warn_always_enabled():
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
 def _check_with(error_type, cond, message):
-    if not isinstance(cond, builtins.bool):
+    if not isinstance(cond, (builtins.bool, torch.SymBool)):
         raise TypeError(f'cond must be a bool, but got {type(cond)}')
 
     if cond:
@@ -1277,7 +1284,7 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 def manager_path():
-    if sys.executable == 'torch_deploy' or platform.system() == 'Windows':
+    if _running_with_deploy() or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
     prepare_multiprocessing_environment(get_file_path('torch'))
@@ -1393,14 +1400,7 @@ from torch import hub as hub
 from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
-import torch.backends.cpu
-import torch.backends.cuda
-import torch.backends.mps
-import torch.backends.cudnn
-import torch.backends.mkl
-import torch.backends.mkldnn
-import torch.backends.openmp
-import torch.backends.quantized
+from torch import backends as backends
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
@@ -1478,16 +1478,14 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config = dict()
+        self.config: Dict[str, Any] = dict()
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
-        if dynamic:
-            # cudagraphs conflicts with dynamic shapes
-            self.config["triton.cudagraphs"] = False
-            assert "triton.cudagraphs" not in (
-                options or ()
-            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
+
+        # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
+        if self.config.get("triton.cudagraphs", False):
+            os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
@@ -1498,7 +1496,8 @@ class _TorchCompileInductorWrapper:
         if mode is None or mode == "default":
             pass
         elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
-            self.apply_options(torch._inductor.list_mode_options(mode))
+            from torch._inductor import list_mode_options
+            self.apply_options(list_mode_options(mode))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
@@ -1576,10 +1575,26 @@ def compile(model: Optional[Callable] = None, *,
     """
     Optimizes given model/function using TorchDynamo and specified backend.
 
+    Concretely, for every frame executed within the compiled region, we will attempt
+    to compile it and cache the compiled result on the code object for future
+    use.  A single frame may be compiled multiple times if previous compiled
+    results are not applicable for subsequent calls (this is called a "guard
+    failure), you can use TORCH_LOGS=guards to debug these situations.
+    Multiple compiled results can be associated with a frame up to
+    ``torch._dynamo.config.cache_size_limit``, which defaults to 64; at which
+    point we will fall back to eager.  Note that compile caches are per
+    *code object*, not frame; if you dynamically create multiple copies of a
+    function, they will all share the same code cache.
+
     Args:
        model (Callable): Module/function to optimize
        fullgraph (bool): Whether it is ok to break model into several subgraphs
-       dynamic (bool): Use dynamic shape tracing
+       dynamic (bool): Use dynamic shape tracing.  When this is True, we will up-front attempt
+        to generate a kernel that is as dynamic as possible to avoid recompilations when
+        sizes change.  This may not always work as some operations/optimizations will
+        force specialization; use TORCH_LOGS=dynamic to debug overspecialization.
+        In particular, if you use "reduce-overhead", this will force sizes to be static
+        even with dynamic=True.
        backend (str or Callable): backend to be used
         - "inductor" is the default backend, which is a good balance between performance and overhead
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
@@ -1587,9 +1602,19 @@ def compile(model: Optional[Callable] = None, *,
         - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
         - "default" is the default mode, which is a good balance between performance and overhead
-        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
+
+        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs,
+          useful for small batches.  Reduction of overhead can come at the cost of more memory
+          usage, as we will cache the workspace memory required for the invocation so that we
+          do not have to reallocate it on subsequent runs.  Reduction of overhead is not guaranteed
+          to work; today, we only reduce overhead for CUDA only graphs which do not mutate inputs.
+          There are other circumstances where CUDA graphs are not applicable; use TORCH_LOG=perf_hints
+          to debug.
+
         - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
+
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
         - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
         - `max_autotune` which will profile to pick the best matmul configuration
@@ -1685,6 +1710,37 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
 
+# Register MPS specific decomps
+torch.backends.mps._init()
 
+if not _running_with_deploy():
+    class _TritonLibrary(object):
+        lib = torch.library.Library("triton", "DEF")
+        ops_table: Dict[Tuple[str, str], Callable] = {}
+
+        @classmethod
+        def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):
+            if (op_key, dispatch_key) not in cls.ops_table:
+                cls.lib.define(full_schema)
+                cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
+                cls.ops_table[(op_key, dispatch_key)] = op_impl
+
+            return cls.ops_table[(op_key, dispatch_key)]
+
+
+# Deprecated attributes
+_deprecated_attrs = {
+    "has_mps": torch.backends.mps.is_built,
+    "has_cuda": torch.backends.cuda.is_built,
+    "has_cudnn": torch.backends.cudnn.is_available,
+    "has_mkldnn": torch.backends.mkldnn.is_available,
+}
+def __getattr__(name):
+    replacement = _deprecated_attrs.get(name)
+    if replacement is not None:
+        import warnings
+        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+        return replacement()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 from . import _logging
 _logging._init_logs()

@@ -48,12 +48,15 @@ except ModuleNotFoundError:
 import importlib
 
 import torch
+import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
+
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
@@ -576,8 +579,11 @@ def clone_inputs(example_inputs):
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
-            assert isinstance(value, torch.Tensor)
-            res[key] = clone_input(value)
+            if isinstance(value, tuple):
+                res[key] = clone_inputs(value)
+            else:
+                assert isinstance(value, torch.Tensor), type(value)
+                res[key] = clone_input(value)
         return res
 
     res = list(example_inputs)
@@ -816,11 +822,15 @@ def enum_repr(value, local):
 
 
 def dict_param_key_ids(value):
-    return {id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)}
+    return {
+        id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))
+    }
 
 
 def dict_const_keys(value):
-    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
+    return {
+        k for k in value.keys() if not isinstance(k, (torch.nn.Parameter, torch.Tensor))
+    }
 
 
 def dict_const_keys_repr(const_keys, *, local):
@@ -1082,6 +1092,9 @@ orig_code_map = ExactWeakKeyDictionary()
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures = collections.defaultdict(list)
 
+# Keep a record of graph break reasons for logging
+graph_break_reasons = list()
+
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
 seen_code_map = ExactWeakKeyDictionary()
@@ -1259,6 +1272,7 @@ def get_fake_value(node, tx):
         cause = e
         if e.__cause__ is not None:
             cause = e.__cause__
+
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
@@ -1281,7 +1295,7 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
-        raise TorchRuntimeError() from e
+        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
 
 def run_node(tracer, node, args, kwargs, nnmodule):
@@ -1314,9 +1328,9 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             assert "example_value" in node.meta
             return node.meta["example_value"]
     except Exception as e:
-        raise RuntimeError(
-            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
-        ) from e
+        fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
+        raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+
     raise AssertionError(op)
 
 
@@ -1325,6 +1339,8 @@ def get_real_value(node, tracer):
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
     """
+    from .exc import TorchRuntimeError
+
     cache = tracer.real_value_cache
     if node in cache:
         return cache[node]
@@ -1350,7 +1366,7 @@ def get_real_value(node, tracer):
         real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        raise TorchRuntimeError() from e
+        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
     return real_value
 
 
@@ -1516,7 +1532,7 @@ def lazy_format_graph_tabular(fn_name, gm):
         except ImportError:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
-                + format_graph_code(fn_name, gm)
+                + str(lazy_format_graph_code(fn_name, gm))
             )
 
         node_specs = [
@@ -1532,6 +1548,17 @@ def lazy_format_graph_tabular(fn_name, gm):
 
 def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
+
+
+forward_hook_names = ["_forward_pre_hooks", "_forward_hooks"]
+backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
+state_dict_hook_names = [
+    "_state_dict_pre_hooks",
+    "_state_dict_hooks",
+    "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
+]
+all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
 
 
 def nnmodule_has_hooks(
@@ -1551,38 +1578,147 @@ def nnmodule_has_hooks(
         and not check_state_dict_hooks
     )
     if check_forward_hooks or check_all_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_forward_pre_hooks",
-                "_forward_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(forward_hook_names)
     if check_backward_hooks or check_all_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_backward_pre_hooks",
-                "_backward_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(backward_hook_names)
     if check_state_dict_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_state_dict_pre_hooks",
-                "_state_dict_hooks",
-                "_load_state_dict_pre_hooks",
-                "_load_state_dict_post_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(state_dict_hook_names)
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
 
 
-def to_numpy_helper(___tmp_0):
-    def convert(obj):
-        if isinstance(obj, torch_np.ndarray):
-            return obj.tensor.numpy()
-        else:
-            return obj
+def to_numpy_helper(value):
+    """Convert tensor and torch_np.ndarray to numpy.ndarray."""
+    if isinstance(value, torch_np.ndarray):
+        return value.tensor.numpy()
+    elif isinstance(value, torch.Tensor):
+        return value.numpy()
+    elif isinstance(value, (tuple, list)):
+        return type(value)(to_numpy_helper(obj) for obj in value)
+    else:
+        return value
 
-    if isinstance(___tmp_0, tuple):
-        return tuple([convert(obj) for obj in ___tmp_0])
-    return convert(___tmp_0)
+
+def numpy_to_tensor(value):
+    """Convert torch_np.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
+    if isinstance(value, torch_np.ndarray):
+        return value.tensor
+    elif isinstance(value, (tuple, list)):
+        return type(value)(numpy_to_tensor(obj) for obj in value)
+    else:
+        return value
+
+
+class numpy_to_tensor_wrapper:
+    def __init__(self, f):
+        self.f = f
+        self.__name__ = "wrapped_" + self.f.__name__
+
+    def __repr__(self):
+        return f"<Wrapped function <original {self.f.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        out = self.f(*args, **kwargs)
+        return numpy_to_tensor(out)
+
+
+def numpy_attr_wrapper(obj, name):
+    if isinstance(obj, torch_np.ndarray):
+        out = getattr(obj, name)
+        return numpy_to_tensor(out)
+    elif isinstance(obj, torch.Tensor):
+        out = getattr(torch_np.ndarray(obj), name)
+        return numpy_to_tensor(out)
+
+
+class numpy_method_wrapper:
+    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
+
+    def __init__(self, method: str):
+        self.method = method
+        self.__name__ = "wrapped_" + self.method
+
+    def __repr__(self):
+        return f"<Wrapped method <original {self.method}>>"
+
+    def __call__(self, *args, **kwargs):
+        obj = args[0]
+        if isinstance(obj, torch.Tensor):
+            obj = torch_np.ndarray(obj)
+        method_callable = getattr(obj, self.method)
+        out = method_callable(*args[1:], **kwargs)
+        return numpy_to_tensor(out)
+
+
+def defake(x):
+    if not isinstance(x, FakeTensor):
+        return x
+    if x._has_symbolic_sizes_strides:
+        size = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.size()
+        ]
+        stride = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.stride()
+        ]
+    else:
+        size = x.size()
+        stride = x.stride()
+    y = torch.empty_strided(
+        size,
+        stride,
+        dtype=x.dtype,
+        device=x.device,
+        requires_grad=x.requires_grad,
+    )
+    y.zero_()
+    return y
+
+
+# NB: The dictionary has to be created lazily after TorchPatcher is called so
+# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
+# sitting in a separate function.
+@functools.lru_cache(None)
+def higher_order_op_converter():
+    import torch._higher_order_ops.wrap
+
+    return {
+        torch.utils.checkpoint.checkpoint: torch._higher_order_ops.wrap.wrap_activation_checkpoint,
+    }
+
+
+def requires_higher_order_op(obj):
+    return obj in higher_order_op_converter()
+
+
+def get_higher_order_op(obj):
+    if (
+        obj is torch.utils.checkpoint.checkpoint
+        and not torch._functorch.config.functionalize_rng_ops
+    ):
+        from .exc import unimplemented
+
+        # TODO - functionalize_rng_ops flags cannot be turned ON by default
+        # because 1) Performance concerns - seed and offset are read and passed
+        # to each AOT graph 2) Inductor has rand-specific optimizations and
+        # there is work remaining to compose them together with
+        # functionalization.
+        #
+        # Until we make it ON by default, we will have to ask users to turn on
+        # this flag manually.  TODO - Revisit if there is a simpler way to
+        # resolve this problem.
+        torch._logging.warning_once(
+            log,
+            "torch.compile on activation checkpointing is an experimental feature. "
+            "Please manually set torch._functorch.config.functionalize_rng_ops=True "
+            "to run torch.compile with activation checkpointing. Without this flag, "
+            "checkpointed function will not get compiled and fallback to eager.",
+        )
+        unimplemented(
+            "torch.compile requires functioanlization of rng ops to be turned on"
+        )
+    return higher_order_op_converter().get(obj)
