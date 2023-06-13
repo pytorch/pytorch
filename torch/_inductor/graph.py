@@ -2,6 +2,8 @@ import logging
 import operator
 import os
 import re
+import copy
+import dataclasses
 import sys
 import time
 from typing import Dict, List, Optional, Set
@@ -97,6 +99,9 @@ def is_magic_method(op):
     magic_ops = {method_to_operator(m) for m in magic_methods}
     return op in magic_ops
 
+@dataclasses.dataclass
+class GraphState:
+    removed_buffers: Set[str]
 
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
@@ -195,6 +200,20 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = user_visible_outputs
+        self.saved_state = []
+
+    def save_state(self):
+        self.saved_state.append(GraphState(
+            removed_buffers=copy.deepcopy(self.removed_buffers),
+        ))
+
+    def restore_state(self):
+        state = self.saved_state[-1]
+        self.removed_buffers = state.removed_buffers
+        self.drop_state()
+
+    def drop_state(self):
+        self.saved_state.pop()
 
     def decide_layout_opt(self) -> bool:
         """

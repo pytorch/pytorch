@@ -2086,6 +2086,7 @@ class TritonScheduling:
             "mutations": mutations,
             "index_dtype": index_dtype,
         }
+        V.graph.save_state()
         kernel = TritonKernel(
             *kernel_args,
             **kernel_kwargs,
@@ -2097,6 +2098,7 @@ class TritonScheduling:
         kernel_name = self.define_kernel(src_code, node_schedule)
 
         if kernel.persistent_reduction and config.triton.multi_kernel:
+            V.graph.restore_state()
             kernel2 = TritonKernel(
                 *kernel_args,
                 **kernel_kwargs,
@@ -2113,6 +2115,7 @@ class TritonScheduling:
             kernel.call_kernel(kernel_name)
             # kernel2.call_kernel(kernel_name2)
         else:
+            V.graph.drop_state()
             kernel.call_kernel(kernel_name)
 
         if config.warn_mix_layout:
