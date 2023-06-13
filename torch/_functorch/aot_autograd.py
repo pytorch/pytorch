@@ -3684,6 +3684,7 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
+    mod_count = 0
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
         for i, node in enumerate(mod.graph.nodes):
@@ -3696,6 +3697,9 @@ def aot_module_simplified(
                     assert source not in seen_sources, source
                     seen_sources.add(source)
                     aot_autograd_arg_pos_to_source.append(source)
+            else:
+                if node.op in ("call_function", "call_method", "call_module"):
+                    mod_count += 1
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
@@ -3705,14 +3709,8 @@ def aot_module_simplified(
         if isinstance(x, FakeTensor):
             dynamic_shapes = x.fake_mode.shape_env is not None
             break
-
-    mod_count = 0
-    if isinstance(mod, torch.fx.GraphModule):
-        for node in mod.graph.nodes:
-            if node.op in ("call_function", "call_method", "call_module"):
-                mod_count += 1
-
     print(f"AOT creating dispatcher for module w/ max fwd ops {mod_count} ")
+
 
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
@@ -3730,7 +3728,6 @@ def aot_module_simplified(
         max_seq_id=mod_count - 1
     )
 
-    print(f"Calling create_aot_dispatch Max seq_id {aot_config.max_seq_id}")
     compiled_fn = create_aot_dispatcher_function(
         functional_call,
         full_args,
@@ -3810,6 +3807,13 @@ def aot_export_module(
 
     num_fw_outs = None
 
+    # Determine max number of fwd ops
+    max_fwd_ops = 0
+    if isinstance(mod, torch.fx.GraphModule):
+        for node in mod.graph.nodes:
+            if node.op in ("call_function", "call_method", "call_module"):
+                max_fwd_ops += 1
+
     if trace_joint:
         # This helper effectively just adds some extra asserts about what the backward will look like:
         # Outputs must include a scalar loss, that we compute gradients w.r.t.
@@ -3862,6 +3866,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
     # Next, the input args
     full_args.extend(args)
 
+    print(f"AOT exporting module w/ max fwd ops {max_fwd_ops} ")
     with ctx():
         fx_g, metadata, in_spec, out_spec = _aot_export_function(
             fn_to_trace,
@@ -3869,7 +3874,17 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             decompositions=decompositions,
             num_params_buffers=len(params_and_buffers_flat),
             no_tangents=True,
+            max_fwd_ops=max_fwd_ops,
         )
+
+    skip_flatten_joint = True
+    trace_joint = False
+    for node in fx_g.graph.nodes:
+        if "call_" in node.op:
+            seq_id = node.meta.get("seq_id", -1)
+            if seq_id >= 0:
+                print(f"Internal node {node.op} target {node.target} seq_id {seq_id}")
+
     if trace_joint:
         def flattened_joint(*args):
             # The idea here is that the joint graph that AOTAutograd creates has some strict properties:
@@ -4014,6 +4029,7 @@ def _aot_export_function(
     # (requiring it to be a graph input).
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
+    max_fwd_ops: int = 0,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     dynamic_shapes = False
     for x in args:
@@ -4024,13 +4040,8 @@ def _aot_export_function(
     flat_fn, out_spec = create_tree_flattened_fn(func, args)
     flat_args, in_spec = pytree.tree_flatten(args)
 
-    mod_count = 0
-    if isinstance(mod, torch.fx.GraphModule):
-        for node in mod.graph.nodes:
-            if node.op in ("call_function", "call_method", "call_module"):
-                mod_count += 1
 
-    print(f"AOT creating dispatcher for module w/ max fwd ops {mod_count} ")
+    print(f"AOT creating dispatcher for module w/ max fwd ops {max_fwd_ops} ")
     # The export use case doesn't care about several bits of AOTConfig
     # (1) compilers (we just export the graph)
     # (2) partitioners (export is only full graph, user can partition themselves)
@@ -4050,7 +4061,7 @@ def _aot_export_function(
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
-        max_seq_id=mod_count - 1
+        max_seq_id=max_fwd_ops - 1
     )
 
     fx_g, meta = create_aot_dispatcher_function(

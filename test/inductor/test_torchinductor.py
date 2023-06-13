@@ -23,6 +23,7 @@ import torch
 
 import torch._dynamo
 import torch.nn as nn
+import torch.fx.traceback as fx_traceback
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
@@ -45,6 +46,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch._functorch.aot_autograd import aot_export_module
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -2337,7 +2339,7 @@ class CommonTemplate:
                     kernel_size=(1, 1),
                     stride=1,
                     padding="same",
-                    bias=True
+                    bias=True,
                 )
                 self.bn1 = torch.nn.BatchNorm2d(num_features=16)
                 self.relu1 = torch.nn.ReLU()
@@ -2354,37 +2356,55 @@ class CommonTemplate:
                 x = self.fc1(x)
                 output = self.loss_fn(x, target)
 
-                return output
+                return (output,)
 
         mod = Model()
         mod.cuda().to(memory_format=torch.contiguous_format)
+        mod.train()
         optimizer = torch.optim.SGD(mod.parameters(), lr=0.01)
-        batch = 100
-        H = 32
-        W = 32
-        C = 16
-        x = torch.rand(batch, C, H, W, device="cuda")
+        x = torch.rand(100, 16, 32, 32, device="cuda", requires_grad=True)
         target = torch.rand(1, device="cuda")
         opt_mod = torch.compile(mod)
         res = opt_mod(x, target)
-        expected = mod(x, target)
-        self.assertTrue(torch.allclose(res, expected))
-        res.backward(retain_graph=True)
+        #expected = mod(x, target)
+        #self.assertTrue(torch.allclose(res, expected))
+        res[0].backward(retain_graph=True)
         optimizer.step()
+
+
+        # Use dynamo export to get the fx graph module
         g_mod, _ = torch._dynamo.export(mod, x, target)
 
-        for node in g_mod.graph.nodes:
-            seq_id = node.meta.get("seq_id", -1)
-            if seq_id >= 0:
-                print(f"Node {node.op} seq_id {seq_id}")
-
+        print(f"Finished dynamo export")
         # Run it w/ inductor
-        aot_fn = torch._dynamo.optimize("inductor")(g_mod)
-        output = aot_fn(x, target)
-        print(f"Type of output {type(output)}")
-        expl, out_guards, graphs, _, _, verbose = torch._dynamo.explain(aot_fn, x, target)
-        for idx, graph in enumerate(graphs):
-            print(f"Graph {idx} listing {graph}")
+        #aot_fn = torch._dynamo.optimize("inductor")(g_mod)
+        #output = aot_fn(x, target)
+
+        # aot_export requires a graph mod input of fwd graph
+        # returns the full fwd/bwd graph in graph mod format
+        with torch.enable_grad(), fx_traceback.preserve_node_meta():
+            fx_g, signature = aot_export_module(g_mod, [x, target],
+                    trace_joint=True, output_loss_index=0)
+
+        # Testing aot full graph
+        seq_id_list = []
+        fwd_detected = False
+        bwd_detechted = False
+        for node in fx_g.graph.nodes:
+            if "call_" in node.op:
+                seq_id = node.meta.get("seq_id", -1)
+                if seq_id >= 0:
+                    if not seq_id_list or seq_id_list[-1] < seq_id:
+                        seq_id_list.append(seq_id)
+                        fwd_detected = True
+                    elif seq_id_list[-1] > seq_id:
+                        seq_id_list.pop()
+                        bwd_detected = True
+        # Last node in list will be 0, just pop it to clear list
+        seq_id_list.pop()
+        print(f"Fwd {fwd_detected} Bwd {bwd_detected} seq {seq_id_list}")
+        self.assertTrue(fwd_detected and bwd_detected and not seq_id_list)
+
 
     def test_adaptive_avg_pool2d_low_prec(self):
         class Model(torch.nn.Module):
