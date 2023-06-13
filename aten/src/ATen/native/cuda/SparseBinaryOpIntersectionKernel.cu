@@ -36,13 +36,6 @@ struct RhsProjOp {
   }
 };
 
-struct LhsProjOp {
-  template <typename scalar_t>
-  static FUNCAPI scalar_t apply(scalar_t a, scalar_t b) {
-    return a;
-  }
-};
-
 template <int nt, int vt, typename loop_t>
 C10_LAUNCH_BOUNDS_2(nt, vt)
 __global__ void apply_kernel(int n, loop_t loop) {
@@ -77,12 +70,11 @@ void binary_op_intersection_kernel(
     TensorIterator& iter,
     int64_t lhs_nnz_stride,
     int64_t rhs_nnz_stride,
-    const Tensor& argsort,
-    const bool accumulate_matches) {
+    const Tensor& argsort) {
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       binary_op_intersection_kernel<binary_op_t, scalar_t, index_t>(
-          sub_iter, lhs_nnz_stride, rhs_nnz_stride, argsort, accumulate_matches);
+          sub_iter, lhs_nnz_stride, rhs_nnz_stride, argsort);
     }
     return;
   }
@@ -114,8 +106,7 @@ void binary_op_intersection_kernel(
     accscalar_t lhs_values = static_cast<accscalar_t>(*ptr_lhs_begin);
     accscalar_t rhs_values;
     index_t rhs_sorted_nnz_idx;
-    const auto match_count = accumulate_matches ? count : std::min<int64_t>(count, 1);
-    for (int64_t c = 0; c < match_count; ++c) {
+    for (int64_t c = 0; c < count; ++c) {
       rhs_sorted_nnz_idx = *ptr_rhs_sorted_nnz_idx++;
       rhs_values = static_cast<accscalar_t>(*(ptr_rhs_values + rhs_sorted_nnz_idx * rhs_nnz_stride));
       res_values += binary_op_t::apply(lhs_values, rhs_values);
@@ -135,8 +126,7 @@ struct CUDAValueSelectionIntersectionKernel {
       const Tensor& rhs_values,
       const Tensor& rhs_select_idx,
       const Tensor& intersection_counts,
-      const Tensor& argsort,
-      const bool accumulate_matches) {
+      const Tensor& argsort) {
     auto iter = make_value_selection_intersection_iter(
         lhs_values,
         lhs_select_idx,
@@ -160,7 +150,7 @@ struct CUDAValueSelectionIntersectionKernel {
           // COO indices are only 64-bit for now.
           using index_t = int64_t;
           binary_op_intersection_kernel<binary_op_t, scalar_t, index_t>(
-              iter, lhs_nnz_stride, rhs_nnz_stride, argsort, accumulate_matches);
+              iter, lhs_nnz_stride, rhs_nnz_stride, argsort);
         });
 
     return res_values;
@@ -190,21 +180,9 @@ void sparse_mask_intersection_out_cuda_kernel(
   );
 }
 
-void sparse_mask_projection_out_cuda_kernel(
-    Tensor& result,
-    const Tensor& x,
-    const Tensor& y,
-    const OptTensor& x_hash_opt = c10::nullopt) {
-  using CUDAValueLhsProjKernel = CUDAValueSelectionIntersectionKernel<LhsProjOp>;
-  _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueLhsProjKernel>(
-      result, x, y, x_hash_opt, c10::nullopt, /*accumulate_matches=*/false
-  );
-}
-
 }
 
 REGISTER_CUDA_DISPATCH(mul_sparse_sparse_out_stub, &mul_sparse_sparse_out_cuda_kernel);
 REGISTER_CUDA_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_cuda_kernel);
-REGISTER_CUDA_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_cuda_kernel);
 
 } // namespace at::native

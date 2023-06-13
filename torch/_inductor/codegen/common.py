@@ -586,9 +586,8 @@ class KernelArgs:
 
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
-    To do so, the backends can simply overload `Kernel.create_cse_var`
-    The "CSEVariable.update_on_args" method gives you a hook for annotations
-    See example of TritonCSEVariable in triton.py
+    The backends can inherit from this class and overload the "create_cse_var" Kernel to do that.
+    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py.
     """
 
     def __init__(self, name):
@@ -673,8 +672,7 @@ class CSE:
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
-        var = self.cache.get(cache_key, None)
-        if not var:
+        if cache_key not in self.cache:
             var = self.newvar() if assignment else None
             self.cache[cache_key] = var
             if write:
@@ -688,7 +686,7 @@ class CSE:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
 
-        return var
+        return self.cache[cache_key]
 
     def newvar(self) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"

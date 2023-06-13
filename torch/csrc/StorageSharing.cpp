@@ -66,11 +66,9 @@ static PyObject* THPStorage_pyNewFilenameStorage(
     PyObject* _unused,
     PyObject* args) {
   HANDLE_TH_ERRORS
-  long long size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  long long size;
   if (!PyArg_ParseTuple(args, "L", &size)) {
-    return nullptr;
-  }
-  if (size < 0) {
     return nullptr;
   }
 
@@ -79,8 +77,7 @@ static PyObject* THPStorage_pyNewFilenameStorage(
   return THPStorage_New(c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size,
-      THManagedMapAllocator::makeDataPtr(
-          "", handle.c_str(), flags, static_cast<size_t>(size)),
+      THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size),
       /*allocator=*/nullptr,
       /*resizable=*/false));
   END_HANDLE_TH_ERRORS
@@ -166,7 +163,7 @@ static PyObject* THPStorage_newSharedFilename(
   }
   const char* manager_handle = PyBytes_AS_STRING(_manager_handle);
   const char* object_handle = PyBytes_AS_STRING(_object_handle);
-  uint64_t size = THPUtils_unpackUInt64(_size);
+  int64_t size = THPUtils_unpackLong(_size);
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
   return THPStorage_New(c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
@@ -180,11 +177,9 @@ static PyObject* THPStorage_newSharedFilename(
 
 static PyObject* THPStorage_pyNewFdStorage(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  long long size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  long long size;
   if (!PyArg_ParseTuple(args, "L", &size)) {
-    return nullptr;
-  }
-  if (size < 0) {
     return nullptr;
   }
   return THPStorage_New(at::new_shm_fd_storage(size));
