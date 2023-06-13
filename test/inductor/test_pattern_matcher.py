@@ -313,26 +313,56 @@ class TestPaternMatcher(TestCase):
             nonlocal counter
             counter += 1
 
-        def fn(x, y):
+        def fn0(x, y):
+            a = torch.sin(x)
+            b = torch.add(x, a)
+            return b
+
+        def fn1(x, y):
             a = torch.sin(x)
             x.copy_(y)
             b = torch.add(x, a)
             return b
 
-        args1 = [
+        def fn2(x, y):
+            a = torch.sin(x)
+            with torch.no_grad():
+                b = torch.add(x, a)
+            return b
+
+        def fn3(x, y):
+            a = torch.sin(x)
+            with torch.autocast("cuda"):
+                b = torch.add(x, a)
+            return b
+
+        def fn4(x, y):
+            a = torch.sin(x)
+            torch.manual_seed(1234)
+            b = torch.add(x, a)
+            return b
+
+        def fn5(x, y):
+            a = torch.sin(x)
+            torch.add(y, 1, out=x)
+            b = torch.add(x, a)
+            return b
+
+        args = [
             torch.randn(5, 5, device="cuda"),
             torch.randn(5, 5, device="cuda"),
         ]
-        args2 = copy.deepcopy(args1)
 
         with unittest.mock.patch(
             "torch._inductor.fx_passes.pre_grad.pattern_matcher_passes", [test_pass]
         ):
-            expected = fn(*args1)
-            actual = torch.compile(fn)(*args2)
-            # should not match
-            self.assertEqual(counter, 0)
-            torch.testing.assert_close(actual, expected)
+            for fn in (fn0, fn1, fn2, fn3, fn4, fn5):
+                counter = 0
+                expected = fn(*copy.deepcopy(args))
+                actual = torch.compile(fn)(*copy.deepcopy(args))
+                # should not match
+                self.assertEqual(counter, int(fn is fn0))
+                torch.testing.assert_close(actual, expected)
 
 
 if __name__ == "__main__":
