@@ -996,7 +996,7 @@ Args:
     {dtype}
     device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
         then the device of data is used. If None and data is not a tensor then
-        the result tensor is constructed on the CPU.
+        the result tensor is constructed on the current device.
 
 
 Example::
@@ -9273,7 +9273,7 @@ Keyword args:
     {dtype}
     device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
         then the device of data is used. If None and data is not a tensor then
-        the result tensor is constructed on the CPU.
+        the result tensor is constructed on the current device.
     {requires_grad}
     {pin_memory}
 

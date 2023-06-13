@@ -5,6 +5,7 @@ import unittest
 
 import torch
 import torch._dynamo
+import torch._dynamo.config as dynamo_config
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided
@@ -145,6 +146,7 @@ class CudaReproTests(TestCase):
         assert compiled([])[0].device.type == "cuda"
 
     @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -172,6 +174,7 @@ class CudaReproTests(TestCase):
         self.common(Repro(), ())
 
     @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -182,6 +185,33 @@ class CudaReproTests(TestCase):
             rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
+
+    @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(
+        dynamic_shapes=True,
+        automatic_dynamic_shapes=True,
+        assume_static_by_default=False,
+    )
+    def test_dynamic_to_static_cudagraphs(self):
+        for b in [False, True]:
+            with config.patch({"triton.cudagraph_trees": b}):
+
+                @torch._dynamo.optimize("inductor")
+                def fn(x, y):
+                    r = x + y
+                    return r, r.size(0)
+
+                inputs = (
+                    torch.randn((5, 5), device="cuda"),
+                    torch.randn((5, 5), device="cuda"),
+                )
+                self.assertTrue(same(fn(*inputs), (inputs[0] + inputs[1], 5)))
+
+                inputs = (
+                    torch.randn((6, 6), device="cuda"),
+                    torch.randn((6, 6), device="cuda"),
+                )
+                self.assertTrue(same(fn(*inputs), (inputs[0] + inputs[1], 6)))
 
     # TODO: Abstract this out, test more extensively
     @torch._dynamo.config.patch(dynamic_shapes=True, assume_static_by_default=False)
@@ -206,6 +236,7 @@ class CudaReproTests(TestCase):
         torch._dynamo.reset()
 
     @config.patch({"triton.cudagraphs": True, "size_asserts": False})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs_no_size_asserts(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -220,6 +251,7 @@ class CudaReproTests(TestCase):
     # TODO: enable
     @config.patch({"triton.cudagraph_trees": False})
     @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_inplace_updates_cudagraphs(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -670,6 +702,31 @@ class CudaReproTests(TestCase):
         mod = Model().cuda().eval()
         with torch.no_grad():
             self.common(mod, (torch.randn(4, 4),))
+
+    def test_lookup_seed_backward(self):
+        @torch.compile(fullgraph=True)
+        def forward(inductor_seeds, mul_4, view_15):
+            inductor_lookup_seed_2 = torch.ops.prims.inductor_lookup_seed.default(
+                inductor_seeds, 2
+            )
+            inductor_random_2 = torch.ops.prims.inductor_random.default(
+                [2, 512, 768], inductor_lookup_seed_2, "rand"
+            )
+            gt_2 = torch.ops.aten.gt.Scalar(inductor_random_2, 0.1)
+            mul_7 = torch.ops.aten.mul.Tensor(gt_2, view_15)
+            mul_8 = torch.ops.aten.mul.Tensor(mul_7, 1.1111111111111112)
+            add_5 = torch.ops.aten.add.Tensor(mul_8, mul_4)
+            var_mean_1 = torch.ops.aten.var_mean.correction(
+                add_5, [2], correction=0, keepdim=True
+            )
+            getitem_3 = var_mean_1[1]
+            sub_3 = torch.ops.aten.sub.Tensor(add_5, getitem_3)
+            return (sub_3,)
+
+        buf0 = torch.zeros((37,), dtype=torch.int64, device="cuda")
+        buf1 = torch.zeros((2, 512, 768), device="cuda")
+        buf2 = torch.zeros((2, 512, 768), device="cuda")
+        forward(buf0, buf1, buf2)
 
     def test_issue100806(self):
         class Model(torch.nn.Module):

@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit, ifunspec
+from torch._dynamo.utils import disable_cache_limit, ifdyn, ifdynstaticdefault, ifunspec
 
 globalmod = torch.nn.ReLU()
 
@@ -313,7 +313,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             return a * x + len_(b)
 
         if config.dynamic_shapes:
-            self._common(fn, 2, 5)
+            self._common(fn, 2, ifdynstaticdefault(4, 5))
         else:
             self._common(fn, 2, 4)
 
@@ -405,12 +405,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         for i in range(start, end):
             opt_fn(torch.randn(i), torch.randn(i))
 
-        if config.assume_static_by_default:
-            # 2 graph breaks - 1 static, 1 made dynamic via automatic
-            self.assertEqual(cnt_dynamic.frame_count, 2)
-        else:
-            # just one graph
-            self.assertEqual(cnt_dynamic.frame_count, 1)
+        self.assertEqual(cnt_dynamic.frame_count, 1)
 
     def test_dynamic_duck_size(self):
         def fn(a, b):
@@ -428,13 +423,14 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, y), fn(x, y))
         self.assertEqual(cnt_dynamic.frame_count, 2)
 
+    @patch("torch._dynamo.config.dynamic_shapes", True)
     def test_dynamic_order_dependence(self):
         def fn(a, b):
             return a.sum() + b.sum()
 
         torch._dynamo.reset()
         cnt_dynamic = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnt_dynamic, dynamic=True)(fn)
+        opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
         x = torch.randn(2)
         y = torch.randn(3)
         self.assertEqual(opt_fn(x, y), fn(x, y))
@@ -630,7 +626,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, 2)
+        self._common(fn, 1, ifdyn(ifdynstaticdefault(2, 7), 2))
 
 
 if __name__ == "__main__":

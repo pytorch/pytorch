@@ -8,6 +8,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     TestCase,
@@ -433,6 +434,7 @@ class TestDecomp(TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
+    @tf32_off()
     # only tests RNNs since we have py dispsatcher decomps for them
     @modules(filter(lambda m: m.module_cls in (torch.nn.RNN, torch.nn.LSTM, torch.nn.GRU), module_db))
     def test_rnn_decomp_module(self, device, dtype, module_info, training):

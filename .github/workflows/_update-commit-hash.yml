@@ -22,7 +22,7 @@ on:
         required: false
         default: .github/ci_commit_pins
     secrets:
-      MERGEBOT_TOKEN:
+      UPDATEBOT_TOKEN:
         required: true
         description: Permissions for opening PR
       PYTORCHBOT_TOKEN:
@@ -41,7 +41,7 @@ jobs:
         with:
           fetch-depth: 1
           submodules: false
-          token: ${{ secrets.MERGEBOT_TOKEN }}
+          token: ${{ secrets.UPDATEBOT_TOKEN }}
 
       - name: Checkout
         shell: bash
@@ -54,11 +54,11 @@ jobs:
           REPO_NAME: ${{ inputs.repo-name }}
           BRANCH: ${{ inputs.branch }}
           PIN_FOLDER: ${{ inputs.pin-folder }}
-          MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          UPDATEBOT_TOKEN: ${{ secrets.UPDATEBOT_TOKEN }}
           PYTORCHBOT_TOKEN: ${{ secrets.PYTORCHBOT_TOKEN }}
         run: |
           # put this here instead of the script to prevent accidentally changing the config when running the script locally
-          git config --global user.name "PyTorch MergeBot"
-          git config --global user.email "pytorchmergebot@users.noreply.github.com"
+          git config --global user.name "PyTorch UpdateBot"
+          git config --global user.email "pytorchupdatebot@users.noreply.github.com"
 
           python .github/scripts/update_commit_hashes.py --repo-name "${REPO_NAME}" --branch "${BRANCH}" --pin-folder "${PIN_FOLDER}"

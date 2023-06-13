@@ -221,7 +221,6 @@ class TestActivationSparsifier(TestCase):
 
         assert sparsifier2.defaults == sparsifier1.defaults
 
-        # import pdb; pdb.set_trace()
         for name, state in sparsifier2.state.items():
             assert name in sparsifier1.state
             mask1 = sparsifier1.state[name]['mask']
@@ -236,7 +235,6 @@ class TestActivationSparsifier(TestCase):
                     for idx in range(len(mask1)):
                         assert torch.all(mask1[idx] == mask2[idx])
                 else:
-                    # import pdb; pdb.set_trace()
                     assert torch.all(mask1 == mask2)
 
         # make sure that the state dict is stored as torch sparse

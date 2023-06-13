@@ -20,12 +20,13 @@ import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint
 
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
     Shard,
     ShardedTensor,
 )
+
+from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _has_fsdp_params,
@@ -612,8 +613,9 @@ def _sharded_pre_load_state_dict_hook(
         )
         if len(shards) == 1:
             local_tensor = shards[0].tensor.flatten()
-            if not local_tensor.is_cuda:
-                local_tensor = local_tensor.cuda()
+            pg_device = _get_pg_default_device(fsdp_state.process_group)
+            if local_tensor.device.type != pg_device.type:
+                local_tensor = local_tensor.to(pg_device)
             num_padding = chunk_size - local_tensor.numel()
             if num_padding > 0:
                 local_tensor = F.pad(local_tensor, [0, num_padding])
@@ -635,12 +637,9 @@ def _sharded_pre_load_state_dict_hook(
 def _replace_with_full_state_dict_type(fsdp_state: _FSDPState) -> Generator:
     old_state_dict_config = fsdp_state._state_dict_config
     old_state_dict_type = fsdp_state._state_dict_type
-    try:
-        fsdp_state._state_dict_config = FullStateDictConfig()
-        fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
-        yield
-    except Exception as e:
-        raise e
+    fsdp_state._state_dict_config = FullStateDictConfig()
+    fsdp_state._state_dict_type = StateDictType.FULL_STATE_DICT
+    yield
     fsdp_state._state_dict_config = old_state_dict_config
     fsdp_state._state_dict_type = old_state_dict_type
 

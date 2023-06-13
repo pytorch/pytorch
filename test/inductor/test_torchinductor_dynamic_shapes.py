@@ -33,7 +33,6 @@ if IS_WINDOWS and IS_CI:
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_cpp_wrapper import CppWrapperTemplate
 from inductor.test_torchinductor import (
     check_model,
     check_model_cuda,
@@ -48,6 +47,8 @@ importlib.import_module("filelock")
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
@@ -76,7 +77,6 @@ def make_dynamic_cls(cls):
 
 
 DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
-DynamicShapesCppWrapperTemplate = make_dynamic_cls(CppWrapperTemplate)
 
 
 if HAS_CPU:
@@ -85,15 +85,7 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    class DynamicShapesCppWrapperCpuTests(TestCase):
-        device = "cpu"
-
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
-    copy_tests(
-        DynamicShapesCppWrapperTemplate,
-        DynamicShapesCppWrapperCpuTests,
-        "cpp_wrapper",
-    )
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

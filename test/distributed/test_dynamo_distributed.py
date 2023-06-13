@@ -150,8 +150,6 @@ class FakeDDP(nn.Module):
         DDP._active_ddp_module = self
         try:
             yield
-        except Exception:
-            raise
         finally:
             DDP._active_ddp_module = None
 
@@ -406,7 +404,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         # ensure compatibilty with dynamo explain
 
         explain_out = torch._dynamo.explain(ddp_m, inputs)
-        break_reasons = explain_out[4]
+        break_reasons = explain_out.break_reasons
         self.assertEqual(len(break_reasons), 3)
         self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 

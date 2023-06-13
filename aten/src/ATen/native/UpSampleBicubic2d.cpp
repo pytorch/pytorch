@@ -4,6 +4,7 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/native/UpSample.h>
 #include <c10/util/irange.h>
+#include <ATen/Parallel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -118,69 +119,65 @@ static void upsample_bicubic2d_backward_out_frame(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   channels = channels * nbatch;
+  auto input_slice_size = input_height * input_width;
+  auto output_slice_size = output_height * output_width;
 
-  // Special case: input/output same size, just copy
-  if (input_height == output_height && input_width == output_width) {
-    for (const auto output_y : c10::irange(output_height)) {
-      for (const auto output_x : c10::irange(output_width)) {
-        scalar_t* in = &idata[output_y * input_width + output_x];
-        scalar_t* out = &odata[output_y * output_width + output_x];
-        for (const auto c C10_UNUSED : c10::irange(channels)) {
-          in[0] = out[0];
-          in += input_width * input_height;
-          out += output_width * output_height;
-        }
-      }
-    }
-    return;
-  }
-
-  const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
+  using opmath_t = at::opmath_type<scalar_t>;
+  const opmath_t height_scale = area_pixel_compute_scale<opmath_t>(
       input_height, output_height, align_corners, scales_h);
-  const scalar_t width_scale = area_pixel_compute_scale<scalar_t>(
+  const opmath_t width_scale = area_pixel_compute_scale<opmath_t>(
       input_width, output_width, align_corners, scales_w);
+  at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size / 4, [&](int64_t start, int64_t end) {
+    opmath_t* acc_data_ptr = nullptr;
+    std::unique_ptr<opmath_t[]> buffer_data;
+    if constexpr (!std::is_same<scalar_t, opmath_t>::value) {
+      buffer_data = std::make_unique<opmath_t[]>(input_slice_size);
+      acc_data_ptr = buffer_data.get();
+      memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
+    }
+    for (const auto i : c10::irange(start, end)) {
+      scalar_t* in = idata + i * input_slice_size;
+      scalar_t* out = odata + i * output_slice_size;
+      for (const auto output_y : c10::irange(output_height)) {
+        for (const auto output_x : c10::irange(output_width)) {
 
-  for (const auto output_y : c10::irange(output_height)) {
-    for (const auto output_x : c10::irange(output_width)) {
-      scalar_t* in = idata;
-      scalar_t* out = odata;
+          const opmath_t real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
+          int64_t input_x;
+          opmath_t t_x;
+          guard_index_and_lambda(real_x, input_width, input_x, t_x);
 
-      const scalar_t real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
-      int64_t input_x = floorf(real_x);
-      scalar_t t_x = real_x - input_x;
+          const opmath_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
+          int64_t input_y;
+          opmath_t t_y;
+          guard_index_and_lambda(real_y, input_height, input_y, t_y);
 
-      const scalar_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
-      int64_t input_y = floorf(real_y);
-      scalar_t t_y = real_y - input_y;
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+          opmath_t x_coeffs[4];
+          // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+          opmath_t y_coeffs[4];
 
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-      scalar_t x_coeffs[4];
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-      scalar_t y_coeffs[4];
+          get_cubic_upsample_coefficients<opmath_t>(x_coeffs, t_x);
+          get_cubic_upsample_coefficients<opmath_t>(y_coeffs, t_y);
 
-      get_cubic_upsample_coefficients<scalar_t>(x_coeffs, t_x);
-      get_cubic_upsample_coefficients<scalar_t>(y_coeffs, t_y);
-
-      for (const auto c C10_UNUSED : c10::irange(channels)) {
-        scalar_t out_value = out[output_y * output_width + output_x];
-
-        for (const auto i : c10::irange(4)) {
-          for (const auto j : c10::irange(4)) {
-            upsample_increment_value_bounded<scalar_t>(
-                in,
-                input_width,
-                input_height,
-                input_x - 1 + i,
-                input_y - 1 + j,
-                out_value * y_coeffs[j] * x_coeffs[i]);
+          opmath_t out_value = out[output_y * output_width + output_x];
+          for (const auto ii : c10::irange(4)) {
+            for (const auto jj : c10::irange(4)) {
+              upsample_increment_value_bounded<opmath_t>(
+                  acc_data_ptr == nullptr ? reinterpret_cast<opmath_t*>(in) : acc_data_ptr,
+                  input_width,
+                  input_height,
+                  input_x - 1 + ii,
+                  input_y - 1 + jj,
+                  out_value * y_coeffs[jj] * x_coeffs[ii]);
+            }
           }
         }
-
-        in += input_width * input_height;
-        out += output_width * output_height;
+      }
+      if (acc_data_ptr != nullptr) {
+        apply_grad_input(acc_data_ptr, in, input_slice_size);
       }
     }
-  }
+  });
 }
 
 static void upsample_bicubic2d_backward_kernel(
@@ -201,7 +198,11 @@ static void upsample_bicubic2d_backward_kernel(
   int64_t input_width = input_size[3];
 
   auto grad_output = grad_output_.contiguous();
-
+  // Special case: input/output same size, just copy
+  if (input_height == output_height && input_width == output_width) {
+    grad_input.copy_(grad_output);
+    return;
+  }
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_bicubic2d_backward", [&] {
         scalar_t* idata = grad_input.data_ptr<scalar_t>();

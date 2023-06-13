@@ -1262,9 +1262,9 @@ def find_matching_merge_rule(
                 reject_reason_score = num_matching_files
                 reject_reason = "\n".join(
                     (
-                        f"Not all files match rule `{rule_name}`."
-                        f"{num_matching_files} files matched, but there are still non-matching files:"
-                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}"
+                        f"Not all files match rule `{rule_name}`.",
+                        f"{num_matching_files} files matched, but there are still non-matching files:",
+                        f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}",
                     )
                 )
             continue
@@ -1509,6 +1509,11 @@ def get_classifications(
                 check.job_id,
             )
             continue
+        if "unstable" in name:
+            checks_with_classifications[name] = JobCheckState(
+                check.name, check.url, check.status, "UNSTABLE", check.job_id
+            )
+            continue
         head_sha_job = head_sha_jobs.get(name)
         merge_base_job = merge_base_jobs.get(name)
         if (
@@ -1678,13 +1683,15 @@ def categorize_checks(
         elif not is_passing_status(check_runs[checkname].status):
             if classification == "IGNORE_CURRENT_CHECK":
                 pass
+            elif classification == "UNSTABLE":
+                pass
             elif classification in ("BROKEN_TRUNK", "FLAKY"):
                 ok_failed_checks.append((checkname, url, job_id))
             else:
                 failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
-        print(
+        warn(
             f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: "
             + ", ".join([x[0] for x in ok_failed_checks])
             + (

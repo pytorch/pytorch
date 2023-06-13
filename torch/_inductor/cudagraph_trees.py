@@ -19,7 +19,7 @@ with a lot of caveats.  CUDA graph trees remove these restrictions:
 * Previously, if you executed graph A, some non-CUDA graph code, and then
   graph B, after executing graph B, it was not safe to retain any references
   to intermediates produced by A.  With CUDA graph trees, we track if any
-  outputs of graph A are still live by the time graph B is run, and make
+outputs of graph A are still live by the time graph B is run, and make
   sure graph B doesn't clobber there memory when reusing the CUDA graphs
   pool.  You'll get a separate recording of B depending on what tensors
   stay live or dead.
@@ -554,7 +554,8 @@ class CUDAWarmupNode:
         non_cudagraph_inps = set()
         for i in range(len(new_inputs)):
             if (
-                new_inputs[i].untyped_storage().data_ptr()
+                isinstance(new_inputs[i], torch.Tensor)
+                and new_inputs[i].untyped_storage().data_ptr()
                 not in existing_path_data_ptrs
             ):
                 non_cudagraph_inps.add(new_inputs[i].untyped_storage().data_ptr())
@@ -581,6 +582,7 @@ class CUDAWarmupNode:
                 o is not None
                 and o.is_cuda
                 and o.untyped_storage().data_ptr() not in non_cudagraph_inps
+                and o.untyped_storage().data_ptr() != 0
             )
 
         self.outputs_weakrefs.extend(
@@ -733,7 +735,7 @@ class CUDAGraphNode:
         self.cudagraph_managed_idxs: List[int] = [
             idx
             for idx, t in enumerate(inputs)
-            if self._is_cuda_graph_recorded_tensor(t)
+            if isinstance(t, torch.Tensor) and self._is_cuda_graph_recorded_tensor(t)
         ]
 
         self.static_input_idxs: List[int] = list(
@@ -741,7 +743,11 @@ class CUDAGraphNode:
         )
 
         self.static_input_data_ptrs: InputList[int] = [
-            (inputs[i].data_ptr() if i in self.static_input_idxs else None)
+            (
+                inputs[i].data_ptr()
+                if isinstance(inputs[i], torch.Tensor) and i in self.static_input_idxs
+                else None
+            )
             for i in range(len(inputs))
         ]
 
@@ -755,7 +761,9 @@ class CUDAGraphNode:
 
         # precompute expanded dims to avoid computing in the hot path
         self.expanded_dims: List[List[int]] = [
-            get_expanded_dims(x) if idx not in self.static_input_idxs else []
+            get_expanded_dims(x)
+            if isinstance(x, torch.Tensor) and idx not in self.static_input_idxs
+            else []
             for idx, x in enumerate(inputs)
         ]
 
@@ -800,6 +808,8 @@ class CUDAGraphNode:
         # will be copied over to these tensors.
         self.reconstructed_inputs: InputList[Tensor] = [
             self._reconstruct_from_tensor_metadata(self._tensor_metadata(x))
+            if isinstance(x, torch.Tensor)
+            else x
             for x in recording_inputs
         ]
 
@@ -886,7 +896,9 @@ class CUDAGraphNode:
         for idx, data_ptr in enumerate(self.static_input_data_ptrs):
             if idx in self.cudagraph_managed_idxs:
                 continue
-            if data_ptr is not None:
+            if not isinstance(new_inputs[idx], torch.Tensor):
+                pass
+            elif data_ptr is not None:
                 # static input, e.g., parameter
                 assert data_ptr == new_inputs[idx].data_ptr()
             else:
@@ -996,7 +1008,8 @@ class CUDAGraphNode:
         static_input_persistent_storage_ptrs: Dict[int, StorageWeakRefWrapper] = {
             inputs[i].untyped_storage().data_ptr(): StorageWeakRefWrapper(inputs[i])
             for i in self.wrapped_function.static_input_idxs
-            if not self._is_cuda_graph_recorded_tensor(inputs[i])
+            if isinstance(inputs[i], torch.Tensor)
+            and not self._is_cuda_graph_recorded_tensor(inputs[i])
         }
 
         if config.triton.slow_path_cudagraph_asserts:
@@ -1007,7 +1020,9 @@ class CUDAGraphNode:
             memory += [
                 StorageWeakRefWrapper(elem)
                 for i, elem in enumerate(inputs)
-                if i not in self.wrapped_function.static_input_idxs
+                if isinstance(elem, torch.Tensor)
+                and i not in self.wrapped_function.static_input_idxs
+                and elem.data_ptr() != 0
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
@@ -1063,7 +1078,10 @@ class CUDAGraphNode:
             ref = static_input_persistent_storage_ptrs.get(
                 o.untyped_storage().data_ptr(), None
             )
-            if ref and ref() is not None:
+            # also treat empty storages as static outputs because we do not need to manage their lifetime
+            # and they should not participate in checkpointing
+            is_empty_storage = o.data_ptr() == 0
+            if ref and ref() is not None or is_empty_storage:
                 self.output_storage_alias.append(None)
                 self.static_output_tensors[i] = o
                 continue
@@ -1391,7 +1409,10 @@ class CUDAGraphNode:
             stream=self.stream,
         ):
             for i, inp in enumerate(inputs):
-                if i not in self.static_input_idxs:
+                if not isinstance(inp, torch.Tensor):
+                    assert isinstance(inp, (int, torch.SymInt))
+                    recording_inputs.append(int(inp))
+                elif i not in self.static_input_idxs:
                     # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
                     # copy over and clear non recording input

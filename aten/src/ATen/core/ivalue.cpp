@@ -245,7 +245,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
           false, "Cannot inspect value of type ", this->tagKind());
-      // Fall through
+      [[fallthrough]];
     default:
       // don't record scalars.
       break;
@@ -763,7 +763,7 @@ IValueComparator getGreaterThanComparator(const IValue& v) {
   };
 }
 
-static std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
   out << v.qualifiedClassName() << "." << v.name();
   return out;
 }

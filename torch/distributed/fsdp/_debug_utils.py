@@ -75,7 +75,7 @@ def _get_sharded_module_tree_with_module_name_to_fqns(
 
         for handle in handles:
             param = handle.flat_param
-            assert type(param) is flat_param_file.FlatParameter
+            assert isinstance(param, flat_param_file.FlatParameter)
             global_fqns = [
                 clean_tensor_name(prefix + name) for name in param._fqns
             ]  # prefixed from the top level `model` (i.e. including `prefix`)
