@@ -294,8 +294,8 @@ def _multi_tensor_asgd(
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
-    for ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
-         grouped_etas, grouped_state_steps), _) in grouped_tensors.values():
+    for (grouped_params, grouped_grads, grouped_axs, grouped_mus,
+         grouped_etas, grouped_state_steps) in grouped_tensors.values():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 

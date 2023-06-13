@@ -83,16 +83,24 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
             for key in ks:
                 op._uncache_dispatch(key)
         push_mode_for_key(k, mode)
-    else:
-        _push_on_torch_dispatch_stack(mode)
+    # Note [Per-Dispatch-Key Modes Must Be Reentrant]
+    # The idea here is that we are allowed to push modes onto any dispatch key's mode stack, but:
+    # (1) We **always** push the mode onto the python mode stack. Operators can have fallthrough
+    #     kernels registered to any dispatch key, so we use the Python mode stack as a catchall,
+    #     to guarantee that every op will be seen by our mode.
+    # (2) We expect the mode that you push to handle being re-entrant: If we end up invoking the mode
+    #     at both the Autograd key and the Python key, nothing bad should happen.
+    #     The main use case for this is pre-autograd tracing with TorchProxyDispatchMode.
+    _push_on_torch_dispatch_stack(mode)
 
 
 def _pop_mode(k: Optional[DispatchKey] = None):
+    m = _pop_torch_dispatch_stack()
     if k is not None:
         from torch._ops import pop_mode_for_key
-        return pop_mode_for_key(k)
-    else:
-        return _pop_torch_dispatch_stack()
+        tmp = pop_mode_for_key(k)
+        assert m is tmp
+    return m
 
 
 @contextlib.contextmanager
