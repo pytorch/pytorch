@@ -1010,11 +1010,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         args_str = "args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
         if V.graph.constants:
-            # TODO: further optimize into one line?
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
-            # as a global variable passed when calling exec.
-            # For cpp wrapper, we need to pass this python value to the inductor_entry_cpp func
+            # as a global variable passed when calling exec(code, mod.__dict__, mod.__dict__).
+            # For cpp wrapper, we need to pass this python value to the inductor_entry_cpp function explicitly.
             assert all(
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
