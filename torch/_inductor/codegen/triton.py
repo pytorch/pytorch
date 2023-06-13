@@ -625,7 +625,7 @@ class IterationRangesRoot(IterationRanges):
             )
         else:
             if not no_x_dim:
-                line = f"{xoffset} + {self.ranges_code()}"
+                line = f"{x}offset + {self.ranges_code()}"
             else:
                 line = self.scalar_code(f"{x}offset")
             code.writelines(
