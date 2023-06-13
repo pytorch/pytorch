@@ -1181,6 +1181,7 @@ multiplication, and ``@`` is matrix multiplication.
    :func:`torch.smm`; no; ``M[sparse_coo] @ M[strided] -> M[sparse_coo]``
    :func:`torch.hspmm`; no; ``M[sparse_coo] @ M[strided] -> M[hybrid sparse_coo]``
    :func:`torch.bmm`; no; ``T[sparse_coo] @ T[strided] -> T[strided]``
+   :func:`torch.addmm`; no; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
    :func:`torch.addmm`; no; ``f * M[strided] + f * (M[SparseSemiStructured] @ M[strided]) -> M[strided]``
    :func:`torch.addmm`; no; ``f * M[strided] + f * (M[strided] @ M[SparseSemiStructured]) -> M[strided]``
    :func:`torch.sparse.addmm`; yes; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
