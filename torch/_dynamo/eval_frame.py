@@ -560,50 +560,6 @@ def optimize(
     )
 
 
-@dataclasses.dataclass
-class ExplainOutput:
-    """
-    This is the output of :func:`torch._dynamo.explain()
-    There is no reason to create this class directly
-    """
-
-    graph_count: int
-    graph_break_count: int
-    op_count: int
-    out_guards: List[_guards.Guard]
-    graphs: List[torch.fx.GraphModule]
-    ops_per_graph: List[torch.fx.Node]
-    break_reasons: List[Any]  # TODO: Not sure if graph break is a type
-    compile_times: str
-
-    def __str__(self):
-        output = f"Graph Count: {self.graph_count}\n"
-        output += f"Graph Break Count: {self.graph_break_count}\n"
-        output += f"Op Count: {self.op_count}\n"
-
-        output += "Break Reasons:\n"
-        for idx, break_reason in enumerate(self.break_reasons):
-            output += f"  Break Reason {idx+1}:\n"
-            output += f"    Reason: {break_reason.reason}\n"
-            output += "    User Stack:\n"
-            for frame_summary in break_reason.user_stack:
-                output += f"      {frame_summary}\n"
-
-        output += "Ops per Graph:\n"
-        for idx, ops in enumerate(self.ops_per_graph):
-            output += f"  Ops {idx+1}:\n"
-            for op in ops:
-                output += f"    {op}\n"
-
-        output += "Out Guards:\n"
-        for i, guard in enumerate(self.out_guards):
-            output += f"  Guard {i+1}:\n"
-            output += f"    {str(guard)}"
-
-        output += f"Compile Times: {self.compile_times}\n"
-        return output
-
-
 # TODO(voz): Consider making "explain" output alongside a run / part of a run
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
@@ -612,27 +568,24 @@ def explain(f, *args, **kwargs):
 
     reset()
 
-    out_guards = []
-    graphs = []
-    ops_per_graph = []
-    op_count = 0
-    break_reasons = []
+    graphs: List[torch.fx.GraphModule] = []
+    break_reasons: List[Any] = []
+    op_count: int = 0
+    ops_per_graph: List[torch.fx.Node] = []
+    out_guards: List[_guards.Guard] = []
 
     def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
+        from .backends.debugging import _explain_graph_detail
+
         nonlocal graphs
         nonlocal op_count
         nonlocal ops_per_graph
+        nonlocal break_reasons
 
-        graphs.append(gm)
-        ops = []
-        for node in gm.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
+        gm, graphs, op_count, ops_per_graph, break_reasons = _explain_graph_detail(
+            gm, graphs, op_count, ops_per_graph, break_reasons
+        )
 
-        op_count += len(ops)
-        ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason.graph_break:
-            break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 
     def guard_export_print(guards):
@@ -668,14 +621,16 @@ def explain(f, *args, **kwargs):
 
     # TODO(voz): Do we want a decorator for this?
     reset()
+    from .backends.debugging import ExplainOutput
+
     return ExplainOutput(
+        graphs,
         graph_count,
         graph_break_count,
-        op_count,
-        out_guards,
-        graphs,
-        ops_per_graph,
         break_reasons,
+        op_count,
+        ops_per_graph,
+        out_guards,
         compile_time,
     )
 
