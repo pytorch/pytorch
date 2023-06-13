@@ -1,3 +1,4 @@
+import bisect
 import copy
 import dataclasses
 import sys
@@ -352,8 +353,9 @@ class ContinueExecutionCache:
                 null_idxes,
             )
 
+        is_py311_plus = sys.version_info >= (3, 11)
         meta = ResumeFunctionMetadata(code)
-        if sys.version_info >= (3, 11):
+        if is_py311_plus:
             meta.prefix_block_target_offset_remap = []
 
         def update(instructions: List[Instruction], code_options: Dict[str, Any]):
@@ -365,7 +367,7 @@ class ContinueExecutionCache:
                 code_options["co_freevars"] or []
             )
             code_options["co_name"] = f"<resume in {code_options['co_name']}>"
-            if sys.version_info >= (3, 11):
+            if is_py311_plus:
                 code_options[
                     "co_qualname"
                 ] = f"<resume in {code_options['co_qualname']}>"
@@ -384,7 +386,7 @@ class ContinueExecutionCache:
             (target,) = [i for i in instructions if i.offset == offset]
 
             prefix = []
-            if sys.version_info >= (3, 11):
+            if is_py311_plus:
                 if freevars:
                     prefix.append(
                         create_instruction("COPY_FREE_VARS", arg=len(freevars))
@@ -413,12 +415,12 @@ class ContinueExecutionCache:
                     hook = hooks.pop(i)
                     hook_insts, exn_target = hook(code_options, cleanup)
                     prefix.extend(hook_insts)
-                    if sys.version_info >= (3, 11):
+                    if is_py311_plus:
                         hook_target_offset = hook_target_offsets.pop(i)
                         old_hook_target = offset_to_inst[hook_target_offset]
                         meta.prefix_block_target_offset_remap.append(hook_target_offset)
                         old_hook_target_remap[old_hook_target] = exn_target
-            if sys.version_info >= (3, 11):
+            if is_py311_plus:
                 # reverse the mapping since targets of later/nested contexts are inserted
                 # into the mapping later, but show up earlier in the prefix.
                 meta.prefix_block_target_offset_remap = list(
@@ -432,7 +434,12 @@ class ContinueExecutionCache:
             # because the line number table monotonically increases from co_firstlineno
             # remove starts_line for any instructions before the graph break instruction
             # this will ensure the instructions after the break have the correct line numbers
-            target_ind = int(target.offset / 2)
+            if is_py311_plus:
+                # In 3.11+ bytecode instruction size vary, so do bisect to find the index
+                target_ind = bisect.bisect_left(instructions, target.offset, key=lambda i:i.offset)
+            else:
+                target_ind = target.offset // 2
+
             for inst in instructions[0:target_ind]:
                 inst.starts_line = None
 
@@ -442,7 +449,7 @@ class ContinueExecutionCache:
 
             # remap original instructions' exception table entries
             if old_hook_target_remap:
-                assert sys.version_info >= (3, 11)
+                assert is_py311_plus
                 for inst in instructions:
                     if (
                         inst.exn_tab_entry
