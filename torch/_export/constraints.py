@@ -8,12 +8,12 @@ from torch.fx.experimental.symbolic_shapes import constrain_range_non_symint
 from torch.utils._sympy.value_ranges import ValueRangeError
 
 # `Scalar` type used in native_functions.ymal will be translated to `Union[Number, _complex]`
-# will could cause type error (`Sym***` will be passed in during tracing).
-# Here manually specify for explicitly.
+# could cause type error during since `SymInt` or `SymFloat` will be used.
+# Here manually specify the type explicitly.
 sym_constrain_range: Callable[
     [Union[Number, _complex, SymInt, SymFloat], Optional[int], Optional[int]],
     None,
-] = torch.sym_constrain_range
+] = torch.sym_constrain_range  # type: ignore[assignment]
 
 
 def _constrain_range(symbol, min: Optional[int] = None, max: Optional[int] = None):
