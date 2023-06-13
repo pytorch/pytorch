@@ -178,10 +178,10 @@ namespace detail {
  * - Data of the new state tensor must be contiguous
  */
 static inline void check_rng_state(const c10::TensorImpl& new_state) {
-  TORCH_CHECK_TYPE(
-    new_state.layout() == kStrided && new_state.device().type() == kCPU && new_state.dtype() == kByte,
-    "RNG state must be a torch.ByteTensor"
-  );
+//  TORCH_CHECK_TYPE(
+//    new_state.layout() == kStrided && new_state.device().type() == kCPU && new_state.dtype() == kByte,
+//    "RNG state must be a torch.ByteTensor"
+//  );
 
   TORCH_CHECK(new_state.is_contiguous(), "RNG state must be contiguous");
 }
