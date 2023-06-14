@@ -72,8 +72,14 @@ int64_t update_to(int64_t to) {
   return to;
 }
 
+#define CHECK_EMPTY_AND_RETURN(tensor) \
+  if (tensor.numel() == 0) {  \
+    return tensor;  \
+  }
+
 template<template<typename> class random_kernel, typename RNG>
 at::Tensor& random_impl(at::Tensor& self, c10::optional<Generator> generator) {
+  CHECK_EMPTY_AND_RETURN(self);
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   random_kernel<RNG>()(iter, generator);
   return self;
@@ -116,6 +122,7 @@ static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
 
 template<template<typename> class random_from_to_kernel, typename RNG>
 at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c10::optional<Generator> generator) {
+  CHECK_EMPTY_AND_RETURN(self);
   uint64_t range = 0;
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   if (to_opt.has_value()) {
@@ -182,11 +189,11 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   CHECK_NORMAL_STD(std);
-  if (self.numel() == 0) {
-    // return earlier for not invoking normal_kernel
-    // see https://github.com/pytorch/pytorch/issues/103418 for more details
-    return self;
-  }
+
+  // return earlier for not invoking normal_kernel
+  // see https://github.com/pytorch/pytorch/issues/103418 for more details
+  CHECK_EMPTY_AND_RETURN(self);
+
   if (self.is_complex()) {
     auto float_tensor = at::view_as_real(self);
     // variance for normal distribution of the real and imaginary values
@@ -267,9 +274,7 @@ Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generato
 
 template<template<typename> class uniform_kernel, typename RNG>
 at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optional<Generator> generator) {
-  if (self.numel() == 0) {
-    return self;
-  }
+  CHECK_EMPTY_AND_RETURN(self);
   if (self.is_complex()) {
     auto float_tensor = at::view_as_real(self);
     uniform_impl_<uniform_kernel, RNG>(float_tensor, from, to, generator);
@@ -298,6 +303,7 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, c10::optiona
 
 template<template<typename> class log_normal_kernel, typename RNG>
 at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  CHECK_EMPTY_AND_RETURN(self);
   TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   log_normal_kernel<RNG>()(iter, mean, std, gen);
@@ -308,6 +314,7 @@ at::Tensor& log_normal_impl_(at::Tensor& self, double mean, double std, c10::opt
 
 template<template<typename> class geometric_kernel, typename RNG>
 Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
+  CHECK_EMPTY_AND_RETURN(self);
   TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   geometric_kernel<RNG>()(iter, p, gen);
@@ -318,6 +325,7 @@ Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 
 template<template<typename> class exponential_kernel, typename RNG>
 Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+  CHECK_EMPTY_AND_RETURN(self);
   TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   exponential_kernel<RNG>()(iter, lambda, gen);
@@ -328,6 +336,7 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
 
 template<template<typename> class cauchy_kernel, typename RNG>
 Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
+  CHECK_EMPTY_AND_RETURN(self);
   // TODO: instead of variable name 'sigma', use 'gamma' or 'scale'
   // the variance, squared sigma, is undefined for cauchy distribution
   TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
@@ -341,6 +350,7 @@ Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Ge
 
 template<template<typename> class bernoulli_tensor_kernel, typename RNG>
 Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  CHECK_EMPTY_AND_RETURN(self);
   NoNamesGuard guard;
   at::assert_no_internal_overlap(self);
   bernoulli_tensor_kernel<RNG>()(self, p_, gen);
@@ -349,6 +359,7 @@ Tensor& bernoulli_impl_(Tensor& self, const Tensor& p_, c10::optional<Generator>
 
 template<template<typename> class bernoulli_scalar_kernel, typename RNG>
 Tensor& bernoulli_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
+  CHECK_EMPTY_AND_RETURN(self);
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
   at::assert_no_internal_overlap(self);
   bernoulli_scalar_kernel<RNG>()(self, p, gen);
