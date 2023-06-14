@@ -179,6 +179,7 @@ class X86InductorQuantizer(Quantizer):
         self._annotate_conv2d_binary(model, config)
         self._annotate_conv2d_unary(model, config)
         self._annotate_conv2d(model, config)
+
         return model
 
     def _annotate_conv2d_binary_unary(
@@ -252,6 +253,7 @@ class X86InductorQuantizer(Quantizer):
                 _annotated=True
             )
             unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True
             )
@@ -321,6 +323,7 @@ class X86InductorQuantizer(Quantizer):
             binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(quantization_config)
             binary_node.meta["quantization_annotation"] = QuantizationAnnotation(
                 input_qspec_map=binary_node_input_qspec_map,
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True
             )
@@ -363,6 +366,7 @@ class X86InductorQuantizer(Quantizer):
                 _annotated=True
             )
             unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True
             )
@@ -401,6 +405,7 @@ class X86InductorQuantizer(Quantizer):
 
             conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),
                 _annotated=True
             )
