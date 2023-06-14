@@ -37,7 +37,7 @@ from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed, _lazy_
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map_only
 
 
 @dataclass
@@ -304,18 +304,11 @@ def _broadcast_processed_state(
 ) -> Dict[str, Any]:
     objects: List[Any] = [None]
     if fsdp_state.rank == 0:
-
-        def process_state(value: Any) -> Any:
-            if torch.is_tensor(value):
-                if value.dim() == 0:
-                    # Ensure that `step` is on CPU.
-                    return value.cpu()
-                else:
-                    return _PosDimTensorInfo(value.shape, value.dtype)
-            else:
-                return value
-
-        objects[0] = tree_map(process_state, optim_state)
+        objects[0] = tree_map_only(
+            torch.Tensor,
+            lambda v: v.cpu() if v.dim() == 0 else _PosDimTensorInfo(v.shape, v.dtype),
+            optim_state,
+        )
     dist.broadcast_object_list(objects, src=0, group=group)
     if fsdp_state.rank == 0:
         return optim_state
@@ -429,16 +422,6 @@ def _flatten_optim_state_dict(
     unflat_osd_state = unflat_osd["state"]
     all_state_keys = set(unflat_osd_state.keys())
 
-    # local_state_dict is used to construct states of empty parameters.
-    # This should only be used if is_named_optimizer=True.
-    local_state_dict: Dict[str, Any] = {}
-    local_state_clean_fqns: Dict[str, str] = {}
-    if optim is not None:
-        local_state_dict = optim.state_dict()["state"]
-        for fqn in local_state_dict.keys():
-            clean_fqn = clean_tensor_name(fqn)
-            local_state_clean_fqns[clean_fqn] = fqn
-
     for fqns in param_to_fqns.values():
         fqn = fqns[0]
         if fqn not in unflat_osd_state:
@@ -475,12 +458,21 @@ def _flatten_optim_state_dict(
             if flat_state:
                 flat_osd_state[key] = flat_state
             elif optim is not None:  # NamedOptimizer or KeyedOptimizer case.
-                assert len(fqns) == 1
-                local_wrapped_fqn = local_state_clean_fqns.get(fqn, "")
-                if local_wrapped_fqn:
-                    flat_osd_state[key] = copy.deepcopy(
-                        local_state_dict[local_wrapped_fqn]
+                assert len(fqns) == 1 and use_orig_params
+                flat_osd_state[key] = copy.deepcopy(
+                    tree_map_only(
+                        torch.Tensor,
+                        lambda t: t.cpu()
+                        if t.dim() == 0
+                        else torch.zeros(0, device=t.device, dtype=t.dtype),
+                        unflat_osd_state[fqn],
                     )
+                )
+            else:
+                assert False, (
+                    f"The state of {key} is empty and the optimizer is not a "
+                    "NamedOptimizer."
+                )
         else:  # do not flatten non-FSDP parameters' states
             assert len(fqns) == 1
             key = _OptimStateKey(tuple(fqns), False)
