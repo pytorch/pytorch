@@ -72,6 +72,8 @@ int64_t update_to(int64_t to) {
   return to;
 }
 
+// Return earlier for not invoking kernel.
+// See https://github.com/pytorch/pytorch/issues/103418 for more details
 #define CHECK_EMPTY_AND_RETURN(tensor) \
   if (tensor.numel() == 0) {  \
     return tensor;  \
@@ -189,9 +191,6 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   CHECK_NORMAL_STD(std);
-
-  // return earlier for not invoking normal_kernel
-  // see https://github.com/pytorch/pytorch/issues/103418 for more details
   CHECK_EMPTY_AND_RETURN(self);
 
   if (self.is_complex()) {
