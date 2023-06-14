@@ -909,7 +909,13 @@ def compile_fx(
     # TODO: can add logging before/after the call to create_aot_dispatcher_function
     # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
     # once torchdynamo is merged into pytorch
-    with V.set_fake_mode(detect_fake_mode(example_inputs_)):
+    fake_mode = detect_fake_mode(example_inputs_) or torch._subclasses.FakeTensorMode(
+        allow_non_fake_inputs=True
+    )
+    tracing_context = (
+        torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
+    )
+    with V.set_fake_mode(fake_mode), torch._guards.tracing(tracing_context):
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
