@@ -9,7 +9,7 @@ from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 
-from functorch.experimental.control_flow import cond
+from functorch.experimental.control_flow import cond, map
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -281,11 +281,47 @@ class TestExport(TestCase):
         inp = torch.ones(6, 4)
         constraints = [dynamic_dim(inp, 0)]
         ep = export(Foo(), (inp,), constraints=constraints, _add_runtime_assertions=False)
-        print(ep.graph)
         gm = unlift_exported_program_lifted_states(ep)
-        print(gm.graph)
-        print(gm.true_graph_0.graph)
+        self.assertEqual(gm(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
 
+    def test_export_cond_map(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self):
+                return self.buffer.sum()
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = A()
+
+            def inner(self, x, pred):
+                def true_fn(x):
+                    return x + x + self.a()
+
+                def false_fn(x):
+                    return x * x - self.a()
+
+                return cond(pred, true_fn, false_fn, [x])
+
+            def forward(self, pred, xs):
+                def body(x, pred):
+                    return self.inner(x, pred) + self.a()
+
+                return map(body, xs, pred)
+
+        mod = Module()
+        inp = torch.randn(3, 2, 1)
+        constraints = [dynamic_dim(inp, 0)]
+        ep = export(Module(), (torch.tensor(True), inp), constraints=constraints, _add_runtime_assertions=False)
+        gm = unlift_exported_program_lifted_states(ep)
+
+        inp_test = torch.randn(3, 2, 1)
+        self.assertEqual(gm(torch.tensor(True), inp_test), Module()(torch.tensor(True), inp_test))
+        self.assertEqual(gm(torch.tensor(False), inp_test), Module()(torch.tensor(False), inp_test))
 
 if __name__ == '__main__':
     run_tests()
