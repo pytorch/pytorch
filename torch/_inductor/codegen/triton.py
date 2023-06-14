@@ -933,7 +933,22 @@ class TritonKernel(Kernel):
         # Note. This may not be correct when there is indirect indexing
         if self.is_indirect_indexing(index):
             return False
-        return not set.issubset(set(self.range_tree_nodes.keys()), index.free_symbols)
+
+        index_numels = [1] * len(self.numels)
+        for symbol in index.free_symbols:
+            if symbol not in self.range_tree_nodes:
+                # Non-iterated variables, e.g. strides
+                continue
+            entry = self.range_tree_nodes[symbol]
+            index_numels[entry.parent.index] *= entry.length
+
+        # If the index variables only iterate over a subset of the kernel
+        # numels, then it must be broadcasted.
+        simplify = V.graph.sizevars.simplify
+        return any(
+            simplify(idx_range) != simplify(iter_range)
+            for idx_range, iter_range in zip(index_numels, self.numels)
+        )
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """

@@ -936,14 +936,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("Tensor"):
             return x + 1
 
-    @requires_static_shapes
     @make_test
     def test_tensor_new_with_size(x):
         y = torch.rand(5, 8)
         z = x.new(y.size())
         assert z.size() == y.size()
 
-    @requires_static_shapes
     @make_test
     def test_tensor_new_with_shape(x):
         y = torch.rand(5, 8)
