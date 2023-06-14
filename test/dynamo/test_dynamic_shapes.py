@@ -36,7 +36,7 @@ def make_dynamic_cls(cls, automatic_dynamic_shapes=False):
 
     cls_prefix = "DynamicShapes"
     if automatic_dynamic_shapes:
-        suffix = "AutomaticDynamicShapes"
+        cls_prefix = "AutomaticDynamicShapes"
 
     test_class = make_test_cls_with_patches(
         cls,
