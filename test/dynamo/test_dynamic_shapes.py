@@ -57,6 +57,7 @@ def make_dynamic_cls(cls, *, static_default=False):
         (config, "dynamic_shapes", True),
         (config, "assume_static_by_default", static_default),
         (config, "specialize_int", static_default),
+        xfail_prop="_expected_failure_dynamic" if not static_default else None,
     )
 
     xfail_tests = ALL_DYNAMIC_XFAILS.get(cls.__name__)

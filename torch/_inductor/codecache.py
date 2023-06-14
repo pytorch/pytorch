@@ -9,7 +9,6 @@ import logging
 import multiprocessing
 import os
 import pathlib
-import pickle
 import re
 import shutil
 import signal
@@ -22,7 +21,6 @@ import types
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
-from copy import copy
 from ctypes import cdll
 from dataclasses import field
 from functools import partial
@@ -301,7 +299,9 @@ def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
         return code_hash(repr(content))
 
 
-def write(content: Union[str, bytes], extension: str, extra="", hash_type: str="code"):
+def write(
+    content: Union[str, bytes], extension: str, extra="", hash_type: str = "code"
+):
     key: str = get_hash(content, extra, hash_type)
     basename, subdir, path = get_path(key, extension)
     if not os.path.exists(subdir):
@@ -778,11 +778,7 @@ class AotCodeCache:
         cpp_command = repr(
             cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda)
         )
-        key, input_path = write(
-            source_code,
-            "cpp",
-            extra=cpp_command
-        )
+        key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
 
@@ -838,11 +834,7 @@ class CppCodeCache:
     def load(cls, source_code):
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
-        key, input_path = write(
-            source_code,
-            "cpp",
-            extra=cpp_command
-        )
+        key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
 

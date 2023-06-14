@@ -14,6 +14,7 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
     magic_methods,
     method_to_operator,
     ShapeEnv,
@@ -197,7 +198,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.user_visible_outputs = user_visible_outputs
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
-        self.cache_linemap: List[Tuple[int, str]] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
+        self.cache_linemap: List[
+            Tuple[int, str]
+        ] = (
+            []
+        )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
 
     def decide_layout_opt(self) -> bool:
         """
@@ -205,12 +210,6 @@ class GraphLowering(torch.fx.Interpreter):
         heuristics.
         """
         if not config.layout_optimization:
-            return False
-
-        if dynamo_config.dynamic_shapes:
-            log.debug(
-                "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
-            )
             return False
 
         gm = self.module
@@ -227,6 +226,14 @@ class GraphLowering(torch.fx.Interpreter):
         # volo_d1_224
         if len(list(gm.graph.nodes)) >= 300 * nconv:
             log.debug("Only a few conv, skip layout optimization")
+            return False
+
+        if any(
+            free_symbols(n.args[idx].meta["val"]) for n in conv_nodes for idx in [0, 1]
+        ):
+            log.debug(
+                "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
+            )
             return False
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
