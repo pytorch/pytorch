@@ -6,7 +6,6 @@ import json
 import os
 import time
 import uuid
-import xml.etree.ElementTree as ET
 import zipfile
 
 from decimal import Decimal
@@ -20,7 +19,10 @@ import rockset  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
-TARGET_WORKFLOW = "--rerun-disabled-tests"
+
+# NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
+# 2 more times
+MAX_RETRY_IN_NON_DISABLED_MODE = 3 * 3
 
 
 def _get_request_headers() -> Dict[str, str]:
@@ -209,17 +211,15 @@ def unzip(p: Path) -> None:
         zip.extractall(unzipped_dir)
 
 
-def is_rerun_disabled_tests(root: ET.ElementTree) -> bool:
+def is_rerun_disabled_tests(tests: Dict[str, Dict[str, int]]) -> bool:
     """
-    Check if the test report is coming from rerun_disabled_tests workflow
+    Check if the test report is coming from rerun_disabled_tests workflow where
+    each test is run multiple times
     """
-    skipped = root.find(".//*skipped")
-    # Need to check against None here, if not skipped doesn't work as expected
-    if skipped is None:
-        return False
-
-    message = skipped.attrib.get("message", "")
-    return TARGET_WORKFLOW in message or "num_red" in message
+    return all(
+        t.get("num_green", 0) + t.get("num_red", 0) > MAX_RETRY_IN_NON_DISABLED_MODE
+        for t in tests.values()
+    )
 
 
 def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
