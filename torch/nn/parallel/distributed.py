@@ -257,13 +257,13 @@ class _DDPSink(Function):
         reducer = ddp_weakref.reducer
         static_graph = ddp_weakref.static_graph
         delay_ar_enqueued = (
-            static_graph and ddp_weakref.static_graph_delay_allreduce_enqueued
+            static_graph and ddp_weakref._static_graph_delay_allreduce_enqueued
         )
         if static_graph and not delay_ar_enqueued:
             Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 reducer._delay_all_reduce
             )
-            ddp_weakref.static_graph_delay_allreduce_enqueued = True
+            ddp_weakref._static_graph_delay_allreduce_enqueued = True
 
         return (None, *grad_outputs)
 
@@ -1470,7 +1470,7 @@ class DistributedDataParallel(Module, Joinable):
         # TODO: DDPSink is currently enabled for unused parameter detection and
         # static graph training for first iteration.
         if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and not self.static_graph_delay_allreduce_enqueued
+            self.static_graph and not self._static_graph_delay_allreduce_enqueued
         ):
             (
                 output_tensor_list,
@@ -2202,7 +2202,7 @@ class DistributedDataParallel(Module, Joinable):
             )
             return
         self.static_graph = True
-        self.static_graph_delay_allreduce_enqueued = False
+        self._static_graph_delay_allreduce_enqueued = False
         self.reducer._set_static_graph()
         assert self.logger is not None
         self.logger._set_static_graph()

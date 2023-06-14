@@ -9787,8 +9787,7 @@ class DistributedTest:
             torch.cuda.set_device(self.rank)
             torch.manual_seed(42 << 1337 % (self.rank + 1))
             model = Net().cuda(self.rank)
-            from copy import deepcopy
-            local_model = deepcopy(model)
+            local_model = copy.deepcopy(model)
             model = torch.nn.parallel.DistributedDataParallel(
                 model, device_ids=[self.rank], static_graph=True
             )
@@ -9808,6 +9807,8 @@ class DistributedTest:
                         b = local_model(inp_clone)
                         loss = a.sum() + b.sum()
                         loss.backward()
+
+                    ws = dist.get_world_size()
                     for p in local_model.parameters():
                         p.grad.data = p.grad / 2
 
