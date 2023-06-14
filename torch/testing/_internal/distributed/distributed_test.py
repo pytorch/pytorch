@@ -9810,7 +9810,7 @@ class DistributedTest:
 
                     ws = dist.get_world_size()
                     for p in local_model.parameters():
-                        p.grad.data = p.grad / 2
+                        p.grad.data = p.grad / dist.get_world_size()
 
                     for p_ddp, p_local in zip(
                         model.parameters(),
