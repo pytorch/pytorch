@@ -67,20 +67,25 @@ class RandomModel(nn.Module):
         return torch.matmul(x, y)
 
 
-class MultiOutputModel(nn.Module):
+class MultiOutputModule(nn.Module):
     def __init__(self, device: torch.device):
         super().__init__()
         self.w1 = nn.Parameter(torch.randn((100, 100), device=device))
         self.w2 = nn.Parameter(torch.randn((100, 100), device=device))
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, activation_fn: str) -> torch.Tensor:
         z = x @ self.w1
-        z = nn.functional.relu(z)
+        if activation_fn == "relu":
+            z = nn.functional.relu(z)
+        elif activation_fn == "gelu":
+            z = nn.functional.gelu(z)
+        else:
+            raise ValueError(f"Unknown activation_fn: {activation_fn}")
         z = z @ self.w2
         return z.sin(), z.cos()
 
 
-class MultiInputModel(nn.Module):
+class MultiInputModule(nn.Module):
     def __init__(self, device: torch.device):
         super().__init__()
         self.w = nn.Parameter(torch.randn((100, 100), device=device))
@@ -91,6 +96,23 @@ class MultiInputModel(nn.Module):
         z = x + y
         z = z @ self.w
         return nn.functional.relu(z)
+
+
+class MultiInputOutputModel(nn.Module):
+    def __init__(self, device: torch.device, use_kwargs: bool):
+        super().__init__()
+        self.m1 = MultiOutputModule(device)
+        self.m2 = MultiInputModule(device)
+        self.m3 = MultiOutputModule(device)
+        self.m4 = MultiInputModule(device)
+        self._use_kwargs = use_kwargs
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        z = self.m1(x, activation_fn="relu") if self._use_kwargs else self.m1(x, "relu")
+        z = self.m2(z)
+        z = self.m3(z, activation_fn="gelu") if self._use_kwargs else self.m3(x, "gelu")
+        z = self.m4(z)
+        return z
 
 
 class TestCheckpoint(TestCase):
@@ -171,27 +193,28 @@ class TestCheckpoint(TestCase):
             self.assertEqual(p1.grad, p2.grad)
 
     @parametrize("use_reentrant", [True, False])
-    def test_multi_args(self, use_reentrant: bool):
+    @parametrize("use_kwargs", [True, False])
+    def test_multi_args(self, use_reentrant: bool, use_kwargs: bool):
         """
         Tests checkpoint for modules with multiple output args and hence
-        multiple backward function input args.
+        multiple backward function input args and pass kwargs to forward or
+        args only.
         """
         device = torch.device("cpu")
-        net1 = nn.Sequential(
-            MultiOutputModel(device),
-            MultiInputModel(device),
-            MultiOutputModel(device),
-            MultiInputModel(device),
-        )
+        net1 = MultiInputOutputModel(device, use_kwargs)
         net2 = deepcopy(net1)
-        checkpoint(net2[0], use_reentrant=use_reentrant)
-        checkpoint(net2[2], use_reentrant=use_reentrant)
-        x1 = torch.randn(20, 100, requires_grad=True)
-        x2 = x1.clone()
-        net1(x1).sum().backward()
-        net2(x2).sum().backward()
-        for p1, p2 in zip(net1.parameters(), net2.parameters()):
-            self.assertEqual(p1.grad, p2.grad)
+        checkpoint(net2.m1, use_reentrant=use_reentrant)
+        checkpoint(net2.m3, use_reentrant=use_reentrant)
+
+        for _ in range(5):
+            net1.zero_grad()
+            net2.zero_grad()
+            x1 = torch.randn(20, 100, requires_grad=True)
+            x2 = x1.clone()
+            net1(x1).sum().backward()
+            net2(x2).sum().backward()
+            for p1, p2 in zip(net1.parameters(), net2.parameters()):
+                self.assertEqual(p1.grad, p2.grad)
 
 
 instantiate_parametrized_tests(TestCheckpoint)

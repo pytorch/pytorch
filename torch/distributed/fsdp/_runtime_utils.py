@@ -439,6 +439,12 @@ def _pre_forward(
         kwargs (Dict[str, Any]): Module forward ``kwargs``.
     """
     with torch.profiler.record_function("FullyShardedDataParallel._pre_forward"):
+        # For `fully_shard` + `checkpoint`, do not re-run pre/post-forward
+        if any(
+            handle._training_state == HandleTrainingState.BACKWARD_PRE
+            for handle in handles
+        ):
+            return
         state.training_state = TrainingState.FORWARD_BACKWARD
         state._exec_order_data.record_pre_forward(handles, module.training)
         for handle in handles:
@@ -513,6 +519,12 @@ def _post_forward(
     parameter.
     """
     with torch.profiler.record_function("FullyShardedDataParallel._post_forward"):
+        # For `fully_shard` + `checkpoint`, do not re-run pre/post-forward
+        if any(
+            handle._training_state == HandleTrainingState.BACKWARD_PRE
+            for handle in handles
+        ):
+            return
         state._exec_order_data.record_post_forward(handles)
         if reshard_fn is not None:
             reshard_fn()
