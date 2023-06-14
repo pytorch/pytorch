@@ -25,7 +25,7 @@ import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.testing import rand_strided, same, expectedFailureDynamic
+from torch._dynamo.testing import expectedFailureCodegenDynamic, rand_strided, same
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -5855,9 +5855,9 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
-    # Shape padding causes the inputs to all get specialized; TODO make it not
-    # do that
-    @expectedFailureDynamic
+    # Shape padding causes the inputs to all get specialized, so the codegen
+    # test fails
+    @expectedFailureCodegenDynamic
     @requires_cuda()
     @skipIfRocm
     @torch._inductor.config.patch("shape_padding", True)
