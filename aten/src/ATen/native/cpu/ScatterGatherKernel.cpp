@@ -16,6 +16,7 @@
 #include <fbgemm/Utils.h>
 #endif
 #include <ATen/ops/zeros.h>
+#include <ATen/OpMathType.h>
 
 namespace at::native {
 
@@ -621,25 +622,22 @@ std::pair<K*, V*> radix_sort_parallel(
 //
 
 template <typename scalar_t, ReductionType reduce>
-inline void _init(scalar_t* self_ptr, float* buffer_ptr, int64_t K, bool include_self) {
-  if constexpr (!is_reduced_floating_point_v<scalar_t>) {
-    init<scalar_t, reduce>(self_ptr, K, include_self);
+inline void _init(scalar_t* self_ptr, at::opmath_type<scalar_t>* buffer_ptr, int64_t K, bool include_self) {
+  if (!include_self) {
+    init<at::opmath_type<scalar_t>, reduce>(buffer_ptr, K, include_self);
   } else {
-    if (!include_self) {
-      init<float, reduce>(buffer_ptr, K, include_self);
-    } else {
-      vec::convert(self_ptr, buffer_ptr, K);
-    }
+    vec::convert(self_ptr, buffer_ptr, K);
   }
 }
 
 template <typename scalar_t, ReductionType reduce>
-inline void _update(scalar_t* self_ptr, scalar_t* src_data, float* buffer_ptr, int64_t col, int64_t K) {
-  using Vec = vec::Vectorized<scalar_t>;
-  using fVec = vec::Vectorized<float>;
+inline void _update(scalar_t* src_data, at::opmath_type<scalar_t>* buffer_ptr, int64_t col, int64_t K) {
   if constexpr (!is_reduced_floating_point_v<scalar_t>) {
-    update<scalar_t, reduce>(self_ptr, src_data + col * K, K);
+    update<scalar_t, reduce>(buffer_ptr, src_data + col * K, K);
   } else {
+    using opmath_t = at::opmath_type<scalar_t>;
+    using Vec = vec::Vectorized<scalar_t>;
+    using fVec = vec::Vectorized<opmath_t>;
     int64_t k = 0;
     constexpr int64_t kVecSize = Vec::size();
     constexpr int64_t kfVecSize = fVec::size();
@@ -654,8 +652,8 @@ inline void _update(scalar_t* self_ptr, scalar_t* src_data, float* buffer_ptr, i
       buf_vec1.store(buffer_ptr + k + fVec::size());
     }
     for (; k < K; k++) {
-      float src_val = float(src_data[col * K + k]);
-      buffer_ptr[k] = update<float, reduce>(buffer_ptr[k], src_val);
+      opmath_t src_val = opmath_t(src_data[col * K + k]);
+      buffer_ptr[k] = update<opmath_t, reduce>(buffer_ptr[k], src_val);
     }
   }
 }
@@ -737,15 +735,18 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
     }
   });
 
-  Tensor buffer = at::zeros({num_threads, K}, self.options().dtype(kFloat));
-  float* buffer_data = buffer.data_ptr<float>();
+  using opmath_t = at::opmath_type<scalar_t>;
+  constexpr bool need_acc = is_reduced_floating_point_v<scalar_t>;
+  auto buffer_type = need_acc ? ScalarType::Float : self.scalar_type();
+  Tensor buffer = at::zeros({num_threads, K}, self.options().dtype(buffer_type));
+  opmath_t* buffer_data = buffer.data_ptr<opmath_t>();
 
   // TODO: do blocking on col dimension to reduce WR bandwidth
   at::parallel_for(0, num_nonzero_rows, 1, [&](int64_t begin, int64_t end) {
     int tid = at::get_thread_num();
     TORCH_CHECK(tid < num_threads,
                 "expect thread id smaller than ", num_threads, ", got thread id ", tid);
-    float* buffer_ptr = buffer_data + tid * K;
+    opmath_t* buffer_ptr = buffer_data + tid * K;
 
     for (const auto m : c10::irange(begin, end)) {
       int64_t row = row_index[m];
@@ -759,11 +760,9 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
       // step 2: reduce
       for (const auto n : c10::irange(off_start, off_end)) {
         int64_t col = sorted_col_index_values[n];
-        _update<scalar_t, reduce>(self_ptr, src_data, buffer_ptr, col, K);
+        _update<scalar_t, reduce>(src_data, buffer_ptr, col, K);
       }
-      if (is_reduced_floating_point_v<scalar_t>) {
-        vec::convert(buffer_ptr, self_ptr, K);
-      }
+      vec::convert(buffer_ptr, self_ptr, K);
 
       // step 3: finalize
       int64_t count = include_self ? 1 : 0;

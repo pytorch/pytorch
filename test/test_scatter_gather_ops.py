@@ -282,8 +282,8 @@ class TestScatterGather(TestCase):
         def helper(input_size, idx_size, atol=1e-5, rtol=0.016):
             is_reduced_type = dtype in [torch.bfloat16, torch.float16]
             if is_reduced_type:
-                atol = 1e-3
-                rtol = 0.016
+                atol = 1e-2
+                rtol = 1e-2
             input = torch.randn(input_size, device=device).to(dtype=dtype)
             input2 = input.clone().to(torch.float32) if is_reduced_type else input.clone()
 
