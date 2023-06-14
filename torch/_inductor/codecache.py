@@ -877,7 +877,7 @@ class PyCodeCache:
 
     @classmethod
     def load(cls, source_code, extra="", linemap=()):
-        key, path = self.write(source_code, "py", extra=extra)
+        key, path = write(source_code, "py", extra=extra)
         return cls.load_by_key_path(key, path, linemap)
 
     @classmethod
