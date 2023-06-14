@@ -221,7 +221,6 @@ def cpp_prefix():
         content = f.read()
         _, filename = codecache.write(
             content,
-            code_hash(content),
             "h",
         )
     return f'#include "{filename}"'
