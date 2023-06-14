@@ -472,6 +472,9 @@ class TracingContext:
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.loc_in_frame = None
+        # this is only set after aot_autograd
+        self.fw_metadata = None
+        self.params_flat = None
 
     @staticmethod
     def extract_stack():
@@ -538,6 +541,7 @@ def tracing(context: TracingContext):
 
 
 # Subclasses can be found in torch/_dynamo/source.py
+# TODO(voz): Consider a toplevel torch/_source.py
 @dataclasses.dataclass(frozen=True)
 class Source:
     def reconstruct(self, codegen):
@@ -556,6 +560,14 @@ class Source:
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+
+# Subclasses can be found in torch/_dynamo/source.py
+# Note - there is an odd exception to this invariant of a single base,
+# see class SuperSource
+@dataclasses.dataclass(frozen=True)
+class ChainedSource(Source):
+    base: Source
 
 
 def detect_fake_mode(inputs: Any = None):
