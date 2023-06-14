@@ -2134,7 +2134,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--timeout",
         type=int,
-        default=1800,
+        default=2000,
         help="timeout (second) for benchmarking.",
     )
 
