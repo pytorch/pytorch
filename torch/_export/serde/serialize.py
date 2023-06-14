@@ -423,12 +423,12 @@ class GraphModuleSerializer:
 
     def is_sym_int_arg(self, arg) -> bool:
         return isinstance(arg, int) or (
-                isinstance(arg, torch.fx.Node) and arg.name in self.sym_int_values
+            isinstance(arg, torch.fx.Node) and arg.name in self.sym_int_values
         )
 
     def is_sym_bool_arg(self, arg) -> bool:
         return isinstance(arg, bool) or (
-                isinstance(arg, torch.fx.Node) and arg.name in self.sym_bool_values
+            isinstance(arg, torch.fx.Node) and arg.name in self.sym_bool_values
         )
 
     def serialize_input(self, arg) -> Argument:
@@ -637,7 +637,7 @@ impl_lib = Library("aten", "IMPL")
 
 class GraphModuleOpUpgrader:
     """Given model op set version number as well as compiler op set version number, do the following:
-    1. retrieve upgraders from somewhere (TorchScript API or new API).
+    1. retrieve upgraders from somewhere (TorchScript API or new API) and pass it into this upgrader.
     2. parse it and reorder for upgrading purpose.
     3. register old versions of operators as custom ops.
     4. prepare upgrader passes.
@@ -679,19 +679,20 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
             self,
             compiler_opset_version: Optional[Dict[str, int]] = None,
             model_opset_version: Optional[Dict[str, int]] = None,
-            op_upgraders: Optional[Dict[str, Tuple[str, ...]]] = None,
+            op_upgraders: Optional[Dict[str, Tuple[str, str]]] = None,
             # TODO(larryliu): can add a new TS API: torch._C._get_upgraders_entry_map()
     ):
-        self.compiler_opset_version = compiler_opset_version
-        self.model_opset_version = model_opset_version
+        self.compiler_opset_version = compiler_opset_version if compiler_opset_version else {}
+        self.model_opset_version = model_opset_version if model_opset_version else {}
         # key is version number, value is a list of upgraders, keyed on op name
-        self.upgraders: List[Tuple[str]] = self._parse_upgraders(op_upgraders)
+        self.upgraders: List[Tuple[str, str]] = self._parse_upgraders(op_upgraders)
 
         self.upgrader_passes: List[GraphModuleOpUpgrader.UpgraderPass] = self._populate_passes()
 
-    def _parse_upgraders(self, op_upgraders: Dict[str, Tuple[str]] = None) -> List[Tuple[str]]:
+    def _parse_upgraders(self, op_upgraders: Optional[Dict[str, Tuple[str, str]]] = None) -> List[Tuple[str, str]]:
         """reorder op_upgraders by version number."""
-        if not op_upgraders:
+        # TODO(larryliu0820): Add support for custom ops
+        if not op_upgraders or "aten" not in self.model_opset_version or "aten" not in self.compiler_opset_version:
             return []
         model_ver = self.model_opset_version["aten"]
         curr_ver = self.compiler_opset_version["aten"]
@@ -701,8 +702,8 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
             upgrading to version 4."""
             return int(versioned_upgrader_name.split('_')[-1]) + 1
 
-        versioned_upgraders: Dict[int, Tuple[str]] = {get_target_version(name): v for name, v in op_upgraders.items()}
-        target_upgraders: List[Tuple[str]] = []
+        versioned_upgraders: Dict[int, Tuple[str, str]] = {get_target_version(name): v for name, v in op_upgraders.items()}
+        target_upgraders: List[Tuple[str, str]] = []
         for ver in range(model_ver, curr_ver + 1):
             if ver in versioned_upgraders:
                 target_upgraders.append(versioned_upgraders[ver])
@@ -729,7 +730,7 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
             exec(impl_str)
             impl_lib.impl(name, locals()[name], "CompositeImplicitAutograd")
 
-        for schema, upgrader_str in self.upgraders:
+        for (schema, upgrader_str) in self.upgraders:
             upgrader_name = upgrader_str.split('(')[0].split(' ')[-1]
             op_name = schema.split('(')[0].split("::")[-1]
             schema = schema.replace(op_name, upgrader_name)
@@ -1039,15 +1040,25 @@ class ExportedProgramDeserializer:
             raise RuntimeError("Serialized model should have opset version.")
         common_namespaces = {key for key in model_opset_version if key in self.expected_opset_version}
         for namespace in common_namespaces:
-            assert isinstance(model_version := model_opset_version[namespace], int), f"model_opset_version value should be int, got {model_opset_version[namespace]}"
-            assert isinstance(compiler_version := self.expected_opset_version[namespace], int), f"expected_opset_version value should be int, got {self.expected_opset_version[namespace]}"
+            assert (
+                isinstance(model_version := model_opset_version[namespace], int)
+            ), f"model_opset_version value should be int, got {model_opset_version[namespace]}"
+
+            assert (
+                isinstance(compiler_version := self.expected_opset_version[namespace], int)
+            ), f"expected_opset_version value should be int, got {self.expected_opset_version[namespace]}"
+
             # TODO(larryliu0820): Add support for upgrader & downgrader
             if model_version != compiler_version:
-                raise NotImplementedError(f"Model opset version {model_opset_version} doesn't match to compiler opset version {self.expected_opset_version}! Upgrader/downgrader is not implemented yet.")
+                raise NotImplementedError(
+                    f"Model opset version {model_opset_version} doesn't match to compiler opset version "
+                    f"{self.expected_opset_version}! Upgrader/downgrader is not implemented yet."
+                )
         for namespace in model_opset_version:
             if namespace in common_namespaces:
                 continue
-            logging.warning(f"Compiler doesn't have a version table for op namespace: {namespace}. ")
+            log.warning("Compiler doesn't have a version table for op namespace: {ns}. ", extra={"ns": namespace})
+
 
 class EnumEncoder(json.JSONEncoder):
     def default(self, obj):

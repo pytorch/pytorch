@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import logging
 import unittest
 
 import torch
@@ -243,8 +242,9 @@ class TestOpVersioning(TestCase):
         compiler_opset_version = {"aten": 3}
         model_opset_version = {"aten": 3, "custom": 4}
         deserializer = ExportedProgramDeserializer(compiler_opset_version)
-        with self.assertLogs(logging.getLogger(), level='WARN'):
+        with self.assertLogs(level='WARN') as log:
             deserializer._validate_model_opset_version(model_opset_version)
+            self.assertIn("Compiler doesn't have a version table for op namespace", log.output[0])
 
     def test_creates_upgrader_pass(self):
         compiler_opset_version = {"aten": 4}
