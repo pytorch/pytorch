@@ -25,7 +25,7 @@ import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.testing import rand_strided, same, expectedFailureDynamic
+from torch._dynamo.testing import expectedFailureDynamic, rand_strided, same
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx

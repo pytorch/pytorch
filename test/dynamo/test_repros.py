@@ -30,7 +30,12 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import rand_strided, requires_static_shapes, same
+from torch._dynamo.testing import (
+    expectedFailureDynamic,
+    rand_strided,
+    requires_static_shapes,
+    same,
+)
 from torch.nn import functional as F
 
 
@@ -1060,9 +1065,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     # https://github.com/pytorch/pytorch/issues/103620
     @expectedFailureDynamic
-    @torch._dynamo.config.patch(
-        automatic_dynamic_shapes=False
-    )
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
         model = ChunkReformerFeedForward()

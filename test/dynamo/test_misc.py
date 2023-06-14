@@ -1975,9 +1975,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     # NotImplementedError: SymNodeVariable() is not a constant
     # https://github.com/pytorch/pytorch/issues/103618
     @expectedFailureDynamic
-    @torch._dynamo.config.patch(
-        automatic_dynamic_shapes=False
-    )
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

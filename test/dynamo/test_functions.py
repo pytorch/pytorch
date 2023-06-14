@@ -14,7 +14,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import requires_numpy_pytorch_interop, requires_static_shapes, expectedFailureDynamic
+from torch._dynamo.testing import (
+    expectedFailureDynamic,
+    requires_numpy_pytorch_interop,
+    requires_static_shapes,
+)
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 
