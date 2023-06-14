@@ -81,6 +81,7 @@ SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
     "nanogpt_generate",  # timeout
+    "sam",  # timeout
 }
 
 SKIP_FOR_CUDA = {
@@ -317,7 +318,24 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         extra_args = []
         if part:
             extra_args = ["--part", part]
-        if is_training:
+
+        if model_name == "vision_maskrcnn" and is_training:
+            # Output of vision_maskrcnn model is a list of bounding boxes,
+            # sorted on the basis of their scores. This makes accuracy
+            # comparison hard with torch.compile. torch.compile can cause minor
+            # divergences in the output because of how fusion works for amp in
+            # TorchInductor compared to eager.  Therefore, instead of looking at
+            # all the bounding boxes, we compare only top 5.
+            model_kwargs = {"box_detections_per_img": 5}
+            benchmark = benchmark_cls(
+                test="train",
+                device=device,
+                jit=False,
+                batch_size=batch_size,
+                extra_args=extra_args,
+                model_kwargs=model_kwargs,
+            )
+        elif is_training:
             benchmark = benchmark_cls(
                 test="train",
                 device=device,
