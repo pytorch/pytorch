@@ -138,17 +138,17 @@ example below as well::
 CPU in multiprocessing
 ----------------------
 
-Inappropriate multiprocessing can lead to CPU over subscription, causing
+Inappropriate multiprocessing can lead to CPU oversubscription, causing
 different processes to compete for CPU resources, resulting in low
 efficiency.
 
-This tutorial will explain what CPU over subscription is and how to
+This tutorial will explain what CPU oversubscription is and how to
 avoid it.
 
-CPU over subscription
+CPU oversubscription
 ~~~~~~~~~~~~~~~~~~~~~
 
-CPU over subscription is a technical term that refers to a situation
+CPU oversubscription is a technical term that refers to a situation
 where the total number of vCPUs allocated to a system exceeds the total
 number of vCPUs available on the hardware.
 
@@ -156,14 +156,14 @@ This leads to severe contention for CPU resources, In such cases, there
 is frequent switching between processes, which increases processes
 switching overhead and decreases overall system efficiency.
 
-Illustrate CPU oversubscription with the code examples in the Hogwild
+See CPU oversubscription with the code examples in the Hogwild
 implementation found in the `example
 repository <https://github.com/pytorch/examples/tree/main/mnist_hogwild>`__.
 
 When running the training example with the following command on CPU
 using 4 processes:
 
-.. code:: bash
+.. code-block:: bash
 
    python main.py --num-processes 4
 
@@ -189,10 +189,10 @@ subscription:
    to allocate resources fairly. This frequent context switching adds
    overhead and reduces the overall system efficiency.
 
-Avoid CPU over subscription
+Avoid CPU oversubscription
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A good way to avoid CPU over subscription is proper resource allocation.
+A good way to avoid CPU oversubscription is proper resource allocation.
 Ensure that the number of processes or threads running concurrently does
 not exceed the available CPU resources.
 
@@ -203,7 +203,7 @@ function in subprocess.
 
 Assuming there are N vCPUs on the machine and M processes will be
 generated, the maximum ``num_threads`` value used by each process would
-be ``floor(N/M)``. To avoid CPU over subscription in the mnist_hogwild
+be ``floor(N/M)``. To avoid CPU oversubscription in the mnist_hogwild
 example, the following changes are needed for the file ``train.py`` in
 `example
 repository <https://github.com/pytorch/examples/tree/main/mnist_hogwild>`__.
@@ -227,6 +227,6 @@ Set ``num_thread`` for each process using
 number of vCPUs available and M with the chosen number of processes. The
 appropriate ``num_thread`` value will vary depending on the specific
 task at hand. However, as a general guideline, the maximum value for the
-``num_thread`` should be ``floor(N/M)`` to avoid CPU over subscription.
+``num_thread`` should be ``floor(N/M)`` to avoid CPU oversubscription.
 In the mnist_hogwild training example, after avoiding CPU over
 subscription, you can achieve a 30x performance boost.
