@@ -1,4 +1,3 @@
-import copy
 import dataclasses
 import weakref
 import re
