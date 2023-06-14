@@ -704,18 +704,6 @@ static bool is_int_list(
       return true;
     }
 
-    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-    // in an intlist argument. Even float or complex scalar tensors.
-    if (jit::tracer::isTracing()) {
-      bool r =
-          (THPVariable_Check(item.ptr()) &&
-           THPVariable_Unpack(item.ptr()).sizes().empty());
-      if (!r && failed_idx != nullptr) {
-        *failed_idx = 0;
-      }
-      return r;
-    }
-
     // in dynamo, FakeTensor is qualified for INT_LIST
     if (is_dynamo_compiling && THPVariable_Check(item.ptr())) {
       auto& var = THPVariable_Unpack(item.ptr());
@@ -730,7 +718,15 @@ static bool is_int_list(
       return true;
     }
 
-    return false;
+    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+    // in an intlist argument. Even float or complex scalar tensors.
+    bool r =
+        (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
+         THPVariable_Unpack(item.ptr()).sizes().empty());
+    if (!r && failed_idx != nullptr) {
+      *failed_idx = 0;
+    }
+    return r;
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
