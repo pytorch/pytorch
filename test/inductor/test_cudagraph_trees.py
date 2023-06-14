@@ -10,6 +10,7 @@ import warnings
 import torch
 
 import torch._dynamo
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
@@ -19,6 +20,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -112,6 +114,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         "triton.slow_path_cudagraph_asserts": True,
                     }
                 )
+            )
+            self.graph_stack.enter_context(
+                dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
             )
             self.device_idx = torch.rand([0], device="cuda").device.index
             warnings.filterwarnings("ignore")
@@ -1125,6 +1130,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
+
+    if not TEST_CUDA_GRAPH:
+        if __name__ == "__main__":
+            sys.exit(0)
+        raise unittest.SkipTest("cuda graph test is skipped")
 
     if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")

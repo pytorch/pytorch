@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 
 from torch import Tensor
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 
 
@@ -32,11 +32,12 @@ def set_rng_state(new_state: Tensor, device_mesh: DeviceMesh) -> None:
 
     if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
-        if device_mesh.device_type == "cuda":
-            torch.cuda.set_rng_state(new_state)
+        device_handle = _get_device_handle(device_mesh.device_type)
+        if device_handle:
+            device_handle.set_rng_state(new_state)
         else:
             raise NotImplementedError(
-                f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
+                f"DTensor randomness only supports cuda/cuda-like device type, but got {device_mesh.device_type}"
             )
 
 
@@ -58,12 +59,12 @@ def get_rng_state(device_mesh: DeviceMesh) -> Tensor:
     assert isinstance(
         device_mesh, DeviceMesh
     ), f"expect a DeviceMesh but {type(device_mesh)} was passed in."
-
-    if device_mesh.device_type == "cuda":
-        return torch.cuda.get_rng_state()
+    device_handle = _get_device_handle(device_mesh.device_type)
+    if device_handle:
+        return device_handle.get_rng_state()
     else:
         raise NotImplementedError(
-            f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
+            f"DTensor randomness only supports cuda/cuda-like device type, but got {device_mesh.device_type}"
         )
 
 
@@ -101,11 +102,12 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
 
     # the current rank is in mesh
     if device_mesh.get_coordinate() is not None:
-        if device_mesh.device_type == "cuda":
-            torch.cuda.manual_seed(seed)
+        device_handle = _get_device_handle(device_mesh.device_type)
+        if device_handle:
+            device_handle.manual_seed(seed)
         else:
             raise NotImplementedError(
-                f"DTensor randomness only supports cuda device type, but got {device_mesh.device_type}"
+                f"DTensor randomness only supports cuda/cuda-like device type, but got {device_mesh.device_type}"
             )
 
 
@@ -232,7 +234,8 @@ def _get_rng_offset(device_mesh: DeviceMesh) -> int:
         If ``device_mesh`` is a sub-mesh and the calling rank is not a part of it,
         `_get_rng_offset` still returns its GPU device's RNG offset.
     """
-    if device_mesh.device_type == "cuda":
+    device_handle = _get_device_handle(device_mesh.device_type)
+    if device_handle:
         # source: https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         # last sizeof(int64_t) bytes are the offset
         state = get_rng_state(device_mesh)
@@ -240,7 +243,7 @@ def _get_rng_offset(device_mesh: DeviceMesh) -> int:
         return int(offset[0].item())
     else:
         raise NotImplementedError(
-            f"DTensor randomness only supports cuda device type, "
+            f"DTensor randomness only supports cuda/cuda-like device type, "
             f"but got {device_mesh.device_type}"
         )
 
@@ -264,7 +267,8 @@ def _set_rng_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
     """
     if device_mesh.get_coordinate() is not None:
         # the current rank is in mesh
-        if device_mesh.device_type == "cuda":
+        device_handle = _get_device_handle(device_mesh.device_type)
+        if device_handle:
             # source: https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
             # the RNG state tensor returned from torch.cuda.get_rng_state() is a ByteTensor
             # first 200 * sizeof(4120) bytes in tensor are 0xFF
@@ -276,7 +280,7 @@ def _set_rng_offset(new_offset: int, device_mesh: DeviceMesh) -> None:
             set_rng_state(state, device_mesh)
         else:
             raise NotImplementedError(
-                f"DTensor randomness only supports cuda device type, "
+                f"DTensor randomness only supports cuda/cuda-like device type, "
                 f"but got {device_mesh.device_type}"
             )
 
@@ -293,8 +297,9 @@ def _calc_shard_linear_idx(shard_coord: List[int], shard_size: List[int]) -> int
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
-    # currently we only support correct RNG on cuda device
-    if device_mesh.device_type == "cuda":
+    # currently we only support correct RNG on cuda/cuda-like device
+    device_handle = _get_device_handle(device_mesh.device_type)
+    if device_handle and hasattr(device_handle, "set_rng_state"):
         return True
     else:
         warnings.warn(
