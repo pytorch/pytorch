@@ -654,7 +654,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
-    def _grad_compile_check(self, fn, *inputs, expected_graph_names=()):
+    def _grad_compile_check(
+        self, fn, *inputs, expected_module_names=(), expected_node_names=()
+    ):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
         expected = torch.compile(fn, backend=backend, fullgraph=True)(*inputs)
@@ -662,13 +664,20 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual, expected)
 
         wrap_gm = backend.graphs[0]
-        actual_names = set()
+        module_names = set()
         for mod_name, _ in wrap_gm.named_modules():
-            actual_names.add(mod_name)
+            module_names.add(mod_name)
 
         # make sure that all expected names were present.
-        for name in expected_graph_names:
-            self.assertTrue(name in actual_names)
+        for name in expected_module_names:
+            self.assertTrue(name in module_names)
+
+        node_names = set()
+        for node in wrap_gm.graph.nodes:
+            node_names.add(node.name)
+
+        for name in expected_node_names:
+            self.assertTrue(name in node_names)
 
     def test_grad(self):
         counters.clear()
@@ -680,7 +689,12 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
+        self._grad_compile_check(
+            wrapper_fn,
+            x,
+            expected_module_names=("grad_body_0",),
+            expected_node_names=("contiguous",),
+        )
 
     def test_grad_freevar_tensor(self):
         counters.clear()
@@ -693,7 +707,12 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
+        self._grad_compile_check(
+            wrapper_fn,
+            x,
+            expected_module_names=("grad_body_0",),
+            expected_node_names=("contiguous",),
+        )
 
     def test_grad_freevar_python_scalar(self):
         counters.clear()
@@ -706,7 +725,12 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
+        self._grad_compile_check(
+            wrapper_fn,
+            x,
+            expected_module_names=("grad_body_0",),
+            expected_node_names=("contiguous",),
+        )
 
     def test_grad_closure_tensor(self):
         counters.clear()
@@ -722,7 +746,12 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
+        self._grad_compile_check(
+            wrapper_fn,
+            x,
+            expected_module_names=("grad_body_0",),
+            expected_node_names=("contiguous",),
+        )
 
     def test_grad_closure_scalar(self):
         counters.clear()
@@ -736,7 +765,12 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
+        self._grad_compile_check(
+            wrapper_fn,
+            x,
+            expected_module_names=("grad_body_0",),
+            expected_node_names=("contiguous",),
+        )
 
     def test_grad_has_aux(self):
         counters.clear()
@@ -750,7 +784,12 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn, has_aux=True)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(wrapper_fn, x, expected_graph_names=("grad_body_0",))
+        self._grad_compile_check(
+            wrapper_fn,
+            x,
+            expected_module_names=("grad_body_0",),
+            expected_node_names=("contiguous",),
+        )
 
     def test_grad_two_tensor_has_aux(self):
         counters.clear()
@@ -764,7 +803,11 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
         self._grad_compile_check(
-            wrapper_fn, x, y, expected_graph_names=("grad_body_0",)
+            wrapper_fn,
+            x,
+            y,
+            expected_module_names=("grad_body_0",),
+            expected_node_names=("contiguous",),
         )
 
     def test_grad_two_tensor_all_grad_has_aux(self):
@@ -779,7 +822,11 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
         self._grad_compile_check(
-            wrapper_fn, x, y, expected_graph_names=("grad_body_0",)
+            wrapper_fn,
+            x,
+            y,
+            expected_module_names=("grad_body_0",),
+            expected_node_names=("contiguous", "contiguous_1"),
         )
 
     def test_grad_over_grad(self):
@@ -795,7 +842,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self._grad_compile_check(
             wrapper_fn,
             x,
-            expected_graph_names=("grad_body_1.grad_body_0", "grad_body_1"),
+            expected_module_names=("grad_body_1.grad_body_0", "grad_body_1"),
         )
 
     def test_grad_with_graph_break(self):

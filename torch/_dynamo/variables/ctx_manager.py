@@ -34,8 +34,23 @@ class ContextWrappingVariable(VariableTracker):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
     def exit(self, tx, *args):
-        if not tx.output.is_root_tracer():
-            # SUPER AWFUL HACK! (DISCUSS)
+        if (
+            not tx.output.is_root_tracer()
+            and getattr(tx.output, "_higher_order_op", None) is torch.func.grad
+        ):
+            # HACK! (DISCUSS)
+            # `torch.func.grad` should not be affected by `no_grad` outside of `grad`.
+            # So, inside the function to which `grad` is applied, is_grad_enabled should be
+            # True except the parts explicitly disabled with `no_grad`.
+            # Eg.
+            # def f(x):
+            #     with no_grad():  # This will disable grad tracking under it.
+            #        y = x * 2
+            #
+            #     return x ** 2 - y  # grad tracking should be enabled irrespective of outside `no_grad`.
+            #
+            # with no_grad():  # This will not disable grad tracking inside of grad(f).
+            #     grad_o = torch.func.grad(f)(x)
             self._call_func(tx, (True,))
         else:
             self._call_func(tx, self.initial_values)

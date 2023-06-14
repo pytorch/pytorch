@@ -768,13 +768,23 @@ def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 # See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
 def speculate_subgraph(
-    tx, f, sub_args, graph_checkpoint, checkpoint, *, always_restore=False
+    tx,
+    f,
+    sub_args,
+    graph_checkpoint,
+    checkpoint,
+    *,
+    always_restore=False,
+    higher_order_op=None,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
     from .builder import wrap_fx_proxy
 
     try:
         with tx.output.new_subtracer() as tracer:
+            # attach the HigherOrderOp we are speculating the subgraph for.
+            if higher_order_op is not None:
+                tx.output._higher_order_op = higher_order_op
             args = []
             # One argument to graph per sub_args
             for a in sub_args:
@@ -1348,6 +1358,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 args[3].items,
                 graph_checkpoint,
                 checkpoint,
+                higher_order_op=torch.func.grad,
             )
 
             body_name = add_subgraph(
@@ -1393,8 +1404,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             # Output of grad_fn is
             # For has_aux=False, Tuple[gradients of inputs indicated by argnums].
             # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
-            # NOTE: example_value should match the output of calling the
-            # TODO(kshitij12345): Add contiguous to the actual output.
+            # NOTE: example_value should match `grad_output`.
             if isinstance(argnums.value, int):
                 example_value = (
                     args[argnums.value]
@@ -1419,11 +1429,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 aux = body_r_proxy[1].node.meta["example_value"]
                 example_value = (example_value, aux)
 
-            # Call contiguous on all the computed grads.
             fx_proxy = wrap_fx_proxy(
                 tx=tx, proxy=grad_output, example_value=example_value
             )
 
+            # Call contiguous on all the computed grads.
             if not has_aux.value:
                 if isinstance(argnums.value, int):
                     return fx_proxy.call_method(tx, "contiguous", (), {})

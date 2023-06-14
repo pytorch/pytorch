@@ -231,8 +231,10 @@ class CommonListMethodsVariable(BaseListVariable):
             if arg.mutable_local is not None:
                 new_rec_contains.add(arg.mutable_local)
             # HACK:
-            # For `speculate_subgraph`, we don't use root tracer,
-            # so here we ban `append` on list which is used in `subgraph`.
+            # For `speculate_subgraph` (HigherOrderOperator), we don't use root tracer,
+            # so here we are banning `append` on list within a `subgraph`.
+            # Ideally, we shouldn't allow dynamo to inline functions under HigherOrderOperator
+            # like `grad`.
             if not tx.output.is_root_tracer():
                 unimplemented("list was mutated.")
             tx.replace_all(
