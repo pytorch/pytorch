@@ -471,6 +471,30 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+    if x.get_dtype() == dtype:
+        return x
+
+    def _get_primitive_bitwidth(dtype):
+        if dtype.is_floating_point:
+            return torch.finfo(dtype).bits
+        else:
+            return torch.iinfo(dtype).bits
+
+    src_bits = _get_primitive_bitwidth(x.get_dtype())
+    dst_bits = _get_primitive_bitwidth(dtype)
+    if src_bits != dst_bits:
+        raise NotImplementedError(
+            f"bitcast {x.get_dtype()} to different bitwidth type {dtype} is not supported yet."
+        )
+
+    def _to_dtype_bitcast(x):
+        return ops.to_dtype_bitcast(x, dtype)
+
+    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
+
+
 @register_lowering(prims.device_put, type_promotion_kind=None)
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
@@ -946,7 +970,7 @@ def glu(x, dim=-1):
 
 
 def register_onednn_fusion_ops():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
@@ -1467,7 +1491,7 @@ make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 
-make_fallback(aten.view_as_complex.default, require_contiguous)
+make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
 # It's not necessarily a priority to implement these
@@ -1573,7 +1597,6 @@ make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten.vdot)
-make_fallback(aten.view_as_complex)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
@@ -1609,6 +1632,10 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
+
+
+make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
+make_fallback(torch._prims.rng_prims.run_with_rng_state)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
@@ -1712,7 +1739,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             # selecting every element is the same as just src.clone()
             return src_loader(idx)
 
-        idx_dim = ops.index_expr(idx[dim], torch.int32)
+        idx_dim = ops.index_expr(idx[dim], torch.int64)
         src_idx = list(idx)
         src_idx[dim] = ir.FloorDiv(idx[dim] - start, step)
 
@@ -1721,23 +1748,23 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             mask.append(
                 ops.ge(
                     idx_dim,
-                    ops.index_expr(sympy.expand(start), torch.int32),
+                    ops.index_expr(sympy.expand(start), torch.int64),
                 )
             )
         if end != dim_size:
             mask.append(
                 ops.lt(
                     idx_dim,
-                    ops.index_expr(sympy.expand(end), torch.int32),
+                    ops.index_expr(sympy.expand(end), torch.int64),
                 )
             )
         if step != 1:
             mask.append(
                 ops.eq(
                     ops.index_expr(
-                        ir.ModularIndexing(idx[dim] - start, 1, step), torch.int32
+                        ir.ModularIndexing(idx[dim] - start, 1, step), torch.int64
                     ),
-                    ops.constant(0, torch.int32),
+                    ops.constant(0, torch.torch.int64),
                 )
             )
         assert mask
