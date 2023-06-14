@@ -349,20 +349,6 @@ def dequantize_per_tensor_tensor_decomp_impl(
     return (input.to(torch.float32) - zero_point) * scale
 
 
-@register_decomposition(aten._foreach_addcmul.Scalar)
-def _foreach_addcmul_scalar(self, left_tensors, right_tensors, scalar=1):
-    return aten._foreach_add.List(
-        self, aten._foreach_mul.List(left_tensors, right_tensors), alpha=scalar
-    )
-
-
-@register_decomposition(aten._foreach_addcdiv.Scalar)
-def _foreach_addcdiv_scalar(self, left_tensors, right_tensors, scalar=1):
-    return aten._foreach_add.List(
-        self, aten._foreach_div.List(left_tensors, right_tensors), alpha=scalar
-    )
-
-
 @functools.lru_cache(None)
 def fast_random_decomps():
     return {**decompositions, **extra_random_decomps}
