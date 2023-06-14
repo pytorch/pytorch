@@ -2000,6 +2000,10 @@ class Module:
         the keys of :attr:`state_dict` must exactly match the keys returned
         by this module's :meth:`~torch.nn.Module.state_dict` function.
 
+        .. warning::
+            If :attr:`assign` is ``True`` the optimizer must be created after
+            the call to :attr:`load_state_dict`.
+
         Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
@@ -2007,11 +2011,9 @@ class Module:
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
             assign (bool, optional): whether to assign items in the state
-            dictionary to their corresponding keys in the module instead
-            of copying them inplace into the module's current parameters and buffers.
-            Warning: if ``assign=True`` is set, the optimizer must be created after
-            the call to ``module.load_state_dict()``.
-            Default: ``False``
+                dictionary to their corresponding keys in the module instead
+                of copying them inplace into the module's current parameters and buffers.
+                Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
