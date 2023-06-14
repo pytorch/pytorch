@@ -1142,9 +1142,7 @@ struct HelperInterpLinear : public HelperInterpBase {
   // src/libImaging/Resample.c#L20-L29
   template<typename scalar_t>
   static inline scalar_t aa_filter(scalar_t x) {
-    if (x < 0.0) {
-      x = -x;
-    }
+    x = std::abs(x);
     if (x < 1.0) {
       return 1.0 - x;
     }
@@ -1270,38 +1268,20 @@ struct HelperInterpCubic : public HelperInterpBase {
   // taken from
   // https://github.com/python-pillow/Pillow/blob/6812205f18ca4ef54372e87e1a13ce4a859434df/
   // src/libImaging/Resample.c#L46-L62
-  template<typename scalar_t>
+  template<typename scalar_t, bool use_keys_cubic=true>
   static inline scalar_t aa_filter(scalar_t x) {
     // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
-#define a -0.5
-    if (x < 0.0) {
-      x = -x;
-    }
-    if (x < 1.0) {
-      return ((a + 2.0) * x - (a + 3.0)) * x * x + 1;
-    }
-    if (x < 2.0) {
-      return (((x - 5) * x + 8) * x - 4) * a;
-    }
-    return 0.0;
-#undef a
-  }
+    // a = -0.5 was proposed by R. Keys in "Cubic convolution interpolation for digital image processing"
+    // We are using -0.5 for bicubic, antialiasing=true (compatibility with PIL)
+    // and using -0.75 for bicubic, antialiasing=false (compatibility with Opencv)
+    constexpr scalar_t a = use_keys_cubic ? -0.5 : -0.75;
 
-  template<typename scalar_t>
-  static inline scalar_t aa_filter_075(scalar_t x) {
-    // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
-    // In this code we are using alternative a=-0.75 definition that matches
-    // get_cubic_upsample_coefficients implementation, as used by float path
-    // TODO: merge both implementations, the only difference is the value of a.
-    constexpr scalar_t a = -0.75;
-    if (x < 0.0) {
-      x = -x;
-    }
+    x = std::abs(x);
     if (x < 1.0) {
-      return cubic_convolution1(x, a);
+        return cubic_convolution1(x, a);
     }
     if (x < 2.0) {
-      return cubic_convolution2(x, a);
+        return cubic_convolution2(x, a);
     }
     return 0.0;
   }
@@ -1361,7 +1341,7 @@ struct HelperInterpCubic : public HelperInterpBase {
     auto interp_size = HelperInterpCubic::interp_size;
     // We have to use the -0.75 constant when aa is False so that this uint8
     // path is as close as possible to float results.
-    auto fn = antialias ? HelperInterpCubic::aa_filter<double> : HelperInterpCubic::aa_filter_075<double>;
+    auto fn = antialias ? HelperInterpCubic::aa_filter<double, true> : HelperInterpCubic::aa_filter<double, false>;
     return HelperInterpCubic::_compute_indices_int16_weights_aa(
         input_size, output_size, stride, ndims, reshape_dim,
         align_corners, opt_scale, interp_size, fn, antialias, align_i32);
