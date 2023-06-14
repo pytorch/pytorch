@@ -36,6 +36,7 @@ from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
+from torch.fx.node import Argument, Target
 
 InputList = List
 DimList = List
@@ -1608,11 +1609,11 @@ try:
             module = torch.fx.GraphModule(root={}, graph=graph)
             super().__init__(module, garbage_collect_values=True)
 
-        def placeholder(self, target: torch.fx.node.Target, args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any:
+        def placeholder(self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]) -> Any:
             symbol = fx_traceback.get_current_meta()["symbol"]
             return self.validator.z3var(symbol)
 
-        def call_function(self, target: torch.fx.node.Target, args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> Any:
+        def call_function(self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]) -> Any:
             if target != torch._assert:
                 # Actually runs the node target function (which is already
                 # lifted) with its arguments.
