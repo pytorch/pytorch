@@ -1278,10 +1278,6 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def failing_dynamic_shape_models(self):
-        return set()
-
-    @property
     def skip_accuracy_checks_large_models_dashboard(self):
         return set()
 
@@ -2341,7 +2337,6 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.assume_static_by_default = True
         torch._dynamo.config.automatic_dynamic_shapes = True
     if args.dynamic_shapes:
-        torch._dynamo.config.dynamic_shapes = True
         torch._dynamo.config.automatic_dynamic_shapes = True
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
@@ -2417,12 +2412,7 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
             # See https://github.com/pytorch/pytorch/issues/102814
-            if torch._dynamo.config.dynamic_shapes:
-                torch._dynamo.config.assume_static_by_default = False
-            if not torch._dynamo.config.automatic_dynamic_shapes:
-                log.warning(
-                    "hf_T5_generate compiles extremely slowly without dynamic shapes; consider lowering cache_size_limit"
-                )
+            torch._dynamo.config.assume_static_by_default = False
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -2476,10 +2466,6 @@ def run(runner, args, original_dir=None):
         )
         if args.training:
             runner.skip_models.add("hf_T5")
-
-    if torch._dynamo.config.dynamic_shapes:
-        # TODO(jansel): fix bugs in these
-        runner.skip_models.update(runner.failing_dynamic_shape_models)
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)

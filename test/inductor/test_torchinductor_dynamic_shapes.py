@@ -71,7 +71,6 @@ def make_dynamic_cls(cls):
         cls,
         "DynamicShapes",
         "_dynamic_shapes",
-        (torch._dynamo.config, "dynamic_shapes", True),
         (torch._dynamo.config, "assume_static_by_default", False),
     )
 

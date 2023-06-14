@@ -883,24 +883,18 @@ def compile_fx(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
-    # Save and restore dynamic shapes setting for backwards, as it is
-    # sometimes done as a context manager which won't be set when we
-    # hit backwards compile
-    dynamic_shapes = dynamo_config.dynamic_shapes
-
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-        with dynamo_config.patch(dynamic_shapes=dynamic_shapes):
-            fixed = count_tangents(model)
-            return inner_compile(
-                model,
-                example_inputs,
-                num_fixed=fixed,
-                cudagraphs=cudagraphs,
-                is_backward=True,
-                graph_id=graph_id,
-                boxed_forward_device_index=forward_device,
-            )
+        fixed = count_tangents(model)
+        return inner_compile(
+            model,
+            example_inputs,
+            num_fixed=fixed,
+            cudagraphs=cudagraphs,
+            is_backward=True,
+            graph_id=graph_id,
+            boxed_forward_device_index=forward_device,
+        )
 
     if decompositions is None:
         decompositions = select_decomp_table()

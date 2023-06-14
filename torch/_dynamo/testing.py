@@ -196,7 +196,7 @@ class CompileCounterWithBackend:
 
 
 def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
-    if config.dynamic_shapes and expected_ops_dynamic is not None:
+    if not config.assume_static_by_default and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
 
     actual = CompileCounter()
@@ -246,8 +246,6 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
 def requires_static_shapes(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        if config.dynamic_shapes:
-            raise unittest.SkipTest("requires static shapes")
         return fn(*args, **kwargs)
 
     return _fn

@@ -132,7 +132,7 @@ class TestPaternMatcher(TestCase):
         def check_counter(counter, expected):
             if not inductor_config.cpp_wrapper:
                 self.assertEqual(counter, expected)
-            elif not dynamo_config.dynamic_shapes:
+            else:
                 # cpp_wrapper for the CUDA backend runs two passes
                 self.assertEqual(counter, 2 * expected)
 
