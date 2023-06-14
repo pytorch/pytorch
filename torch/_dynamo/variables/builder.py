@@ -214,7 +214,8 @@ class VariableBuilder:
                 ser_source_is_local = is_from_local_source(side_effect_result.source)
                 source_is_local = is_from_local_source(self.source)
                 # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
-                # reconcile guards builder scopes in compile_check_fn.
+                # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
+                # so maybe we should do this refactor before we land this...
                 # TODO(voz): Combine local and global guard builders.
                 if ser_source_is_local == source_is_local:
                     dup_guard = functools.partial(
