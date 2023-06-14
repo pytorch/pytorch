@@ -190,18 +190,23 @@ def tensor_has_hints(t):
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
         return val.node.expr.free_symbols
+    elif isinstance(val, sympy.Expr):
+        return val.free_symbols
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
+        return (
+            free_symbols(val.size()) |
+            free_symbols(val.stride()) |
+            free_symbols(val.storage_offset())
+        )
+    elif isinstance(val, (tuple, list)):
         r = set()
-        for s in val.size():
+        for s in val:
             r |= free_symbols(s)
-        for s in val.stride():
-            r |= free_symbols(s)
-        r |= free_symbols(val.storage_offset())
         return r
     else:
-        raise AssertionError(f"cannot compute free_symbols of {val}")
+        raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -296,6 +301,14 @@ def guard_scalar(a):
     else:
         raise AssertionError(f"unrecognized scalar {a}")
 
+def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
+    if r := shape_env.var_to_range.get(s, None):
+        shape_env.var_to_range[s] = ValueRanges(
+            builtins.max(r.lower, min), builtins.min(r.upper, max)
+        )
+    else:
+        shape_env.var_to_range[s] = ValueRanges(min, max)
+
 # inclusive both ways
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     """
@@ -346,7 +359,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
             # shape_env's var_to_range
             sym_integer = sympy.Integer(a)
             shape_env = fake_mode.shape_env
-            shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
+            _constrain_symbol_range(shape_env, sym_integer, min, max)
             shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
         return
@@ -361,11 +374,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    r = a.node.shape_env.var_to_range[a.node.expr]
-    a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
-        builtins.max(r.lower, min), builtins.min(r.upper, max)
-    )
-
+    _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
 
 def constrain_unify(a, b):
     """
@@ -2043,6 +2052,14 @@ class ShapeEnv:
                 dynamic_dims.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
 
+        # TODO: make this configurable from outside policy; we made a policy
+        # decision here where if all sizes are static, we are going to
+        # specialize all of the inner strides/offset too. We don't have to
+        # do this, and arguably we should ALWAYS allow for dynamic offset,
+        # this is cheap.
+        # TODO: This should be DYNAMIC, using DUCK for BC
+        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+
         assert len(dynamic_dims) == dim
         assert len(constraint_dims) == dim
 
@@ -2078,8 +2095,7 @@ class ShapeEnv:
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    # TODO: This should be DYNAMIC, using DUCK for BC
-                    dynamic_dim=DimDynamic.DUCK,
+                    dynamic_dim=dynamic_strides_offset,
                     constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
@@ -2094,8 +2110,7 @@ class ShapeEnv:
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex.storage_offset(),
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            # TODO: This should be DYNAMIC, using DUCK for BC
-            dynamic_dim=DimDynamic.DUCK,
+            dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
         ), hint=ex.storage_offset())
         return sym_sizes, sym_stride, sym_storage_offset
@@ -2110,6 +2125,9 @@ class ShapeEnv:
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint))
 
+    def create_symboolnode(self, sym: "sympy.Expr"):
+        return SymBool(SymNode(sym, self, bool, None))
+
     def create_unbacked_symfloat(self):
         symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
@@ -2120,13 +2138,13 @@ class ShapeEnv:
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
-        return SymInt(SymNode(symbol, self, int, None))
+        return self.create_symintnode(symbol, hint=None)
 
     def create_unbacked_symbool(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
-        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
+        return self.create_symboolnode(sympy.Eq(symbol, 1))
 
     def create_symbol(
         self,

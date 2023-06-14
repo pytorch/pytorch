@@ -1232,7 +1232,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(3)
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
     @requires_numpy_pytorch_interop
@@ -1843,8 +1843,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         x = torch.empty([4, 9, 8])
-        self.assertTrue(opt_fn(x, 1) == 9)
-        self.assertTrue(opt_fn(x, -2) == 9)
+        self.assertEqual(opt_fn(x, 1), 9)
+        self.assertEqual(opt_fn(x, -2), 9)
 
     def test_stride_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1854,8 +1854,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         x = torch.empty([4, 9, 8])
-        self.assertTrue(opt_fn(x, 0) == 72)
-        self.assertTrue(opt_fn(x, -2) == 8)
+        self.assertEqual(opt_fn(x, 0), 72)
+        self.assertEqual(opt_fn(x, -2), 8)
 
     def test_torch_seed(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -3430,8 +3430,9 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
-    @patch.object(torch._dynamo.config, "print_graph_breaks", True)
-    def test_duplicate_graph_break_warning(self):
+    def test_duplicate_graph_break_log(self):
+        torch._logging.set_logs(graph_breaks=True)
+
         @torch._dynamo.optimize("eager")
         def f1(a, b):
             f2(a, b)
@@ -3453,15 +3454,18 @@ def fn():
         def count_graph_break_msgs(msgs):
             return sum(msg.find("Graph break") != -1 for msg in msgs)
 
-        with self.assertLogs(logger="torch._dynamo", level=logging.WARNING) as log:
+        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
             torch._dynamo.config.verbose = True
             f1(torch.randn(10), torch.randn(10))
             self.assertGreater(count_graph_break_msgs(log.output), 1)
 
-        with self.assertLogs(logger="torch._dynamo", level=logging.WARNING) as log:
+        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
             torch._dynamo.config.verbose = False
             g1(torch.randn(10), torch.randn(10))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
+
+        # reset logging state
+        torch._logging.set_logs()
 
     def test_inplace_param_update(self):
         def fn(param, y):
