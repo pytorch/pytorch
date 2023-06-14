@@ -228,5 +228,5 @@ number of vCPUs available and M with the chosen number of processes. The
 appropriate ``num_thread`` value will vary depending on the specific
 task at hand. However, as a general guideline, the maximum value for the
 ``num_thread`` should be ``floor(N/M)`` to avoid CPU oversubscription.
-In the mnist_hogwild training example, after avoiding CPU over
+In the `mnist_hogwild <https://github.com/pytorch/examples/tree/main/mnist_hogwild>`__ training example, after avoiding CPU over
 subscription, you can achieve a 30x performance boost.
