@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import inspect
 import operator
 import re
@@ -7,7 +9,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-    graph_building as onnxscript_graph_builder,
+    graph_building as onnxscript_graph_building,
 )
 
 import torch
@@ -29,11 +31,162 @@ def _fx_node_to_onnx_message_formatter(
     return f"FX Node: {node.op}:{node.target}[name={node.name}]. "
 
 
+def _location_from_fx_stack_trace(
+    node_stack_trace: str,
+) -> Optional[diagnostics.infra.Location]:
+    """Extract location from FX node stack trace.
+
+    TODO(bowbao): Create fx utils module and move this function there.
+
+    Args:
+        node_stack_trace: The stack trace of the FX node. Example:
+
+            File "path/file.py", line 311, in <function>
+                <code>
+            |   File "path/file2.py", line 389, in <function>
+                <code>
+
+    Returns:
+        location: The location of the FX node.
+    """
+    if "File" not in node_stack_trace:
+        return None
+
+    lines = node_stack_trace.strip().split("\n")
+    idx = 0
+    while idx < len(lines) and "File" not in lines[idx]:
+        idx += 1
+    if idx + 1 >= len(lines):
+        return None
+
+    pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
+    matches = pattern.match(lines[idx].strip())
+    if matches:
+        uri = matches.group(1)
+        line_number = int(matches.group(2))
+        snippet = lines[idx + 1].strip()
+        return diagnostics.infra.Location(uri=uri, line=line_number, snippet=snippet)
+    return None
+
+
+@_beartype.beartype
+def _retrieve_or_adapt_input_to_graph_set(
+    fx_node_arg: _type_utils.Argument,
+    fx_name_to_onnxscript_value: Dict[
+        str,
+        Union[
+            onnxscript_graph_building.TorchScriptTensor,
+            Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
+        ],
+    ],
+    tracer: onnxscript_graph_building.TorchScriptTracingEvaluator,
+):
+    """Map FX value to TorchScript value.
+
+    When creating TorchScript graph from FX graph, we need a mapping from FX variable
+    to TorchScript variable. This function maps FX variable, fx_node_arg, to torch.jit.Value.
+    """
+
+    onnx_tensor = fx_node_arg
+    if isinstance(onnx_tensor, torch.fx.Node):
+        # 1. fx_node_arg is a torch.fx.Node, which means
+        #    fx_node_arg stands for the output of that torch.fx.Node.
+        # 2. fx_node_arg (variable in torch.fx.Graph) is be mapped to
+        #    torch.jit.Value, fx_name_to_onnxscript_value[fx_node_arg.name],
+        #    in TorchScript graph.
+        return fx_name_to_onnxscript_value[onnx_tensor.name]
+    if isinstance(onnx_tensor, (tuple, list)) and any(
+        isinstance(node, torch.fx.Node) and isinstance(node.meta["val"], torch.SymInt)
+        for node in onnx_tensor
+    ):
+        # This intends to handle dynamic axes. for example, if the input size of op.Expand
+        # is dynamic, each dimension would be variable (i.e., sym variable in Pytorch
+        # FX graph. Note that sym variable is mapped to tensor in ONNX Script world)
+        # calculated by other operators.
+        sequence_mixed_elements: List[
+            Union[
+                onnxscript_graph_building.TorchScriptTensor,
+                List[int],
+            ]
+        ] = []
+        for tensor in onnx_tensor:
+            if isinstance(tensor, torch.fx.Node) and isinstance(
+                tensor.meta["val"], torch.SymInt
+            ):
+                sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
+            elif isinstance(tensor, int):
+                # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
+                # dim, and onnx-script will promote it to tensot(int64)
+                sequence_mixed_elements.append([tensor])
+        # Concat all the elements in the sequence.
+        # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
+        # so list of sym_ints is concatenated to a tensor before calling ONNX op.
+
+        # For example:
+        #    inputs: [[2], [4], fx.Node(SymIntA), [1], fx.Node(SymIntB)]
+        #    outputs: op.Concat([op.Constant(2), op.Constant(4), TorchScriptTensor(A), op.Constant(1), TorchScriptTensor(B)])
+
+        # onnx-script auto wraps python number with op.Constants,
+        # so we don't need to specifically process them.
+        with onnxscript.evaluator.default_as(tracer):
+            output = onnxscript.opset18.Concat(*sequence_mixed_elements, axis=0)
+        output.dtype = torch.int64
+        output.shape = [len(sequence_mixed_elements)]
+        return output
+    elif isinstance(onnx_tensor, (tuple, list)) and all(
+        isinstance(node, torch.fx.Node) for node in onnx_tensor
+    ):
+        sequence_elements: List[
+            Union[
+                onnxscript_graph_building.TorchScriptTensor,
+                Tuple[
+                    onnxscript_graph_building.TorchScriptTensor,
+                    ...,
+                ],
+            ]
+        ] = []
+        for tensor in onnx_tensor:
+            sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
+        return sequence_elements
+    if isinstance(onnx_tensor, torch.dtype):
+        onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
+
+    # all other cases, we do nothing.
+    return onnx_tensor
+
+
+def filter_incompatible_and_dtype_convert_kwargs(kwargs):
+    """Filter out kwargs that are not supported by onnxscript."""
+    filtered = {}
+    for key, value in kwargs.items():
+        if key in {
+            "layout",
+            "device",
+            "requires_grad",
+            "pin_memory",
+            "memory_format",
+            "implicit",
+        }:
+            continue
+        if key == "dtype":
+            if value is None:
+                # We omit if dtype is not provided, because onnxscript handles the
+                # default case.
+                continue
+            else:
+                filtered["dtype"] = int(
+                    _type_utils.JitScalarType.from_dtype(value).onnx_type()
+                )
+            continue
+        filtered[key] = value
+    return filtered
+
+
 @_beartype.beartype
 def _fill_tensor_shape_type(
     onnxscript_values: Union[
-        onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor,
-        Tuple[onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor, ...],
+        onnxscript_graph_building.TorchScriptTensor,
+        Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
     ],
     name: str,
     expected_values: Union[
@@ -80,118 +233,38 @@ def _fill_tensor_shape_type(
 
 
 @_beartype.beartype
-def _retrieve_or_adapt_input_to_graph_set(
-    fx_node_arg: _type_utils.Argument,
-    fx_name_to_onnxscript_value: Dict[
-        str,
-        Union[
-            onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor,
-            Tuple[
-                onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor, ...
-            ],
-        ],
-    ],
-    tracer: onnxscript.function_libs.torch_lib.graph_building.TorchScriptTracingEvaluator,
-):
-    """Map FX value to TorchScript value.
+def _fill_in_default_kwargs(
+    node: torch.fx.Node,
+) -> Tuple[List[_type_utils.Argument], Dict[str, _type_utils.Argument]]:
+    """Find and Fill in the not provided kwargs with default values."""
 
-    When creating TorchScript graph from FX graph, we need a mapping from FX variable
-    to TorchScript variable. This function maps FX variable, fx_node_arg, to torch.jit.Value.
-    """
+    # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
+    # overloadpacket for some reasons.
+    # https://github.com/pytorch/pytorch/issues/97201
+    # We manually assigned overload for aten::sym_size.
+    if hasattr(node.target, "_schema"):
+        node_schema = node.target._schema  # type: ignore[union-attr]
+    else:
+        node_schema = torch.ops.aten.sym_size.int._schema  # type: ignore[union-attr]
 
-    onnx_tensor = fx_node_arg
-    if isinstance(onnx_tensor, torch.fx.Node):
-        # 1. fx_node_arg is a torch.fx.Node, which means
-        #    fx_node_arg stands for the output of that torch.fx.Node.
-        # 2. fx_node_arg (variable in torch.fx.Graph) is be mapped to
-        #    torch.jit.Value, fx_name_to_onnxscript_value[fx_node_arg.name],
-        #    in TorchScript graph.
-        return fx_name_to_onnxscript_value[onnx_tensor.name]
-    if isinstance(onnx_tensor, (tuple, list)) and any(
-        isinstance(node, torch.fx.Node) and isinstance(node.meta["val"], torch.SymInt)
-        for node in onnx_tensor
-    ):
-        # This intends to handle dynamic axes. for example, if the input size of op.Expand
-        # is dynamic, each dimension would be variable (i.e., sym variable in Pytorch
-        # FX graph. Note that sym variable is mapped to tensor in ONNX Script world)
-        # calculated by other operators.
-        sequence_mixed_elements: List[
-            Union[
-                onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor,
-                List[int],
-            ]
-        ] = []
-        for tensor in onnx_tensor:
-            if isinstance(tensor, torch.fx.Node) and isinstance(
-                tensor.meta["val"], torch.SymInt
-            ):
-                sequence_mixed_elements.append(fx_name_to_onnxscript_value[tensor.name])
-            elif isinstance(tensor, int):
-                # NOTE: op.Concat doesn't support scalar, so we need to wrap it with
-                # dim, and onnx-script will promote it to tensot(int64)
-                sequence_mixed_elements.append([tensor])
-        # Concat all the elements in the sequence.
-        # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
-        # so list of sym_ints is concatenated to a tensor before calling ONNX op.
+    # This function assumes the order of arguments in FX op is the
+    # same as the order of arguments in TorchScript op.
+    complete_args: List[_type_utils.Argument] = []
+    complete_kwargs: Dict[str, _type_utils.Argument] = {}
 
-        # For example:
-        #    inputs: [[2], [4], fx.Node(SymIntA), [1], fx.Node(SymIntB)]
-        #    outputs: op.Concat([op.Constant(2), op.Constant(4), TorchScriptTensor(A), op.Constant(1), TorchScriptTensor(B)])
-
-        # onnx-script auto wraps python number with op.Constants,
-        # so we don't need to specifically process them.
-        with onnxscript.evaluator.default_as(tracer):
-            output = onnxscript.opset18.Concat(*sequence_mixed_elements, axis=0)
-        output.dtype = torch.int64
-        output.shape = [len(sequence_mixed_elements)]
-        return output
-    elif isinstance(onnx_tensor, (tuple, list)) and all(
-        isinstance(node, torch.fx.Node) for node in onnx_tensor
-    ):
-        sequence_elements: List[
-            Union[
-                onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor,
-                Tuple[
-                    onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor,
-                    ...,
-                ],
-            ]
-        ] = []
-        for tensor in onnx_tensor:
-            sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
-        return sequence_elements
-    if isinstance(onnx_tensor, torch.dtype):
-        onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
-
-    # all other cases, we do nothing.
-    return onnx_tensor
-
-
-def filter_incompatible_and_dtype_convert_kwargs(kwargs):
-    """Filter out kwargs that are not supported by onnxscript."""
-    filtered = {}
-    for key, value in kwargs.items():
-        if key in {
-            "layout",
-            "device",
-            "requires_grad",
-            "pin_memory",
-            "memory_format",
-            "implicit",
-        }:
-            continue
-        if key == "dtype":
-            if value is None:
-                # We omit if dtype is not provided, because onnxscript handles the
-                # default case.
-                continue
+    if inspect.isbuiltin(node.target):
+        complete_args = list(node.args)
+    else:
+        for i, expected_arg in enumerate(node_schema.arguments):
+            if i < len(node.args):
+                complete_args.append(node.args[i])
+            elif expected_arg.name in node.kwargs:
+                complete_kwargs[expected_arg.name] = node.kwargs[expected_arg.name]
             else:
-                filtered["dtype"] = int(
-                    _type_utils.JitScalarType.from_dtype(value).onnx_type()
-                )
-            continue
-        filtered[key] = value
-    return filtered
+                # Get default from schema.
+                complete_kwargs[expected_arg.name] = expected_arg.default_value
+
+    return complete_args, complete_kwargs
 
 
 @_beartype.beartype
@@ -201,18 +274,16 @@ def _wrap_fx_args_as_onnxscript_args(
     fx_name_to_onnxscript_value: Dict[
         str,
         Union[
-            onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor,
-            Tuple[
-                onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor, ...
-            ],
+            onnxscript_graph_building.TorchScriptTensor,
+            Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
         ],
     ],
-    tracer: onnxscript.function_libs.torch_lib.graph_building.TorchScriptTracingEvaluator,
+    tracer: onnxscript_graph_building.TorchScriptTracingEvaluator,
 ) -> Tuple[
     Sequence[
         Optional[
             Union[
-                onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor,
+                onnxscript_graph_building.TorchScriptTensor,
                 str,
                 int,
                 float,
@@ -244,7 +315,7 @@ class FxOnnxInterpreter:
 
     def __init__(
         self,
-        onnxscript_graph: onnxscript.function_libs.torch_lib.graph_building.TorchScriptGraph,
+        onnxscript_graph: onnxscript_graph_building.TorchScriptGraph,
         graph_module: torch.fx.GraphModule,
         onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -271,16 +342,17 @@ class FxOnnxInterpreter:
         self.fx_name_to_onnxscript_value: Dict[
             str,
             Union[
-                onnxscript_graph_builder.TorchScriptTensor,
-                Tuple[onnxscript_graph_builder.TorchScriptTensor, ...],
+                onnxscript_graph_building.TorchScriptTensor,
+                Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
             ],
         ] = {}
+
         self.tracer = None
         self.op_level_debug = op_level_debug
         self.diagnostic_context = diagnostic_context
 
         # TODO: Refactor where/how onnxscript_graph is store/passed in
-        self.tracer = onnxscript_graph_builder.TorchScriptTracingEvaluator(
+        self.tracer = onnxscript_graph_building.TorchScriptTracingEvaluator(
             self.onnxscript_graph
         )
 
@@ -369,9 +441,7 @@ class FxOnnxInterpreter:
             output is not None
         ), f"Node creates None with target={node.target} and name={node.name}"
 
-        assert isinstance(
-            output, onnxscript.function_libs.torch_lib.graph_building.TorchScriptTensor
-        )
+        assert isinstance(output, onnxscript_graph_building.TorchScriptTensor)
         assert isinstance(output, onnxscript.tensor.Tensor)
 
         self.fx_name_to_onnxscript_value[node.name] = output
@@ -392,7 +462,7 @@ class FxOnnxInterpreter:
                 output is not None
             ), f"Node creates None with target={node.target} and name={node.name}"
             assert isinstance(
-                output, (onnxscript_graph_builder.TorchScriptTensor, tuple)
+                output, (onnxscript_graph_building.TorchScriptTensor, tuple)
             ), type(output)
 
             self.fx_name_to_onnxscript_value[node.name] = output
@@ -420,8 +490,8 @@ class FxOnnxInterpreter:
 
         with onnxscript.evaluator.default_as(self.tracer):
             output: Union[  # type: ignore[no-redef]
-                onnxscript_graph_builder.TorchScriptTensor,
-                Tuple[onnxscript_graph_builder.TorchScriptTensor, ...],
+                onnxscript_graph_building.TorchScriptTensor,
+                Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
             ] = symbolic_fn(*onnx_args, **onnx_kwargs)
         assert (
             output is not None
@@ -431,7 +501,7 @@ class FxOnnxInterpreter:
         # One fx node could produce multiple outputs (e.g., tuple of tensors); in
         # that case, v is a tuple of TorchScriptTensors.
         assert isinstance(
-            output, (onnxscript_graph_builder.TorchScriptTensor, tuple)
+            output, (onnxscript_graph_building.TorchScriptTensor, tuple)
         ), type(output)
         # NOTE(titaiwang): We bypass two kinds of ops as it's not meaningful to
         # validate them with op level debug.
@@ -524,81 +594,8 @@ class FxOnnxInterpreter:
 
         input_ = self.onnxscript_graph.add_initializer(node.name, current_attr)
 
-        assert isinstance(input_, onnxscript_graph_builder.TorchScriptTensor)
+        assert isinstance(input_, onnxscript_graph_building.TorchScriptTensor)
         assert isinstance(input_, onnxscript.tensor.Tensor)
         self.fx_name_to_onnxscript_value[node.name] = input_
         # FIXME: Refactor logic getting 'current_attr'.
         assert isinstance(current_attr, torch.Tensor)
-
-
-def _location_from_fx_stack_trace(
-    node_stack_trace: str,
-) -> Optional[diagnostics.infra.Location]:
-    """Extract location from FX node stack trace.
-
-    TODO(bowbao): Create fx utils module and move this function there.
-
-    Args:
-        node_stack_trace: The stack trace of the FX node. Example:
-
-            File "path/file.py", line 311, in <function>
-                <code>
-            |   File "path/file2.py", line 389, in <function>
-                <code>
-
-    Returns:
-        location: The location of the FX node.
-    """
-    if "File" not in node_stack_trace:
-        return None
-
-    lines = node_stack_trace.strip().split("\n")
-    idx = 0
-    while idx < len(lines) and "File" not in lines[idx]:
-        idx += 1
-    if idx + 1 >= len(lines):
-        return None
-
-    pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
-    matches = pattern.match(lines[idx].strip())
-    if matches:
-        uri = matches.group(1)
-        line_number = int(matches.group(2))
-        snippet = lines[idx + 1].strip()
-        return diagnostics.infra.Location(uri=uri, line=line_number, snippet=snippet)
-    return None
-
-
-@_beartype.beartype
-def _fill_in_default_kwargs(
-    node: torch.fx.Node,
-) -> Tuple[List[_type_utils.Argument], Dict[str, _type_utils.Argument]]:
-    """Find and Fill in the not provided kwargs with default values."""
-
-    # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
-    # overloadpacket for some reasons.
-    # https://github.com/pytorch/pytorch/issues/97201
-    # We manually assigned overload for aten::sym_size.
-    if hasattr(node.target, "_schema"):
-        node_schema = node.target._schema  # type: ignore[union-attr]
-    else:
-        node_schema = torch.ops.aten.sym_size.int._schema  # type: ignore[union-attr]
-
-    # This function assumes the order of arguments in FX op is the
-    # same as the order of arguments in TorchScript op.
-    complete_args: List[_type_utils.Argument] = []
-    complete_kwargs: Dict[str, _type_utils.Argument] = {}
-
-    if inspect.isbuiltin(node.target):
-        complete_args = list(node.args)
-    else:
-        for i, expected_arg in enumerate(node_schema.arguments):
-            if i < len(node.args):
-                complete_args.append(node.args[i])
-            elif expected_arg.name in node.kwargs:
-                complete_kwargs[expected_arg.name] = node.kwargs[expected_arg.name]
-            else:
-                # Get default from schema.
-                complete_kwargs[expected_arg.name] = expected_arg.default_value
-
-    return complete_args, complete_kwargs

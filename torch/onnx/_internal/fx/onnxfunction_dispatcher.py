@@ -191,7 +191,7 @@ class OnnxFunctionDispatcher:
             # https://github.com/pytorch/pytorch/issues/97201
             aten_op_default = node.target.default
             return aten_op_default.name()  # type: ignore[attr-defined]
-        # import pdb; pdb.set_trace()
+
         if _symint_symfloat_builtin_to_exporter_key_table(node.target) is not None:
             # Make sure it's symint/symfloat consuming builtin ops.
             for node_arg in node.args:
