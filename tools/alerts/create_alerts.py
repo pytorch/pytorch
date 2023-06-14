@@ -266,6 +266,8 @@ def get_recurrently_failing_jobs_alerts(
             "OncallTeams": [],
             "OncallIndividuals": [],
             "Flags": [],
+            "sha": job.current_status["sha"],
+            "branch": branch,
         }
         alerts.append(entry)
     return alerts
