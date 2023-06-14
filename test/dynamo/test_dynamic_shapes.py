@@ -40,7 +40,7 @@ def make_dynamic_cls(cls):
         suffix,
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
-        "_expected_failure_dynamic",
+        xfail_prop="_expected_failure_dynamic",
     )
 
     test_classes[test_class.__name__] = test_class
