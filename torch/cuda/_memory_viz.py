@@ -633,7 +633,7 @@ _memory_over_time_template = r"""
 <head></head>
 <body>
 <script type="module">
-import {main} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch@8bc79fb3af1958d003b8d69fdc9d6182e404605a/torch/utils/viz/MemoryPlot.js"
+import {main} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch/torch/utils/viz/MemoryViz.js"
 let alloc_data = $PLOT_DATA
 main(alloc_data)
 </script>
