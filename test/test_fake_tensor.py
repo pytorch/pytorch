@@ -765,7 +765,7 @@ class FakeTensorOpInfoTest(TestCase):
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
-            optests.fake_check(op, args, kwargs, op.name in data_dependnet_outputs)
+            optests.fake_check(op, args, kwargs, op.name in data_dependent_outputs)
 
 
 class FakeTensorConverterTest(TestCase):
