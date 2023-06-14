@@ -2112,8 +2112,10 @@ class TritonScheduling:
             print(blue_text(f"kernel {kernel_name} v.s. kernel2 {kernel_name2}"))
 
             # call either kernel_name of kernel_name2
-            kernel.call_kernel(kernel_name)
-            # kernel2.call_kernel(kernel_name2)
+            if config.triton.multi_kernel == 1:
+                kernel.call_kernel(kernel_name)
+            else:
+                kernel2.call_kernel(kernel_name2)
         else:
             V.graph.drop_state()
             kernel.call_kernel(kernel_name)
