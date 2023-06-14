@@ -5,7 +5,7 @@ import io
 import subprocess
 import json
 from functools import lru_cache
-from typing import List, Tuple, Optional, Any, Dict
+from typing import Any
 from itertools import groupby
 import base64
 import warnings
@@ -414,7 +414,7 @@ def trace_plot(data, device=None, plot_segments=False):
 
 def _profile_to_snapshot(profile):
     import torch
-    from torch.profiler._memory_profiler import Action, TensorKey, Category
+    from torch.profiler._memory_profiler import Action, TensorKey
     from torch._C._profiler import _EventType
     memory_profile = profile._memory_profile()
 
@@ -438,7 +438,11 @@ def _profile_to_snapshot(profile):
     device_count = torch.cuda.device_count()
     snapshot = {
         'device_traces': [[] for _ in range(device_count + 1)],
-        'segments': [{'device': device, 'address': None, 'total_size': 0, 'stream': 0, 'blocks': []} for device in range(device_count + 1)]
+        'segments': [{'device': device,
+                      'address': None,
+                      'total_size': 0,
+                      'stream': 0,
+                      'blocks': []} for device in range(device_count + 1)]
     }
 
     def to_device(device):
@@ -454,7 +458,7 @@ def _profile_to_snapshot(profile):
         seg = snapshot['segments'][device]
         if seg['address'] is None or seg['address'] > addr:
             seg['address'] = addr
-        seg['total_size'] = max(seg['total_size'], addr + size) # record max addr for now, we will make it the size later
+        seg['total_size'] = max(seg['total_size'], addr + size)  # record max addr for now, we will make it the size later
         category = memory_profile._categories.get(tensor_key, version)
         category = category.name.lower() if category is not None else "unknown"
         stack = allocation_stacks.get(tensor_key, ())
@@ -464,9 +468,13 @@ def _profile_to_snapshot(profile):
             snapshot['device_traces'][device].append(r)
         return r
 
-    def  free(alloc, device):
+    def free(alloc, device):
         for e in ('free_requested', 'free_completed'):
-            snapshot['device_traces'][device].append({'action': e, 'addr': alloc['addr'], 'size': alloc['size'], 'stream': 0, 'frames': alloc['frames']})
+            snapshot['device_traces'][device].append({'action': e,
+                                                      'addr': alloc['addr'],
+                                                      'size': alloc['size'],
+                                                      'stream': 0,
+                                                      'frames': alloc['frames']})
 
     kv_to_elem = {}
 
@@ -488,14 +496,16 @@ def _profile_to_snapshot(profile):
 
 
     # create the final snapshot state
-    blocks_at_end = [(to_device(tensor_key.device), event['addr'], event['size'], event['frames']) for (tensor_key, version), event in kv_to_elem.items()]
+    blocks_at_end = [(to_device(tensor_key.device), event['addr'], event['size'], event['frames'])
+                     for (tensor_key, version), event in kv_to_elem.items()]
     for device, blocks in groupby(sorted(blocks_at_end), key=lambda x: x[0]):
         seg = snapshot['segments'][device]
         last_addr = seg['address']
         for _, addr, size, frames in blocks:
             if last_addr < addr:
                 seg['blocks'].append({'size': addr - last_addr, 'state': 'inactive'})
-            seg['blocks'].append({'size': size, 'state': 'active_allocated', 'history': [{'addr': addr, 'frames': frames, 'real_size': size}]})
+            seg['blocks'].append({'size': size, 'state': 'active_allocated',
+                                  'history': [{'addr': addr, 'frames': frames, 'real_size': size}]})
             last_addr = addr + size
         if last_addr < seg['total_size']:
             seg['blocks'].append({'size': seg['total_size'] - last_addr, 'state': 'inactive'})

@@ -1486,7 +1486,7 @@ function decode_base64(input) {
   }
   let output = new Uint8Array(input.length / 4 * 3)
   for (let i = 0, j = 0; i < input.length; i += 4, j += 3) {
-  	let u24 = decode_char(i, 18) + decode_char(i + 1, 12) + decode_char(i + 2, 6) + decode_char(i + 3)
+      let u24 = decode_char(i, 18) + decode_char(i + 1, 12) + decode_char(i + 2, 6) + decode_char(i + 3)
     output[j] = u24 >> 16
     output[j+1] = (u24 >> 8) & 0xFF
     output[j+2] = u24 & 0xFF;
