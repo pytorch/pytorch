@@ -334,8 +334,7 @@ def expectedFailureDynamic(fn):
 
 
 def expectedFailureAutomaticDynamic(fn):
-    fn._expected_failure_automatic_dynamic = True
-    return fn
+    return unittest.expectedFailure(fn)
 
 
 def expectedFailureCodegenDynamic(fn):

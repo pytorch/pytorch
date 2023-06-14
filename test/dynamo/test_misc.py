@@ -4431,7 +4431,10 @@ def fn():
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """5""")
+            if torch._dynamo.config.automatic_dynamic_shapes:
+                self.assertExpectedInline(cnt.frame_count, """2""")
+            else:
+                self.assertExpectedInline(cnt.frame_count, """5""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
 

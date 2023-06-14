@@ -5,7 +5,12 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
-from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided, expectedFailureAutomaticDynamic
+from torch._dynamo.testing import (
+    CompileCounter,
+    expectedFailureAutomaticDynamic,
+    expectedFailureDynamic,
+    rand_strided,
+)
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
