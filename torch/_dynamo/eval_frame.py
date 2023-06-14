@@ -560,50 +560,6 @@ def optimize(
     )
 
 
-@dataclasses.dataclass
-class ExplainOutput:
-    """
-    This is the output of :func:`torch._dynamo.explain()
-    There is no reason to create this class directly
-    """
-
-    graph_count: int
-    graph_break_count: int
-    op_count: int
-    out_guards: List[_guards.Guard]
-    graphs: List[torch.fx.GraphModule]
-    ops_per_graph: List[torch.fx.Node]
-    break_reasons: List[Any]  # TODO: Not sure if graph break is a type
-    compile_times: str
-
-    def __str__(self):
-        output = f"Graph Count: {self.graph_count}\n"
-        output += f"Graph Break Count: {self.graph_break_count}\n"
-        output += f"Op Count: {self.op_count}\n"
-
-        output += "Break Reasons:\n"
-        for idx, break_reason in enumerate(self.break_reasons):
-            output += f"  Break Reason {idx+1}:\n"
-            output += f"    Reason: {break_reason.reason}\n"
-            output += "    User Stack:\n"
-            for frame_summary in break_reason.user_stack:
-                output += f"      {frame_summary}\n"
-
-        output += "Ops per Graph:\n"
-        for idx, ops in enumerate(self.ops_per_graph):
-            output += f"  Ops {idx+1}:\n"
-            for op in ops:
-                output += f"    {op}\n"
-
-        output += "Out Guards:\n"
-        for i, guard in enumerate(self.out_guards):
-            output += f"  Guard {i+1}:\n"
-            output += f"    {str(guard)}"
-
-        output += f"Compile Times: {self.compile_times}\n"
-        return output
-
-
 # TODO(voz): Consider making "explain" output alongside a run / part of a run
 @patch("torch._dynamo.symbolic_convert.explain", True)
 def explain(f, *args, **kwargs):
@@ -612,27 +568,24 @@ def explain(f, *args, **kwargs):
 
     reset()
 
-    out_guards = []
-    graphs = []
-    ops_per_graph = []
-    op_count = 0
-    break_reasons = []
+    graphs: List[torch.fx.GraphModule] = []
+    break_reasons: List[Any] = []
+    op_count: int = 0
+    ops_per_graph: List[torch.fx.Node] = []
+    out_guards: List[_guards.Guard] = []
 
     def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
+        from .backends.debugging import _explain_graph_detail
+
         nonlocal graphs
         nonlocal op_count
         nonlocal ops_per_graph
+        nonlocal break_reasons
 
-        graphs.append(gm)
-        ops = []
-        for node in gm.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
+        gm, graphs, op_count, ops_per_graph, break_reasons = _explain_graph_detail(
+            gm, graphs, op_count, ops_per_graph, break_reasons
+        )
 
-        op_count += len(ops)
-        ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason.graph_break:
-            break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 
     def guard_export_print(guards):
@@ -668,14 +621,16 @@ def explain(f, *args, **kwargs):
 
     # TODO(voz): Do we want a decorator for this?
     reset()
+    from .backends.debugging import ExplainOutput
+
     return ExplainOutput(
+        graphs,
         graph_count,
         graph_break_count,
-        op_count,
-        out_guards,
-        graphs,
-        ops_per_graph,
         break_reasons,
+        op_count,
+        ops_per_graph,
+        out_guards,
         compile_time,
     )
 
@@ -836,7 +791,7 @@ def export(
     f: Callable[..., Any],
     *args,
     aten_graph: bool = False,
-    pre_dispatch: bool = False,
+    pre_autograd: bool = False,
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
@@ -856,10 +811,9 @@ def export(
         aten_graph (bool): If True, exports a graph with ATen operators.
         If False, exports a graph with Python operators. Default is False.
 
-        pre_dispatch (bool): If True, exports a graph with ATen operators,
-        but before any logic in the PyTorch dispatcher has run.
-        This can be useful if you want to apply further tranformations on a graph before running it
-        through autograd, autocast, or any other functionalities that are integrated into the dispatcher.
+        pre_autograd (bool): If True, exports a graph with ATen operators,
+        but before autograd has run. This can be useful if you want to apply further tranformations
+        on a graph before running it through autograd.
         This flag is only valid if aten_graph=True is set.
         Default is False.
 
@@ -889,8 +843,8 @@ def export(
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-    if pre_dispatch:
-        assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
+    if pre_autograd:
+        assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
     f = innermost_fn(f)
     call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
     original_signature = inspect.signature(call_to_inspect)
@@ -965,11 +919,13 @@ def export(
 
     remove_from_cache(f)
     constraint_violation_error = None
+    if tracing_mode != "symbolic":
+        assume_static_by_default = True
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
         summarize_dim_constraints=True,
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
-        dynamic_shapes=tracing_mode == "symbolic",
+        automatic_dynamic_shapes=False,
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -988,10 +944,10 @@ def export(
     remove_from_cache(f)
 
     if (
-        shape_env := getattr(fake_mode, "shape_env", None)
-    ) is not None and not skipfiles.check(inspect.getsourcefile(call_to_inspect)):
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
+        (shape_env := getattr(fake_mode, "shape_env", None)) is not None
+        and (dim_constraints := shape_env.dim_constraints) is not None
+        and not skipfiles.check(inspect.getsourcefile(call_to_inspect))
+    ):
         dim_constraints.solve()
         msg = dim_constraints.prettify_results(original_signature)
         forced_specializations = dim_constraints.forced_specializations()
@@ -1055,7 +1011,7 @@ def export(
                     decomposition_table=decomposition_table,
                     tracing_mode="real",
                     _allow_non_fake_inputs=True,
-                    pre_dispatch=pre_dispatch,
+                    pre_autograd=pre_autograd,
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error

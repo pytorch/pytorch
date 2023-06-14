@@ -378,7 +378,7 @@ class SplitCatSimplifier:
         """
         node_input = []
         split_users = set(split_node.users.keys())
-        for node_arg in (*node.args, *node.kwargs.values()):
+        for node_arg in node.all_input_nodes:
             if node_arg in split_users:
                 getitem_num = get_arg_value(node_arg, 1)
                 node_input.append((getitem_num, getitem_num))
@@ -591,17 +591,11 @@ class SplitCatSimplifier:
                 # Change the args and kwargs of non-cat/stack nodes. Replace old getitems (belonging to
                 # the original split node) with the newer getitems
                 next_cat_input = 0
-                new_args = []
-                for arg_num, arg in enumerate(user_node.args):
-                    if arg in split_users:
-                        new_args.append(user_inputs_new[next_cat_input])
-                        next_cat_input += 1
-                    else:
-                        new_args.append(arg)
-                user_node.args = tuple(new_args)
-                for key, arg in user_node.kwargs.items():
-                    if arg in split_users:
-                        user_node.kwargs[key] = user_inputs_new[next_cat_input]
+                for input_node in user_node.all_input_nodes:
+                    if input_node in split_users:
+                        user_node.replace_input_with(
+                            input_node, user_inputs_new[next_cat_input]
+                        )
                         next_cat_input += 1
                 continue
 

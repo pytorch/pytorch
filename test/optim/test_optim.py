@@ -1669,6 +1669,32 @@ class TestOptim(TestCase):
             self.assertEqual(params, prev_params)
 
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required.")
+    def test_fused_optimizer_load_state_dict(self):
+        # NOTE: This SIMULATES a fused/capturable optimizer with state moved to CPU, issue 103256
+        # How do we get there? Users typically create CUDA models on fused optimizers and then
+        # store checkpoints on CPU as CUDA memory is limited with torch.load(...map_location="cpu").
+        # Since this is a unit test, it is more expedient to simulate what the state_dict
+        # would look like, which is basically CPU tensors with fused/capturable flag = True.
+        for optimC, kwarg in itertools.product((Adam, optim.AdamW), ("fused", "capturable")):
+            input = torch.tensor([0.1, 0.2], dtype=torch.float32, device="cpu")
+            optimizer = optimC([input])
+            optimizer.zero_grad()
+            input.grad = torch.rand_like(input)
+            optimizer.step()
+            optim_state_dict_cpu = deepcopy(optimizer.state_dict())
+            optim_state_dict_cpu["param_groups"][0][kwarg] = True
+
+            # load
+            input_cuda = input.clone().detach().to(device="cuda")
+            defaults = {kwarg: True}
+            optimizer_cuda = optimC([input_cuda], **defaults)
+            optimizer_cuda.load_state_dict(optim_state_dict_cpu)
+            optimizer_cuda.zero_grad()
+            input_cuda.grad = torch.rand_like(input_cuda)
+            optimizer_cuda.step()
+
+
     @skipIfTorchDynamo()
     def test_post_hook(self):
         def post_hook(opt: Optimizer, args: Tuple[Any], kwargs: Dict[Any, Any]):
