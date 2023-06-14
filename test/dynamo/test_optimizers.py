@@ -20,7 +20,7 @@ model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
 model(input).sum().backward()
 
 
-def make_test(optim_cls, exp_graph_count=0, closure=None, **kwargs):
+def make_test(optim_cls, closure=None, **kwargs):
     opt = optim_cls(model.parameters(), **kwargs)
 
     def test_fn(self):
@@ -33,11 +33,7 @@ def make_test(optim_cls, exp_graph_count=0, closure=None, **kwargs):
         else:
             fn = opt.step
 
-        if exp_graph_count == 0:
-            torch.compile(fn, backend="eager", fullgraph=True)()
-        else:
-            graphs = torch._dynamo.explain(fn).graphs
-            self.assertEqual(exp_graph_count, len(graphs))
+        torch.compile(fn, backend="eager", fullgraph=True)()
 
     return test_fn
 
