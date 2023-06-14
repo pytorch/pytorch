@@ -41,7 +41,6 @@ inner(torch.randn(2, 2).to("{device}"))
 
     @requires_cuda()
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
-    @unittest.expectedFailure  # Skipping this test due to Triton bug, see https://github.com/openai/triton/issues/1704 for details
     def test_after_aot_cuda_runtime_error(self):
         self._test_after_aot_runtime_error("cuda", "device-side assert")
 
