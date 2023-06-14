@@ -1284,7 +1284,10 @@ class TritonKernel(Kernel):
         ndims = self.triton_tensor_ndim()
         if ndims == 1:
             return f"triton_helpers.promote_to_tensor({value})"
-        return f"tl.expand_dims({value}, axis=-1)"
+
+        sizes = [":"] * ndims
+        sizes[-1] = "None"
+        return f"{value}[{', '.join(sizes)}]"
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
