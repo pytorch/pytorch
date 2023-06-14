@@ -296,10 +296,6 @@ void reflection_pad2d_backward_out_template(
     "gradOutput height unexpected. Expected: ", output_h, ", Got: ",
     grad_output.size(dim_h));
 
-  /* resize */
-  grad_input.resize_(input.sizes());
-  grad_input.zero_();
-
   reflection_pad2d_backward_kernel(kCPU, grad_input, grad_output, padding);
 }
 
@@ -307,7 +303,7 @@ void reflection_pad2d_backward_out_template(
 
 // TODO: I tihnk this function should be removed since we implement it with
 // TORCH_IMPL_FUNC below
-Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
+static Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
     Tensor& output) {
   reflection_pad1d_kernel(kCPU, output, input, padding);
   return output;
@@ -363,6 +359,8 @@ Tensor& reflection_pad2d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding,
     Tensor& grad_input) {
+  grad_input.resize_as_(input);
+  grad_input.zero_();
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
@@ -372,7 +370,7 @@ Tensor reflection_pad2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::empty({0}, input.options());
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
