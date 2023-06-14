@@ -5,13 +5,14 @@ import json
 import logging
 import operator
 import typing
+from functools import partial
 from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch.fx.experimental import symbolic_shapes
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 import torch._export.exported_program as ep
-from torch.utils._pytree import pytree_to_str, str_to_pytree
+from torch.utils._pytree import pytree_to_str, str_to_pytree, tree_flatten, tree_unflatten
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     BackwardSignature,
@@ -44,6 +45,7 @@ __all__ = [
     "ExportedProgramDeserializer",
 ]
 
+from .. import export
 
 from ...fx.node import Target
 from ...fx.passes.graph_manipulation import replace_target_nodes_with
@@ -737,6 +739,15 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
 
         return upgrader_passes
 
+    def upgrade(self, exported_program: ep.ExportedProgram) -> ep.ExportedProgram:
+        args = [n.meta["val"] for n in exported_program.graph.nodes if n.op == "placeholder"]
+        inputs = tree_unflatten(args, exported_program.call_spec.in_spec)
+        from torch._dynamo import config
+        config.traceable_tensor_subclasses.add(FakeTensor)
+        for _pass in self.upgrader_passes:
+            exported_program = exported_program.transform(_pass).transform(partial(export, args=inputs))
+        return exported_program
+
 
 class GraphModuleDeserializer:
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
@@ -987,9 +998,10 @@ class ExportedProgramDeserializer:
         state_dict = deserialize_state_dict(serialized_state_dict)
 
         # TODO(angelyi): serialize constraints
-        return ep.ExportedProgram(
+        exported_program = ep.ExportedProgram(
             state_dict, graph_module.graph, sig, call_spec, state_dict, {}, [],
-        ).transform(*upgrader.upgrader_passes)
+        )
+        return upgrader.upgrade(exported_program)
 
 
 class EnumEncoder(json.JSONEncoder):
