@@ -37,6 +37,10 @@ from torch._functorch.utils import exposed_in
 argnums_t = Union[int, Tuple[int, ...]]
 
 
+def lazy_dynamo_disable(func):
+    import torch._dynamo
+    return torch._dynamo.disable(func)
+
 @contextlib.contextmanager
 def enable_inplace_requires_grad(enabled=True):
     prev_state = get_inplace_requires_grad_allowed()
@@ -1280,8 +1284,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
     return wrapper
 
 def grad_impl(func: Callable, argnums: argnums_t, has_aux: bool, args, kwargs):
-    import torch._dynamo
-    func = torch._dynamo.disable(func)
+    func = lazy_dynamo_disable(func)
     results = grad_and_value(func, argnums, has_aux=has_aux)(*args, **kwargs)
     if has_aux:
         grad, (_, aux) = results
