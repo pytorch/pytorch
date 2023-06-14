@@ -83,6 +83,9 @@ test_failures_cpp_wrapper = {
 
 # see https://github.com/pytorch/pytorch/issues/103194
 test_failures_cuda_wrapper = {
+    "test_batch_norm_2d_2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",)
+    ),
     "test_fft_real_input_cuda_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",)
     ),
@@ -223,6 +226,7 @@ if RUN_CUDA:
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),

@@ -5021,6 +5021,27 @@ TEST_F(VulkanAPITest, stack_from_1_to_20_tensors) {
   }
 }
 
+void test_zero_(const at::IntArrayRef input_shape) {
+  auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  auto vulkan = cpu.vulkan();
+
+  cpu.zero_();
+  vulkan.zero_();
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, zero_) {
+  test_zero_({5});
+  test_zero_({5, 7});
+  test_zero_({9, 7, 5});
+  test_zero_({22, 11, 19, 17});
+}
+
 TEST_F(VulkanAPITest, clone_success) {
   // Arrange
   std::multimap<c10::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
