@@ -30,9 +30,9 @@ from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
+    expectedFailureAutomaticDynamic,
     expectedFailureDynamic,
     requires_numpy_pytorch_interop,
-    requires_static_shapes,
     same,
     skipIfNotPy311,
     unsupported,
@@ -1196,7 +1196,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
-    @requires_static_shapes
     def test_tensor_build_list_unpack(self):
         def fn(x):
             # seen in fastNLP_Bert
@@ -1975,7 +1974,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     # NotImplementedError: SymNodeVariable() is not a constant
     # https://github.com/pytorch/pytorch/issues/103618
     @expectedFailureDynamic
-    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    @expectedFailureAutomaticDynamic
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2737,7 +2736,6 @@ def fn():
 
         self.assertTrue(torch.allclose(dynamo_output, output))
 
-    @requires_static_shapes
     def test_cross_entropy_loss_fancy_ctor2(self):
         rand_3_5 = torch.randn(3, 5)
         target = torch.empty(3, dtype=torch.long).random_(5)
@@ -4433,7 +4431,7 @@ def fn():
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """2""")
+            self.assertExpectedInline(cnt.frame_count, """5""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
 
@@ -5276,7 +5274,7 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
-    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    @expectedFailureAutomaticDynamic
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
