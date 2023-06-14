@@ -5925,13 +5925,17 @@ class CommonTemplate:
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_rsqrt_dynamic_shapes(self):
         # From HF hf_BigBird model.
-        def fn(a):
-            return 1 / math.sqrt(a.size(1))
+        @torch.compile(dynamic=True)
+        def fn(a, b):
+            r = 1 / math.sqrt(a.size(1))
+            return torch.bmm(a, b) / r
+            return (r,)
 
         self.common(
             fn,
             [
-                torch.randn(8, 4, 4),
+                torch.randn(2, 4, 4),
+                torch.randn(2, 4, 4),
             ],
         )
 
