@@ -680,6 +680,7 @@ class CommonDistributedDataParallelTest:
                     "Your training graph has changed in this iteration"
                 ) if static_graph and not use_reentrant else nullcontext()
             )
+            err_ctx = nullcontext()
             with err_ctx:
                 self._test_ddp_checkpointing(
                     model,
