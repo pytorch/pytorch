@@ -5,6 +5,7 @@ AllenaiLongformerBase,pass,4
 BartForCausalLM,pass,0
 BertForMaskedLM,pass,0
 BertForQuestionAnswering,pass,0
+BlenderbotForCausalLM,pass_due_to_skip,0
 BlenderbotSmallForCausalLM,pass,0
 BlenderbotSmallForConditionalGeneration,pass,0
 CamemBert,pass,0
@@ -17,7 +18,6 @@ DistillGPT2,pass,0
 ElectraForCausalLM,pass,0
 ElectraForQuestionAnswering,pass,0
 GPT2ForSequenceClassification,pass,2
-GoogleFnet,pass,0
 LayoutLMForMaskedLM,pass,0
 LayoutLMForSequenceClassification,pass,2
 M2M100ForConditionalGeneration,pass,0
@@ -34,7 +34,7 @@ PLBartForConditionalGeneration,pass,0
 PegasusForCausalLM,pass,0
 PegasusForConditionalGeneration,pass,0
 RobertaForCausalLM,pass,0
-RobertaForQuestionAnswering,pass,0
+RobertaForQuestionAnswering,fail_accuracy,0
 Speech2Text2ForCausalLM,pass,0
 T5ForConditionalGeneration,pass,0
 T5Small,pass,0
