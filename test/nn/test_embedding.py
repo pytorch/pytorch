@@ -139,10 +139,11 @@ class TestEmbeddingNN(NNTestCase):
 
         embed_old = torch.nn.Embedding(4, 3)
         embed_old.weight.data = embeddings.data
-        res_old = embed_old(a)
 
+        self.assertEqual(embed_old.weight.data, embeddings.data)
+        res_old = embed_old(a)
         res_F = F.embedding(a, embeddings)
-        self.assertEqual(res_old, res_F)
+        self.assertEqual(res_F, res_old)
 
         embed_old = torch.nn.Embedding(4, 3)
         embed_old = embed_old.from_pretrained(embeddings, padding_idx=2)
