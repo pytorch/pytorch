@@ -164,8 +164,8 @@ class TestDeserialize(TestCase):
         # export tests
 
         ep = export(fn, inputs, [])
-        serialized_struct, state_dict = serialize(ep)
-        deserialized_ep = deserialize(serialized_struct, state_dict)
+        serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
+        deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
 
         orig_outputs = ep(*inputs)
         loaded_outputs = deserialized_ep(*inputs)
