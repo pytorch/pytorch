@@ -5,7 +5,7 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
-from torch._dynamo.testing import CompileCounter, rand_strided
+from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
@@ -401,8 +401,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         fxy(x1, y1)
         fxy(x2, y2)
 
-        if not torch._dynamo.config.dynamic_shapes:
-            self.assertTrue(failure_reason is None)
+        self.assertTrue(failure_reason is None)
 
         # Reset failure reason
         failure_reason = None
@@ -651,8 +650,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cc.frame_count, 2)
         self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
 
+    @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @patch("torch._functorch.config.debug_assert", True)
-    @patch("torch._dynamo.config.dynamic_shapes", False)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         # this is just dealing with the fact that
         # aot_module_simplified expects submods to always return tuples/lists

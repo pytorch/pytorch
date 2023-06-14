@@ -14,7 +14,6 @@ import torch
 
 import torch._logging
 from torch._prims_common import is_integer_dtype
-from ..._dynamo import config as dynamo_config
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
@@ -601,12 +600,6 @@ class IterationRangesRoot(IterationRanges):
         convert = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
         return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}{convert}"
 
-    def scalar_code(self, value):
-        index_dtype = self.kernel.index_dtype
-        ndim = self.kernel.triton_tensor_ndim()
-        size = [1] * ndim
-        return f"tl.full({size}, {value}, {index_dtype})"
-
     def get_pid(self):
         key = f"tl.program_id({self.index})"
         pid = self.pid_cache.get(key, key)
@@ -624,14 +617,11 @@ class IterationRangesRoot(IterationRanges):
                 f"{self.name} = {self.ranges_code()}",
             )
         else:
-            if not no_x_dim:
-                line = f"{x}offset + {self.ranges_code()}"
-            else:
-                line = self.scalar_code(f"{x}offset")
+            ranges_code = f" + {self.ranges_code()}" if not no_x_dim else ""
             code.writelines(
                 [
                     f"{x}offset = {self.get_pid()} * {x.upper()}BLOCK",
-                    f"{self.name} = {line}",
+                    f"{self.name} = {x}offset {ranges_code}",
                 ]
             )
         code.writeline(f"{x}mask = {self.name} < {x}numel")
@@ -943,7 +933,22 @@ class TritonKernel(Kernel):
         # Note. This may not be correct when there is indirect indexing
         if self.is_indirect_indexing(index):
             return False
-        return not set.issubset(set(self.range_tree_nodes.keys()), index.free_symbols)
+
+        index_numels = [1] * len(self.numels)
+        for symbol in index.free_symbols:
+            if symbol not in self.range_tree_nodes:
+                # Non-iterated variables, e.g. strides
+                continue
+            entry = self.range_tree_nodes[symbol]
+            index_numels[entry.parent.index] *= entry.length
+
+        # If the index variables only iterate over a subset of the kernel
+        # numels, then it must be broadcasted.
+        simplify = V.graph.sizevars.simplify
+        return any(
+            simplify(idx_range) != simplify(iter_range)
+            for idx_range, iter_range in zip(index_numels, self.numels)
+        )
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
@@ -1280,11 +1285,13 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def reduction_resize(self, value):
-        ndims = self.triton_tensor_ndim()
-        if ndims == 1:
-            return f"triton_helpers.promote_to_tensor({value})"
-        return f"tl.expand_dims({value}, axis=-1)"
+    def reduction_size_str(self):
+        if self.no_x_dim:
+            return ""
+        else:
+            sizes = [":" for _ in self.range_trees]
+            sizes[-1] = "None"
+            return f"[{', '.join(sizes)}]"
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction
@@ -1305,16 +1312,16 @@ class TritonKernel(Kernel):
             use_helper = reduction_type in {"max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
             if reduction_type in {"max", "min"}:
-                return self.reduction_resize(
-                    f"{module}.{reduction_type}2({value}, {dim})"
-                )
-            return self.reduction_resize(f"{module}.{reduction_type}({value}, {dim})")
+                return f"{module}.{reduction_type}2({value}, {dim}){self.reduction_size_str()}"
+            return (
+                f"{module}.{reduction_type}({value}, {dim}){self.reduction_size_str()}"
+            )
 
         def final_argreduce(buffer, result_var, value, index):
             buffer.splice(
                 f"""\
                 _, {result_var}_tmp = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
-                {result_var} = {self.reduction_resize(f'{result_var}_tmp')}
+                {result_var} = {result_var}_tmp{self.reduction_size_str()}
                 """
             )
 
@@ -1699,15 +1706,12 @@ class TritonKernel(Kernel):
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
-    def triton_tensor_ndim(self):
-        no_x_dim = int(bool(self.no_x_dim))
-        no_r_dim = self.numels[-1] == 1
-        return len(self.range_trees) - no_x_dim - no_r_dim
-
     def indexing_size_str(self, i=None, x=None):
         # no_x_dim is sympy.logic.boolalg.BooleanTrue
         no_x_dim = int(bool(self.no_x_dim))
-        sizes = ["None"] * self.triton_tensor_ndim()
+        sizes = ["None"] * (
+            len(self.range_trees) - int(self.numels[-1] == 1) - no_x_dim
+        )
         if i is not None:
             idx = i - no_x_dim
             sizes[idx] = ":"
@@ -2142,16 +2146,8 @@ class TritonScheduling:
                     stack.close()
                     kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
-                    # TODO - mostly works but needs a couple fixes
-                    # Problem looks like free variables NYI: s0
-                    # We need to detect if the proposed ranges would have
-                    # symbols and bail out on this optimization if so
-                    if (
-                        not dynamo_config.dynamic_shapes
-                        and dynamo_config.assume_static_by_default
-                    ):
-                        # TODO - use split ranges ?
-                        indexing_dtype_strength_reduction(node._body)
+                    # TODO - use split ranges ?
+                    indexing_dtype_strength_reduction(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 

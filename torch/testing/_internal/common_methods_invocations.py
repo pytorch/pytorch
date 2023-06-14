@@ -134,6 +134,8 @@ from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
 from torch.testing._internal.opinfo.definitions.sparse import (
+    error_inputs_sparse_like_fns,
+    sample_inputs_sparse_like_fns,
     error_inputs_sparse_mul,
     sample_inputs_sparse_mul,
     error_inputs_sparse_reduction_sum,
@@ -9331,7 +9333,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
 
                # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
 
                # FX failed to normalize op - add the op to the op_skip list.
@@ -9362,7 +9363,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
 
                # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
 
                # FX failed to normalize op - add the op to the op_skip list.
@@ -9392,7 +9392,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
 
                # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
 
                # FX failed to normalize op - add the op to the op_skip list.
@@ -9421,7 +9420,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
 
                # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -9453,7 +9451,6 @@ op_db: List[OpInfo] = [
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive_inplace'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -9756,8 +9753,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('addcmul',
-           dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -15690,6 +15686,12 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
+           error_inputs_sparse_func=error_inputs_sparse_like_fns,
+           sample_inputs_sparse_coo_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_coo),
+           sample_inputs_sparse_csr_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_csr),
+           sample_inputs_sparse_csc_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_csc),
+           sample_inputs_sparse_bsr_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_bsr),
+           sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_bsc),
            skips=(
            )),
     OpInfo('ones_like',
@@ -15732,7 +15734,12 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
-           supports_sparse_csr=True,
+           error_inputs_sparse_func=error_inputs_sparse_like_fns,
+           sample_inputs_sparse_coo_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_coo),
+           sample_inputs_sparse_csr_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_csr),
+           sample_inputs_sparse_csc_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_csc),
+           sample_inputs_sparse_bsr_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_bsr),
+           sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_bsc),
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
@@ -19493,7 +19500,6 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                 dtypes=(torch.complex32,),
             ),
-
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
@@ -19611,6 +19617,16 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.addcmul",
         torch_opinfo_name="addcmul",
+        skips=(
+            # Reference result was farther (1.3343989849090576e-05)
+            # from the precise computation than the torch result
+            # was (9.592622518539429e-06)!
+            # FIXME: enable dtype-based tolerances in test_ops.py:TestCommon._ref_test_helper
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.float16,), device_type="cpu"),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.float16,), device_type="cpu"),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_min",
