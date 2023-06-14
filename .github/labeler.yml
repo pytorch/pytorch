@@ -8,6 +8,10 @@
 - torch/_inductor/**
 - test/inductor/**
 
+"module: export":
+- torch/_export/**
+- test/export/**
+
 "ciflow/inductor":
 - torch/_decomp/**
 - torch/_dynamo/**
