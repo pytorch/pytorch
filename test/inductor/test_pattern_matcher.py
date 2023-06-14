@@ -3,7 +3,6 @@ import copy
 import unittest
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters

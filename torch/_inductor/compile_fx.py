@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 from functorch.compile import min_cut_rematerialization_partition
 
-import torch._dynamo.config as dynamo_config
 import torch._functorch.config as functorch_config
 
 import torch.fx
