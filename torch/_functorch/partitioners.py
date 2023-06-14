@@ -22,10 +22,11 @@ import functools
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
 
-def is_symint_node(node):
-    assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
-    return "val" in node.meta and isinstance(node.meta['val'], torch.SymInt)
-
+def sym_node_size(node):
+    if isinstance(node.meta["val"], (torch.SymInt, torch.SymBool)):
+        return 1
+    assert isinstance(node.meta["val"], torch.SymFloat)
+    return 4
 
 class InvalidNodeBase:
     def __repr__(self):
@@ -576,10 +577,9 @@ def min_cut_rematerialization_partition(
         # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
-        if is_symint_node(node):
-            weight = 1
-        elif is_sym_node(node):
-            weight = math.inf
+
+        if is_sym_node(node):
+            weight = sym_node_size(node)
         elif is_non_tensor_node:
             weight = math.inf
         else:
