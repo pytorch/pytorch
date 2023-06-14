@@ -152,7 +152,7 @@ CPU oversubscription is a technical term that refers to a situation
 where the total number of vCPUs allocated to a system exceeds the total
 number of vCPUs available on the hardware.
 
-This leads to severe contention for CPU resources, In such cases, there
+This leads to severe contention for CPU resources. In such cases, there
 is frequent switching between processes, which increases processes
 switching overhead and decreases overall system efficiency.
 
