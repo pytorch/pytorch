@@ -317,7 +317,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if max is None:
         max = sympy.oo
     if not isinstance(a, SymInt):
-        constrain_range_non_symint(a, min=min, max=max)
+        constrain_range_eager(a, min=min, max=max)
         return
 
 
@@ -336,7 +336,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         builtins.max(r.lower, min), builtins.min(r.upper, max)
     )
 
-def constrain_range_non_symint(a, *, min, max):
+def constrain_range_eager(a, *, min, max):
     assert not isinstance(a, SymInt)
     if not (min <= a <= max):
         raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
@@ -351,8 +351,6 @@ def constrain_range_non_symint(a, *, min, max):
         shape_env = fake_mode.shape_env
         shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
         shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
-
-    return
 
 
 def constrain_unify(a, b):

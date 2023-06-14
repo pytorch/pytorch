@@ -2424,7 +2424,7 @@ def forward(self, x):
 
             ep = torch._export.export(f, (torch.tensor([5]),))
             self.assertEqual(
-                ep.graph_module(torch.tensor([6]))[0],
+                ep(torch.tensor([6]))[0],
                 torch.empty((6, 4)),
             )
 
@@ -2432,7 +2432,7 @@ def forward(self, x):
                 RuntimeError,
                 r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
             ) as cm:
-                ep.graph_module(torch.tensor([30]))
+                ep(torch.tensor([30]))
 
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
