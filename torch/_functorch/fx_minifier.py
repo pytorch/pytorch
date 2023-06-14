@@ -135,6 +135,10 @@ class ReproState:
     graph: fx.Graph
     inps: List[torch.Tensor]
 
+    def __post_init__(self):
+        ph_nodes = get_placeholders(self.graph)
+        assert len(ph_nodes) == len(self.inps)
+
 def minifier(
     fail_f: fx.GraphModule, inps, module_fails, dump_state: Callable = dump_state, *,
     save_dir=None, offload_to_disk=False, skip_offload=False, skip_sanity=False,
@@ -154,6 +158,8 @@ def minifier(
 
     note: module_fails returns True if it fails.
     """
+    assert isinstance(inps, (tuple, list))
+
     failing_graph = fail_f.graph
     cur_size = len(failing_graph.nodes)
 
