@@ -40,6 +40,7 @@ from .quantizer import (
     OperatorPatternType,
     QuantizationAnnotation,
     QuantizationConfig,
+    QuantizationSpecBase,
     QuantizationSpec,
     SharedQuantizationSpec,
     Quantizer,
@@ -286,6 +287,7 @@ class QNNPackQuantizer(Quantizer):
         self._annotate_hardtanh(model, config)
         self._annotate_mean(model, config)
         self._annotate_adaptive_avg_pool2d(model, config)
+        self._annotate_gru(model, config)
         return model
 
     def _annotate_for_dynamic_quantization_config(
@@ -553,6 +555,54 @@ class QNNPackQuantizer(Quantizer):
                     _annotate_output_qspec(output_node, output_act_qspec)
                 nodes_to_mark_annotated = list(p.nodes)
                 _mark_nodes_as_annotated(nodes_to_mark_annotated)
+
+    # TODO: move this to BoltNNQuantizer?
+    def _annotate_gru(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        gru_partitions = get_source_partitions(
+            gm.graph, [torch.nn.GRU]
+        )
+        gru_partitions = list(itertools.chain(*gru_partitions.values()))
+        for gru_partition in gru_partitions:
+            output_nodes = gru_partition.output_nodes
+            input_nodes = gru_partition.input_nodes
+            # skip annotation if it is already annotated
+            if _is_annotated(input_nodes + output_nodes):
+                continue
+            # inside each GRU partition, we should be able to annotate each linear
+            # subgraph
+            input_qspec_map: Dict[Node, QuantizationSpecBase] = {}
+            input_act = input_nodes[0]
+            input_act_user = list(input_act.users.keys())[0]
+            assert isinstance(input_act, Node)
+            assert isinstance(input_act_user, Node)
+            input_act_user.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map={
+                    input_act: get_input_act_qspec(quantization_config),
+                },
+                _annotated=True
+            )
+
+            hidden_state = input_nodes[1]
+            hidden_state_user = list(hidden_state.users.keys())[0]
+            assert isinstance(hidden_state, Node)
+            assert isinstance(hidden_state_user, Node)
+            hidden_state_user.meta["quantization_annotation"] = QuantizationAnnotation(
+                input_qspec_map={
+                    hidden_state: get_input_act_qspec(quantization_config),
+                },
+                _annotated=True
+            )
+
+            assert len(output_nodes) == 2, "expecting GRU to have two outputs"
+            for output in output_nodes:
+                output.meta["quantization_annotation"] = QuantizationAnnotation(
+                    output_qspec=get_output_act_qspec(quantization_config),
+                    _annotated=True,
+                )
+            nodes_to_mark_annotated = list(gru_partition.nodes)
+            _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_maxpool2d(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
