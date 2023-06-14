@@ -27,8 +27,8 @@ class InputDim(NamedTuple):
 
 @dataclass
 class RangeConstraint:
-    min_val: sympy.Integer
-    max_val: sympy.Integer
+    min_val: sympy.Expr
+    max_val: sympy.Expr
 
 
 def _convert_to_int(val):

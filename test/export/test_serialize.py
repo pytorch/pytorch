@@ -187,7 +187,8 @@ class TestDeserialize(TestCase):
         flat_loaded_outputs, _ = pytree.tree_flatten(loaded_outputs)
 
         for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
-            if isinstance(orig, torch.Tensor) and isinstance(loaded, torch.Tensor):
+            self.assertEqual(type(orig), type(loaded))
+            if isinstance(orig, torch.Tensor):
                 self.assertTrue(torch.allclose(orig, loaded))
             else:
                 self.assertEqual(orig, loaded)
@@ -212,7 +213,7 @@ class TestDeserialize(TestCase):
             elif isinstance(val1, list) and isinstance(val2, list):
                 # Or both are fake tensors lists with one element and with the
                 # same shape/dtype
-                self.assertTrue(len(val1) == len(val2) and len(val1) == 1)
+                self.assertTrue(len(val1) == 1 and len(val2) == 1)
                 self.assertEqual(val1[0].shape, val2[0].shape)
                 self.assertEqual(val1[0].dtype, val2[0].dtype)
             else:

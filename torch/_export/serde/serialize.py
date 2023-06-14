@@ -31,6 +31,7 @@ from .schema import (   # type: ignore[attr-defined]
     ScalarType,
     SymBool,
     SymBoolArgument,
+    SymExpr,
     SymInt,
     SymIntArgument,
     TensorArgument,
@@ -58,6 +59,9 @@ class SerializeError(RuntimeError):
 
 def _reverse_map(d: Dict[Any, Enum]):
     return {v.value: k for k, v in d.items()}
+
+
+MetaType = Union[FakeTensor, int, torch.SymInt, bool, torch.SymBool]
 
 
 _TORCH_TO_SERIALIZE_DTYPE = {
@@ -136,7 +140,7 @@ def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
             return SymInt.create(as_int=int(s))
         else:
             assert isinstance(s, torch.SymInt)
-            return SymInt.create(as_symbol=[str(s), s.node.hint])
+            return SymInt.create(as_expr=SymExpr(str(s), s.node.hint))
     else:
         raise SerializeError(
             f"SymInt should be either symbol or int, got `{s}` of type `{type(s)}`"
@@ -148,7 +152,7 @@ def serialize_sym_bool(s: Union[bool, torch.SymBool]) -> SymBool:
         if symbolic_shapes.is_concrete_bool(s):
             return SymBool.create(as_bool=bool(s))
         else:
-            return SymBool.create(as_symbol=str(s))
+            return SymBool.create(as_expr=str(s))
     else:
         raise SerializeError(
             f"SymBool should be either symbol or bool, got `{s}` of type `{type(s)}`"
@@ -174,12 +178,6 @@ def serialize_metadata(node: torch.fx.Node) -> Dict[str, str]:
     ret = {}
     if stack_trace := node.meta.get("stack_trace"):
         ret["stack_trace"] = stack_trace
-    module_fqn = node.meta.get("module_fqn")
-    # Need an explicit None check instead of walrus operator, because
-    # module_fqn can be the empty string if the node belongs to the root.
-    # The walrus operator returns False on an empty string :(
-    if module_fqn is not None:
-        ret["module_fqn"] = module_fqn
 
     if nn_module_stack := node.meta.get("nn_module_stack"):
         # Serialize to "fx_node_name:(orig_ref,type_str)"
@@ -201,12 +199,6 @@ def deserialize_metadata(metadata) -> Dict[str, str]:
     ret = {}
     if stack_trace := metadata.get("stack_trace"):
         ret["stack_trace"] = stack_trace
-    # Need an explicit None check instead of walrus operator, because
-    # module_fqn can be the empty string if the node belongs to the root.
-    # The walrus operator returns False on an empty string :(
-    module_fqn = metadata.get("module_fqn")
-    if module_fqn is not None:
-        ret["module_fqn"] = module_fqn
 
     def deserialize_meta_func(serialized_target: str):
         module = None
@@ -355,7 +347,7 @@ def deserialize_state_dict(serialized: bytes) -> Dict[str, torch.Tensor]:
 
 
 
-def _convert_sympy_int_to_int(val: sympy.Integer):
+def _sympy_int_to_int(val: sympy.Expr):
     # Convert simple sympy Integers into concrete int
     if val == sympy.oo:
         return math.inf
@@ -368,7 +360,7 @@ def _convert_sympy_int_to_int(val: sympy.Integer):
     )
 
 
-def _convert_int_to_sympy_int(val) -> sympy.Integer:
+def _int_to_sympy_int(val) -> sympy.Expr:
     # Convert concrete int into simple sympy Integers
     if val == math.inf:
         return sympy.oo
@@ -382,8 +374,8 @@ def serialize_range_constraints(
 ) -> Dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
-            _convert_sympy_int_to_int(v.min_val),
-            _convert_sympy_int_to_int(v.max_val),
+            _sympy_int_to_int(v.min_val),
+            _sympy_int_to_int(v.max_val),
         )
         for k, v in range_constraints.items()
     }
@@ -738,15 +730,26 @@ class ExportedProgramSerializer:
 class GraphModuleDeserializer:
     def __init__(self):
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
-        self.serialized_name_to_meta: Dict[str, Union[FakeTensor, int, torch.SymInt, bool, torch.SymBool]] = {}
+        self.serialized_name_to_meta: Dict[str, MetaType] = {}
         self.graph = torch.fx.Graph()
 
     def deserialize_sym_int(self, s: SymInt) -> Union[int, torch.SymInt]:
         val = s.value
-        if s.type == "as_symbol":
-            expr, hint = val
-            sym = sympy.sympify(expr, locals=self.symbol_name_to_symbol)
-            return self.shape_env.create_symintnode(sym, hint=hint)
+        if s.type == "as_expr":
+            if val.expr_str in self.symbol_name_to_symbol:
+                sym = self.symbol_name_to_symbol[val.expr_str]
+            else:
+                sym = sympy.sympify(val.expr_str, locals=self.symbol_name_to_symbol)
+
+                if isinstance(sym, sympy.Symbol):
+                    self.symbol_name_to_symbol[val.expr_str] = sym
+
+                    if vr := self.symbol_name_to_range.get(val.expr_str):
+                        symbolic_shapes._constrain_symbol_range(
+                            self.shape_env, sym, vr.lower, vr.upper
+                        )
+
+            return self.shape_env.create_symintnode(sym, hint=val.hint)
         elif s.type == "as_int":
             assert isinstance(val, int)
             return val
@@ -757,9 +760,9 @@ class GraphModuleDeserializer:
 
     def deserialize_sym_bool(self, s: SymBool) -> Union[bool, torch.SymBool]:
         val = s.value
-        if s.type == "as_symbol":
+        if s.type == "as_expr":
             expr = sympy.sympify(val, locals=self.symbol_name_to_symbol)
-            return symbolic_shapes.SymBool(symbolic_shapes.SymNode(expr, self.shape_env, bool, None))
+            return self.shape_env.create_symboolnode(expr)
         elif s.type == "as_bool":
             assert isinstance(val, bool)
             return val
@@ -787,19 +790,12 @@ class GraphModuleDeserializer:
     def deserialize(
         self,
         serialized_graph_module: GraphModule,
-        shape_env: Optional[symbolic_shapes.ShapeEnv] = None,
-        symbol_name_to_symbol: Optional[Dict[str, sympy.Symbol]] = None,
-    ) -> Tuple[torch.fx.GraphModule, ep.ExportGraphSignature, ep.CallSpec]:
-        self.fake_tensor_mode = FakeTensorMode(shape_env=shape_env)
-        self.shape_env = (
-            shape_env if shape_env is not None
-            else symbolic_shapes.ShapeEnv()
-        )
-        self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = (
-            symbol_name_to_symbol
-            if symbol_name_to_symbol is not None
-            else {}
-        )
+        symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
+    ) -> Tuple[torch.fx.GraphModule, ep.ExportGraphSignature, ep.CallSpec, Dict[str, sympy.Symbol]]:
+        self.shape_env = symbolic_shapes.ShapeEnv()
+        self.fake_tensor_mode = FakeTensorMode(shape_env=self.shape_env)
+        self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
+        self.symbol_name_to_range = {} if symbol_name_to_range is None else symbol_name_to_range
 
         graph = self.graph
         serialized_graph = serialized_graph_module.graph
@@ -883,7 +879,7 @@ class GraphModuleDeserializer:
 
         sig = deserialize_signature(serialized_graph_module.signature)
         call_spec = deserialize_call_spec(serialized_graph_module.call_spec)
-        return torch.fx.GraphModule({}, graph), sig, call_spec
+        return torch.fx.GraphModule({}, graph), sig, call_spec, self.symbol_name_to_symbol
 
     def sync_serialized_node(self, name: str, fx_node: torch.fx.Node):
         if name in self.serialized_name_to_node:
@@ -1007,40 +1003,34 @@ class ExportedProgramDeserializer:
 
     def deserialize_range_constraints(
         self,
-        serialized_range_constraints: Dict[str, RangeConstraint],
+        symbol_name_to_range: Dict[str, symbolic_shapes.ValueRanges],
+        symbol_name_to_symbol: Dict[str, sympy.Symbol],
     ) -> Dict[sympy.Symbol, ep.RangeConstraint]:
         range_constraints = {}
-        for k, v in serialized_range_constraints.items():
-            symbol = sympy.Symbol(k)
-            self.symbol_name_to_symbol[k] = symbol
-
-            sympy_min_val = _convert_int_to_sympy_int(v.min_val)
-            sympy_max_val = _convert_int_to_sympy_int(v.max_val)
-            range_constraints[symbol] = ep.RangeConstraint(
-                sympy_min_val, sympy_max_val,
-            )
-            self.shape_env.var_to_range[symbol] = symbolic_shapes.ValueRanges(
-                sympy_min_val, sympy_max_val
-            )
-
+        for k, v in symbol_name_to_range.items():
+            if symbol := symbol_name_to_symbol.get(k):
+                range_constraints[symbol] = ep.RangeConstraint(v.lower, v.upper)  # type: ignore[arg-type]
+            else:
+                log.warning(f"Symbol {k} did not appear in the graph that was deserialized")  # noqa: G004
         return range_constraints
 
     def deserialize(
         self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
     ) -> ep.ExportedProgram:
-        self.shape_env: symbolic_shapes.ShapeEnv = symbolic_shapes.ShapeEnv()
-        self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
+        symbol_name_to_range = {
+            k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
+            for k, v in serialized_exported_program.range_constraints.items()
+        }
 
-        range_constraints = self.deserialize_range_constraints(
-            serialized_exported_program.range_constraints,
-        )
-        graph_module, sig, call_spec = (
+        graph_module, sig, call_spec, symbol_name_to_symbol = (
             GraphModuleDeserializer()
             .deserialize(
                 serialized_exported_program.graph_module,
-                self.shape_env,
-                self.symbol_name_to_symbol,
+                symbol_name_to_range,
             )
+        )
+        range_constraints = self.deserialize_range_constraints(
+            symbol_name_to_range, symbol_name_to_symbol,
         )
         state_dict = deserialize_state_dict(serialized_state_dict)
         equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)

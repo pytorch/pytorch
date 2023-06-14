@@ -71,14 +71,20 @@ class Device:
 
 
 @dataclass
+class SymExpr:
+    expr_str: str
+    hint: Optional[int]
+
+
+@dataclass
 class SymInt(_Union):
-    as_symbol: Tuple[str, int]
+    as_expr: SymExpr
     as_int: int
 
 
 @dataclass
 class SymBool(_Union):
-    as_symbol: str
+    as_expr: str
     as_bool: bool
 
 
