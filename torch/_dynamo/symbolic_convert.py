@@ -103,6 +103,7 @@ from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
+graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 @functools.lru_cache(None)
@@ -329,24 +330,27 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
             x = value.var_getattr(self, "__bool__")
-            # __bool__ is function
+            # if __bool__ is missing, trying __len__ to infer a truth value.
+            if x.is_python_constant() and x.as_python_constant() is None:
+                x = value.var_getattr(self, "__len__")
+            # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
                 state = self.copy_graphstate()
                 result = x.call_function(self, [], {})
                 if isinstance(result, ConstantVariable) and isinstance(
-                    result.value, bool
+                    result.value, (bool, int)
                 ):
                     self.output.guards.update(result.guards)
                     if truth_fn(result.value):
                         push and self.push(value)
                         self.jump(inst)
                 else:
-                    # rollback to the state before the __bool__ inline
+                    # rollback to the state before the __bool__ or __len__ inline
                     self.restore_graphstate(state)
                     unimplemented(
                         "generic_jump on UserDefined with __bool__ returning non-constant"
                     )
-            # __bool__ is non-function or not existed in the user defined object
+            # __bool__ or __len__ is non-function or not existed in the user defined object
             else:
                 if truth_fn(True):
                     push and self.push(value)
@@ -414,11 +418,11 @@ def break_graph_if_unsupported(*, push):
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if (
-                    config.print_graph_breaks
+                    graph_break_log.isEnabledFor(logging.DEBUG)
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
-                    log.warning(
+                    graph_break_log.debug(
                         "Graph break: %s from user code at %s",
                         excp,
                         user_stack_formatted,
@@ -1060,6 +1064,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     supported_const_comparison_ops[op](object(), right.value), **options
                 )
             )
+
         elif (
             left.is_python_constant()
             and right.is_python_constant()
@@ -1275,7 +1280,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, (ConstantVariable, EnumVariable)) or (
+            assert isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable)) or (
                 isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 

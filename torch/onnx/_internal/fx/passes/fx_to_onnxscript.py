@@ -352,9 +352,9 @@ def _export_fx_node_to_onnxscript(
     elif node.op == "call_function":
         # aten ops and other stateless functions.
         if node.target == operator.getitem and isinstance(
-            fx_name_to_onnxscript_value[node.args[0].name], tuple  # type: ignore[union-attr]
+            fx_name_to_onnxscript_value[node.args[0].name], tuple  # type: ignore[union-attr,index]
         ):
-            onnx_tensor_tuple = fx_name_to_onnxscript_value[node.args[0].name]  # type: ignore[union-attr]
+            onnx_tensor_tuple = fx_name_to_onnxscript_value[node.args[0].name]  # type: ignore[union-attr,index]
             index = node.args[1]
             output = onnx_tensor_tuple[index]  # type: ignore[index]
             assert (
