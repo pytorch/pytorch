@@ -30,7 +30,7 @@ from torch._inductor.codegen.common import DataTypePropagation, OptimizationCont
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing import make_tensor
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
@@ -3107,6 +3107,47 @@ class CommonTemplate:
             ),
             check_lowp=False,  # accuracy issues with relatively large matmuls
         )
+
+    def test_remove_no_ops(self):
+        def matmul_with_op(x, y, fn):
+            return fn(x @ y)
+
+        foo_opt = torch.compile(matmul_with_op)
+
+        # test no-op
+        fns = (
+            lambda x: x + torch.zeros_like(x, dtype=torch.float32),  # noqa: E731
+            lambda x: x - torch.zeros_like(x, dtype=torch.float32),  # noqa: E731
+            lambda x: x * torch.ones_like(x, dtype=torch.float32),  # noqa: E731
+            lambda x: x / torch.ones_like(x, dtype=torch.float32),  # noqa: E731
+        )
+
+        inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
+
+        for fn in fns:
+            out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+            self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+
+            if self.device == "cpu":
+                FileCheck().check_not("cpp_fused").run(source_codes[0])
+            else:
+                FileCheck().check_not("triton.jit").run(source_codes[0])
+
+        # test dtype conversion
+        inps = [
+            torch.rand([256, 256], device=self.device, dtype=torch.bfloat16)
+            for _ in range(2)
+        ]
+        for fn in fns:
+            out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+            self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
+
+        # test broadcasted shape bail
+        fn = lambda x: x + torch.zeros(  # noqa: E731
+            [256, 256, 256], dtype=torch.bfloat16, device=self.device
+        )
+        out, source_codes = run_and_get_code(foo_opt, inps[0], inps[1], fn)
+        self.assertEqual(out, matmul_with_op(inps[0], inps[1], fn))
 
     def test_cat_of_loops_and_extern_kernel(self):
         class M(torch.nn.Module):
