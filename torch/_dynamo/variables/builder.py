@@ -199,11 +199,11 @@ class VariableBuilder:
     def __call__(self, value):
         if value in self.tx.output.side_effects:
             # TODO(jansel): add guard for alias relationship
-            # 
+            #
             # Note - we may end up in a situation where we invoke something like
             # def fn(x, y)
             # with fn(x, x)
-            # Prior to the addition of tracking to all input objects, we would handle this just fine by 
+            # Prior to the addition of tracking to all input objects, we would handle this just fine by
             # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
             # with tracking on inputs, we do not produce deduping guard correctly, and duplicate inputs or aliased
             # relationships may end up getting erased here - the fn(x, x) call above, with side effects, would
@@ -214,11 +214,18 @@ class VariableBuilder:
             if not is_from_local_source(self.source):
                 return self.tx.output.side_effects[value]
         vt = self._wrap(value).clone(**self.options())
-        if is_from_local_source(self.source) and isinstance(vt, (TensorVariable, UserDefinedObjectVariable)):
+        if self._can_lift_attrs_to_inputs(vt):
             vt = self.tx.output.side_effects.track_object_existing(
                 self.source, value, vt
             )
         return vt
+
+    def _can_lift_attrs_to_inputs(self, vt):
+        if not is_from_local_source(self.source):
+            return False
+        if type(vt) in [TensorVariable, UserDefinedObjectVariable]:
+            return True
+        return False
 
     @staticmethod
     @functools.lru_cache(None)

@@ -1,6 +1,5 @@
 import collections
 from typing import Any, Callable, Dict, List, Optional, Set
-import inspect
 
 from .. import variables
 from ..exc import unimplemented
@@ -192,7 +191,7 @@ class VariableTracker(metaclass=HasPostInit):
 
         if not is_from_local_source(self.source):
             raise NotImplementedError()
-        
+
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
 
@@ -212,13 +211,15 @@ class VariableTracker(metaclass=HasPostInit):
         from .builder import VariableBuilder
 
         real_value = getattr(_input_associated_real_value, name)
-        if callable(real_value): 
+        if callable(real_value):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
-            # Note - at a certain point we may want to handle 
+            # Note - at a certain point we may want to handle
             raise NotImplementedError()
-        
-        return VariableBuilder(tx, AttrSource(self.source, name))(real_value).add_options(self) 
+
+        return VariableBuilder(tx, AttrSource(self.source, name))(
+            real_value
+        ).add_options(self)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
