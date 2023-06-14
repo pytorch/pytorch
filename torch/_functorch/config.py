@@ -12,7 +12,7 @@ import sys
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
-functionalize_rng_ops = False
+functionalize_rng_ops = os.environ.get("FUNCTIONALIZE_RNG_OPS", False)
 
 # can be useful for debugging if we are incorrectly creating meta fake tensors
 fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)

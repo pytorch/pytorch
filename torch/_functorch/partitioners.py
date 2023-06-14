@@ -12,7 +12,7 @@ import copy
 import os
 import itertools
 import sympy
-from collections import defaultdict
+from collections import defaultdict, deque
 from torch.fx.passes import graph_drawer
 from typing import Tuple
 from .compile_utils import fx_graph_cse, get_aten_target
@@ -219,6 +219,24 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     return fwd_module, bwd_module
 
 
+def find_non_recomputable_inputs(node):
+    new_inputs = []
+    q = deque(node.all_input_nodes)
+    visited = set()
+    while len(q):
+        n = q.popleft()
+        visited.add(n)
+        if not must_recompute(n):
+            new_inputs.append(n)
+        else:
+            for arg in n.all_input_nodes:
+                if arg not in visited:
+                    q.append(arg)
+    return new_inputs
+
+def passthrough(x):
+    return [x,]
+
 def default_partition(
     joint_module: fx.GraphModule, _joint_inputs, *, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
@@ -245,8 +263,11 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-    if has_recomputable_ops(joint_module):
-        return min_cut_rematerialization_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
+    graph_has_recomputable_ops = has_recomputable_ops(joint_module)
+    graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
+    if graph_has_recomputable_ops:
+        joint_module = cleanup_recompute_tags(joint_module)
+
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
@@ -255,6 +276,7 @@ def default_partition(
     forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
     saved_values = []
     saved_sym_nodes = []
+
 
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
@@ -271,7 +293,8 @@ def default_partition(
             users = node.users
             assert all(user.target == operator.getitem for user in users)
             for user in users:
-                saved_values.append(user)
+                input_finder = find_non_recomputable_inputs if must_recompute(user) else passthrough
+                saved_values.extend(input_finder(user))
         else:
             backward_usages = [n for n in node.users if n.name not in forward_node_names]
             if 'tensor_meta' in node.meta and all(is_sym_node(n) for n in backward_usages):
@@ -286,11 +309,20 @@ def default_partition(
                 for user in backward_usages:
                     saved_sym_nodes.append(user)
             else:
-                saved_values.append(node)
+                input_finder = find_non_recomputable_inputs if must_recompute(node) else passthrough
+                saved_values.extend(input_finder(node))
     saved_values = list({k: None for k in saved_values}.keys())
     saved_sym_nodes = list({k: None for k in saved_sym_nodes}.keys())
 
-    return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+
+    if graph_has_recomputable_ops:
+        if graph_has_recomputable_rng_ops:
+            fw_module, bw_module = functionalize_rng_ops(
+                joint_module, fw_module, bw_module
+            )
+        bw_module = reordering_to_mimic_autograd_engine(bw_module)
+    return fw_module, bw_module
 
 
 def _prod(x):
@@ -609,7 +641,7 @@ def cleanup_recompute_tags(joint_module):
 
 
 def min_cut_rematerialization_partition(
-    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None,
+    joint_module: fx.GraphModule, _joint_inputs, compiler="inductor", recomputable_ops=None,
     *, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
