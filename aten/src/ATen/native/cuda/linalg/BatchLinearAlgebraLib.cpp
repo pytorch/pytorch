@@ -325,15 +325,16 @@ static void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, 
 #ifdef ROCM_VERSION
   // Cannot auto-hipifiy this piece of code, because in other functions the uplo
   // and other variables need to be hipSOLVER's type.
-  auto uplo = upper ? rocblas_fill_upper : rocblas_fill_lower;
-  const auto trans = (rocblas_operation)to_cublas(transpose);
-  rocblas_side side = left ? rocblas_side_left : rocblas_side_right;
+  auto uplo = upper ? HIPBLAS_FILL_MODE_UPPER : HIPBLAS_FILL_MODE_LOWER;
+  const auto trans = (hipblasOperation_t)to_cublas(transpose);
+  hipblasSideMode_t side = left ? HIPBLAS_SIDE_LEFT : HIPBLAS_SIDE_RIGHT;
+  hipblasDiagType_t diag = unitriangular ? HIPBLAS_DIAG_UNIT : HIPBLAS_DIAG_NON_UNIT;
 #else
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const auto trans = to_cublas(transpose);
   cublasSideMode_t side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
-#endif
   cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+#endif
 
   auto A_data = A.data_ptr<scalar_t>();
   auto B_data = B.data_ptr<scalar_t>();
@@ -367,15 +368,16 @@ static void apply_triangular_solve_batched(const Tensor& A, const Tensor& B, boo
 #ifdef ROCM_VERSION
   // Cannot auto-hipifiy this piece of code, because in other functions the uplo
   // and other variables need to be hipSOLVER's type.
-  auto uplo = upper ? rocblas_fill_upper : rocblas_fill_lower;
-  const auto trans = (rocblas_operation)to_cublas(transpose);
-  rocblas_side side = left ? rocblas_side_left : rocblas_side_right;
+  auto uplo = upper ? HIPBLAS_FILL_MODE_UPPER : HIPBLAS_FILL_MODE_LOWER;
+  const auto trans = (hipblasOperation_t)to_cublas(transpose);
+  hipblasSideMode_t side = left ? HIPBLAS_SIDE_LEFT : HIPBLAS_SIDE_RIGHT;
+  hipblasDiagType_t diag = unitriangular ? HIPBLAS_DIAG_UNIT : HIPBLAS_DIAG_NON_UNIT;
 #else
   cublasFillMode_t uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const auto trans = to_cublas(transpose);
   cublasSideMode_t side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
-#endif
   cublasDiagType_t diag = unitriangular ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
+#endif
 
   auto batch_size = cuda_int_cast(batchCount(A), "batch_size");
   // This allows to pass rectangular A and B when left = True

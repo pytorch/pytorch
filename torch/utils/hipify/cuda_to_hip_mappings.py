@@ -6517,25 +6517,25 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cublasZsymm", ("rocblas_zsymm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
         ("cublasChemm", ("rocblas_chemm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
         ("cublasZhemm", ("rocblas_zhemm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
-        ("cublasStrsm", ("rocblas_strsm", CONV_MATH_FUNC, API_BLAS)),
-        ("cublasDtrsm", ("rocblas_dtrsm", CONV_MATH_FUNC, API_BLAS)),
-        ("cublasCtrsm", ("rocblas_ctrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
-        ("cublasZtrsm", ("rocblas_ztrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+        ("cublasStrsm", ("hipblasStrsm", CONV_MATH_FUNC, API_BLAS)),
+        ("cublasDtrsm", ("hipblasDtrsm", CONV_MATH_FUNC, API_BLAS)),
+        ("cublasCtrsm", ("hipblasCtrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+        ("cublasZtrsm", ("hipblasZtrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
         (
             "cublasStrsmBatched",
-            ("rocblas_strsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasStrsmBatched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasDtrsmBatched",
-            ("rocblas_dtrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasDtrsmBatched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasCtrsmBatched",
-            ("rocblas_ctrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasCtrsmBatched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasZtrsmBatched",
-            ("rocblas_ztrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasZtrsmBatched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         ("cublasStrmm", ("rocblas_strmm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
         ("cublasDtrmm", ("rocblas_dtrmm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
@@ -6595,19 +6595,19 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         (
             "cublasStrsmBatched",
-            ("rocblas_strsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasStrsmBatched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasDtrsmBatched",
-            ("rocblas_dtrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasDtrsmBatched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasCtrsmBatched",
-            ("rocblas_ctrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasCtrsmBatched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasZtrsmBatched",
-            ("rocblas_ztrsm_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasZtrsmBatched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasSmatinvBatched",
@@ -7068,19 +7068,19 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         (
             "cublasStrsm_v2",
-            ("rocblas_strsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasStrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasDtrsm_v2",
-            ("rocblas_dtrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasDtrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasCtrsm_v2",
-            ("rocblas_ctrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasCtrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasZtrsm_v2",
-            ("rocblas_ztrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
+            ("hipblasZtrsm", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
             "cublasStrmm_v2",

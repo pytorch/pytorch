@@ -983,6 +983,133 @@ void int8_gemm(
 }
 #endif // !defined(USE_ROCM) && !defined(_MSC_VER)
 
+
+#ifdef USE_ROCM
+
+template <>
+void trsm<float>(HIPBLAS_TRSM_ARGTYPES(float)) {
+  TORCH_HIPBLAS_CHECK(cublasStrsm(
+      handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb));
+}
+
+template <>
+void trsm<double>(HIPBLAS_TRSM_ARGTYPES(double)) {
+  TORCH_HIPBLAS_CHECK(cublasDtrsm(
+      handle, side, uplo, trans, diag, m, n, alpha, A, lda, B, ldb));
+}
+
+template <>
+void trsm<c10::complex<float>>(HIPBLAS_TRSM_ARGTYPES(c10::complex<float>)) {
+  TORCH_HIPBLAS_CHECK(cublasCtrsm(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const hipblasComplex*>(alpha),
+      reinterpret_cast<hipblasComplex*>(A),
+      lda,
+      reinterpret_cast<hipblasComplex*>(B),
+      ldb));
+}
+
+template <>
+void trsm<c10::complex<double>>(HIPBLAS_TRSM_ARGTYPES(c10::complex<double>)) {
+  TORCH_HIPBLAS_CHECK(cublasZtrsm(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const hipblasDoubleComplex*>(alpha),
+      reinterpret_cast<hipblasDoubleComplex*>(A),
+      lda,
+      reinterpret_cast<hipblasDoubleComplex*>(B),
+      ldb));
+}
+
+template <>
+void trsmBatched<float>(HIPBLAS_TRSM_BATCHED_ARGTYPES(float)) {
+  TORCH_HIPBLAS_CHECK(cublasStrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<double>(HIPBLAS_TRSM_BATCHED_ARGTYPES(double)) {
+  TORCH_HIPBLAS_CHECK(cublasDtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      alpha,
+      A,
+      lda,
+      B,
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<c10::complex<float>>(
+    HIPBLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>)) {
+  TORCH_HIPBLAS_CHECK(cublasCtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const hipblasComplex*>(alpha),
+      reinterpret_cast<hipblasComplex**>(A),
+      lda,
+      reinterpret_cast<hipblasComplex**>(B),
+      ldb,
+      batchCount));
+}
+
+template <>
+void trsmBatched<c10::complex<double>>(
+    HIPBLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>)) {
+  TORCH_HIPBLAS_CHECK(cublasZtrsmBatched(
+      handle,
+      side,
+      uplo,
+      trans,
+      diag,
+      m,
+      n,
+      reinterpret_cast<const hipblasDoubleComplex*>(alpha),
+      reinterpret_cast<hipblasDoubleComplex**>(A),
+      lda,
+      reinterpret_cast<hipblasDoubleComplex**>(B),
+      ldb,
+      batchCount));
+}
+
+
+
+#else
+
 template <>
 void trsm<float>(CUDABLAS_TRSM_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasStrsm(
@@ -1102,6 +1229,8 @@ void trsmBatched<c10::complex<double>>(
       ldb,
       batchCount));
 }
+
+#endif // USE_ROCM
 
 /* LEVEL 2 BLAS FUNCTIONS */
 

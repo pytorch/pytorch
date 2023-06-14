@@ -138,6 +138,53 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 
+
+#ifdef USE_ROCM
+
+#define HIPBLAS_TRSM_ARGTYPES(Dtype)                                  \
+  hipblasHandle_t handle, hipblasSideMode_t side, hipblasFillMode_t uplo, \
+      hipblasOperation_t trans, hipblasDiagType_t diag, int m, int n,    \
+      const Dtype *alpha, Dtype *A, int lda, Dtype *B, int ldb
+
+template <typename Dtype>
+inline void trsm(HIPBLAS_TRSM_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::blas::trsm: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+TORCH_CUDA_CU_API void trsm<float>(HIPBLAS_TRSM_ARGTYPES(float));
+template <>
+TORCH_CUDA_CU_API void trsm<double>(HIPBLAS_TRSM_ARGTYPES(double));
+template <>
+TORCH_CUDA_CU_API void trsm<c10::complex<float>>(HIPBLAS_TRSM_ARGTYPES(c10::complex<float>));
+template <>
+TORCH_CUDA_CU_API void trsm<c10::complex<double>>(HIPBLAS_TRSM_ARGTYPES(c10::complex<double>));
+
+#define HIPBLAS_TRSM_BATCHED_ARGTYPES(Dtype)                          \
+  hipblasHandle_t handle, hipblasSideMode_t side, hipblasFillMode_t uplo, \
+      hipblasOperation_t trans, hipblasDiagType_t diag, int m, int n,    \
+      const Dtype *alpha, Dtype *A[], int lda, Dtype *B[], int ldb,    \
+      int batchCount
+
+template <typename Dtype>
+inline void trsmBatched(HIPBLAS_TRSM_BATCHED_ARGTYPES(Dtype)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::blas::trsmBatched: not implemented for ",
+      typeid(Dtype).name());
+}
+
+template <>
+TORCH_CUDA_CU_API void trsmBatched<float>(HIPBLAS_TRSM_BATCHED_ARGTYPES(float));
+template <>
+TORCH_CUDA_CU_API void trsmBatched<double>(HIPBLAS_TRSM_BATCHED_ARGTYPES(double));
+template <>
+TORCH_CUDA_CU_API void trsmBatched<c10::complex<float>>(HIPBLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>));
+template <>
+TORCH_CUDA_CU_API void trsmBatched<c10::complex<double>>(HIPBLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>));
+
+#else
+
 #define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
   cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, \
       cublasOperation_t trans, cublasDiagType_t diag, int m, int n,    \
@@ -179,6 +226,8 @@ template <>
 TORCH_CUDA_CU_API void trsmBatched<c10::complex<float>>(CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>));
 template <>
 TORCH_CUDA_CU_API void trsmBatched<c10::complex<double>>(CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>));
+
+#endif
 
 /* LEVEL 2 BLAS FUNCTIONS */
 
