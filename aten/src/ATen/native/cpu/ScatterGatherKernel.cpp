@@ -634,36 +634,29 @@ inline void _init(scalar_t* self_ptr, float* buffer_ptr, int64_t K, bool include
 }
 
 template <typename scalar_t, ReductionType reduce>
-inline void _update(scalar_t* self_ptr, scalar_t* src_data, float* buffer_ptr, int64_t K, int64_t off_start, int64_t off_end, int64_t* sorted_col_index_values) {
+inline void _update(scalar_t* self_ptr, scalar_t* src_data, float* buffer_ptr, int64_t col, int64_t K) {
   using Vec = vec::Vectorized<scalar_t>;
   using fVec = vec::Vectorized<float>;
   if constexpr (!is_reduced_floating_point_v<scalar_t>) {
-    for (const auto n : c10::irange(off_start, off_end)) {
-      int64_t col = sorted_col_index_values[n];
-      update<scalar_t, reduce>(self_ptr, src_data + col * K, K);
-    }
+    update<scalar_t, reduce>(self_ptr, src_data + col * K, K);
   } else {
     int64_t k = 0;
     constexpr int64_t kVecSize = Vec::size();
     constexpr int64_t kfVecSize = fVec::size();
-    for (const auto n : c10::irange(off_start, off_end)) {
-      int64_t col = sorted_col_index_values[n];
-      for (k = 0; k < K - (K % kVecSize); k += kVecSize) {
-        Vec src_vec = Vec::loadu(src_data + col * K + k);
-        fVec src_vec0, src_vec1;
-        std::tie(src_vec0, src_vec1) = convert_to_float<scalar_t>(src_vec);
-        fVec buf_vec0, buf_vec1;
-        buf_vec0 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k), src_vec0);
-        buf_vec1 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k + kfVecSize), src_vec1);
-        buf_vec0.store(buffer_ptr + k);
-        buf_vec1.store(buffer_ptr + k + fVec::size());
-      }
-      for (; k < K; k++) {
-        float src_val = float(src_data[col * K + k]);
-        buffer_ptr[k] = update<float, reduce>(buffer_ptr[k], src_val);
-      }
+    for (k = 0; k < K - (K % kVecSize); k += kVecSize) {
+      Vec src_vec = Vec::loadu(src_data + col * K + k);
+      fVec src_vec0, src_vec1;
+      std::tie(src_vec0, src_vec1) = convert_to_float<scalar_t>(src_vec);
+      fVec buf_vec0, buf_vec1;
+      buf_vec0 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k), src_vec0);
+      buf_vec1 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k + kfVecSize), src_vec1);
+      buf_vec0.store(buffer_ptr + k);
+      buf_vec1.store(buffer_ptr + k + fVec::size());
     }
-    vec::convert(buffer_ptr, self_ptr, K);
+    for (; k < K; k++) {
+      float src_val = float(src_data[col * K + k]);
+      buffer_ptr[k] = update<float, reduce>(buffer_ptr[k], src_val);
+    }
   }
 }
 
@@ -764,7 +757,13 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
       _init<scalar_t, reduce>(self_ptr, buffer_ptr, K, include_self);
 
       // step 2: reduce
-      _update<scalar_t, reduce>(self_ptr, src_data, buffer_ptr, K, off_start, off_end, sorted_col_index_values);
+      for (const auto n : c10::irange(off_start, off_end)) {
+        int64_t col = sorted_col_index_values[n];
+        _update<scalar_t, reduce>(self_ptr, src_data, buffer_ptr, col, K);
+      }
+      if (is_reduced_floating_point_v<scalar_t>) {
+        vec::convert(buffer_ptr, self_ptr, K);
+      }
 
       // step 3: finalize
       int64_t count = include_self ? 1 : 0;

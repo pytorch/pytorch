@@ -280,8 +280,12 @@ class TestScatterGather(TestCase):
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     def test_scatter_expanded_index(self, device, dtype):
         def helper(input_size, idx_size, atol=1e-5, rtol=0.016):
+            is_reduced_type = dtype in [torch.bfloat16, torch.float16]
+            if is_reduced_type:
+                atol = 1e-3
+                rtol = 0.016
             input = torch.randn(input_size, device=device).to(dtype=dtype)
-            input2 = input.clone().to(torch.float32) if dtype in [torch.bfloat16, torch.float16] else input.clone()
+            input2 = input.clone().to(torch.float32) if is_reduced_type else input.clone()
 
             shape = [1] * len(input_size)
             shape[0] = idx_size
@@ -300,22 +304,22 @@ class TestScatterGather(TestCase):
             idx = idx.expand(expanded_shape)
             idx2 = idx.contiguous()
             src = torch.randn(expanded_shape, device=device).to(dtype=dtype)
-            src2 = src.clone().to(torch.float32) if dtype in [torch.bfloat16, torch.float16] else src.clone()
+            src2 = src.clone().to(torch.float32) if is_reduced_type else src.clone()
 
             out = input.scatter_add(0, idx, src)
             out2 = input2.scatter_add(0, idx2, src2)
 
-            self.assertEqual(out, out2.to(dtype) if dtype in [torch.bfloat16, torch.float16] else out2, atol=atol, rtol=rtol)
+            self.assertEqual(out, out2.to(dtype) if is_reduced_type else out2, atol=atol, rtol=rtol)
 
             for reduce in ["sum", "prod", "mean", "amax", "amin"]:
                 for include_self in [True, False]:
                     out = input.scatter_reduce(0, idx, src, reduce=reduce, include_self=include_self)
                     out2 = input2.scatter_reduce(0, idx2, src2, reduce=reduce, include_self=include_self)
-                    self.assertEqual(out, out2.to(dtype) if dtype in [torch.bfloat16, torch.float16] else out2,
+                    self.assertEqual(out, out2.to(dtype) if is_reduced_type else out2,
                                      atol=atol, rtol=rtol)
 
         helper([50, 17], 100)
-        helper([50, 1], 100, atol=1e-3, rtol=0.016)  # SLow path has accuracy gap between float32 and low precision
+        helper([50, 1], 100)
         helper([50, 8, 7], 100)
         helper([50, 3, 4, 5], 100)
 
