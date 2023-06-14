@@ -2,8 +2,9 @@ import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
                         _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
-                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach, _warn_step_no_param_with_grad)
+                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach)
 from typing import List, Optional
+from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ["AdamW", "adamw"]
 
@@ -56,11 +57,14 @@ class AdamW(Optimizer):
             # Suppor AMP with FP16/BF16 model params which would need
             # higher prec copy of params to do update math in higher prec to
             # alleviate the loss of information.
+            fused_supported_devices = _get_fused_kernels_supported_devices()
             if not all(
-                p.is_cuda and torch.is_floating_point(p)
+                p.device.type in fused_supported_devices and
+                torch.is_floating_point(p)
                 for pg in self.param_groups for p in pg['params']
             ):
-                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
+                raise RuntimeError("`fused=True` requires all the params to be floating point Tensors of "
+                                   f"supported devices: {fused_supported_devices}.")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
@@ -148,7 +152,6 @@ class AdamW(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        has_any_param_with_grad = False
         for group in self.param_groups:
             params_with_grad = []
             grads = []
@@ -169,9 +172,6 @@ class AdamW(Optimizer):
                 max_exp_avg_sqs,
                 state_steps,
             )
-
-            if len(params_with_grad) != 0:
-                has_any_param_with_grad = True
 
             adamw(
                 params_with_grad,
@@ -194,9 +194,6 @@ class AdamW(Optimizer):
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
             )
-
-        if not has_any_param_with_grad:
-            _warn_step_no_param_with_grad()
 
         return loss
 

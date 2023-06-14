@@ -114,6 +114,7 @@ def validate_ir(node_or_nodes):
                     sympy.Symbol,
                     sympy.core.relational.Relational,
                     Expr,
+                    torch._inductor.ir.ExpandView,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -3219,12 +3220,28 @@ class FallbackKernel(ExternKernelAlloc):
         )
         self.use_cpp_op_schema = False
 
-        if getattr(torch.ops.aten, kernel.__name__, None) is kernel:
+        op_overload_packet = (
+            kernel._overloadpacket
+            if isinstance(kernel, torch._ops.OpOverload)
+            else kernel
+        )
+
+        if (
+            getattr(torch.ops.aten, op_overload_packet.__name__, None)
+            is op_overload_packet
+        ):
             self.kernel = (
-                f"at::{kernel.__name__}"
+                f"at::{op_overload_packet.__name__}"
                 if V.graph.cpp_wrapper
                 else f"aten.{kernel.__name__}"
             )
+        elif isinstance(kernel, torch._ops.HigherOrderOperator):
+            if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
+                self.kernel = f"torch._prims.rng_prims.{kernel.__name__}"
+            else:
+                raise NotImplementedError(
+                    "Unable to find HigherOrderOperator kernel name"
+                )
         else:
             if V.graph.cpp_wrapper:
                 from torch._inductor.codegen.wrapper import (
@@ -3250,11 +3267,18 @@ class FallbackKernel(ExternKernelAlloc):
         assert (
             not kernel._schema.is_mutable
         ), f"mutable {kernel.__name__} is not supported with cpp_wrapper"
+
+        # These checks are here because ops that return aliasing tensors will
+        # return type Tensor& instead of Tensor, but codegen will always write
+        # type Tensor on the LHS.
+        def is_not_write(arg):
+            return arg.alias_info is None or not arg.alias_info.is_write
+
         assert all(
-            x.alias_info is None for x in kernel._schema.arguments
+            is_not_write(x) for x in kernel._schema.arguments
         ), f"{kernel.__name__} with alias_info arguments is not supported with cpp_wrapper"
         assert all(
-            x.alias_info is None for x in kernel._schema.returns
+            is_not_write(x) for x in kernel._schema.returns
         ), f"{kernel.__name__} with alias_info returns is not supported with cpp_wrapper"
 
         self.kernel = kernel._schema.name
@@ -3282,6 +3306,24 @@ class FallbackKernel(ExternKernelAlloc):
         # let self.codegen_kwargs handle kwargs
         self.kwargs.update(kwargs)
         return args
+
+    @staticmethod
+    def find_device(tensor_args, example_output):
+        if tensor_args:
+            return tensor_args[0].get_device()
+        if isinstance(example_output, torch.Tensor):
+            return example_output.device
+        if isinstance(example_output, (list, tuple)):
+            devices = {FallbackKernel.find_device(None, x) for x in example_output}
+            # Remove None
+            devices = [device for device in devices if device]
+            if len(devices) == 1:
+                return devices[0]
+            for device in devices:
+                if device.type == "cuda":
+                    return device
+            return devices[0]
+        return None
 
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
@@ -3320,13 +3362,10 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        assert tensor_args or isinstance(
-            example_output, torch.Tensor
-        ), "Not sure where to find device info"
+        device = FallbackKernel.find_device(tensor_args, example_output)
+        assert device, "Not sure where to find device info"
         packed = FallbackKernel(
-            MultiOutputLayout(
-                tensor_args[0].get_device() if tensor_args else example_output.device
-            ),
+            MultiOutputLayout(device),
             kernel,
             tensor_args,
             non_tensor_args,
@@ -3985,21 +4024,42 @@ class LinearBinary(ExternKernelAlloc):
 
 
 class ConvolutionTransposeUnary(ExternKernelAlloc):
-    kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
-
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
-        kernel="torch.ops.mkldnn._convolution_transpose_pointwise",
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            kernel="torch.ops.mkldnn._convolution_transpose_pointwise",
+            cpp_kernel="mkldnn::_convolution_transpose_pointwise",
+        )
+        self.cpp_kernel_key = "convolution_transpose_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& input_t,
+                const at::Tensor& weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                at::IntArrayRef padding,
+                at::IntArrayRef output_padding,
+                at::IntArrayRef stride,
+                at::IntArrayRef dilation,
+                int64_t groups,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
 
     def codegen(self, wrapper):
-        wrapper.writeline(
-            f"{self.get_name()} = {self.kernel}({', '.join(self.codegen_args())})"
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.kernel,
+            self.codegen_args(),
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
         )
 
     @classmethod
@@ -4017,7 +4077,6 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         scalars,
         algorithm,
     ):
-        kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
         transposed = True
         (
             inputs,
@@ -4036,12 +4095,17 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
             transposed,
             output_padding_,
         )
-        constant_args = constant_args + [attr, scalars, algorithm]
+        optional_string = OptionalString()
+        optional_list = OptionalList()
+        constant_args = constant_args + [
+            attr,
+            may_convert_to_optional(optional_list, scalars),
+            may_convert_to_optional(optional_string, algorithm),
+        ]
         return ConvolutionTransposeUnary(
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
-            kernel=kernel,
         )
 
 
@@ -4372,6 +4436,21 @@ class LoopBody:
         self.indirect_vars = []
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
+
+    @cache_on_self
+    def get_nodes(self):
+        all_graphs = itertools.chain(
+            (self.root_block.graph,),
+            (block.graph for block in self.subblocks.values()),
+        )
+        return [node for graph in all_graphs for node in graph.nodes]
+
+    @cache_on_self
+    def bounds(self):
+        # Doing a local import to avoid dumping all the code here
+        from .bounds import BoundVars
+
+        return BoundVars(self)
 
     def debug_str(self):
         lines = [f"var_ranges = {dict(self.var_ranges)}"]
