@@ -106,14 +106,17 @@ class VariableTracker(metaclass=HasPostInit):
         elif istype(value, list):
             result = [cls.apply(fn, v, cache, skip_fn, update_contains) for v in value]
         elif istype(value, tuple):
-            result = tuple(cls.apply(fn, v, cache, skip_fn, update_contains) for v in value)
+            result = tuple(
+                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value
+            )
         elif istype(value, collections.OrderedDict):
             result = collections.OrderedDict(
                 cls.apply(fn, v, cache, skip_fn, update_contains) for v in value.items()
             )
         elif istype(value, dict):
             result = {
-                k: cls.apply(fn, v, cache, skip_fn, update_contains) for k, v in list(value.items())
+                k: cls.apply(fn, v, cache, skip_fn, update_contains)
+                for k, v in list(value.items())
             }
         else:
             result = value
@@ -292,7 +295,10 @@ class VariableTracker(metaclass=HasPostInit):
         self.recursively_contains = set()
 
         VariableTracker.apply(
-            self._aggregate_mutables, self, skip_fn=lambda var: var is not self, update_contains=True
+            self._aggregate_mutables,
+            self,
+            skip_fn=lambda var: var is not self,
+            update_contains=True,
         )
 
         assert None not in self.recursively_contains
