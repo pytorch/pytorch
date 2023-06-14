@@ -15,7 +15,6 @@ from .common import (
     CommBlock,
     fake_tensor_mode,
     get_all_comm_blocks,
-    get_comm_block,
     graph_optimization_pass,
 )
 

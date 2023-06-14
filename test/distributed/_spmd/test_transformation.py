@@ -20,8 +20,8 @@ from torch.distributed._spmd.graph_transformations import (
     schedule_comm_wait,
     split_fused_optimizer,
 )
-from torch.distributed._spmd.graph_utils import find_node
 from torch.distributed._spmd.graph_transformations.common import _optimized_func
+from torch.distributed._spmd.graph_utils import find_node
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu

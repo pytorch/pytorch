@@ -8,7 +8,6 @@ from typing import Any, cast, DefaultDict, List, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.distributed._spmd.graph_utils import find_node, get_output, OP
 from torch.distributed._spmd.iter_graph_module import IterGraphModule
 from torch.utils._pytree import tree_flatten, tree_unflatten
