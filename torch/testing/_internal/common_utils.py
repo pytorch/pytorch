@@ -2159,7 +2159,7 @@ class TestCase(expecttest.TestCase):
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
 
-    def assertExpectedInline(self, actual, expect, skip = 0):
+    def assertExpectedInline(self, actual, expect, skip=0):
         return super().assertExpectedInline(actual if isinstance(actual, str) else str(actual), expect, skip + 1)
 
     def assertLogs(self, logger=None, level=None):
