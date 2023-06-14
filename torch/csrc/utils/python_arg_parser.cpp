@@ -706,13 +706,31 @@ static bool is_int_list(
 
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
-    bool r =
-        (jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
-         THPVariable_Unpack(item.ptr()).sizes().empty());
-    if (!r && failed_idx != nullptr) {
-      *failed_idx = 0;
+    if (jit::tracer::isTracing()) {
+      bool r =
+          (THPVariable_Check(item.ptr()) &&
+           THPVariable_Unpack(item.ptr()).sizes().empty());
+      if (!r && failed_idx != nullptr) {
+        *failed_idx = 0;
+      }
+      return r;
     }
-    return r;
+
+    // in dynamo, FakeTensor is qualified for INT_LIST
+    if (is_dynamo_compiling && THPVariable_Check(item.ptr())) {
+      auto& var = THPVariable_Unpack(item.ptr());
+      if (var.numel() != 1 || !var.sizes().empty() ||
+          !at::isIntegralType(
+              var.dtype().toScalarType(), /*include_bool*/ true)) {
+        if (failed_idx != nullptr) {
+          *failed_idx = 0;
+        }
+        return false;
+      }
+      return true;
+    }
+
+    return false;
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
   // int
@@ -754,12 +772,6 @@ static bool is_int_or_symint_list(
     auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
 
     if (is_int_or_symint(item.ptr())) {
-      return true;
-    }
-
-    // NOTE: In dynamo, allow fake tensor as int
-    if (is_dynamo_compiling && THPVariable_Check(item.ptr()) &&
-        THPVariable_Unpack(item.ptr()).sizes().empty()) {
       return true;
     }
 

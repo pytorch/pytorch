@@ -5676,6 +5676,20 @@ def ___make_guard_fn():
         opt_out = opt_m(x)
         self.assertTrue(same(orig_out, opt_out))
 
+    def test_dynamo_compiling_fake_tensor_to_int_list(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, input):
+                permute = torch.tensor([0, 2, 1])
+                x = input.permute(*permute)
+                return x
+
+        x = torch.randn(2, 3, 4)
+        m = MyModel()
+        orig_out = m(x)
+        opt_m = torch.compile(backend="eager")(m)
+        opt_out = opt_m(x)
+        self.assertTrue(same(orig_out, opt_out))
+
     def test_torch_variable_hasattr(self):
         def fn(x):
             if hasattr(torch.nn, "Module"):

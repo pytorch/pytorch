@@ -954,12 +954,11 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
         !at::isIntegralType(
             var.dtype().toScalarType(), /*include_bool*/ true)) {
       throw TypeError(
-          "%s(): argument '%s' must be %s, failed to convert %s with numel=%ld sizes.empty()=%d",
+          "%s(): argument '%s' must be %s, failed to convert %s with sizes.empty()=%d",
           signature.name.c_str(),
           signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(),
           Py_TYPE(obj)->tp_name,
-          var.numel(),
           var.sizes().empty());
     }
     auto scalar = var.item();
