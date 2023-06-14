@@ -196,8 +196,10 @@ class CachingAutotuner(KernelInterface):
                 launcher.config.pre_hook(
                     {**zip(self.arg_names, args), **launcher.config.kwargs}
                 )
+
+            cloned_args = self.clone_args(*args)
             launcher(
-                *args,
+                *cloned_args,
                 grid=grid,
                 stream=stream,
             )
@@ -222,9 +224,8 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        cloned_args = self.clone_args(*args)
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)
+            launcher: self.bench(launcher, *args, **kwargs)
             for launcher in self.launchers
         }
 

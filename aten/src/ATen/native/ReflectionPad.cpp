@@ -212,223 +212,18 @@ namespace native {
 
 namespace {
 
-template <typename scalar_t>
-static void reflection_pad1d_out_frame(
-    scalar_t *input_p, scalar_t *output_p,
-    int64_t nplane,
-    int64_t input_w, int64_t output_w,
-    int64_t pad_l) {
-  int64_t i_start_x = std::max(int64_t(0), -pad_l);
-  int64_t o_start_x = std::max(int64_t(0), pad_l);
-
-  at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t ip_x;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto j : c10::irange(output_w)) {
-        if (j < pad_l) {
-          ip_x = pad_l * 2 - j;
-        } else if (j >= pad_l && j < input_w + pad_l) {
-          ip_x = j;
-        } else {
-          ip_x = (input_w + pad_l - 1) * 2 - j;
-        }
-        ip_x = ip_x - o_start_x + i_start_x;
-
-        scalar_t *dest_p = output_p + k*output_w + j;
-        scalar_t *src_p = input_p + k*input_w + ip_x;
-        *dest_p = *src_p;
-      }
-    }
-  });
-}
-
-template <typename scalar_t>
-inline void reflection_pad1d_out_loop(
-    scalar_t *input_p, scalar_t *output_p,
-    int64_t nbatch, int64_t nplane,
-    int64_t input_w, int64_t output_w,
-    int64_t pad_l) {
-  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
-      reflection_pad1d_out_frame<scalar_t>(
-        input_p + p * nplane * input_w,
-        output_p + p * nplane * output_w,
-        nplane,
-        input_w, output_w,
-        pad_l);
-    }
-  });
-}
-
-void reflection_pad1d_out_template(
-    const Tensor& output, const Tensor& input_, IntArrayRef padding) {
-  /* get contiguous input */
-  Tensor input = input_.contiguous();
-
-  if (input.ndimension() == 2) {
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad1d", [&]() {
-        reflection_pad1d_out_frame<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          input.size(0),
-          input.size(1), output.size(-1),
-          padding[0]);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
-        reflection_pad1d_out_frame<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          input.size(0),
-          input.size(1), output.size(-1),
-          padding[0]);
-      });
-    }
-  } else {
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad1d", [&]() {
-        reflection_pad1d_out_loop<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          output.size(0), input.size(1),
-          input.size(2), output.size(-1),
-          padding[0]);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
-        reflection_pad1d_out_loop<scalar_t>(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          output.size(0), input.size(1),
-          input.size(2), output.size(-1),
-          padding[0]);
-      });
-    }
-  }
-}
-
-template <typename scalar_t>
-static void reflection_pad1d_backward_out_frame(
-    scalar_t * grad_input, scalar_t * grad_output,
-    int64_t nplane,
-    int64_t input_w, int64_t output_w,
-    int64_t pad_l) {
-  int64_t i_start_x = std::max(int64_t(0), -pad_l);
-  int64_t o_start_x = std::max(int64_t(0), pad_l);
-
-  at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t ip_x;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto j : c10::irange(output_w)) {
-        if (j < pad_l) {
-          ip_x = pad_l * 2 - j;
-        } else if (j >= pad_l && j < input_w + pad_l) {
-          ip_x = j;
-        } else {
-          ip_x = (input_w + pad_l - 1) * 2 - j;
-        }
-        ip_x = ip_x - o_start_x + i_start_x;
-
-        scalar_t *src_p = grad_output + k*output_w + j;
-        scalar_t *dest_p = grad_input + k*input_w + ip_x;
-        *dest_p += *src_p;
-      }
-    }
-  });
-}
-
-template <typename scalar_t>
-inline void reflection_pad1d_backward_out_loop(
-    scalar_t *grad_input, scalar_t *grad_output,
-    int64_t nbatch, int64_t nplane,
-    int64_t input_w, int64_t output_w,
-    int64_t pad_l) {
-  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
-      reflection_pad1d_backward_out_frame<scalar_t>(
-        grad_input + p * nplane * input_w,
-        grad_output + p * nplane * output_w,
-        nplane,
-        input_w, output_w,
-        pad_l);
-    }
-  });
-}
-
-template <typename scalar_t>
-static void reflection_pad2d_out_frame(
-    scalar_t * input_p, scalar_t * output_p,
-    int64_t nplane,
-    int64_t input_w, int64_t input_h,
-    int64_t output_w, int64_t output_h,
-    int64_t pad_l, int64_t pad_t) {
-  auto i_start_x = std::max(int64_t(0), -pad_l);
-  auto i_start_y = std::max(int64_t(0), -pad_t);
-  auto o_start_x = std::max(int64_t(0), pad_l);
-  auto o_start_y = std::max(int64_t(0), pad_t);
-
-  at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t ip_x, ip_y;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto i : c10::irange(output_h)) {
-        for (const auto j : c10::irange(output_w)) {
-          if (j < pad_l) {
-            ip_x = pad_l * 2 - j;
-          } else if (j >= pad_l && j < input_w + pad_l) {
-            ip_x = j;
-          } else {
-            ip_x = (input_w + pad_l - 1) * 2 - j;
-          }
-          ip_x = ip_x - o_start_x + i_start_x;
-
-          if (i < pad_t) {
-            ip_y = pad_t * 2 - i;
-          } else if (i >= pad_t && i < input_h + pad_t) {
-            ip_y = i;
-          } else {
-            ip_y = (input_h + pad_t - 1) * 2 - i;
-          }
-          ip_y = ip_y - o_start_y + i_start_y;
-
-          scalar_t *dest_p = output_p + k*output_w*output_h + i * output_w + j;
-          scalar_t *src_p = input_p + k*input_w*input_h + ip_y * input_w + ip_x;
-          *dest_p = *src_p;
-        }
-      }
-    }
-  });
-}
-
-template <typename scalar_t>
-inline void reflection_pad2d_out_loop(
-    scalar_t * input_p, scalar_t * output_p,
-    int64_t nbatch, int64_t nplane,
-    int64_t input_w, int64_t input_h,
-    int64_t output_w, int64_t output_h,
-    int64_t pad_l, int64_t pad_t) {
-  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
-      reflection_pad2d_out_frame(
-        input_p + p * nplane * input_w * input_h,
-        output_p + p * nplane * output_w * output_h,
-        nplane,
-        input_w, input_h, output_w, output_h,
-        pad_l, pad_t);
-    }
-  });
-}
-
 void reflection_pad2d_out_template(
-    Tensor &output, const Tensor &input_, IntArrayRef padding) {
+    Tensor &output, const Tensor &input, IntArrayRef padding) {
   int dim_w = 2;
   int dim_h = 1;
   int dim_slices = 0;
   int64_t nbatch = 1;
 
-  at::native::padding::check_valid_input<2>(input_, padding);
+  at::native::padding::check_valid_input<2>(input, padding);
 
-  if (input_.ndimension() == 4) {
-    nbatch = input_.size(0);
+  int ndim = input.dim();
+  if (ndim == 4) {
+    nbatch = input.size(0);
     dim_w++;
     dim_h++;
     dim_slices++;
@@ -440,148 +235,43 @@ void reflection_pad2d_out_template(
   int64_t pad_t = padding[2];
   int64_t pad_b = padding[3];
 
-  int64_t nplane = input_.size(dim_slices);
-  int64_t input_h = input_.size(dim_h);
-  int64_t input_w = input_.size(dim_w);
+  int64_t nplane = input.size(dim_slices);
+  int64_t input_h = input.size(dim_h);
+  int64_t input_w = input.size(dim_w);
   int64_t output_h = input_h + pad_t + pad_b;
   int64_t output_w  = input_w + pad_l + pad_r;
 
   TORCH_CHECK(pad_l < input_w && pad_r < input_w,
     "Argument #4: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_l, ", ", pad_r,
-    ") at dimension ", dim_w, " of input ", input_.ndimension());
+    ") at dimension ", dim_w, " of input ", ndim);
 
   TORCH_CHECK(pad_t < input_h && pad_b < input_h,
     "Argument #6: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_t, ", ", pad_b,
-    ") at dimension ", dim_h, " of input ", input_.ndimension());
+    ") at dimension ", dim_h, " of input ", ndim);
 
   TORCH_CHECK(output_w >= 1 || output_h >= 1,
     "input (H: ", input_h, ", W: ", input_w, ")is too small. Calculated "
     "output H: ", output_h, " W: ", output_w);
 
-  /* get contiguous input */
-  Tensor input = input_.contiguous();
-
-  if (input.ndimension() == 3) {
-    /* resize output */
+  /* resize output */
+  if (ndim == 3) {
     output.resize_({nplane, output_h, output_w});
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
-        reflection_pad2d_out_frame(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
-        reflection_pad2d_out_frame(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      });
-    }
   } else {
-    /* resize output */
     output.resize_({nbatch, nplane, output_h, output_w});
-    if (input.is_quantized()) {
-      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
-        reflection_pad2d_out_loop(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      });
-    } else {
-      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
-        reflection_pad2d_out_loop(
-          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      });
-    }
   }
-}
-
-template <typename scalar_t>
-static void reflection_pad2d_backward_out_frame(
-    scalar_t *grad_input, scalar_t *grad_output,
-    int64_t nplane,
-    int64_t input_w, int64_t input_h,
-    int64_t output_w, int64_t output_h,
-    int64_t pad_l, int64_t pad_t) {
-  auto i_start_x = std::max(int64_t(0), -pad_l);
-  auto i_start_y = std::max(int64_t(0), -pad_t);
-  auto o_start_x = std::max(int64_t(0), pad_l);
-  auto o_start_y = std::max(int64_t(0), pad_t);
-
-  at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t ip_x, ip_y;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto i : c10::irange(output_h)) {
-        for (const auto j : c10::irange(output_w)) {
-          if (j < pad_l) {
-            ip_x = pad_l * 2 - j;
-          } else if (j >= pad_l && j < input_w + pad_l) {
-            ip_x = j;
-          } else {
-            ip_x = (input_w + pad_l - 1) * 2 - j;
-          }
-          ip_x = ip_x - o_start_x + i_start_x;
-
-          if (i < pad_t) {
-            ip_y = pad_t * 2 - i;
-          } else if (i >= pad_t && i < input_h + pad_t) {
-            ip_y = i;
-          } else {
-            ip_y = (input_h + pad_t - 1) * 2 - i;
-          }
-          ip_y = ip_y - o_start_y + i_start_y;
-
-          scalar_t *src_p =
-            grad_output + k * output_w * output_h + i * output_w + j;
-          scalar_t *dest_p =
-            grad_input + k * input_w * input_h + ip_y * input_w + ip_x;
-          *dest_p += *src_p;
-        }
-      }
-    }
-  });
-}
-
-template <typename scalar_t>
-inline void reflection_pad2d_backward_out_loop(
-    scalar_t *grad_input, scalar_t *grad_output,
-    int64_t nbatch, int64_t nplane,
-    int64_t input_w, int64_t input_h,
-    int64_t output_w, int64_t output_h,
-    int64_t pad_l, int64_t pad_t) {
-  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
-      reflection_pad2d_backward_out_frame(
-        grad_input + p * nplane * input_h * input_w,
-        grad_output + p * nplane * output_h * output_w,
-        nplane,
-        input_w, input_h, output_w, output_h,
-        pad_l, pad_t);
-    }
-  });
+  reflection_pad2d_kernel(kCPU, output, input, padding);
 }
 
 void reflection_pad2d_backward_out_template(
-    Tensor &grad_input, const Tensor &grad_output_,
+    Tensor &grad_input, const Tensor &grad_output,
     const Tensor &input, IntArrayRef padding) {
   int dim_w = 2;
   int dim_h = 1;
   int dim_plane = 0;
-  int64_t nbatch = 1;
 
   if (input.ndimension() == 4) {
-    nbatch = input.size(0);
     dim_w++;
     dim_h++;
     dim_plane++;
@@ -593,223 +283,20 @@ void reflection_pad2d_backward_out_template(
   int64_t pad_t = padding[2];
   int64_t pad_b = padding[3];
 
-  int64_t nplane = input.size(dim_plane);
   int64_t input_h = input.size(dim_h);
   int64_t input_w = input.size(dim_w);
   int64_t output_h = input_h + pad_t + pad_b;
   int64_t output_w  = input_w + pad_l + pad_r;
 
-  TORCH_CHECK(output_w == grad_output_.size(dim_w),
+  TORCH_CHECK(output_w == grad_output.size(dim_w),
     "gradOutput width unexpected. Expected: ", output_w, ", Got: ",
-    grad_output_.size(dim_w));
+    grad_output.size(dim_w));
 
-  TORCH_CHECK(output_h == grad_output_.size(dim_h),
+  TORCH_CHECK(output_h == grad_output.size(dim_h),
     "gradOutput height unexpected. Expected: ", output_h, ", Got: ",
-    grad_output_.size(dim_h));
+    grad_output.size(dim_h));
 
-  /* get contiguous gradOutput */
-  Tensor grad_output = grad_output_.contiguous();
-
-  /* backprop */
-  if (input.ndimension() == 3) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
-        reflection_pad2d_backward_out_frame(
-          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      }
-    );
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
-        reflection_pad2d_backward_out_loop(
-          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, input_h, output_w, output_h,
-          pad_l, pad_t);
-      }
-    );
-  }
-}
-template <typename F>
-inline void parallel_reflection_pad3d(
-    int64_t nplane,
-    int64_t input_w, int64_t input_h, int64_t input_d,
-    int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_top, int64_t pad_front,
-    const F& f) {
-
-  auto i_start_x = std::max(int64_t(0), -pad_left);
-  auto i_start_y = std::max(int64_t(0), -pad_top);
-  auto i_start_z = std::max(int64_t(0), -pad_front);
-  auto o_start_x = std::max(int64_t(0), pad_left);
-  auto o_start_y = std::max(int64_t(0), pad_top);
-  auto o_start_z = std::max(int64_t(0), pad_front);
-
-  at::parallel_for(0, nplane, 0, [&](int64_t start, int64_t end) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t ip_x, ip_y, ip_z;
-    for (const auto k : c10::irange(start, end)) {
-      for (const auto op_z : c10::irange(output_d)) {
-        for (const auto op_y : c10::irange(output_h)) {
-          for (const auto op_x : c10::irange(output_w)) {
-            if (op_x < pad_left) {
-              ip_x = pad_left * 2 - op_x;
-            } else if (op_x >= pad_left && op_x < input_w + pad_left) {
-              ip_x = op_x;
-            } else {
-              ip_x = (input_w + pad_left - 1) * 2 - op_x;
-            }
-            ip_x = ip_x - o_start_x + i_start_x;
-
-            if (op_y < pad_top) {
-              ip_y = pad_top * 2 - op_y;
-            } else if (op_y >= pad_top && op_y < input_h + pad_top) {
-              ip_y = op_y;
-            } else {
-              ip_y = (input_h + pad_top - 1) * 2 - op_y;
-            }
-            ip_y = ip_y - o_start_y + i_start_y;
-
-            if (op_z < pad_front) {
-              ip_z = pad_front * 2 - op_z;
-            } else if (op_z >= pad_front && op_z < input_d + pad_front) {
-              ip_z = op_z;
-            } else {
-              ip_z = (input_d + pad_front - 1) * 2 - op_z;
-            }
-            ip_z = ip_z - o_start_z + i_start_z;
-
-            f(k, op_z, op_y, op_x, ip_z, ip_y, ip_x);
-          }
-        }
-      }
-    }
-  });
-}
-
-template <typename scalar_t>
-static void reflection_pad3d_out_frame(
-    scalar_t *input_p, scalar_t *output_p,
-    int64_t nplane,
-    int64_t input_w, int64_t input_h, int64_t input_d,
-    int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_top, int64_t pad_front)
-{
-  parallel_reflection_pad3d(
-      nplane,
-      input_w,
-      input_h,
-      input_d,
-      output_w,
-      output_h,
-      output_d,
-      pad_left,
-      pad_top,
-      pad_front,
-      [&](int64_t k,
-          int64_t op_z,
-          int64_t op_y,
-          int64_t op_x,
-          int64_t ip_z,
-          int64_t ip_y,
-          int64_t ip_x) {
-        scalar_t* dest_p = output_p + k * output_w * output_h * output_d +
-            op_z * output_w * output_h + op_y * output_w + op_x;
-        scalar_t* src_p = input_p + k * input_w * input_h * input_d +
-            ip_z * input_w * input_h + ip_y * input_w + ip_x;
-        *dest_p = *src_p;
-      });
-}
-
-template <typename scalar_t>
-static void reflection_pad3d_out_loop(
-    scalar_t *input_p, scalar_t *output_p,
-    int64_t nbatch, int64_t nplane,
-    int64_t input_w, int64_t input_h, int64_t input_d,
-    int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_top, int64_t pad_front)
-{
-  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
-      reflection_pad3d_out_frame(
-          input_p + p * nplane * input_w * input_h * input_d,
-          output_p + p * nplane * output_w * output_h * output_d,
-          nplane,
-          input_w,
-          input_h,
-          input_d,
-          output_w,
-          output_h,
-          output_d,
-          pad_left,
-          pad_top,
-          pad_front);
-    }
-  });
-}
-
-template <typename scalar_t>
-static void reflection_pad3d_backward_out_frame(
-    scalar_t *grad_input, scalar_t *grad_output,
-    int64_t nplane,
-    int64_t input_w, int64_t input_h, int64_t input_d,
-    int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_top, int64_t pad_front
-) {
-  parallel_reflection_pad3d(
-      nplane,
-      input_w,
-      input_h,
-      input_d,
-      output_w,
-      output_h,
-      output_d,
-      pad_left,
-      pad_top,
-      pad_front,
-      [&](int64_t k,
-          int64_t op_z,
-          int64_t op_y,
-          int64_t op_x,
-          int64_t ip_z,
-          int64_t ip_y,
-          int64_t ip_x) {
-        scalar_t* src_p = grad_output + k * output_w * output_h * output_d +
-            op_z * output_w * output_h + op_y * output_w + op_x;
-        scalar_t* dest_p = grad_input + k * input_w * input_h * input_d +
-            ip_z * input_w * input_h + ip_y * input_w + ip_x;
-        *dest_p += *src_p;
-      });
-}
-
-template <typename scalar_t>
-static void reflection_pad3d_backward_out_loop(
-    scalar_t *grad_input, scalar_t *grad_output,
-    int64_t nbatch, int64_t nplane,
-    int64_t input_w, int64_t input_h, int64_t input_d,
-    int64_t output_w, int64_t output_h, int64_t output_d,
-    int64_t pad_left, int64_t pad_top, int64_t pad_front
-) {
-  at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-    for (const auto p : c10::irange(start, end)) {
-      reflection_pad3d_backward_out_frame<scalar_t>(
-          grad_input + p * nplane * input_w * input_h * input_d,
-          grad_output + p * nplane * output_w * output_h * output_d,
-          nplane,
-          input_w,
-          input_h,
-          input_d,
-          output_w,
-          output_h,
-          output_d,
-          pad_left,
-          pad_top,
-          pad_front);
-    }
-  });
+  reflection_pad2d_backward_kernel(kCPU, grad_input, grad_output, padding);
 }
 
 } // namespace
@@ -818,7 +305,7 @@ static void reflection_pad3d_backward_out_loop(
 // TORCH_IMPL_FUNC below
 static Tensor& reflection_pad1d_out_cpu(const Tensor& input, IntArrayRef padding,
     Tensor& output) {
-  reflection_pad1d_out_template(output, input, padding);
+  reflection_pad1d_kernel(kCPU, output, input, padding);
   return output;
 }
 
@@ -826,64 +313,25 @@ Tensor& reflection_pad1d_out_quantized_cpu(const Tensor& input, IntArrayRef padd
     Tensor& output) {
   TORCH_CHECK(input.qscheme() == kPerTensorAffine, "Only per tensor quantization is supported");
   set_quantizer_(output, make_per_tensor_affine_quantizer(input.q_scale(), input.q_zero_point(), input.scalar_type()));
-  reflection_pad1d_out_template(output, input, padding);
+  reflection_pad1d_kernel(kCPU, output, input, padding);
   return output;
 }
 
 TORCH_IMPL_FUNC(reflection_pad1d_out_cpu)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
-  reflection_pad1d_out_template(output, input, padding);
+  reflection_pad1d_kernel(kCPU, output, input, padding);
 }
 
-TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cpu)(const Tensor& grad_output_,
+TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cpu)(const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding,
     const Tensor& grad_input) {
+  if (grad_output.numel() == 0) {
+    return;
+  }
+
   grad_input.zero_();
-
-  int64_t dim_plane = 0;
-  int64_t dim_w = 1;
-  int64_t nbatch = 1;
-
-  if (input.ndimension() == 3) {
-    nbatch = input.size(0);
-    dim_w++;
-    dim_plane++;
-  }
-
-  /* sizes */
-  auto pad_l = padding[0];
-  auto pad_r = padding[1];
-  int64_t nplane = input.size(dim_plane);
-  int64_t input_w = input.size(dim_w);
-  int64_t output_w  = input_w + pad_l + pad_r;
-
-  /* get contiguous grad_output */
-  Tensor grad_output = grad_output_.contiguous();
-
-  /* backprop */
-  if (input.ndimension() == 2) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      grad_input.scalar_type(), "reflection_pad1d_backward_cpu", [&] {
-        reflection_pad1d_backward_out_frame(
-          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
-          nplane,
-          input_w, output_w,
-          pad_l);
-        }
-    );
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      grad_input.scalar_type(), "reflection_pad1d_backward_cpu", [&] {
-        reflection_pad1d_backward_out_loop(
-          grad_input.data_ptr<scalar_t>(),
-          grad_output.data_ptr<scalar_t>(),
-          nbatch, nplane,
-          input_w, output_w,
-          pad_l);
-      }
-    );
-  }
+  reflection_pad1d_backward_kernel(kCPU, grad_input, grad_output, padding);
 }
 
 Tensor& reflection_pad2d_out_cpu(const Tensor& input, IntArrayRef padding,
@@ -929,147 +377,28 @@ Tensor reflection_pad2d_backward_cpu(
 }
 
 TORCH_IMPL_FUNC(reflection_pad3d_out_cpu)
-(const Tensor& input_, IntArrayRef padding, const Tensor& output) {
-  int64_t pad_left = padding[0];
-  int64_t pad_top = padding[2];
-  int64_t pad_front = padding[4];
-  int64_t dim_w = 3;
-  int64_t dim_h = 2;
-  int64_t dim_d = 1;
-  int64_t dim_plane = 0;
-  bool batch_mode = (input_.dim() == 5);
-
-  if (batch_mode) {
-    dim_w++;
-    dim_h++;
-    dim_d++;
-    dim_plane++;
-  }
-
-  int64_t nplane = input_.size(dim_plane);
-  int64_t input_w = input_.size(dim_w);
-  int64_t input_h = input_.size(dim_h);
-  int64_t input_d = input_.size(dim_d);
-  int64_t output_w = output.size(dim_w);
-  int64_t output_h = output.size(dim_h);
-  int64_t output_d = output.size(dim_d);
-
-  auto input = input_.contiguous();
-
-  if (batch_mode) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-        kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
-          auto output_data = output.data_ptr<scalar_t>();
-          auto nbatch = input.size(0);
-          reflection_pad3d_out_loop(
-              input_data,
-              output_data,
-              nbatch,
-              nplane,
-              input_w,
-              input_h,
-              input_d,
-              output_w,
-              output_h,
-              output_d,
-              pad_left,
-              pad_top,
-              pad_front);
-        });
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-        kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_cpu", [&] {
-          auto input_data = input.data_ptr<scalar_t>();
-          auto output_data = output.data_ptr<scalar_t>();
-          reflection_pad3d_out_frame(
-              input_data,
-              output_data,
-              nplane,
-              input_w,
-              input_h,
-              input_d,
-              output_w,
-              output_h,
-              output_d,
-              pad_left,
-              pad_top,
-              pad_front);
-        });
-  }
+(const Tensor& input, IntArrayRef padding, const Tensor& output) {
+  reflection_pad3d_kernel(kCPU, output, input, padding);
 }
 
 TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cpu)(const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding,
     const Tensor& grad_input) {
-  int64_t pad_left = padding[0];
-  int64_t pad_top = padding[2];
-  int64_t pad_front = padding[4];
-  int64_t dim_w = 3;
-  int64_t dim_h = 2;
-  int64_t dim_d = 1;
-  int64_t dim_plane = 0;
-  bool batch_mode = (input.dim() == 5);
-
-  if (batch_mode) {
-    dim_w++;
-    dim_h++;
-    dim_d++;
-    dim_plane++;
-  }
-
-  int64_t nplane = input.size(dim_plane);
-  int64_t input_d = input.size(dim_d);
-  int64_t input_h = input.size(dim_h);
-  int64_t input_w = input.size(dim_w);
-  int64_t output_d = grad_output.size(dim_d);
-  int64_t output_h = grad_output.size(dim_h);
-  int64_t output_w = grad_output.size(dim_w);
-
-  auto grad_output_ = grad_output.contiguous();
-  if (grad_output_.numel() == 0) {
+  if (grad_output.numel() == 0) {
     return;
   }
 
   grad_input.zero_();
-
-  if (batch_mode) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-        kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_backward_cpu", [&] {
-          reflection_pad3d_backward_out_loop<scalar_t>(
-              grad_input.data_ptr<scalar_t>(),
-              grad_output_.data_ptr<scalar_t>(),
-              input.size(0),
-              nplane,
-              input_w,
-              input_h,
-              input_d,
-              output_w,
-              output_h,
-              output_d,
-              pad_left,
-              pad_top,
-              pad_front);
-        });
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-        kHalf, kBFloat16, input.scalar_type(), "reflection_pad3d_backward_cpu", [&] {
-          reflection_pad3d_backward_out_frame<scalar_t>(
-              grad_input.data_ptr<scalar_t>(),
-              grad_output_.data_ptr<scalar_t>(),
-              nplane,
-              input_w,
-              input_h,
-              input_d,
-              output_w,
-              output_h,
-              output_d,
-              pad_left,
-              pad_top,
-              pad_front);
-        });
-  }
+  reflection_pad3d_backward_kernel(kCPU, grad_input, grad_output, padding);
 }
+
+DEFINE_DISPATCH(reflection_pad1d_kernel);
+DEFINE_DISPATCH(reflection_pad1d_backward_kernel);
+DEFINE_DISPATCH(reflection_pad2d_kernel);
+DEFINE_DISPATCH(reflection_pad2d_backward_kernel);
+DEFINE_DISPATCH(reflection_pad3d_kernel);
+DEFINE_DISPATCH(reflection_pad3d_backward_kernel);
+
 } // namespace native
 } // namespace at
