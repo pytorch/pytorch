@@ -168,8 +168,15 @@ class ComputeCodegenUnboxedKernels:
         kernel_key: Union[ETKernelKey, List[ETKernelKey]] = unbox_kernel_entry[1][0]
         kernel_meta: BackendMetadata = unbox_kernel_entry[1][1]
 
-        # TODO: Update to use Kernel Selector
-        if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
+        op_name = f.namespace + "::" + str(f.func.name)
+        if not isinstance(kernel_key, list):
+            kernel_key = [kernel_key]
+        used_kernel_keys = [
+            k
+            for k in kernel_key
+            if self.selector.is_et_kernel_selected(op_name, k.to_native_string())
+        ]
+        if not used_kernel_keys and not self.selector.is_root_operator(op_name):
             return ""
         sig: Union[CppSignature, ExecutorchCppSignature]
         argument_type_gen: Callable[..., NamedCType]
@@ -216,9 +223,6 @@ class ComputeCodegenUnboxedKernels:
             else:
                 return_assignment = ""
                 ret_prefix = ""
-
-        if not isinstance(kernel_key, list):
-            kernel_key = [kernel_key]
 
         newline = "\n    "
         return "\n".join(

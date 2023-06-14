@@ -233,6 +233,11 @@ class SelectiveBuilder:
     def is_et_kernel_selected(self, op_name: str, kernel_key: str) -> bool:
         if op_name not in self.et_kernel_metadata:
             return False
+
+        # Always select default key for now
+        if kernel_key == "default":
+            return True
+
         # Don't compare the version for now
         tensor_metadata = kernel_key.split("/")[1]
 
