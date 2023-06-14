@@ -453,15 +453,6 @@ class BuiltinVariable(VariableTracker):
         assert isinstance(args, (list, tuple))
         assert isinstance(kwargs, dict)
 
-        if (
-            self.fn is operator.getitem
-            and len(args) == 2
-            and isinstance(args[1], variables.TensorVariable)
-            and args[1].dtype == torch.bool
-            and not config.dynamic_shapes
-        ):
-            unimplemented("dynamic Tensor.__getitem__(bool[])")
-
         # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
             args[0], variables.TensorVariable
@@ -813,9 +804,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):
-        if arg is None:
+        if arg is None or isinstance(arg, dict):
             return ConstDictVariable(
-                {}, user_cls, mutable_local=MutableLocal()
+                arg if arg is not None else {}, user_cls, mutable_local=MutableLocal()
             ).add_options(options)
         elif isinstance(arg, variables.ConstDictVariable):
             return arg.clone(
@@ -925,7 +916,7 @@ class BuiltinVariable(VariableTracker):
         source = (
             None
             if a.source is None or b.source is None
-            else SuperSource(a.source, b.source)
+            else SuperSource(type=a.source, base=b.source)
         )
         return variables.SuperVariable(a, b, source=source)
 
@@ -1215,6 +1206,7 @@ class BuiltinVariable(VariableTracker):
         from . import (
             BaseListVariable,
             ConstantVariable,
+            NNModuleVariable,
             TensorVariable,
             UserFunctionVariable,
         )
@@ -1228,6 +1220,13 @@ class BuiltinVariable(VariableTracker):
 
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
+
+        if (
+            isinstance(left, NNModuleVariable)
+            and isinstance(right, NNModuleVariable)
+            and op in supported_const_comparison_ops
+        ):
+            self.push(ConstantVariable(op(left, right)))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():

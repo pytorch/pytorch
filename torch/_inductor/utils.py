@@ -15,7 +15,7 @@ import textwrap
 import time
 from collections import defaultdict
 from io import StringIO
-from typing import Any, Dict, List, NamedTuple, Optional, Union
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -341,6 +341,23 @@ def get_kernel_metadata(node_schedule):
     return "\n".join(metadata)
 
 
+def dominated_nodes(initial_queue: Iterable[torch.fx.Node], skip_filter=None):
+    """Returns the set of nodes whose values depend on those within initial_queue"""
+    initial_queue = list(initial_queue)
+    dominated_set = set(initial_queue)
+
+    while initial_queue:
+        node = initial_queue.pop()
+        for user in node.users:
+            if skip_filter and skip_filter(user):
+                continue
+            if user not in dominated_set:
+                dominated_set.add(user)
+                initial_queue.append(user)
+
+    return dominated_set
+
+
 def gather_origins(args, kwargs):
     import itertools
 
@@ -414,6 +431,8 @@ def has_incompatible_cudagraph_ops(gm):
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
+        "run_with_rng_state",
+        "run_and_save_rng_state",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -1097,3 +1116,33 @@ def triton_config_to_hashable(cfg):
     items.append(("num_warps", cfg.num_warps))
     items.append(("num_stages", cfg.num_stages))
     return tuple(items)
+
+
+HAS_COLORAMA = True
+try:
+    import colorama
+except ImportError:
+    HAS_COLORAMA = False
+
+
+def _color_text(msg, color):
+    if not HAS_COLORAMA:
+        return msg
+
+    return getattr(colorama.Fore, color.upper()) + msg + colorama.Fore.RESET
+
+
+def green_text(msg):
+    return _color_text(msg, "green")
+
+
+def yellow_text(msg):
+    return _color_text(msg, "yellow")
+
+
+def red_text(msg):
+    return _color_text(msg, "red")
+
+
+def blue_text(msg):
+    return _color_text(msg, "blue")
