@@ -20,7 +20,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import defake, detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
-from torch._inductor.codecache import CompiledFxGraph
+from torch._inductor.codecache import CompiledFxGraph, FxGraphCache
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp

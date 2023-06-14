@@ -9,6 +9,7 @@ import logging
 import multiprocessing
 import os
 import pathlib
+import pickle
 import re
 import shutil
 import signal
@@ -21,6 +22,7 @@ import types
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from copy import copy
 from ctypes import cdll
 from dataclasses import field
 from functools import partial
@@ -297,6 +299,8 @@ def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
         return code_hash(content, extra)
     if hash_type == "cubin":
         return code_hash(repr(content))
+    if hash_type == "cg":
+        return extra
 
 
 def write(
@@ -355,7 +359,12 @@ class FxGraphCache:
                     # Important as compiled models are not pickeable
                     disk_compiled_graph.compiled_artifact = None
                     print(disk_compiled_graph)
-                    write(pickle.dumps(disk_compiled_graph), key, "cg")
+                    write(
+                        pickle.dumps(disk_compiled_graph),
+                        "cg",
+                        extra=key,
+                        hash_type="cg",
+                    )
                 else:
                     # Load required info from disk, recreation of compiled model will be on first run
                     with open(cg_path, "rb") as f:
