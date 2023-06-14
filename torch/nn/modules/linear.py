@@ -81,6 +81,16 @@ class Linear(Module):
         >>> output = m(input)
         >>> print(output.size())
         torch.Size([128, 30])
+         
+        >>> k = nn.Linear(20, 30)
+        >>> input = torch.randn(128, 5, 20)  
+        >>> output = k(input)
+        >>> print(output.size())  
+        torch.Size([128, 5, 30])
+
+    Note ::
+
+        For input tensors with dimensions higher than 2, the linear transformation is applied to each element along the last dimension while keeping all other dimensions the same.
     """
     __constants__ = ['in_features', 'out_features']
     in_features: int
