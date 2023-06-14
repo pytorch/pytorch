@@ -1,7 +1,5 @@
 # Owner(s): ["module: ProxyTensor"]
 
-from typing import cast
-from torch._dynamo.source import LocalSource
 from torch.testing._internal.common_utils import TestCase, run_tests, xfail_inherited_tests
 import torch
 import unittest
@@ -13,7 +11,7 @@ from torch.testing._internal.common_methods_invocations import op_db, wrapper_se
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, DataDependentOutputException, FakeTensorMode
 from torch._decomp import decomposition_table
 from torch.fx.experimental.symbolic_shapes import (
-    ShapeEnv, sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
+    sym_float, eval_guards, bind_symbols, fx_placeholder_vals, fx_placeholder_targets,
     constrain_range, guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.custom_op_db import custom_op_db
