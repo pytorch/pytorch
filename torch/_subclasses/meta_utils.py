@@ -408,7 +408,7 @@ class MetaConverter:
                                 r = r.clone(memory_format=torch.preserve_format)
 
                     # Graph-Break for wrapped tensors
-                    if (torch._C._functorch.is_functorch_wrapped_tensor(t)):
+                    if torch._C._functorch.is_functorch_wrapped_tensor(t):
                         return NotImplemented
 
                     s = t.untyped_storage()

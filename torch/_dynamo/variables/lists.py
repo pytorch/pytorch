@@ -234,7 +234,7 @@ class CommonListMethodsVariable(BaseListVariable):
             # For `speculate_subgraph`, we don't use root tracer,
             # so here we ban `append` on list which is used in `subgraph`.
             if not tx.output.is_root_tracer():
-                unimplemented(f"list was mutated.")
+                unimplemented("list was mutated.")
             tx.replace_all(
                 self,
                 type(self)(
