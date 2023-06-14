@@ -224,7 +224,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        assert len(args) == 2
+        assert len(args) <= 2
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
@@ -414,38 +414,62 @@ def make_pointwise(
     return inner
 
 
-def make_foreach_pointwise(aten_fn, pw_fn):
+def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
-        def is_dynamic(t):
-            return any(x.free_symbols for x in t.data.get_size())
+        def is_dynamic(*args):
+            return any(
+                isinstance(t, TensorBox)
+                and any(x.free_symbols for x in t.data.get_size())
+                for t in args
+            )
+
+        def has_type_promotion(*args):
+            if len(args) < 2:
+                return False
+            else:
+                dtype = args[0].data.get_dtype()
+                return any(
+                    isinstance(t, TensorBox) and t.data.get_dtype() != dtype
+                    for t in args
+                )
+
+        def realize_inputs(*args):
+            for arg in args:
+                if isinstance(arg, TensorBox):
+                    arg.data.realize()
 
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         # Note: we'll fallback on type promotion until
         # https://github.com/openai/triton/commit/9820899b3845e461d9031dba66062efade65d420
         # is in the pytorch triton version
-        def group_args(tensor_pairs):
+        def group_args(arg_pairs):
             out = defaultdict(list)
-            for i, (l, r) in enumerate(tensor_pairs):
-                assert l.get_device() == r.get_device()
-                use_foreach = not (
-                    is_dynamic(l)
-                    or is_dynamic(r)
-                    or l.data.get_dtype() != r.data.get_dtype()
-                )
-                out[(l.get_device(), use_foreach)].append((i, l, r))
+            for i, args in enumerate(arg_pairs):
+                use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
+                out[(args[0].get_device(), use_foreach)].append((i, args))
             return out
+
+        # replicate scalar input to match lenghth of list input
+        if len(inputs) > 1 and not isinstance(inputs[1], (list, tuple)):
+            inputs = (inputs[0], [inputs[1] for _ in inputs[0]])
 
         groups = group_args(zip(*inputs))
         outputs = [None] * len(inputs[0])
         for (device, use_foreach), group in groups.items():
             buffer_list = []
-            for output_ind, left, right in group:
+            for (
+                output_ind,
+                args,
+            ) in group:
                 if device.type == "cuda" and use_foreach:
-                    left.realize()
-                    right.realize()
+                    realize_inputs(*args)
 
-                output = pw_fn(left, right, alpha=alpha)
+                if allow_alpha:
+                    output = pw_fn(*args, alpha=alpha)
+                else:
+                    output = pw_fn(*args)
+
                 outputs[output_ind] = output
 
                 if device.type == "cuda" and use_foreach:
@@ -548,8 +572,9 @@ def register_pointwise(
 def register_foreach_pointwise(
     aten_fn,
     pointwise_lowering_fn,
+    allow_alpha=False,
 ):
-    fn = make_foreach_pointwise(aten_fn, pointwise_lowering_fn)
+    fn = make_foreach_pointwise(pointwise_lowering_fn, allow_alpha=allow_alpha)
     fn = _register_foreach_lowering(aten_fn, fn)
     return fn
 
@@ -4099,8 +4124,8 @@ maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
-register_pointwise(aten.neg)
-register_pointwise_numeric(aten.reciprocal)
+neg = register_pointwise(aten.neg)
+reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
@@ -4129,7 +4154,20 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_foreach_pointwise(aten._foreach_add.List, add)
+register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_add.Scalar, add, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_mul.List, mul)
+register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
+register_foreach_pointwise(aten._foreach_sub.List, sub)
+register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
+register_foreach_pointwise(aten._foreach_neg.default, neg)
+register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_div.List, div)
+register_foreach_pointwise(aten._foreach_div.Scalar, div)
+register_foreach_pointwise(aten._foreach_sqrt, sqrt)
+register_foreach_pointwise(aten._foreach_maximum.List, maximum)
+register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
+register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 
 
 def register_inplace(aten_op, outplace_op):
