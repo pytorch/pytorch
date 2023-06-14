@@ -385,6 +385,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                 b = torch.empty(1, device="foo:0")
                 result = a + b
 
+        def test_open_device_default_argument_device():
+            torch.utils.rename_privateuse1_backend('foo')
+            try:
+                self.assertEqual(torch._C._get_default_argument_device(), "cuda")
+                torch._C._set_default_argument_device_type("foo")
+                self.assertEqual(torch._C._get_default_argument_device(), "foo")
+            finally:
+                torch._C._set_default_argument_device_type("cuda")
+
         test_base_device_registration()
         test_before_common_registration()
         test_common_registration()
@@ -399,6 +408,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_resize()
         test_open_device_storage_type()
         test_open_device_faketensor()
+        test_open_device_default_argument_device()
 
 
 if __name__ == "__main__":
