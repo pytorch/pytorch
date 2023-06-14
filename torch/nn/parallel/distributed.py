@@ -755,7 +755,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # Check that a module does not have Uninitialized parameters
         for param in self._module_parameters:
-            if isinstance(param, torch.nn.parameter.UninitializedParameter):
+            if type(param) is torch.nn.parameter.UninitializedParameter:
                 self._log_and_throw(
                     RuntimeError,
                     "Modules with uninitialized parameters can't be used with `DistributedDataParallel`. "
@@ -1166,9 +1166,16 @@ class DistributedDataParallel(Module, Joinable):
             self.logger._set_static_graph()
 
     def _build_params_for_reducer(self):
+        from torch.distributed._tensor import DTensor
+        def _dtensor_ext(param):
+            if isinstance(param, DTensor):
+                param._local_tensor.requires_grad_()
+                param = param._local_tensor
+            return param
+
         # Build tuple of (module, parameter) for all parameters that require grads.
         modules_and_parameters = [
-            (module, parameter)
+            (module, _dtensor_ext(parameter))
             for module_name, module in self.module.named_modules()
             for parameter in [
                 param
@@ -1184,6 +1191,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # Deduplicate any parameters that might be shared across child modules.
         memo = set()
+
         modules_and_parameters = [
             # "p not in memo" is the deduplication check.
             # "not memo.add(p)" is always True, and it's only there to cause "add(p)" if needed.
