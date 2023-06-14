@@ -2,7 +2,7 @@ import operator
 import torch
 import warnings
 from itertools import chain
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
 from ..modules import Module
 from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
@@ -40,7 +40,10 @@ def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
         return
 
 
-class DataParallel(Module):
+T = TypeVar("T", bound=Module)
+
+
+class DataParallel(Module, Generic[T]):
     r"""Implements data parallelism at the module level.
 
     This container parallelizes the application of the given :attr:`module` by
@@ -124,7 +127,7 @@ class DataParallel(Module):
 
     def __init__(
         self,
-        module: Module,
+        module: T,
         device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
         output_device: Optional[Union[int, torch.device]] = None,
         dim: int = 0,
@@ -181,7 +184,7 @@ class DataParallel(Module):
             outputs = self.parallel_apply(replicas, inputs, module_kwargs)
             return self.gather(outputs, self.output_device)
 
-    def replicate(self, module: Module, device_ids: Sequence[Union[int, torch.device]]) -> List[Module]:
+    def replicate(self, module: T, device_ids: Sequence[Union[int, torch.device]]) -> List[T]:
         return replicate(module, device_ids, not torch.is_grad_enabled())
 
     def scatter(
@@ -192,7 +195,7 @@ class DataParallel(Module):
     ) -> Any:
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
-    def parallel_apply(self, replicas: Sequence[Module], inputs: Sequence[Any], kwargs: Any) -> List[Any]:
+    def parallel_apply(self, replicas: Sequence[T], inputs: Sequence[Any], kwargs: Any) -> List[Any]:
         return parallel_apply(replicas, inputs, kwargs, self.device_ids[:len(replicas)])
 
     def gather(self, outputs: Any, output_device: Union[int, torch.device]) -> Any:

@@ -30,6 +30,7 @@ from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
+    requires_numpy_pytorch_interop,
     requires_static_shapes,
     same,
     skipIfNotPy311,
@@ -1216,6 +1217,80 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    @requires_numpy_pytorch_interop
+    def test_numpy_ndarray_graph_break(self):
+        def fn(x):
+            a = x.numpy()
+            b = a.real
+            torch._dynamo.graph_break()
+            c = np.multiply(b, 2.0)
+            return c
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.randn(3)
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @requires_numpy_pytorch_interop
+    def test_numpy_ndarray_graph_break_with_multiple_outputs(self):
+        def fn(x, y):
+            a = x.numpy()
+            b = y.numpy()
+            torch._dynamo.graph_break()
+            return np.add(a, 1), np.add(b, 1)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.randn([1, 3])
+            y = torch.randn([1, 3])
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @requires_numpy_pytorch_interop
+    def test_tensor_interacts_with_numpy_ndarray(self):
+        def fn(x, y):
+            a = x.numpy()
+            b = y.numpy()
+            c = np.ones_like(a)
+            d = np.ones_like(b)
+            torch._dynamo.graph_break()
+            return np.add(a, c), np.add(b, d)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.randn([1, 3])
+            y = torch.randn([1, 3])
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
+    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
+    def test_(self):
+        def fn(x: torch.Tensor, y: int):
+            z = x.detach()
+            w = y + 1
+            torch._dynamo.graph_break()
+            return z + w
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        for _ in range(10):
+            x = torch.randn([1, 3])
+            y = 5
+            ref = fn(x, y)
+            res = opt_fn(x, y)
+            self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
         func_args_map = {
@@ -1768,8 +1843,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         x = torch.empty([4, 9, 8])
-        self.assertTrue(opt_fn(x, 1) == 9)
-        self.assertTrue(opt_fn(x, -2) == 9)
+        self.assertEqual(opt_fn(x, 1), 9)
+        self.assertEqual(opt_fn(x, -2), 9)
 
     def test_stride_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1779,8 +1854,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         x = torch.empty([4, 9, 8])
-        self.assertTrue(opt_fn(x, 0) == 72)
-        self.assertTrue(opt_fn(x, -2) == 8)
+        self.assertEqual(opt_fn(x, 0), 72)
+        self.assertEqual(opt_fn(x, -2), 8)
 
     def test_torch_seed(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -3355,8 +3430,9 @@ def fn():
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
-    @patch.object(torch._dynamo.config, "print_graph_breaks", True)
-    def test_duplicate_graph_break_warning(self):
+    def test_duplicate_graph_break_log(self):
+        torch._logging.set_logs(graph_breaks=True)
+
         @torch._dynamo.optimize("eager")
         def f1(a, b):
             f2(a, b)
@@ -3378,15 +3454,18 @@ def fn():
         def count_graph_break_msgs(msgs):
             return sum(msg.find("Graph break") != -1 for msg in msgs)
 
-        with self.assertLogs(logger="torch._dynamo", level=logging.WARNING) as log:
+        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
             torch._dynamo.config.verbose = True
             f1(torch.randn(10), torch.randn(10))
             self.assertGreater(count_graph_break_msgs(log.output), 1)
 
-        with self.assertLogs(logger="torch._dynamo", level=logging.WARNING) as log:
+        with self.assertLogs(logger="torch._dynamo", level=logging.DEBUG) as log:
             torch._dynamo.config.verbose = False
             g1(torch.randn(10), torch.randn(10))
             self.assertEqual(count_graph_break_msgs(log.output), 1)
+
+        # reset logging state
+        torch._logging.set_logs()
 
     def test_inplace_param_update(self):
         def fn(param, y):
@@ -3749,6 +3828,19 @@ def fn():
         res = opt_model(x)
         self.assertTrue(same(ref, res))
 
+    def test_if_cond_nn_mod3(self):
+        def fn(x):
+            if torch.nn.ModuleList():
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     def test_if_cond_user_defined_object(self):
         # obj.__bool__ is not existed
         class A:  # noqa: B903
@@ -3795,7 +3887,7 @@ def fn():
                 self.x = x
 
             def __bool__(self):
-                self.x = 1
+                self.x = 1.2
                 return self.x
 
         def fn(a, obj):
@@ -3811,7 +3903,44 @@ def fn():
             opt_fn(x, obj)
             self.assertFalse(True)
         except TypeError as e:
-            self.assertIn("__bool__ should return bool, returned int", str(e))
+            self.assertIn("__bool__ should return bool, returned float", str(e))
+
+    def test_if_cond_user_defined_object3(self):
+        # obj.__bool__ is not existed, but obj.__len__ exists
+        class A:  # noqa: B903
+            def __init__(self, x):
+                self.x = x
+
+            def __len__(self):
+                return len(self.x)
+
+        # obj.__bool__ takes precedence over obj.__len__
+        class B:
+            def __init__(self, x):
+                self.x = x
+
+            def __bool__(self):
+                return False
+
+            def __len__(self):
+                return len(self.x)
+
+        def fn(x, obj):
+            if not obj:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(4)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        obj1 = A([1, 2, 3])
+        obj2 = A([])
+        obj3 = B([1, 2, 3])
+        obj4 = B([])
+        for obj in [obj1, obj2, obj3, obj4]:
+            ref = fn(x, obj)
+            res = opt_fn(x, obj)
+            self.assertTrue(same(ref, res))
 
     def test_class_has_instancecheck_method(self):
         class A:
@@ -3942,6 +4071,14 @@ def fn():
         opt_fn = torch._dynamo.optimize("eager")(fn)
         x, y = opt_fn()
         self.assertEqual(x, y)
+
+    def test_torch_distributions_lazy_property(self):
+        def fn(x):
+            return torch.distributions.Categorical(probs=x).entropy()
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        x = torch.rand([4, 4])
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_guard_failure_fn(self):
         def fn(x, y, k):
@@ -4337,6 +4474,50 @@ def fn():
         ref = fn(x, y)
         opt_fn = torch._dynamo.optimize("eager")(fn)
         res = opt_fn(x, y)
+        self.assertTrue(same(ref, res))
+
+    def test_assigning_function_to_object_attribute(self):
+        # user-defined functions which are object's attributes are not converted to bound methods
+        def my_add(*args):
+            a, b = args
+            return a + b
+
+        class MyClass:
+            def __init__(self, func):
+                self.add = func
+
+        obj = MyClass(my_add)
+
+        def fn(x):
+            return obj.add(x, 2)
+
+        x = torch.rand(2, 3)
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager")(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_assigning_function_to_class_attribute(self):
+        # user-defined functions which are class's attributes are converted to bound methods
+        def my_add(*args):
+            obj, a, b = args
+            return obj.x + a + b
+
+        class MyClass:
+            add = my_add
+
+            def __init__(self, x):
+                self.x = x
+
+        obj = MyClass(0.5)
+
+        def fn(x):
+            return obj.add(x, 2)
+
+        x = torch.rand(2, 3)
+        ref = fn(x)
+        opt_fn = torch.compile(backend="eager")(fn)
+        res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
     def test_tagging_tensors_simple(self):
@@ -5184,6 +5365,28 @@ def fn():
         self.assertTrue(s == s2)
         self.assertTrue(s != s3)
 
+    def test_inline_dict_function(self):
+        def _result_type_dict(dtype):
+            return {bool: torch.float32}[dtype]
+
+        @torch.compile
+        def f():
+            return torch.ones(3, dtype=_result_type_dict(bool))
+
+        self.assertEqual(f(), torch.ones(3, dtype=torch.float32))
+
+    def test_inline_dict_function_passed_as_arg(self):
+        @torch.compile
+        def fn(d, x, y):
+            if d[x] is torch.float32:
+                return y.cos()
+            else:
+                return y.sin()
+
+        dd = {bool: torch.float32, int: torch.int64}
+        self.assertEqual(fn(dd, bool, torch.ones(4)), torch.ones(4).cos())
+        self.assertEqual(fn(dd, int, torch.ones(4)), torch.ones(4).sin())
+
     def test_add_sizes(self):
         def func(x):
             y = x.size()
@@ -5407,6 +5610,47 @@ def ___make_guard_fn():
                 expected_38 if self._has_ast_unparse() else expected_38_no_astunparse
             )
         self.assertEqual(expected, pycode)
+
+    def test_dynamo_compiling_fake_tensor_to_vararg_int(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                # use numpy int so it's wrapped as fake tensor in dynamo
+                shape = np.int_(16)
+                # test shape as fake tensor, which param type is
+                # Sequence[Union[_int, SymInt]]
+                return x.reshape(shape)
+
+        x = torch.rand([4, 4])
+        model = MyModule()
+        orig_out = model(x)
+        opt_model = torch._dynamo.optimize("eager")(MyModule())
+        opt_out = opt_model(x)
+        self.assertTrue(same(orig_out, opt_out))
+
+    def test_torch_variable_hasattr(self):
+        def fn(x):
+            if hasattr(torch.nn, "Module"):
+                return x * x
+            return x + 1
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        x = torch.rand([4, 4])
+        fn_out = fn(x)
+        compiled_out = compiled_fn(x)
+        self.assertTrue(same(fn_out, compiled_out))
+
+    def test_torch_objects_as_keys(self):
+        remap = {torch.float16: torch.float32}
+
+        def fn():
+            return torch.randn(3, dtype=remap[torch.float16])
+
+        opt = torch._dynamo.optimize("eager")(fn)
+        opt()
 
 
 class TestTracer(JitTestCase):
