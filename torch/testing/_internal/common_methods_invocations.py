@@ -134,6 +134,8 @@ from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
 from torch.testing._internal.opinfo.definitions.sparse import (
+    error_inputs_sparse_like_fns,
+    sample_inputs_sparse_like_fns,
     error_inputs_sparse_mul,
     sample_inputs_sparse_mul,
     error_inputs_sparse_reduction_sum,
@@ -15690,6 +15692,12 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
+           error_inputs_sparse_func=error_inputs_sparse_like_fns,
+           sample_inputs_sparse_coo_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_coo),
+           sample_inputs_sparse_csr_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_csr),
+           sample_inputs_sparse_csc_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_csc),
+           sample_inputs_sparse_bsr_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_bsr),
+           sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_bsc),
            skips=(
            )),
     OpInfo('ones_like',
@@ -15732,7 +15740,12 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_like_fns,
            supports_autograd=False,
-           supports_sparse_csr=True,
+           error_inputs_sparse_func=error_inputs_sparse_like_fns,
+           sample_inputs_sparse_coo_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_coo),
+           sample_inputs_sparse_csr_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_csr),
+           sample_inputs_sparse_csc_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_csc),
+           sample_inputs_sparse_bsr_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_bsr),
+           sample_inputs_sparse_bsc_func=partial(sample_inputs_sparse_like_fns, layout=torch.sparse_bsc),
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # AssertionError: JIT Test does not execute any logic
