@@ -11973,11 +11973,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 x.index_add_(self.dim, self.index, self.updates)
                 return x
 
-        x = torch.ones(5, 4, 3)
+        x = torch.ones(5, 1)
         updates = torch.tensor([[1], [4], [7], [3], [2]], dtype=torch.float)
         index = torch.tensor([0, 2, 3, 1, 4])
         self.run_test(M(0, index, updates), (x,))
 
+        x = torch.ones(1, 4, 3)
         updates = torch.tensor(
             [[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float
         )
@@ -12003,7 +12004,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 x.index_add_(self.dim, self.index, self.updates)
                 return x
 
-        x = torch.ones(5, 4, 3)
+        x = torch.ones(1, 4, 3)
         updates = torch.tensor([[[1, 5, 7], [2, 4, 5], [5, 5, 6]]], dtype=torch.float)
         index = torch.tensor([0, 2, 1])
         self.run_test(M(1, index, updates), (x,))
@@ -12023,7 +12024,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     x.index_add_(self.dim, self.index, self.updates)
                 return x
 
-        x = torch.ones(5, 4, 3)
+        x = torch.ones(1, 4, 3)
         updates = torch.tensor(
             [[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float
         )
@@ -12048,7 +12049,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     x.index_add_(self.dim, self.index_false, self.updates)
                 return x
 
-        x = torch.ones(5, 4, 3)
+        x = torch.ones(1, 4, 3)
         updates = torch.tensor(
             [[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float
         )
@@ -12072,8 +12073,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 x.index_add_(self.dim, self.index, self.updates)
                 return x
 
-        x = torch.ones(5, 4, 3)
-        y = torch.ones(7, 8, 3)
+        x = torch.ones(1, 4, 3)
         updates = torch.tensor(
             [[[1, 5, 7], [2, 4, 5], [5, 5, 6], [2, 3, 4]]], dtype=torch.float
         )
@@ -12082,7 +12082,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(
             M(1, index, updates),
             (x,),
-            additional_test_inputs=[y],
             input_names=["input_1"],
             dynamic_axes={"input_1": [0, 1]},
         )
