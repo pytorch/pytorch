@@ -458,9 +458,9 @@ def _flatten_optim_state_dict(
             if flat_state:
                 flat_osd_state[key] = flat_state
             elif use_orig_params:
-                assert len(fqns) == 1, (
-                    f"use_orig_params is True but there are multiple FQNs, {fqns}."
-                )
+                assert (
+                    len(fqns) == 1
+                ), f"use_orig_params is True but there are multiple FQNs, {fqns}."
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
                     flat_osd_state[key] = copy.deepcopy(
                         tree_map_only(
