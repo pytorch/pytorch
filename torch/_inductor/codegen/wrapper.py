@@ -14,6 +14,7 @@ from sympy import Expr
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
 from torch.fx.experimental.symbolic_shapes import SymTypes
+from torch.fx.node import _get_qualified_name
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
@@ -734,6 +735,8 @@ class WrapperCodeGen(CodeGen):
                     return self.ref
 
             return repr(type(s)(Shim(self.val_to_str(a)) for a in s))
+        elif isinstance(s, torch._ops.OpOverload):
+            return _get_qualified_name(s)
         else:
             return repr(s)
 

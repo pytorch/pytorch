@@ -276,7 +276,7 @@ def _multi_tensor_adadelta(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, acc_deltas])
-    for ((device_params, device_grads, device_square_avgs, device_acc_deltas), _) in grouped_tensors.values():
+    for device_params, device_grads, device_square_avgs, device_acc_deltas in grouped_tensors.values():
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
 
