@@ -23,6 +23,7 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.testing import expectedFailureDynamic
 import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
@@ -1961,6 +1962,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(res, ref_run1))
 
+    # NotImplementedError: SymNodeVariable() is not a constant
+    @expectedFailureDynamic
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2974,6 +2977,11 @@ def fn():
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    # '__torch__.torch.SymInt (of Python compilation unit at: 0x4c9c0e0)'
+    # object has no attribute or method '__ne__'
+    # NB: I don't think this ever can actually work, cuz TorchScript
+    # can't deal with SymInt inputs
+    @expectedFailureDynamic
     @torch._dynamo.config.patch(raise_on_backend_change=True)
     def test_change_backends(self):
         @torch._dynamo.optimize("eager", nopython=True)
