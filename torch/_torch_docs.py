@@ -2308,6 +2308,10 @@ and :func:`torch.chunk`.
 
 :func:`torch.cat` can be best understood via examples.
 
+.. seealso::
+
+    :func:`torch.stack` concatenates the given sequence along a new dimension.
+
 Args:
     tensors (sequence of Tensors): any python sequence of tensors of the same type.
         Non-empty tensors provided must have the same shape, except in the
