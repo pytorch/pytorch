@@ -703,6 +703,18 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(torch.ones(4))
         f(torch.ones(6))
 
+    def test_nn_parameter_construction(self):
+        # https://github.com/pytorch/pytorch/issues/99569
+        def fn(x):
+            y = x.sin()
+            z = torch.nn.Parameter(torch.ones(1))
+            return y + z
+
+        x = torch.rand((4, 4))
+
+        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -66,10 +66,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
+
+    from .quantization import register_quantization_lowerings
+
+    register_quantization_lowerings()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -160,14 +164,15 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
 def pointless_cumsum_replacement(match: Match, size0, size1, device, dtype):
     """Based on a pattern in OPTForCausalLM"""
 
-    def repl():
+    def repl(size0, size1):
         return torch.arange(1, size1 + 1, device=device, dtype=dtype).expand(
             size0, size1
         )
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    match.replace_by_example(repl, [])
+    with V.fake_mode:
+        match.replace_by_example(repl, [size0, size1])
 
 
 def shape_of_mm(a, b):
@@ -396,3 +401,12 @@ def is_valid_splitwithsizes_cat(match):
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
+
+
+def view_to_reshape(gm):
+    """
+    Replace view ops in the GraphModule to reshape ops.
+    """
+    for nd in gm.graph.nodes:
+        if nd.target == torch.ops.aten.view.default:
+            nd.target = torch.ops.aten.reshape.default

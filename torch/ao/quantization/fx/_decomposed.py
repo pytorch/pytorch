@@ -264,7 +264,7 @@ def choose_qparams_tensor_meta(
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: \
         {quant_min} max: {quant_max}"
-    return torch.empty(1, dtype=torch.float, device=input.device), torch.empty(1, dtype=torch.int32, device=input.device)
+    return torch.empty(1, dtype=torch.double, device=input.device), torch.empty(1, dtype=torch.int64, device=input.device)
 
 @impl(quantized_decomposed_lib, "choose_qparams_symmetric.tensor", "Meta")
 def choose_qparams_symmetric_tensor_meta(
@@ -274,7 +274,8 @@ def choose_qparams_symmetric_tensor_meta(
         eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    return torch.empty(1, dtype=torch.float, device=input.device), torch.empty(1, dtype=torch.int32, device=input.device)
+    return torch.empty(1, dtype=torch.double, device=input.device), torch.empty(1, dtype=torch.int64, device=input.device)
+
 # Helper function used to implement per-channel quantization against any axis
 def _permute_to_axis_zero(x, axis):
     new_axis_list = list(range(x.dim()))

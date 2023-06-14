@@ -7,7 +7,6 @@ import torch.distributed as dist
 from torch.cuda import FloatTensor  # type: ignore[attr-defined]
 from torch.cuda.amp.grad_scaler import _MultiDeviceReplicator, GradScaler, OptState
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch.optim.sgd import SGD
 
 log = logging.getLogger(__name__)
 
@@ -177,7 +176,7 @@ class ShardedGradScaler(GradScaler):
 
     def _unscale_grads_(
         self,
-        optimizer: SGD,
+        optimizer: torch.optim.Optimizer,
         inv_scale: torch.Tensor,
         found_inf: torch.Tensor,
         allow_fp16: bool = True,
@@ -238,7 +237,7 @@ class ShardedGradScaler(GradScaler):
             per_device_found_inf.get(self._scale.device)
         return per_device_found_inf._per_device_tensors
 
-    def unscale_(self, optimizer: SGD) -> None:
+    def unscale_(self, optimizer: torch.optim.Optimizer) -> None:
         if not self._enabled:
             return
 
@@ -289,7 +288,9 @@ class ShardedGradScaler(GradScaler):
         if future_handles:
             torch.futures.wait_all(future_handles)
 
-    def step(self, optimizer: SGD, *args, **kwargs) -> Optional[float]:
+    def step(
+        self, optimizer: torch.optim.Optimizer, *args, **kwargs
+    ) -> Optional[float]:
         return super().step(optimizer, *args, **kwargs)
 
     def _amp_update_scale_cpu_(self, found_inf) -> None:

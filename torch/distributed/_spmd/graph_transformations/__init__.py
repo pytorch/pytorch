@@ -8,6 +8,7 @@ from .common import (
 )
 from .optimizer import (
     AdamArgs,
+    find_all_descendants,
     FusedAdamBlock,
     get_all_fused_optimizer_blocks,
     iter_move_grads_and_optimizers,

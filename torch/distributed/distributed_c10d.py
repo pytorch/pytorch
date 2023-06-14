@@ -45,7 +45,7 @@ __all__ = [
     'broadcast_multigpu', 'broadcast_object_list', 'destroy_process_group',
     'dist_backend', 'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
     'get_world_size', 'group', 'init_process_group', 'irecv',
-    'is_gloo_available', 'is_initialized', 'is_mpi_available',
+    'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
     'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
     'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
     'new_subgroups_by_enumeration', 'recv', 'reduce', 'reduce_multigpu',
@@ -186,7 +186,7 @@ class Backend:
             raise ValueError(f"Backend name must be a string, but got: {name}")
         value = getattr(Backend, name.upper(), Backend.UNDEFINED)
 
-        if value != Backend.GLOO and value != Backend.NCCL and value != Backend.UCC and value != Backend.MPI:
+        if value == Backend.UNDEFINED:
             value = name.lower()
         return value
 
@@ -226,7 +226,7 @@ class Backend:
             f"{name.upper()} c10d backend creator function already exist"
         )
 
-        setattr(Backend, name.upper(), name.upper())
+        setattr(Backend, name.upper(), name.lower())
         Backend.backend_list.append(name.lower())
 
         # Update device capability matrix in Backend class
@@ -299,6 +299,7 @@ class BackendConfig:
             self.device_backend_map = {
                 "cpu" : backend_val,
                 "cuda" : backend_val,
+                "xpu" : backend_val,
             }
 
         logger.info(
@@ -540,7 +541,6 @@ class GroupMember(metaclass=_WorldMeta):
 _default_pg_init_method = None
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
-
 
 def _get_pg_default_device(group: Optional[ProcessGroup] = None):
     """
@@ -859,6 +859,24 @@ def is_ucc_available() -> bool:
     return _UCC_AVAILABLE
 
 
+def is_backend_available(backend: str) -> bool:
+    """
+    Checks if the given backend is available and supports the built-in backends or
+    third-party backends through function ``Backend.register_backend``.
+
+    Args:
+        backend (str): Backend name.
+    Returns:
+        bool: Returns true if the backend is available otherwise false.
+    """
+    # If the backend has an ``is_backend_available`` function, return the result of that function directly
+    available_func = getattr(torch.distributed, f"is_{backend.lower()}_available", None)
+    if available_func:
+        return available_func()
+
+    return backend.lower() in Backend.backend_list
+
+
 def is_initialized() -> bool:
     """
     Checking if the default process group has been initialized
@@ -879,11 +897,11 @@ def is_torchelastic_launched() -> bool:
 
 
 def _is_barrier_after_init() -> int:
-    # Environment variable to control whether we do a barrier after process group
-    # init. Default value is 1 for now to stay the same with previous behavior.
-    # Users can change it to 0 if such behavior is undesired. We reserve the right
-    # to change the default value to 0 if small rollout is successful.
-    return int(os.getenv("TORCH_DIST_INIT_BARRIER", "1"))
+    # Environment variable to control whether process group should perform a
+    # barrier after its init. Default value is 0, i.e. no barrier. If you
+    # experience issue with this setting, you may set
+    # `TORCH_DIST_INIT_BARRIER=1` to add the barrier.
+    return int(os.getenv("TORCH_DIST_INIT_BARRIER", "0"))
 
 
 def _get_default_group():
@@ -1117,13 +1135,17 @@ def init_process_group(
 
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
-        # process groups including global variables are updated correctly on all
-        # ranks.
+        # process groups including global variables (if any) are updated
+        # correctly on all ranks.
         # Update 04/2023: for large-scale runs, this barrier (esp. store-based
         # barrier) may be costly and/or unscalable. Also, in a lot of cases,
-        # these barriers may be unnecessary, as proved by a green CI after
+        # these barriers may be unnecessary, as proven by a green CI after
         # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
-        # added which, when set to 0, will disable these barriers.
+        # added which enables this barrier only when set to 1.
+        logger.info(
+            "Performing barrier after ProcessGroup initialization since "
+            "TORCH_DIST_INIT_BARRIER = 1"
+        )
         if backend == Backend.MPI:
             # MPI backend doesn't use store.
             barrier()
@@ -1131,11 +1153,6 @@ def init_process_group(
             # Use store based barrier here since barrier() used a bunch of
             # default devices and messes up NCCL internal state.
             _store_based_barrier(rank, store, group_name, world_size, timeout)
-    else:
-        logger.info(
-            "TORCH_DIST_INIT_BARRIER is set to 0, omitting the barrier after "
-            "ProcessGroup initialization."
-        )
 
 
 def _new_process_group_helper(
@@ -2250,21 +2267,6 @@ def _tensor_to_object(tensor, tensor_size):
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
-
-
-def _check_for_nccl_backend(group):
-    pg = group or _get_default_group()
-    # Gate PG wrapper check on Gloo availability.
-    if _GLOO_AVAILABLE:
-        # It is not expected for PG to be wrapped many times, but support it just
-        # in case
-        while isinstance(pg, _ProcessGroupWrapper):
-            pg = pg.wrapped_pg
-
-    return (
-        is_nccl_available() and
-        pg.name() == Backend.NCCL
-    )
 
 
 @_exception_logger
@@ -3897,13 +3899,17 @@ def _new_group_with_tag(
 
     if _is_barrier_after_init() == 1:
         # barrier at the end to ensure that once we return from this method, all
-        # process groups including global variables are updated correctly on all
-        # ranks.
-        # Update 04/2023: for large-scale runs, these barriers (esp. store-based
+        # process groups including global variables (if any) are updated
+        # correctly on all ranks.
+        # Update 04/2023: for large-scale runs, this barrier (esp. store-based
         # barrier) may be costly and/or unscalable. Also, in a lot of cases,
-        # these barriers may be unnecessary, as proved by a green CI after
+        # these barriers may be unnecessary, as proven by a green CI after
         # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
-        # added which, when set to 0, will disable these barriers.
+        # added which enables this barrier only when set to 1.
+        logger.info(
+            "Performing barrier after ProcessGroup initialization since "
+            "TORCH_DIST_INIT_BARRIER = 1"
+        )
         if backend == Backend.MPI:
             # MPI doesn't have store.
             barrier()
@@ -3913,11 +3919,6 @@ def _new_group_with_tag(
             # Use store based barrier here since barrier() used a bunch of
             # default devices and messes up NCCL internal state.
             _store_based_barrier(global_rank, barrier_store, group_name, world_size, timeout)
-    else:
-        logger.info(
-            "TORCH_DIST_INIT_BARRIER is set to 0, omitting the barrier after "
-            "ProcessGroup initialization."
-        )
 
     return pg
 

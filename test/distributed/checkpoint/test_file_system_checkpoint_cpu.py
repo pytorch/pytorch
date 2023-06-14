@@ -456,7 +456,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                 save_dict = {
                     "sharded": sharded_tensor.rand(save_spec, tensor_size),
                     "replicated": torch.rand(
-                        tensor_size, device=f"cpu:{self.rank}"
+                        tensor_size, device="cpu"
                     ),
                 }
 
