@@ -16,7 +16,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.testing import same, expectedFailureDynamic
+from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn import functional as F
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter

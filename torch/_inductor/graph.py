@@ -22,8 +22,6 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._mode_utils import no_dispatch
 
-from .._dynamo import config as dynamo_config
-
 from . import config, ir, metrics
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (

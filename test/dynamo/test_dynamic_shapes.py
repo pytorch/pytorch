@@ -25,10 +25,9 @@ except ImportError:
     import test_repros
     import test_subgraphs
 
-import unittest
-
 
 test_classes = {}
+
 
 def make_dynamic_cls(cls):
     suffix = "_dynamic_shapes"

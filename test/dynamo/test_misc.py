@@ -23,7 +23,6 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.testing import expectedFailureDynamic
 import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
@@ -31,6 +30,7 @@ from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
+    expectedFailureDynamic,
     requires_numpy_pytorch_interop,
     requires_static_shapes,
     same,
