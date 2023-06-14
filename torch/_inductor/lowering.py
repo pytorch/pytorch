@@ -1764,7 +1764,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             # selecting every element is the same as just src.clone()
             return src_loader(idx)
 
-        idx_dim = ops.index_expr(idx[dim], torch.int32)
+        idx_dim = ops.index_expr(idx[dim], torch.int64)
         src_idx = list(idx)
         src_idx[dim] = ir.FloorDiv(idx[dim] - start, step)
 
@@ -1773,23 +1773,23 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             mask.append(
                 ops.ge(
                     idx_dim,
-                    ops.index_expr(sympy.expand(start), torch.int32),
+                    ops.index_expr(sympy.expand(start), torch.int64),
                 )
             )
         if end != dim_size:
             mask.append(
                 ops.lt(
                     idx_dim,
-                    ops.index_expr(sympy.expand(end), torch.int32),
+                    ops.index_expr(sympy.expand(end), torch.int64),
                 )
             )
         if step != 1:
             mask.append(
                 ops.eq(
                     ops.index_expr(
-                        ir.ModularIndexing(idx[dim] - start, 1, step), torch.int32
+                        ir.ModularIndexing(idx[dim] - start, 1, step), torch.int64
                     ),
-                    ops.constant(0, torch.int32),
+                    ops.constant(0, torch.torch.int64),
                 )
             )
         assert mask
