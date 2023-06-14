@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import logging
 import unittest
 
 import torch
@@ -7,21 +8,27 @@ from torch._export import export
 from torch._export.serde.serialize import (
     ExportedProgramSerializer,
     deserialize,
-    serialize, GraphModuleOpUpgrader,
+    serialize, GraphModuleOpUpgrader, ExportedProgramDeserializer,
 )
 import torch.utils._pytree as pytree
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 TEST_UPGRADERS = {
-    "aten::div__Scalar_0_3": (
-        "div.Scalar(Tensor self, Scalar other) -> Tensor",
+    "aten::div__Scalar_mode_0_3": (
+        "div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor",
         """
-def div__Scalar_0_3(self: torch.Tensor, other) -> torch.Tensor:
-  if (self.is_floating_point() or isinstance(other, float)):
-    return self.true_divide(other)
-  return self.divide(other, rounding_mode='trunc')
+def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Optional[str]=None) -> torch.Tensor:
+    return self.divide(other, rounding_mode=rounding_mode)
+        """),
+    "aten::gelu_0_9": (
+        "gelu(Tensor self) -> Tensor"
+        """
+def gelu_0_9(self: Tensor) -> Tensor:
+  return torch.gelu(self, approximate='none')
         """)
 }
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
     def test_serialize_multiple_returns_from_node(self) -> None:
@@ -174,6 +181,7 @@ class TestDeserialize(TestCase):
         """
         Test multiple return from a single node (ex. layer_norm has 2 outputs)
         """
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -208,10 +216,37 @@ class TestDeserialize(TestCase):
         inputs = (torch.ones([512], requires_grad=True),)
         self.check_graph(MyModule(), inputs)
 
+
+def count_op(graph, target_str):
+    return len(
+        [n for n in graph.nodes if isinstance(n.target, torch._ops.OpOverload) and n.target.name() == target_str])
+
+
 class TestOpVersioning(TestCase):
     """Test if serializer/deserializer behaves correctly if version mismatch."""
-    def test_creates_upgrader_pass(self):
 
+    def test_empty_model_opset_version_raises(self):
+        compiler_opset_version = {"aten": 4}
+        model_opset_version = None
+        deserializer = ExportedProgramDeserializer(compiler_opset_version)
+        with self.assertRaises(RuntimeError):
+            deserializer._validate_model_opset_version(model_opset_version)
+
+    def test_opset_mismatch_raises(self):
+        compiler_opset_version = {"aten": 4}
+        model_opset_version = {"aten": 3}
+        deserializer = ExportedProgramDeserializer(compiler_opset_version)
+        with self.assertRaises(NotImplementedError):
+            deserializer._validate_model_opset_version(model_opset_version)
+
+    def test_model_op_namespace_version_missing_from_deserializer_do_not_raises(self):
+        compiler_opset_version = {"aten": 3}
+        model_opset_version = {"aten": 3, "custom": 4}
+        deserializer = ExportedProgramDeserializer(compiler_opset_version)
+        with self.assertLogs(logging.getLogger(), level='WARN'):
+            deserializer._validate_model_opset_version(model_opset_version)
+
+    def test_creates_upgrader_pass(self):
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)
@@ -219,41 +254,46 @@ class TestOpVersioning(TestCase):
 
     def test_div_upgrader_replaces_op_with_old_version(self):
         def fn(a: torch.Tensor, b):
-            return torch.ops.aten.div.Scalar(a, b)
+            return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
-        inputs = (torch.ones([2, 3]) * 4, 2)
+        inputs = (torch.ones([2, 3]) * 4, 2.)
         ep = export(fn, inputs, [])
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)
-        ep.transform(*upgrader.upgrader_passes)
+        upgraded = ep.transform(*upgrader.upgrader_passes)
+        upgraded.graph_module.print_readable()
 
-        def count_op(graph, target_str):
-            return len([n for n in graph.nodes if isinstance(n.target, torch._ops.OpOverload) and n.target.name() == target_str])
-        count = count_op(ep.graph, "aten::div.Scalar")
+        count = count_op(upgraded.graph, "aten::div.Scalar_mode")
         self.assertEqual(count, 0)
-        custom_op_count = count_op(ep.graph, "aten::div__Scalar_0_3")
+        custom_op_count = count_op(upgraded.graph, "aten::div__Scalar_mode_0_3")
         self.assertEqual(custom_op_count, 1)
 
     def test_div_upgrader_pass_return_new_op_after_retrace(self):
         def fn(a: torch.Tensor, b):
-            return torch.ops.aten.div.Scalar(a, b)
+            return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
-        inputs = (torch.ones([2, 3]) * 4, 2)
+        inputs = (torch.ones([2, 3]) * 4, 2.)
         ep = export(fn, inputs, [])
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)
 
-        def count_op(graph, target_str):
-            return len([n for n in graph.nodes if isinstance(n.target, torch._ops.OpOverload) and n.target.name() == target_str])
-        count = count_op(ep.graph, "aten::div.Scalar")
+        count = count_op(ep.graph, "aten::div.Scalar_mode")
         self.assertEqual(count, 1)
 
+        # upgrade: replace op (div.Scalar_mode -> div__Scalar_mode_0_3) then retrace
         upgraded_ep = upgrader.upgrade(ep)
+        upgraded_ep.graph_module.print_readable()
 
-        custom_op_count = count_op(upgraded_ep.graph, "aten::div__Scalar_0_3")
+        # no old version of op (div__Scalar_mode_0_3) anymore.
+        custom_op_count = count_op(upgraded_ep.graph, "aten::div__Scalar_mode_0_3")
         self.assertEqual(custom_op_count, 0)
+
+        # div__Scalar_mode_0_3 decomposes into div.Tensor.
+        decomposed_op_count = count_op(upgraded_ep.graph, "aten::div.Tensor_mode")
+        self.assertEqual(decomposed_op_count, 1)
+
 
 if __name__ == '__main__':
     run_tests()

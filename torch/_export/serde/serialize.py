@@ -5,14 +5,13 @@ import json
 import logging
 import operator
 import typing
-from functools import partial
 from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch.fx.experimental import symbolic_shapes
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 import torch._export.exported_program as ep
-from torch.utils._pytree import pytree_to_str, str_to_pytree, tree_flatten, tree_unflatten
+from torch.utils._pytree import pytree_to_str, str_to_pytree, tree_unflatten
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     BackwardSignature,
@@ -46,10 +45,11 @@ __all__ = [
 ]
 
 from .. import export
+from ..pass_base import ExportPassBase
+from ..pass_infra.node_metadata import NodeMetadata
+from ..pass_infra.proxy_value import ProxyValue
 
 from ...fx.node import Target
-from ...fx.passes.graph_manipulation import replace_target_nodes_with
-from ...fx.passes.infra.pass_base import PassResult
 from ...library import Library
 
 log = logging.getLogger(__name__)
@@ -632,6 +632,9 @@ class ExportedProgramSerializer:
         )
 
 
+lib = Library("aten", "FRAGMENT")
+impl_lib = Library("aten", "IMPL")
+
 class GraphModuleOpUpgrader:
     """Given model op set version number as well as compiler op set version number, do the following:
     1. retrieve upgraders from somewhere (TorchScript API or new API).
@@ -655,22 +658,29 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
     },
     """
 
-    class UpgraderPass:
+    class UpgraderPass(ExportPassBase):
         def __init__(self, old_target: Target, new_target: Target):
+            super().__init__()
             self.old_target = old_target
             self.new_target = new_target
 
-        def __call__(self, fx_module: GraphModule) -> Optional[PassResult]:
-            replace_target_nodes_with(fx_module, "call_function", self.old_target, "call_function", self.new_target)
-            # retrace the graph module
-            return PassResult(fx_module, True)
+        def call_operator(
+                self,
+                op,
+                args: Tuple[torch.fx.node.Argument, ...],
+                kwargs: Dict[str, torch.fx.node.Argument],
+                meta: NodeMetadata,
+        ) -> ProxyValue:
+            if op == self.old_target:
+                return super().call_operator(self.new_target, args, kwargs, meta)
+            return super().call_operator(op, args, kwargs, meta)
 
     def __init__(
             self,
             compiler_opset_version: Optional[Dict[str, int]] = None,
             model_opset_version: Optional[Dict[str, int]] = None,
             op_upgraders: Optional[Dict[str, Tuple[str, ...]]] = None,
-            # can add a new TS API: torch._C._get_upgraders_entry_map()
+            # TODO(larryliu): can add a new TS API: torch._C._get_upgraders_entry_map()
     ):
         self.compiler_opset_version = compiler_opset_version
         self.model_opset_version = model_opset_version
@@ -710,8 +720,7 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
         impl_lib = Library("aten", "IMPL")
         impl_lib.impl("div__Scalar_0_3", div__Scalar_0_3, "CompositeImplicitAutograd")
         """
-        lib = Library("aten", "FRAGMENT")
-        impl_lib = Library("aten", "IMPL")
+
         upgrader_passes = []
 
         def register_old_op(name: str, schema: str, impl_str: str):
@@ -740,12 +749,17 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:     # upgrader in li
         return upgrader_passes
 
     def upgrade(self, exported_program: ep.ExportedProgram) -> ep.ExportedProgram:
+        """Run each upgrader and then retrace to decompose it."""
         args = [n.meta["val"] for n in exported_program.graph.nodes if n.op == "placeholder"]
-        inputs = tree_unflatten(args, exported_program.call_spec.in_spec)
-        from torch._dynamo import config
-        config.traceable_tensor_subclasses.add(FakeTensor)
+        args_real_tensors = [torch.ones(tuple(arg.size()), dtype=arg.dtype) if isinstance(arg, FakeTensor) else arg for arg in args]
+        inputs = tree_unflatten(args_real_tensors, exported_program.call_spec.in_spec)
+
         for _pass in self.upgrader_passes:
-            exported_program = exported_program.transform(_pass).transform(partial(export, args=inputs))
+            upgraded_program = exported_program.transform(_pass)
+            # NB: we have to retrace the graph_module instead of ep because of some failure.
+            exported_program = export(upgraded_program.graph_module, inputs, [])
+            exported_program.call_spec = upgraded_program.call_spec
+
         return exported_program
 
 
@@ -993,6 +1007,7 @@ class ExportedProgramDeserializer:
             .deserialize(serialized_exported_program.graph_module)
         )
         model_opset_version: Optional[Dict[str, int]] = serialized_exported_program.opset_version
+        self._validate_model_opset_version(model_opset_version)
         upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
 
         state_dict = deserialize_state_dict(serialized_state_dict)
@@ -1003,6 +1018,36 @@ class ExportedProgramDeserializer:
         )
         return upgrader.upgrade(exported_program)
 
+    def _validate_model_opset_version(self, model_opset_version: Optional[Dict[str, int]]):
+        """Compare model_opset_version with expected_opset_version and raise error if we can't resolve the version
+        difference.
+        E.g., model_opset_version = {"aten": 3, "custom": 4}
+        expected_opset_version = {"aten": 4, "custom": 4}
+        This means we can use an upgrader for ATen to reconcile the deserialized model.
+
+        The logic of this method:
+
+        For common op namespaces:
+        1. if model version < expected version, this case can be handled by upgraders.
+        2. if model version > expected version, we need downgraders but not implemented yet.
+        3. if model version == expected version, we don't need extra handling.
+
+        For op namespace only in model_opset_version, we should give a warning because it is missing from
+        expected_opset_version.
+        """
+        if not model_opset_version:
+            raise RuntimeError("Serialized model should have opset version.")
+        common_namespaces = {key for key in model_opset_version if key in self.expected_opset_version}
+        for namespace in common_namespaces:
+            assert isinstance(model_version := model_opset_version[namespace], int), f"model_opset_version value should be int, got {model_opset_version[namespace]}"
+            assert isinstance(compiler_version := self.expected_opset_version[namespace], int), f"expected_opset_version value should be int, got {self.expected_opset_version[namespace]}"
+            # TODO(larryliu0820): Add support for upgrader & downgrader
+            if model_version != compiler_version:
+                raise NotImplementedError(f"Model opset version {model_opset_version} doesn't match to compiler opset version {self.expected_opset_version}! Upgrader/downgrader is not implemented yet.")
+        for namespace in model_opset_version:
+            if namespace in common_namespaces:
+                continue
+            logging.warning(f"Compiler doesn't have a version table for op namespace: {namespace}. ")
 
 class EnumEncoder(json.JSONEncoder):
     def default(self, obj):
