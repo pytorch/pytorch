@@ -256,11 +256,14 @@ class _DDPSink(Function):
         ddp_weakref = ctx.ddp_weakref()
         reducer = ddp_weakref.reducer
         static_graph = ddp_weakref.static_graph
-        num_forward_calls = ddp_weakref.num_forward_calls
-        if static_graph and num_forward_calls == 1:
+        delay_ar_enqueued = (
+            static_graph and ddp_weakref._static_graph_delay_allreduce_enqueued
+        )
+        if static_graph and not delay_ar_enqueued:
             Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 reducer._delay_all_reduce
             )
+            ddp_weakref._static_graph_delay_allreduce_enqueued = True
 
         return (None, *grad_outputs)
 
@@ -1050,7 +1053,6 @@ class DistributedDataParallel(Module, Joinable):
         (4) Logging construction-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
-        self.num_forward_calls = 0
         # Notice, the parameters order is not in the order in which they are used,
         # especially in models with control flow.
         #
@@ -1384,7 +1386,6 @@ class DistributedDataParallel(Module, Joinable):
         if torch.is_grad_enabled() and self.require_backward_grad_sync:
             assert self.logger is not None
             self.logger.set_runtime_stats_and_log()
-            self.num_forward_calls += 1
             self.reducer.prepare_for_forward()
 
         # Notify the join context that this process has not joined, if
@@ -1469,7 +1470,7 @@ class DistributedDataParallel(Module, Joinable):
         # TODO: DDPSink is currently enabled for unused parameter detection and
         # static graph training for first iteration.
         if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and self.num_forward_calls == 1
+            self.static_graph and not self._static_graph_delay_allreduce_enqueued
         ):
             (
                 output_tensor_list,
@@ -2201,6 +2202,7 @@ class DistributedDataParallel(Module, Joinable):
             )
             return
         self.static_graph = True
+        self._static_graph_delay_allreduce_enqueued = False
         self.reducer._set_static_graph()
         assert self.logger is not None
         self.logger._set_static_graph()
