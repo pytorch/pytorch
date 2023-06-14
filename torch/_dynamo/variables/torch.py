@@ -239,8 +239,6 @@ class TorchVariable(VariableTracker):
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
         elif self.value is torch._functorch.eager_transforms.grad_impl:
-            # `torch.func.grad` doesn't respect outer context setting
-            # disabling the grad modes, so temporarily turn on `GradMode`
             op = TorchHigherOrderOperatorVariable(
                 self.value,
                 source=self.source,
