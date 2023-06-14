@@ -455,21 +455,27 @@ class Exporter:
         graph_module = pre_export_passes(self.options, graph_module, updated_model_args)
 
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-            graph_building,
+            graph_building as onnxscript_graph_building,
         )
 
-        onnxscript_graph = graph_building.TorchScriptGraph()
+        onnxscript_graph = onnxscript_graph_building.TorchScriptGraph()
 
         from torch.onnx._internal.fx import fx_onnx_interpreter
 
-        fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
-            onnxscript_graph,
-            graph_module,
-            self.options.onnxfunction_dispatcher,
-            self.options.diagnostic_context,
-            self.options.op_level_debug,
+        fx_onnx_interpreter_ctx = fx_onnx_interpreter.FxOnnxInterpreterContext(
+            torchscript_tracer=onnxscript_graph_building.TorchScriptTracingEvaluator(
+                onnxscript_graph
+            ),
+            onnxscript_graph=onnxscript_graph,
+            fx_graph_module=graph_module,
+            fx_name_to_onnxscript_value={},
         )
-        fx_interpreter.run()
+        fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
+            onnxfunction_dispatcher=self.options.onnxfunction_dispatcher,
+            diagnostic_context=self.options.diagnostic_context,
+            op_level_debug=self.options.op_level_debug,
+        )
+        fx_interpreter.run(fx_onnx_interpreter_ctx)
 
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)

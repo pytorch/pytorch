@@ -5,6 +5,7 @@ import operator
 import re
 import types
 import warnings
+from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
@@ -25,6 +26,7 @@ def _fx_node_to_onnx_message_formatter(
     fn: Callable,
     self,
     node: torch.fx.Node,
+    context: FxOnnxInterpreterContext,
     *args,
     **kwargs,
 ) -> str:
@@ -305,72 +307,69 @@ def _wrap_fx_args_as_onnxscript_args(
     return onnxscript_args, onnxscript_kwargs
 
 
+@dataclass
+class FxOnnxInterpreterContext:
+    """Context class to be used with FxOnnxInterpreter
+
+    The main goal is to allow access to many arguments from a single point,
+    freezing FxOnnxInterpreter.OPERATOR() API
+
+    The following arguments hold or depend on current export state:
+        * fx_name_to_onnxscript_value
+        * onnxscript_graph
+        * fx_graph_module and
+        * torchscript_tracer
+    """
+
+    torchscript_tracer: onnxscript_graph_building.TorchScriptTracingEvaluator
+    onnxscript_graph: onnxscript_graph_building.TorchScriptGraph
+    fx_graph_module: torch.fx.GraphModule
+    # At `run`, a TorchScript graph is augmented to
+    # represent the input FX graph with ONNX symbols (e.g., onnx::add).
+    # To connect the values to nodes in the TorchScript graph, we maintain
+    # fx_name_to_onnxscript_value. Basically, we want to translate
+    #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
+    # to
+    #   fx_name_to_onnxscript_value[fx_tensor_x.name] -> onnx_node_1 -> fx_name_to_onnxscript_value[fx_tensor_y.name]
+    fx_name_to_onnxscript_value: Dict[
+        str,
+        Union[
+            onnxscript_graph_building.TorchScriptTensor,
+            Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
+        ],
+    ]
+
+
 class FxOnnxInterpreter:
     """Process FX graph Node-by-Node to translate them into their ONNX counterparts.
 
     All FX nodes described by [FX Graph](https://pytorch.org/docs/stable/fx.html#torch.fx.Graph) are supported.
     Similarly to [FX Interpreter pattern](https://pytorch.org/docs/stable/fx.html#torch.fx.Interpreter), each FX node
     must be implemented on its own method in this class.
+
+    Each operator's implementation returns either an `onnxscript.OnnxFunction` or
+    `onnxscript.TracedOnnxFunction` instance based on the dispatch algorithm. They can
+    also raise RuntimeError: If there are no overloaded functions available for the given FX node.
+
+    TODO: Convert methods to @staticmethod when the diagnosic system supports it
     """
 
     def __init__(
         self,
-        onnxscript_graph: onnxscript_graph_building.TorchScriptGraph,
-        graph_module: torch.fx.GraphModule,
-        onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
         diagnostic_context: diagnostics.DiagnosticContext,
-        op_level_debug: bool = False,
+        onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
+        op_level_debug: bool,
     ):
-        """Initialize the Dispatcher.
-
-        Args:
-
-            opset_version: The model opset version.
-        """
-        self.onnxscript_graph = onnxscript_graph
-        self.graph_module = graph_module
-        self.onnxfunction_dispatcher = onnxfunction_dispatcher
-
-        # At `run`, a TorchScript graph is augmented to
-        # represent the input FX graph with ONNX symbols (e.g., onnx::add).
-        # To connect the values to nodes in the TorchScript graph, we maintain
-        # fx_name_to_onnxscript_value. Basically, we want to translate
-        #   fx_tensor_x (type: torch.fx.Node) -> fx_node_1 -> fx_tensor_y (type: torch.fx.Node)
-        # to
-        #   fx_name_to_onnxscript_value[fx_tensor_x.name] -> onnx_node_1 -> fx_name_to_onnxscript_value[fx_tensor_y.name]
-
-        self.fx_name_to_onnxscript_value: Dict[
-            str,
-            Union[
-                onnxscript_graph_building.TorchScriptTensor,
-                Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
-            ],
-        ] = {}
-
-        self.tracer = None
-        self.op_level_debug = op_level_debug
         self.diagnostic_context = diagnostic_context
-
-        # TODO: Refactor where/how onnxscript_graph is store/passed in
-        self.tracer = onnxscript_graph_building.TorchScriptTracingEvaluator(
-            self.onnxscript_graph
-        )
+        self.onnxfunction_dispatcher = onnxfunction_dispatcher
+        self.op_level_debug = op_level_debug
 
     @_beartype.beartype
-    def run(self):
-        """Analyze the specified FX node and trigger the ONNX translation for it.
+    def run(self, context: FxOnnxInterpreterContext):
+        """Analyze all FX nodes and trigger their ONNX translation.
 
         Args:
-            node: The TorchFX node to dispatch the function for.
-            onnx_args: The arguments of the ONNX function.
-            onnx_kwargs: The keyword arguments of the ONNX function.
-            diagnostic_context: The diagnostic context to use for reporting errors.
-
-        Returns:
-            Either an `onnxscript.OnnxFunction` or `onnxscript.TracedOnnxFunction` instance based on the dispatch algorithm.
-
-        Raises:
-            RuntimeError: If there are no overloaded functions available for the given FX node.
+            context: Context each FX node method can use during ONNX translation
         """
 
         # TODO: Fix FakeTensorMode limitation asap
@@ -381,23 +380,23 @@ class FxOnnxInterpreter:
         # with FakeTensorMode.
         with torch.utils._mode_utils.no_dispatch():
             # node_fixed_shape is only used on op_level_debug purpose.
-            for node in self.graph_module.graph.nodes:
+            for node in context.fx_graph_module.graph.nodes:
                 # Dispatch to ONNX op through OpSchema. The input argument dtypes are compared to
                 # function signature in OpSchema, and find the best matched overload.
                 # TODO(titaiwang): diagnostic rules.
 
                 if node.op == "placeholder":
-                    self.placeholder(node)
+                    self.placeholder(node, context)
                 elif node.op == "get_attr":
-                    self.get_attr(node)
+                    self.get_attr(node, context)
                 elif node.op == "call_function":
-                    self.call_function(node)
+                    self.call_function(node, context)
                 elif node.op == "call_method":
-                    self.call_method(node)
+                    self.call_method(node, context)
                 elif node.op == "call_module":
-                    self.call_module(node)
+                    self.call_module(node, context)
                 elif node.op == "output":
-                    self.output(node)
+                    self.output(node, context)
                 else:
                     raise RuntimeError(
                         f"Found node type not defined in torch.fx: {node.op}"
@@ -422,17 +421,18 @@ class FxOnnxInterpreter:
         diagnostics.rules.fx_node_to_onnx,
         diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
     )
-    def placeholder(self, node: torch.fx.Node):
+    @_beartype.beartype
+    def placeholder(self, node: torch.fx.Node, context: FxOnnxInterpreterContext):
         # Input of graph.
         # The node.meta["val"] is generated by FakeTensorProp.
         # NOTE: add_input() intends to create nodes with shape/type
         fake_tensor = node.meta.get("val", None)
         if fake_tensor is None:
-            output = self.onnxscript_graph.add_input(
+            output = context.onnxscript_graph.add_input(
                 input_name=None,
             )
         else:
-            output = self.onnxscript_graph.add_input(
+            output = context.onnxscript_graph.add_input(
                 input_name=node.name,
                 shape=fake_tensor.shape,
                 dtype=fake_tensor.dtype,
@@ -444,18 +444,19 @@ class FxOnnxInterpreter:
         assert isinstance(output, onnxscript_graph_building.TorchScriptTensor)
         assert isinstance(output, onnxscript.tensor.Tensor)
 
-        self.fx_name_to_onnxscript_value[node.name] = output
+        context.fx_name_to_onnxscript_value[node.name] = output
 
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_node_to_onnx,
         diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
     )
-    def call_function(self, node: torch.fx.Node):
+    @_beartype.beartype
+    def call_function(self, node: torch.fx.Node, context: FxOnnxInterpreterContext):
         # aten ops and other stateless functions.
         if node.target == operator.getitem and isinstance(
-            self.fx_name_to_onnxscript_value[node.args[0].name], tuple  # type: ignore[union-attr,index]
+            context.fx_name_to_onnxscript_value[node.args[0].name], tuple  # type: ignore[union-attr,index]
         ):
-            onnx_tensor_tuple = self.fx_name_to_onnxscript_value[node.args[0].name]  # type: ignore[union-attr,index]
+            onnx_tensor_tuple = context.fx_name_to_onnxscript_value[node.args[0].name]  # type: ignore[union-attr,index]
             index = node.args[1]
             output = onnx_tensor_tuple[index]  # type: ignore[index]
             assert (
@@ -465,7 +466,7 @@ class FxOnnxInterpreter:
                 output, (onnxscript_graph_building.TorchScriptTensor, tuple)
             ), type(output)
 
-            self.fx_name_to_onnxscript_value[node.name] = output
+            context.fx_name_to_onnxscript_value[node.name] = output
             return
 
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
@@ -474,8 +475,8 @@ class FxOnnxInterpreter:
         onnx_args, onnx_kwargs = _wrap_fx_args_as_onnxscript_args(
             complete_args,
             complete_kwargs,
-            self.fx_name_to_onnxscript_value,
-            self.tracer,
+            context.fx_name_to_onnxscript_value,
+            context.torchscript_tracer,
         )
 
         # Dispatch to ONNX op through OpShema. The input argument dtypes are compared to
@@ -488,7 +489,7 @@ class FxOnnxInterpreter:
             diagnostic_context=self.diagnostic_context,
         )
 
-        with onnxscript.evaluator.default_as(self.tracer):
+        with onnxscript.evaluator.default_as(context.torchscript_tracer):
             output: Union[  # type: ignore[no-redef]
                 onnxscript_graph_building.TorchScriptTensor,
                 Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
@@ -533,20 +534,25 @@ class FxOnnxInterpreter:
                 diagnostic.level = diagnostics.levels.ERROR
             else:
                 op_validation.validate_op_between_ort_torch(
-                    self.diagnostic_context, node, symbolic_fn, torch_args, torch_kwargs
+                    self.diagnostic_context,
+                    node,
+                    symbolic_fn,
+                    torch_args,
+                    torch_kwargs,
                 )
-        self.fx_name_to_onnxscript_value[node.name] = output
+        context.fx_name_to_onnxscript_value[node.name] = output
 
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_node_to_onnx,
         diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
     )
-    def output(self, node: torch.fx.Node):
+    @_beartype.beartype
+    def output(self, node: torch.fx.Node, context: FxOnnxInterpreterContext):
         if isinstance(node.args[0], torch.fx.Node):
-            onnx_tensor_or_tensor_tuple = self.fx_name_to_onnxscript_value[
+            onnx_tensor_or_tensor_tuple = context.fx_name_to_onnxscript_value[
                 node.args[0].name
             ]
-            self.onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
+            context.onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
         else:
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
@@ -555,14 +561,17 @@ class FxOnnxInterpreter:
                 assert isinstance(
                     arg, torch.fx.Node
                 ), f"arg must be a torch.fx.Node, not {type(arg)}"
-                onnx_tensor_or_tensor_tuple = self.fx_name_to_onnxscript_value[arg.name]
-                self.onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
+                onnx_tensor_or_tensor_tuple = context.fx_name_to_onnxscript_value[
+                    arg.name
+                ]
+                context.onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
 
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_node_to_onnx,
         diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
     )
-    def call_method(self, node: torch.fx.Node):
+    @_beartype.beartype
+    def call_method(self, node: torch.fx.Node, context: FxOnnxInterpreterContext):
         # TODO(wechi): Support call_method.
         raise RuntimeError("call_method is not supported yet.")
 
@@ -570,7 +579,8 @@ class FxOnnxInterpreter:
         diagnostics.rules.fx_node_to_onnx,
         diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
     )
-    def call_module(self, node: torch.fx.Node):
+    @_beartype.beartype
+    def call_module(self, node: torch.fx.Node, context: FxOnnxInterpreterContext):
         # TODO(wechi): Support call_module.
         raise RuntimeError("call_module is not supported yet.")
 
@@ -578,8 +588,9 @@ class FxOnnxInterpreter:
         diagnostics.rules.fx_node_to_onnx,
         diagnostic_message_formatter=_fx_node_to_onnx_message_formatter,
     )
-    def get_attr(self, node: torch.fx.Node):
-        current_attr = self.graph_module
+    @_beartype.beartype
+    def get_attr(self, node: torch.fx.Node, context: FxOnnxInterpreterContext):
+        current_attr = context.fx_graph_module
         sub_attr_names = node.target.split(".")  # type: ignore[union-attr]
         # If node.targe is "conv.weight", the following loop first
         # assigns fx_module_with_metadata.conv to current_attr, and then
@@ -592,10 +603,10 @@ class FxOnnxInterpreter:
                 )
             current_attr = getattr(current_attr, sub_attr_name)
 
-        input_ = self.onnxscript_graph.add_initializer(node.name, current_attr)
+        input_ = context.onnxscript_graph.add_initializer(node.name, current_attr)
 
         assert isinstance(input_, onnxscript_graph_building.TorchScriptTensor)
         assert isinstance(input_, onnxscript.tensor.Tensor)
-        self.fx_name_to_onnxscript_value[node.name] = input_
+        context.fx_name_to_onnxscript_value[node.name] = input_
         # FIXME: Refactor logic getting 'current_attr'.
         assert isinstance(current_attr, torch.Tensor)
