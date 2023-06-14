@@ -3311,9 +3311,7 @@ Failed Source Guards:
             """
             Returns an integer constant being added at the top-level of this expression.
             """
-            if isinstance(expr, sympy.Integer):
-                return expr
-            elif isinstance(expr, sympy.Add):
+            if isinstance(expr, sympy.Add):
                 for a in expr.args:
                     if isinstance(a, sympy.Integer):
                         return a
@@ -3322,7 +3320,7 @@ Failed Source Guards:
         # Move any constants in the left-hand side to the right-hand side.
         if isinstance(expr, sympy.Rel):
             lhs_const = get_added_const(expr.lhs)
-            if lhs_const is not None and lhs_const != 0 :
+            if lhs_const is not None:
                 expr = type(expr)(expr.lhs - lhs_const, expr.rhs - lhs_const)  # type: ignore[arg-type]
 
         # a // b == expr
@@ -3657,6 +3655,16 @@ Failed Source Guards:
 
         return concrete_val
 
+    # Refines the ranges of the variables present in 'guard'.
+    #
+    # This function tries to refine the range of the variables inside
+    # 'guard' by reasoning about it. Specifically, when 'guard' is a
+    # 'sympy.Relational' operation.
+    #
+    # It does mainly 3 things:
+    #   1. Tries to isolate a variable in the left-hand side
+    #   2. Compute the value range of the right-hand side
+    #   3. Update the value range of the variable, if better
     def refine_ranges(self, guard: ShapeGuard) -> None:
         def simplify(expr: sympy.Expr) -> sympy.Expr:
             """
@@ -3694,14 +3702,14 @@ Failed Source Guards:
             # First, try to simplify the left-hand side.
             expr = simplify_until(expr)
 
-            # Filter the guards that:
+            # Filter the guards that are not:
             #   1. are relational operations
             #   2. have a symbol as the left-hand side
             #   3. already have a range
-            if (
-                not isinstance(expr, sympy.Rel)
-                or not isinstance(expr.lhs, sympy.Symbol)
-                or expr.lhs not in self.var_to_range
+            if not (
+                isinstance(expr, sympy.Rel)
+                and isinstance(expr.lhs, sympy.Symbol)
+                and expr.lhs in self.var_to_range
             ):
                 continue
 
@@ -3741,8 +3749,10 @@ Failed Source Guards:
             if vr == ValueRanges(lower, upper):
                 continue
 
+            # Updates the range and the guards corresponding to each bound of the symbol.
             self.var_to_range[symbol] = ValueRanges(lower, upper)
             self.var_to_guards[symbol] = (lower_guard, upper_guard)
+            # Clears the cache, since this update can change the result.
             self._maybe_evaluate_static.cache_clear()
 
 def _is_int(expr):
