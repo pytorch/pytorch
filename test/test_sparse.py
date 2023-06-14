@@ -26,6 +26,8 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
+from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
+
 
 def _op_supports_any_sparse(op):
     return (op.supports_sparse
@@ -3743,8 +3745,8 @@ class TestSparse(TestSparseBase):
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
 
     @coalescedonoff
-    # NOTE: addcmul_out is not implemented for bool and half.
-    @dtypes(*all_types_and_complex_and(torch.bfloat16))
+    # NOTE: addcmul_out is not implemented for bool.
+    @dtypes(*all_types_and_complex_and(torch.bfloat16, torch.float16))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_sparse_mul(self, device, dtype, coalesced):
         self._test_mul_skips(device, dtype, coalesced)
@@ -4781,6 +4783,10 @@ class TestSparseAny(TestCase):
             self.skipTest(f'{layout} is not supported in `{op.name}` OpInfo definition. Skipping!')
 
         for sample in op.sample_inputs_sparse(layout, device, dtype):
+            if validate_sample_input_sparse(op, sample, check_validate=False) is not sample:
+                # that is, the validation returns the sparse sample
+                # wrapped within ErrorInput instance
+                continue
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
             batch_dim = t_inp.dim() - t_inp.dense_dim() - t_inp.sparse_dim()
             result = op.op(t_inp, *t_args, **t_kwargs)
