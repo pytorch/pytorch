@@ -6,9 +6,8 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.testing import expectedFailureDynamic
 import torch.onnx.operators
-from torch._dynamo.testing import same
+from torch._dynamo.testing import expectedFailureDynamic, same
 
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
