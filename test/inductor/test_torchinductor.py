@@ -5902,6 +5902,10 @@ class CommonTemplate:
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
+        # TODO: support cuda path.
+        if self.device == "cuda":
+            raise unittest.SkipTest("sqrt dynamic shapes only supports cpu")
+
         class Model(torch.nn.Module):
             def __init__(self):
                 super(Model, self).__init__()
