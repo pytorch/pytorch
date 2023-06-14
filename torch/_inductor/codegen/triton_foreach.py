@@ -112,6 +112,7 @@ class ForeachKernel(Kernel):
                 import triton.language as tl
                 from torch._inductor.triton_heuristics import foreach
                 from torch._inductor.utils import instance_descriptor
+                from torch._inductor import triton_helpers
             """
         )
         argdefs, _, _ = self.args.python_argdefs()
