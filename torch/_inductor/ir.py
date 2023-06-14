@@ -3233,7 +3233,7 @@ class FallbackKernel(ExternKernelAlloc):
             self.kernel = (
                 f"at::{op_overload_packet.__name__}"
                 if V.graph.cpp_wrapper
-                else f"aten.{op_overload_packet.__name__}"
+                else f"aten.{kernel.__name__}"
             )
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
