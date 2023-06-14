@@ -1092,6 +1092,12 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
     return decorator
 
 
+# Run PyTorch tests with translation validation on.
+TEST_WITH_TV = os.getenv('PYTORCH_TEST_WITH_TV') == '1'
+
+if TEST_WITH_TV:
+    torch._dynamo.config.translation_validation = True
+
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
 # test case / configuration.
