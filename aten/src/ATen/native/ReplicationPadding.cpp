@@ -17,7 +17,7 @@
 #include <ATen/ops/replication_pad2d_native.h>
 #include <ATen/ops/replication_pad3d_backward_native.h>
 #include <ATen/ops/replication_pad3d_native.h>
-#include <ATen/ops/empty.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 namespace at {
@@ -208,13 +208,10 @@ void replication_pad2d_backward_out_cpu_template(
       "gradOutput height unexpected. Expected: ", oheight, ", Got: ",
       gradOutput.size(dimh));
 
-  /* resize */
-  gradInput.resize_(input.sizes(), input.suggest_memory_format());
   if (gradInput.numel() == 0) {
     return;
   }
 
-  gradInput.zero_();
   replication_pad2d_backward_kernel(kCPU, gradInput, gradOutput, paddingSize);
 }
 
@@ -261,13 +258,10 @@ void replication_pad3d_backward_out_cpu_template(
       "gradOutput depth unexpected. Expected: ", odepth, ", Got: ",
       gradOutput.size(dimd));
 
-  /* resize */
-  gradInput.resize_(input.sizes(), input.suggest_memory_format());
   if (gradInput.numel() == 0) {
     return;
   }
 
-  gradInput.zero_();
   replication_pad3d_backward_kernel(kCPU, gradInput, gradOutput, paddingSize);
 }
 
@@ -304,6 +298,8 @@ Tensor& replication_pad2d_backward_out_cpu(const Tensor& gradOutput,
     IntArrayRef paddingSize,
     Tensor& gradInput)
 {
+  gradInput.resize_as_(input, input.suggest_memory_format());
+  gradInput.zero_();
   replication_pad2d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -314,7 +310,7 @@ Tensor replication_pad2d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::empty({0}, input.options());
+  auto gradInput = at::zeros_like(input, input.suggest_memory_format());
   replication_pad2d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -334,6 +330,8 @@ Tensor& replication_pad3d_backward_out_cpu(const Tensor& gradOutput,
     IntArrayRef paddingSize,
     Tensor& gradInput)
 {
+  gradInput.resize_as_(input, input.suggest_memory_format());
+  gradInput.zero_();
   replication_pad3d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -344,7 +342,7 @@ Tensor replication_pad3d_backward_cpu(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::empty({0}, input.options());
+  auto gradInput = at::zeros_like(input, input.suggest_memory_format());
   replication_pad3d_backward_out_cpu_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
