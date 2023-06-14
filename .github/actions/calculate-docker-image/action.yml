@@ -50,6 +50,9 @@ runs:
           DOCKER_TAG=$(echo "${DOCKER_IMAGE_NAME}" | awk -F '[:,]' '{print $2}')
           echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
           echo "docker-image=${DOCKER_IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
+
+          EXTRACTED_DOCKER_IMAGE_NAME=$(echo ${DOCKER_IMAGE_NAME#"${DOCKER_IMAGE_ECR_PREFIX}/"} | awk -F '[:,]' '{print $1}')
+          echo "docker-image-name=${EXTRACTED_DOCKER_IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
         else
           DOCKER_IMAGE_BASE="${DOCKER_IMAGE_ECR_PREFIX}/${DOCKER_IMAGE_NAME}"
 
@@ -63,6 +66,7 @@ runs:
             echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
             echo "docker-image=${DOCKER_IMAGE_BASE}:${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
           fi
+          echo "docker-image-name=${DOCKER_IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
         fi
 
     - name: Check if image should be built
@@ -111,7 +115,7 @@ runs:
     - name: Build and push docker image
       if: inputs.always-rebuild || steps.check.outputs.rebuild
       env:
-        IMAGE_NAME: ${{inputs.docker-image-name}}
+        IMAGE_NAME: ${{ steps.calculate-tag.outputs.docker-image-name }}
         DOCKER_SKIP_S3_UPLOAD: "1"
         # Skip push if we don't need it, or if specified in the inputs
         DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || inputs.skip_push }}
