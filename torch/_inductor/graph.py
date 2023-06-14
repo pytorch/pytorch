@@ -195,9 +195,9 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = user_visible_outputs
-        self.cache_key: str = ""
-        self.cache_path: str = ""
-        self.cache_linemap: List[Tuple[int, str]] = []
+        self.cache_key: str = ""  # This is the cache key for the compiled artifact
+        self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
+        self.cache_linemap: List[Tuple[int, str]] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
 
     def decide_layout_opt(self) -> bool:
         """

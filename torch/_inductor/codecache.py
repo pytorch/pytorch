@@ -245,10 +245,13 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code):
+def code_hash(code, extra=""):
+    hashing_str = code
+    if extra != "":
+        hashing_str = hashing_str + "||" + extra
     return (
         "c"
-        + base64.b32encode(hashlib.sha256(code.encode("utf-8")).digest())[:51]
+        + base64.b32encode(hashlib.sha256(hashing_str.encode("utf-8")).digest())[:51]
         .decode("utf-8")
         .lower()
     )
@@ -290,7 +293,16 @@ def get_path(basename: str, extension: str):
     return basename, subdir, path
 
 
-def write(content: Union[str, bytes], key: str, extension: str):
+def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
+    assert hash_type in ["code", "cubin"], "Hash type not supported"
+    if hash_type == "code":
+        return code_hash(content, extra)
+    if hash_type == "cubin":
+        return code_hash(repr(content))
+
+
+def write(content: Union[str, bytes], extension: str, extra="", hash_type: str="code"):
+    key: str = get_hash(content, extra, hash_type)
     basename, subdir, path = get_path(key, extension)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -523,7 +535,7 @@ cdll.LoadLibrary("__lib_path__")
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
-        key, input_path = write(VecISA._avx_code, code_hash(VecISA._avx_code), "cpp")
+        key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -746,7 +758,7 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        _, path = write(cubin, code_hash(repr(cubin)), "cubin")
+        _, path = write(cubin, "cubin", hash_type="cubin")
         params["cubin_path"] = path
         cls.cache[key] = params
 
@@ -768,8 +780,8 @@ class AotCodeCache:
         )
         key, input_path = write(
             source_code,
-            code_hash(source_code + cpp_command),
             "cpp",
+            extra=cpp_command
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -828,8 +840,8 @@ class CppCodeCache:
         cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         key, input_path = write(
             source_code,
-            code_hash(source_code + cpp_command),
             "cpp",
+            extra=cpp_command
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -860,11 +872,11 @@ class PyCodeCache:
 
     @classmethod
     def write(cls, source_code, extra=""):
-        return write(source_code, code_hash(source_code + extra), "py")
+        return write(source_code, "py", extra=extra)
 
     @classmethod
     def load(cls, source_code, extra="", linemap=()):
-        key, path = write(source_code, code_hash(source_code + extra), "py")
+        key, path = self.write(source_code, "py", extra=extra)
         return cls.load_by_key_path(key, path, linemap)
 
     @classmethod
