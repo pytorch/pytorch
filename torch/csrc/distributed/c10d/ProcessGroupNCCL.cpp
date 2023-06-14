@@ -268,8 +268,7 @@ std::string getExceptionMsgFromExceptionPtr(
   }
 }
 
-inline void errorIfCapturingNonCapturableNCCL() {
-  auto status = c10::cuda::currentStreamCaptureStatusMayInitCtx();
+inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
   // parentheses avoid some compiler warnings
   static const uint64_t min_version =
       (((uint64_t)2) << 32) + (((uint64_t)9) << 16) + ((uint64_t)6);
@@ -1441,7 +1440,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
 
-  if (coalescing_state_ & CoalColl) {
+  c10::cuda::CaptureStatus capture_status =
+      c10::cuda::currentStreamCaptureStatusMayInitCtx();
+
+  if ((coalescing_state_ & CoalColl) &&
+      capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
     // TODO: it seems we never enqueue work for single send/recv or batch P2P,
     // see the `pointToPoint` function. This should be fixed. Otherwise, we risk
@@ -1460,7 +1463,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle) {
-  errorIfCapturingNonCapturableNCCL();
+  c10::cuda::CaptureStatus capture_status =
+      c10::cuda::currentStreamCaptureStatusMayInitCtx();
+  errorIfCapturingNonCapturableNCCL(capture_status);
 
   // Bump collective counter
   seq_++;
@@ -1603,7 +1608,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   work->numelIn_ = inputs[0].numel();
   work->numelOut_ = outputs[0].numel();
 
-  if (!coalescing_state_) {
+  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
   }
 

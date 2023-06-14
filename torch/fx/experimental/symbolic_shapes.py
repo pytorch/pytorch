@@ -55,6 +55,7 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
+    "is_concrete_bool",
 ]
 
 # These are modules that contain generic code for interacting with ShapeEnv
@@ -163,6 +164,23 @@ def is_concrete_int(a: Union[int, SymInt]):
 
     return False
 
+def is_concrete_bool(a: Union[bool, SymBool]):
+    r""" Utility to check if underlying object
+    in SymBool is concrete value. Also returns
+    true if integer is passed in.
+    Args:
+        a (SymBool or bool): Object to test if it bool
+    """
+    assert isinstance(a, (SymBool, bool))
+
+    if isinstance(a, bool):
+        return True
+
+    if isinstance(a.node.expr, (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse)):
+        return True
+
+    return False
+
 # Returns True if every size dim on the tensor has a hint
 # TODO: Should this include strides too?  For now it doesn't matter,
 # that's quite an obscure case
@@ -172,18 +190,23 @@ def tensor_has_hints(t):
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
         return val.node.expr.free_symbols
+    elif isinstance(val, sympy.Expr):
+        return val.free_symbols
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
+        return (
+            free_symbols(val.size()) |
+            free_symbols(val.stride()) |
+            free_symbols(val.storage_offset())
+        )
+    elif isinstance(val, (tuple, list)):
         r = set()
-        for s in val.size():
+        for s in val:
             r |= free_symbols(s)
-        for s in val.stride():
-            r |= free_symbols(s)
-        r |= free_symbols(val.storage_offset())
         return r
     else:
-        raise AssertionError(f"cannot compute free_symbols of {val}")
+        raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -278,6 +301,14 @@ def guard_scalar(a):
     else:
         raise AssertionError(f"unrecognized scalar {a}")
 
+def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
+    if r := shape_env.var_to_range.get(s, None):
+        shape_env.var_to_range[s] = ValueRanges(
+            builtins.max(r.lower, min), builtins.min(r.upper, max)
+        )
+    else:
+        shape_env.var_to_range[s] = ValueRanges(min, max)
+
 # inclusive both ways
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     """
@@ -328,7 +359,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
             # shape_env's var_to_range
             sym_integer = sympy.Integer(a)
             shape_env = fake_mode.shape_env
-            shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
+            _constrain_symbol_range(shape_env, sym_integer, min, max)
             shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
         return
@@ -343,11 +374,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    r = a.node.shape_env.var_to_range[a.node.expr]
-    a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
-        builtins.max(r.lower, min), builtins.min(r.upper, max)
-    )
-
+    _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
 
 def constrain_unify(a, b):
     """
@@ -1499,7 +1526,7 @@ class DimConstraints:
     Solutions are "static" values or simplified "dynamic" constraints.
     """
 
-    def __init__(self, symbol_to_source, var_to_val):
+    def __init__(self, symbol_to_source, var_to_val, marked_dynamic):
         # We try to solve systems of inequalities with 1 free variable.
         self._univariate_inequalities: Dict[sympy.Symbol, Set[sympy.Expr]] = defaultdict(set)
         # Among them, we prioritize solving for a free variable that has equalities.
@@ -1537,6 +1564,9 @@ class DimConstraints:
 
         # inconsistencies found on substituting with concrete values / static solutions
         self._inconsistencies: List[str] = []
+
+        # symbols that are marked dynamic
+        self._marked_dynamic = marked_dynamic
 
     def rewrite_with_congruences(self, s, expr):
         """
@@ -1686,7 +1716,35 @@ class DimConstraints:
             self._inconsistencies.clear()
             raise ValueError(f"The following inconsistencies were found:\n{msg}")
 
-    def solve(self):
+    def _force_specialization(self, s):
+        val = self._var_to_val[s]
+        self._static_results.add(f"{self._dcp.symbol_to_source[s][0].name()} == {val}")
+        self._substitutions[s] = val
+
+    def specialize_divisor_symbols(self):
+        for expr in self._multivariate_inequalities:
+            for atom in expr.atoms(FloorDiv, sympy.Mod):
+                _, divisor = atom.args
+                for s in divisor.free_symbols:
+                    self._force_specialization(s)
+
+        multivariate_inequalities = self._multivariate_inequalities
+        self._multivariate_inequalities = set()
+        for expr in multivariate_inequalities:
+            self.add(expr.subs(self._substitutions))
+        self.raise_inconsistencies()
+        self._univariate_inequalities = {
+            s: exprs
+            for s, exprs in self._univariate_inequalities.items()
+            if s not in self._substitutions
+        }
+        self._congruences = {
+            s: congruences
+            for s, congruences in self._congruences.items()
+            if s not in self._substitutions
+        }
+
+    def solve(self, disable_congruences=True):
         self.raise_inconsistencies()
         # as long as there are symbols with equalities, solve for them
         # NOTE(avik): this is guaranteed to terminate (#iterations <= #symbols)
@@ -1711,11 +1769,20 @@ class DimConstraints:
                 self.add(expr.subs(s, self._substitutions[s]))
             self.raise_inconsistencies()
 
-            # simplify symbolic equivalences: some of them will now become specializations!
-            symbolic_equivalences = self._symbolic_equivalences
-            self._symbolic_equivalences = []
-            for source, expr in symbolic_equivalences:
-                self.add_equality(source, expr.subs(s, self._substitutions[s]))
+        self.specialize_divisor_symbols()
+
+        # solve linear congruences
+        # NOTE(avik): We do not need to solve them for symbols that have already been specialized.
+        reduced_congruences = self.reduce_congruences()
+        for s, congruences in reduced_congruences.items():
+            for congruence in congruences:
+                # any congruence that cannot be checked becomes a dynamic constraint as well
+                if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):
+                    if disable_congruences:
+                        self._force_specialization(s)
+                        self._univariate_inequalities.pop(s, None)
+                    else:
+                        self._dynamic_results.add(self._dcp.doprint(sympy.Eq(congruence, 0)))
 
         # remaining symbols have only pure inequalities (no equalities)
         for s, exprs in self._univariate_inequalities.items():
@@ -1732,18 +1799,25 @@ class DimConstraints:
                 for expr in exprs:
                     self._dynamic_results.add(self._dcp.doprint(expr))
 
+        # simplify symbolic equivalences: some of them will now become specializations!
+        symbolic_equivalences = self._symbolic_equivalences
+        self._symbolic_equivalences = []
+        for source, expr in symbolic_equivalences:
+            self.add_equality(source, expr.subs(self._substitutions))
+
         # remaining symbolic equivalences become dynamic equality constraints
         for source, expr in self._symbolic_equivalences:
             self._dynamic_results.add(f"{self._dcp.print_source(source)} == {self._dcp.doprint(expr)}")
 
-        # solve linear congruences
-        # NOTE(avik): We do not need to solve them for symbols that have already been specialized.
-        reduced_congruences = self.reduce_congruences()
-        for s, congruences in reduced_congruences.items():
-            for congruence in congruences:
-                # any congruence that cannot be checked becomes a dynamic constraint as well
-                if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):
-                    self._dynamic_results.add(self._dcp.doprint(sympy.Eq(congruence, 0)))
+    def forced_specializations(self):
+        return "\n".join([
+            (
+                f"\t{self._dcp.symbol_to_source[s][0].name()}, which was marked dynamic, "
+                f"must be specialized to {val}."
+            )
+            for s, val in self._substitutions.items()
+            if s in self._marked_dynamic
+        ])
 
     def prettify_results(self, original_signature: inspect.Signature):
         # Note: Model inputs are wrapped as LocalSource in dynamo.
@@ -1978,6 +2052,14 @@ class ShapeEnv:
                 dynamic_dims.append(r)
             dynamic_dims = [DimDynamic.DUCK] * dim
 
+        # TODO: make this configurable from outside policy; we made a policy
+        # decision here where if all sizes are static, we are going to
+        # specialize all of the inner strides/offset too. We don't have to
+        # do this, and arguably we should ALWAYS allow for dynamic offset,
+        # this is cheap.
+        # TODO: This should be DYNAMIC, using DUCK for BC
+        dynamic_strides_offset = DimDynamic.STATIC if all(r == DimDynamic.STATIC for r in dynamic_dims) else DimDynamic.DUCK
+
         assert len(dynamic_dims) == dim
         assert len(constraint_dims) == dim
 
@@ -2013,8 +2095,7 @@ class ShapeEnv:
                 stride[i] = self.create_symbol(
                     val,
                     TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    # TODO: This should be DYNAMIC, using DUCK for BC
-                    dynamic_dim=DimDynamic.DUCK,
+                    dynamic_dim=dynamic_strides_offset,
                     constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
@@ -2029,8 +2110,7 @@ class ShapeEnv:
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex.storage_offset(),
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            # TODO: This should be DYNAMIC, using DUCK for BC
-            dynamic_dim=DimDynamic.DUCK,
+            dynamic_dim=dynamic_strides_offset,
             constraint_dim=None,
         ), hint=ex.storage_offset())
         return sym_sizes, sym_stride, sym_storage_offset
@@ -2045,6 +2125,9 @@ class ShapeEnv:
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint))
 
+    def create_symboolnode(self, sym: "sympy.Expr"):
+        return SymBool(SymNode(sym, self, bool, None))
+
     def create_unbacked_symfloat(self):
         symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
@@ -2055,13 +2138,13 @@ class ShapeEnv:
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
-        return SymInt(SymNode(symbol, self, int, None))
+        return self.create_symintnode(symbol, hint=None)
 
     def create_unbacked_symbool(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
-        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
+        return self.create_symboolnode(sympy.Eq(symbol, 1))
 
     def create_symbol(
         self,
@@ -2366,7 +2449,11 @@ class ShapeEnv:
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
-        self.dim_constraints = DimConstraints(symbol_to_source, self.var_to_val)
+        self.dim_constraints = DimConstraints(
+            symbol_to_source,
+            self.var_to_val,
+            set(symbol_to_constraints.keys()),
+        )
 
         if not _simplified:
             for source, expr in input_guards:
