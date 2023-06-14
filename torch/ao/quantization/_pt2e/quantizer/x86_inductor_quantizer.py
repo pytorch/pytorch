@@ -155,10 +155,6 @@ class X86InductorQuantizer(Quantizer):
         # can take precedence over single operator pattern in this way
         config = self.global_config
         self._annotate_conv2d(model, config)
-        for node in reversed(model.graph.nodes):
-            # one improvement is to register node annotators for each
-            # supported op type.
-            pass
 
         return model
 
@@ -180,7 +176,7 @@ class X86InductorQuantizer(Quantizer):
                 raise ValueError(f"{conv_node} is not an aten conv2d operator")
             # skip annotation if it is already annotated
             if _is_annotated([conv_node]):
-                return
+                continue
             input_qspec_map = {}
             input_node = conv_node.args[0]
             assert isinstance(input_node, Node)
@@ -196,6 +192,7 @@ class X86InductorQuantizer(Quantizer):
 
             conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
+                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
                 output_qspec=get_output_act_qspec(quantization_config),
                 _annotated=True
             )
