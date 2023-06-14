@@ -11,8 +11,8 @@ TEST(OperatorRegistrationTest, Add) {
     values[1] = EValue(at::ones({2, 3}));
     values[2] = EValue(int64_t(1));
     values[3] = EValue(at::zeros({2, 3}));
-    ASSERT_TRUE(hasOpsFn("aten::add.out"));
-    auto op = getOpsFn("aten::add.out");
+    ASSERT_TRUE(hasKernelFn("aten::add.out"));
+    auto op = getKernelFn("aten::add.out");
 
     EValue* kernel_values[4];
     for (size_t i = 0; i < 4; i++) {
@@ -33,8 +33,8 @@ TEST(OperatorRegistrationTest, CustomAdd3) {
     values[1] = EValue(at::ones({2, 3}));
     values[2] = EValue(at::ones({2, 3}));
     values[3] = EValue(at::zeros({2, 3}));
-    ASSERT_TRUE(hasOpsFn("custom::add_3.out"));
-    auto op = getOpsFn("custom::add_3.out");
+    ASSERT_TRUE(hasKernelFn("custom::add_3.out"));
+    auto op = getKernelFn("custom::add_3.out");
 
     EValue* kernel_values[4];
     for (size_t i = 0; i < 4; i++) {
