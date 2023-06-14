@@ -27,7 +27,7 @@ def is_symint_node(node):
     return "val" in node.meta and isinstance(node.meta['val'], torch.SymInt)
 
 def must_recompute(node):
-    return "recompute" in node.meta and node.meta["recompute"]
+    return node.meta.get("recompute", False)
 
 def has_recomputable_ops(fx_g):
     found = False
