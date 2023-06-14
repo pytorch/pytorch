@@ -469,7 +469,7 @@ def _flatten_optim_state_dict(
                     )
                 )
             else:
-                assert False, (
+                raise AssertionError(
                     f"The state of {key} is empty and the optimizer is not a "
                     "NamedOptimizer."
                 )
