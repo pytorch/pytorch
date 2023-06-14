@@ -5731,7 +5731,7 @@ def ___make_guard_fn():
         validator.add_source_expr(z0 > 5)
         validator.add_source_expr(z1 / 2 > z0)
 
-        # Solutions for output is a subset of the solutions for the input.
+        # Solutions for target is a subset of the solutions for the source.
         validator.add_target_expr(s0 > 20)
         validator.add_target_expr(s1 > s0**2)
 
@@ -5751,8 +5751,9 @@ def ___make_guard_fn():
         validator.add_source_expr(z0 > 5)
         validator.add_source_expr(z1 / 2 > z0)
 
-        # Solutions for output is a subset of the solutions for the input.
+        # Solutions for target is NOT a subset of the solutions for the source.
         validator.add_target_expr(s0 > 20)
+        # This expression is less restrictive than its counterpart.
         validator.add_target_expr(s1 > s0 + 2)
 
         r = validator.validate()

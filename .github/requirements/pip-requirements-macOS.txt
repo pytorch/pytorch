@@ -23,3 +23,4 @@ xdoctest==1.1.0
 filelock==3.6.0
 sympy==1.11.1
 pytest-cpp==2.3.0
+z3-solver==4.12.2.0

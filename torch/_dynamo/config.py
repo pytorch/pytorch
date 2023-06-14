@@ -237,7 +237,7 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 numpy_ndarray_as_tensor = False
 
 # Uses z3 for validating the guard optimizations transformations.
-translation_validation = True
+translation_validation = False
 
 
 def is_fbcode():

@@ -1437,6 +1437,29 @@ del func
 try:
     import z3
 
+    # Translation Validation for Dynamo guards
+    # ========================================
+    #
+    # Checks whether optimizations applied to the collected guards are
+    # valid. In other words, whether the guard function we actually run
+    # does not have false positives (unsound).
+    #
+    # In order to do so, we build the guards using 2 different information
+    # attached to each 'SymNode':
+    #   1. SymPy expressions
+    #   2. FX nodes
+    #
+    # SymPy expressions have implicit optimizations baked within itself,
+    # which may have a few bugs. On the other hand, we build the FX graph
+    # manually, with no optimizations enabled. This gives us access to
+    # the "ground truth".
+    #
+    # We then convert into Z3 expressions both the SymPy expressions
+    # (see [Note: SympyToZ3]) that reach 'ShapeEnv.produce_guards' function
+    # and the FX nodes (see [Note: PopulateValidator]) that go through
+    # 'ShapeEnv.evaluate_expr' function. Finally, we run the validation.
+    # (see [Note: TranslationValidator])
+
     # Implementation of Python semantics as Z3 expressions.
     #
     # Z3 Real-Int theory has operators with semantics that differ that of
@@ -1569,6 +1592,7 @@ try:
 
     # Processes an FX graph, populating the given validator.
     #
+    # [Note: PopulateValidator]
     # This class walks through each node in the FX graph, translating
     # them into the Z3 world.
     #
@@ -1600,6 +1624,7 @@ try:
 
     # Translates SymPy expressions into Z3 expressions.
     #
+    # [Note: SympyToZ3]
     # At the time of the translation, all free variables present in the
     # SymPy expression being translated must be already mapped to a Z3
     # integer variable.
@@ -1652,33 +1677,20 @@ try:
         def run(self, expr: sympy.Basic) -> z3.ExprRef:
             return sympy_interp(self, self._validator.symbols, expr)  # type: ignore[arg-type]
 
-    # Frontend class to Z3 validation.
+    # Dynamo guards translation validator.
     #
-    # Given:
-    # - Input: all the generated SymPy expressions (no optimizations applied)
-    # - Output: optimized SymPy expressions
+    # [Note: TranslationValidator]
+    # Verifies whether the guards issued by 'ShapeEnv.produce_guards' are sound.
+    # That is: whether those (target) guards only yield TRUE whenever the original,
+    # unoptimized, (source) guards yield TRUE.
     #
-    # Shows whether the transformations applied to the input expressions are
-    # sound. In other words, solves the following soundness problem:
+    # More concretely, given 'source' and 'target' guard expressions, we wish to
+    # check whether the following expression holds:
     #
-    # (for all possible assignments of the free variables)
+    # Not(And(source)) AND And(target)
     #
-    # "If the conjunction of the output expressions is true, is the conjunctions
-    # of the input expressions also true?"
-    #
-    # In practice: if there is any assignment of the free variables such that
-    # the conjunction of the inputs is FALSE but the conjunction of the outputs
-    # is TRUE, it would mean that an unsound transformation was applied at some
-    # point.
-    #
-    # That is exactly what this class does. Checks whether the following holds
-    # for any assignment of free variables:
-    #
-    # Not(And(Input)) AND And(Output)
-    #
-    # If the above equation is true, it means that there is a case where the
-    # generated guard (using the output expressions) is incorrectly true.
-    # Otherwise, it shows that the optimized output expressions is sound.
+    # i.e. whether there is an assignment of the free variables where the opposite
+    # happens: target is TRUE, but source is FALSE.
     class TranslationValidator:
         def __init__(self) -> None:
             # Mapping of SymPy symbols to Z3 integer variables.
