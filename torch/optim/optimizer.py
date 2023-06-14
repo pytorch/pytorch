@@ -4,6 +4,7 @@ from copy import deepcopy
 from itertools import chain
 import warnings
 import functools
+import inspect
 import math
 
 from typing import Any, Callable, Dict, List, Tuple
@@ -38,6 +39,8 @@ def _use_grad_for_differentiable(func):
         finally:
             torch.set_grad_enabled(prev_grad)
         return ret
+    _use_grad.__doc__ = func.__doc__
+    _use_grad.__signature__ = inspect.signature(func)
     return _use_grad
 
 def _get_value(x):
