@@ -14,7 +14,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import requires_numpy_pytorch_interop, requires_static_shapes
+from torch._dynamo.testing import requires_numpy_pytorch_interop, requires_static_shapes, expectedFailureDynamic
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 
@@ -923,7 +923,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("1.23"):
             return a + b
 
-    @requires_static_shapes
+    # https://github.com/pytorch/pytorch/issues/103602
+    @expectedFailureDynamic
     @make_test
     def test_fstrings2(x):
         tmp = f"{x.shape[0]} bar"

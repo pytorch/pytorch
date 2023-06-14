@@ -23,4 +23,4 @@ with torch.no_grad():
     module, _ = torch._dynamo.export(Net().cuda(), x, y)
     lib_path = torch._inductor.aot_compile(module, [x, y])
 
-shutil.copy(lib_path, f"libaot_inductor_output{'_dynamic' if dynamic else ''}.so")
+shutil.copy(lib_path, f"libaot_inductor_output.so")
