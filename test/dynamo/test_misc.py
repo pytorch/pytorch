@@ -1973,7 +1973,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(res, ref_run1))
 
     # NotImplementedError: SymNodeVariable() is not a constant
+    # https://github.com/pytorch/pytorch/issues/103618
     @expectedFailureDynamic
+    @torch._dynamo.config.patch(
+        automatic_dynamic_shapes=False
+    )
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -4431,7 +4435,7 @@ def fn():
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """5""")
+            self.assertExpectedInline(cnt.frame_count, """2""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
 
@@ -5274,6 +5278,7 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
