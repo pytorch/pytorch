@@ -32,7 +32,6 @@ from torch._dynamo.testing import (
     CompileCounter,
     expectedFailureDynamic,
     requires_numpy_pytorch_interop,
-    requires_static_shapes,
     same,
     skipIfNotPy311,
     unsupported,
@@ -1196,7 +1195,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
-    @requires_static_shapes
     def test_tensor_build_list_unpack(self):
         def fn(x):
             # seen in fastNLP_Bert
@@ -2735,7 +2733,6 @@ def fn():
 
         self.assertTrue(torch.allclose(dynamo_output, output))
 
-    @requires_static_shapes
     def test_cross_entropy_loss_fancy_ctor2(self):
         rand_3_5 = torch.randn(3, 5)
         target = torch.empty(3, dtype=torch.long).random_(5)

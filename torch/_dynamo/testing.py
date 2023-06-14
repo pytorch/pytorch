@@ -243,14 +243,6 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
     return f"{speedup:.3f}x p={pvalue:.2f}"
 
 
-def requires_static_shapes(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        return fn(*args, **kwargs)
-
-    return _fn
-
-
 @contextlib.contextmanager
 def trace_numpy() -> None:
     config.numpy_ndarray_as_tensor, prev = True, config.numpy_ndarray_as_tensor
@@ -338,4 +330,9 @@ def skipIfNotPy311(fn):
 
 def expectedFailureDynamic(fn):
     fn._expected_failure_dynamic = True
+    return fn
+
+
+def expectedFailureCodegenDynamic(fn):
+    fn._expected_failure_codegen_dynamic = True
     return fn
