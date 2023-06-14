@@ -999,7 +999,7 @@ class TestCommon(TestCase):
             out = None
             try:
                 if with_out:
-                    out = torch.empty(0, dtype=torch.int32)
+                    out = torch.empty(0, dtype=torch.int32, device=device)
                     op_to_test(inputs, out=out, *args, **kwargs)
                 else:
                     out = op_to_test(inputs, *args, **kwargs)
