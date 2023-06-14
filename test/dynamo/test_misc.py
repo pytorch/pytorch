@@ -1232,7 +1232,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(3)
             ref = fn(x)
             res = opt_fn(x)
-            self.assertTrue(same(ref, res))
+            self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
     @requires_numpy_pytorch_interop
@@ -1843,8 +1843,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         x = torch.empty([4, 9, 8])
-        self.assertTrue(opt_fn(x, 1) == 9)
-        self.assertTrue(opt_fn(x, -2) == 9)
+        self.assertEqual(opt_fn(x, 1), 9)
+        self.assertEqual(opt_fn(x, -2), 9)
 
     def test_stride_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1854,8 +1854,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         x = torch.empty([4, 9, 8])
-        self.assertTrue(opt_fn(x, 0) == 72)
-        self.assertTrue(opt_fn(x, -2) == 8)
+        self.assertEqual(opt_fn(x, 0), 72)
+        self.assertEqual(opt_fn(x, -2), 8)
 
     def test_torch_seed(self):
         cnts = torch._dynamo.testing.CompileCounter()

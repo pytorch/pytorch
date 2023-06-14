@@ -280,14 +280,58 @@ class TensorVariable(VariableTracker):
 
         kwargs = dict(kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
-        if name == "stride" and self.stride is not None:
-            constant_result = ConstantVariable(self.stride, **options)
 
-            if "dim" in kwargs:
-                dim = kwargs.pop("dim")
-                constant_result = constant_result.getitem_const(dim)
+        if name in ("stride", "size"):
+            dim_var = None
+            if len(args) == 1:
+                dim_var = args[0]
+            elif "dim" in kwargs:
+                dim_var = kwargs["dim"]
+            else:
+                assert not args and not kwargs, f"Tensor.{name}() unhandled args/kwargs"
 
-        elif name == "size" and self.size is None:
+            dim = None
+            if isinstance(dim_var, SymNodeVariable):
+                # This is because SymNodeVariable intentionally doesn't define
+                # as_python_constant to avoid shunting down some codepaths
+                # that expect consts.   In this case, we know we definitely
+                # want to specialize though.
+                dim = dim_var.evaluate_expr()
+            elif dim_var is not None:
+                dim = dim_var.as_python_constant()
+
+            def make_const_size_variable(x, **options):
+                return SizeVariable(
+                    [ConstantVariable(y, **options) for y in x], **options
+                )
+
+            RetVariable = (
+                make_const_size_variable if name == "size" else ConstantVariable
+            )
+
+            # Technically, this should not be necessary, but I'm including it
+            # for enhanced BC, in case example_value is sometimes not set
+            # (it really should always be set though!)
+            if (r := getattr(self, name)) is not None:
+                if dim is None:
+                    return RetVariable(r, **options)
+                else:
+                    return ConstantVariable(r[dim], **options)
+
+            # It might still be constant!  Consult the fake tensor and see
+            if (fake := self.proxy.node.meta.get("example_value")) is not None:
+                if dim is None:
+                    fake_r = getattr(fake, name)()
+                    if not free_symbols(fake_r):
+                        # int conversion for safety, in case a SymInt refined
+                        # to constant
+                        return RetVariable(tuple(int(r) for r in fake_r), **options)
+                else:
+                    fake_r = getattr(fake, name)(dim)
+                    if not free_symbols(fake_r):
+                        return ConstantVariable(int(fake_r), **options)
+
+            # Oops, it's not constant.  Do the dynamic shapes path.
             return wrap_fx_proxy(
                 tx,
                 tx.output.create_proxy(
@@ -297,16 +341,30 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
-        elif name == "size" and self.size is not None:
-            sizes = [variables.ConstantVariable(x) for x in self.size]
-            constant_result = SizeVariable(sizes, **options)
 
-            if "dim" in kwargs:
-                dim = kwargs.pop("dim")
-                constant_result = constant_result.getitem_const(dim)
+        elif name in ("numel", "nelement"):
+            if self.size is not None:
+                return ConstantVariable(product(self.size), **options)
 
-        elif name in ("numel", "nelement") and self.size is not None:
-            constant_result = ConstantVariable(product(self.size), **options)
+            # It might still be constant!  Consult the fake tensor and see
+            if (fake := self.proxy.node.meta.get("example_value")) is not None:
+                fake_r = fake.numel()
+                if not free_symbols(fake_r):
+                    return ConstantVariable(int(fake_r), **options)
+
+            assert not kwargs, f"Tensor.{name}() unhandled kwargs"
+
+            # Oops, it's not constant.  Do the dynamic shapes path.
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    "numel",
+                    *proxy_args_kwargs([self] + list(args), kwargs),
+                ),
+                **options,
+            )
+
         elif name in ("ndimension", "dim") and self.ndim is not None:
             constant_result = ConstantVariable(self.ndim, **options)
         elif name == "is_floating_point" and self.dtype is not None:
@@ -363,6 +421,7 @@ class TensorVariable(VariableTracker):
 
         if constant_result:
             assert not kwargs, f"Tensor.{name}() unhandled kwargs"
+            # TODO: I think this branch is dead
             if len(args) == 1:
                 return constant_result.getitem_const(args[0])
             elif args:
@@ -543,7 +602,7 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def evaluate_expr(self, output_graph):
+    def evaluate_expr(self, output_graph=None):
         return guard_scalar(self.sym_num)
 
     def call_method(
@@ -700,12 +759,30 @@ class NumpyNdarrayVariable(TensorVariable):
         super().__init__(proxy, **kwargs)
 
     def var_getattr(self, tx, name):
-        from torch._dynamo.variables import GetAttrVariable, TupleVariable
+        # NB: This INTENTIONALLY does not call super(), because there is
+        # no intrinsic reason ndarray properties are related to Tensor
+        # properties.  The inheritance here is for implementation sharing.
+
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         result = None
         options = VariableTracker.propagate(self)
+
+        import torch_np
+
+        example_value = self.proxy.node.meta["example_value"]
+        example_ndarray = torch_np.ndarray(example_value)
+
+        def insert_into_graph():
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_function", numpy_attr_wrapper, (self.as_proxy(), name), {}
+                ),
+                **options,
+            )
+
         if name in ["T", "real", "imag"]:
             result = wrap_fx_proxy_cls(
                 target_cls=NumpyNdarrayVariable,
@@ -716,56 +793,31 @@ class NumpyNdarrayVariable(TensorVariable):
                     (self.as_proxy(), name),
                     {},
                 ),
-                example_value=None,
                 **options,
             )
-        elif name in ["ndim", "itemsize", "shape"]:
-            result = wrap_fx_proxy_cls(
-                target_cls=ConstantVariable,
-                tx=tx,
-                proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                example_value=None,
-                **options,
-            )
-        elif name == "shape":
-            # ndarray.shape gives a tuple of ints while tensor.shape returns a torch.Size object.
-            # Here we overrides target_cls to be TupleVariable to match ndarray.shape return type.
-            result = wrap_fx_proxy_cls(
-                target_cls=TupleVariable,
-                tx=tx,
-                proxy=GetAttrVariable.create_getattr_proxy(self.as_proxy(), name),
-                example_value=None,
-                **options,
-            )
+        # These are awkward to implement.  The standard playbook for torch_np
+        # interop is to trace a call into the torch_np wrapper which works for
+        # Tensor operations.  However, we don't want to do this for calls
+        # that don't return Tensors, because in those cases we may not want
+        # to trace the attribute access into the graph at all (it is sort
+        # of harmless to do so, because AOTAutograd will eliminate them,
+        # but it's best not to trace them in to begin with.)  But in any
+        # case, tracing these into the graph is like trying to fit a square
+        # peg into a round hole; best not to do it.  So instead we
+        # painstakingly implement these by hand
+        #
+        # NB: only ALWAYS specialized attributes can go here; notably,
+        # size/shape not allowed!
+        elif name in ("ndim", "itemsize"):
+            return ConstantVariable(getattr(example_ndarray, name), **options)
+        elif name in ("shape", "stride"):
+            if not free_symbols(r := getattr(example_ndarray, name)):
+                return ConstantVariable(tuple(int(r) for r in r), **options)
+            return insert_into_graph()
         elif name == "size":
-            result = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method",
-                    "numel",
-                    (self.as_proxy(),),
-                    {},
-                ),
-                example_value=None,
-                **options,
-            )
-        elif name == "strides":
-            # ndarray.strides returns a tuple of strides in terms of bytes. E.g., np.ones([2, 3]).strides -> (24, 8).
-            # This result can't be generated from tensor attributes or functions (given we don't have tensor.strides()
-            # and the semantics of tensor.stride() is different), so instead we delegate it to torch_np.ndarray
-            # strides() function call.
-            torch_np_func_name = "strides"
-            result = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    numpy_attr_wrapper,
-                    (self.as_proxy(), torch_np_func_name),
-                    {},
-                ),
-                example_value=None,
-                **options,
-            )
+            if not free_symbols(r := example_ndarray.size):
+                return ConstantVariable(int(r), **options)
+            return insert_into_graph()
         elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
         if result is None:

@@ -426,10 +426,10 @@ test_dynamo_benchmark() {
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
-    # Check inference with --float32
-    test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
-    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
-      # Check training with --amp
+    if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
+    else
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --amp "$@"
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
     fi
   fi
