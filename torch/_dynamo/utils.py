@@ -1453,7 +1453,6 @@ def get_custom_getattr(value: Any):
 
 class TensorStaticReason(enum.Enum):
     PARAMETER = 2
-    CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
     NN_MODULE_PROPERTY = 5
 
@@ -1461,8 +1460,6 @@ class TensorStaticReason(enum.Enum):
 def tensor_static_reason_to_message(reason: TensorStaticReason):
     if reason == TensorStaticReason.PARAMETER:
         return "mark_dynamic on parameter, parameters are always static today."
-    if reason == TensorStaticReason.CONFIG_NOT_DYN:
-        return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
     if reason == TensorStaticReason.NOT_TENSOR:
         return "mark_dynamic on a non tensor, how did this happen?"
     if reason == TensorStaticReason.NN_MODULE_PROPERTY:
@@ -1486,8 +1483,6 @@ def tensor_always_has_static_shape(
     """
     if type(tensor) is torch.nn.Parameter:
         return True, TensorStaticReason.PARAMETER
-    if config.dynamic_shapes is False:
-        return True, TensorStaticReason.CONFIG_NOT_DYN
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     if guard_source.is_nn_module():
