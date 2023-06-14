@@ -457,21 +457,25 @@ def _flatten_optim_state_dict(
             # or NamedOptimizer.
             if flat_state:
                 flat_osd_state[key] = flat_state
-            elif optim is not None:  # NamedOptimizer or KeyedOptimizer case.
-                assert len(fqns) == 1 and use_orig_params
-                flat_osd_state[key] = copy.deepcopy(
-                    tree_map_only(
-                        torch.Tensor,
-                        lambda t: t.cpu()
-                        if t.dim() == 0
-                        else torch.zeros(0, device=t.device, dtype=t.dtype),
-                        unflat_osd_state[fqn],
-                    )
+            elif use_orig_params:
+                assert len(fqns) == 1, (
+                    f"use_orig_params is True but there are multiple FQNs, {fqns}."
                 )
+                if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
+                    flat_osd_state[key] = copy.deepcopy(
+                        tree_map_only(
+                            torch.Tensor,
+                            # Keep the step state on CPU.
+                            lambda t: t.cpu()
+                            if t.dim() == 0
+                            else torch.zeros(0, device=t.device, dtype=t.dtype),
+                            unflat_osd_state[fqn],
+                        )
+                    )
             else:
-                raise AssertionError(
-                    f"The state of {key} is empty and the optimizer is not a "
-                    "NamedOptimizer."
+                raise RuntimeError(
+                    f"The state of {key} is empty. This should happen when "
+                    "use_orig_params=True."
                 )
         else:  # do not flatten non-FSDP parameters' states
             assert len(fqns) == 1
