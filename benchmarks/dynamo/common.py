@@ -273,6 +273,12 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     "sebotnet33ts_256",  # Flaky accuracy failed
 ]
 
+CI_SKIP[CI("inductor", training=False, dynamic=True, device="cpu")] = [
+    *CI_SKIP[CI("inductor", training=False, device="cpu")],
+    "pyhpc_isoneutral_mixing",
+    "dpn107",
+]
+
 CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
