@@ -1337,6 +1337,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
         elif self.value is torch._functorch.eager_transforms.grad_impl:
+            # TODO: Support `fn` with kwargs.
             if not torch._dynamo.config.capture_func_grad:
                 unimplemented("torch.func.grad capture is disabled")
             # [NOTE] Here we are (roughly) modelling the following
@@ -1395,8 +1396,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             grad_fn_args = tuple(arg.as_proxy() for arg in args) + tuple(
                 body_lifted_freevars
             )
-            # TODO: kwargs
-            # grad_fn_kwargs = {k: v.as_proxy() for k, v in args[4].items.items()}
 
             # Call grad_fn with inputs.
             # grad_output = grad_fn(*grad_fn_args, **grad_fn_kwargs)
