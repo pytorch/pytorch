@@ -919,13 +919,11 @@ def export(
 
     remove_from_cache(f)
     constraint_violation_error = None
-    if tracing_mode != "symbolic":
-        assume_static_by_default = True
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
         summarize_dim_constraints=True,
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
-        automatic_dynamic_shapes=False,
+        dynamic_shapes=tracing_mode == "symbolic",
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,

@@ -5,16 +5,15 @@
 #include "caffe2/operators/cross_entropy_op.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
 #include "caffe2/utils/cub_namespace.cuh"
-#include <c10/cuda/CUDADeviceAssertion.h>
 
 namespace caffe2 {
 
 namespace {
 __global__ void LabelCrossEntropyKernel(
     const int N, const int D, const float* Xdata, const int* labeldata,
-    const float log_threshold, float* Ydata, TORCH_DSA_KERNEL_ARGS) {
+    const float log_threshold, float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    CUDA_KERNEL_ASSERT2(labeldata[i] >= 0 && labeldata[i] < D);
+    CUDA_KERNEL_ASSERT(labeldata[i] >= 0 && labeldata[i] < D);
     Ydata[i] = -logf(fmaxf(Xdata[i * D + labeldata[i]], log_threshold));
   }
 }
@@ -45,18 +44,18 @@ bool LabelCrossEntropyOp<float, CUDAContext>::RunOnDevice() {
       (label.dim() == 1) || (label.dim() == 2 && label.dim32(1) == 1));
   CAFFE_ENFORCE_EQ(label.dim32(0), N);
   auto* Y = Output(0, vector<int64_t>(size_t(1), N), at::dtype<float>());
-  TORCH_DSA_KERNEL_LAUNCH(
-      LabelCrossEntropyKernel,
+  LabelCrossEntropyKernel<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context_.stream(),
+      context_.cuda_stream()>>>(
       N,
       D,
       X.data<float>(),
       label.data<int>(),
       kLOG_THRESHOLD(),
       Y->template mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }

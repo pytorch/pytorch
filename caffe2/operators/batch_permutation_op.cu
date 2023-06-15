@@ -1,8 +1,6 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/batch_permutation_op.h"
 
-#include <c10/cuda/CUDADeviceAssertion.h>
-
 namespace caffe2 {
 
 namespace {
@@ -12,15 +10,14 @@ __global__ void BatchPermutationKernel(
     int K,
     const float* src,
     const int* indices,
-    float* dst,
-    TORCH_DSA_KERNEL_ARGS) {
+    float* dst) {
   if (forward) {
     CUDA_1D_KERNEL_LOOP(index, N * K) {
       int k = index % K;
       int n = index / K;
       int idx = indices[n];
-      CUDA_KERNEL_ASSERT2(idx >= 0);
-      CUDA_KERNEL_ASSERT2(idx < N);
+      CUDA_KERNEL_ASSERT(idx >= 0);
+      CUDA_KERNEL_ASSERT(idx < N);
       dst[index] = src[idx * K + k];
     }
   } else {
@@ -36,13 +33,13 @@ __global__ void BatchPermutationKernel(
       //     idx = i;
       //   }
       // }
-      // CUDA_KERNEL_ASSERT2(idx >= 0);
-      // CUDA_KERNEL_ASSERT2(idx < N);
+      // CUDA_KERNEL_ASSERT(idx >= 0);
+      // CUDA_KERNEL_ASSERT(idx < N);
       // dst[index] = src[idx * K + k];
 
       int idx = indices[n];
-      CUDA_KERNEL_ASSERT2(idx >= 0);
-      CUDA_KERNEL_ASSERT2(idx < N);
+      CUDA_KERNEL_ASSERT(idx >= 0);
+      CUDA_KERNEL_ASSERT(idx < N);
       dst[idx * K + k] = src[index];
     }
   }
@@ -67,17 +64,17 @@ bool BatchPermutationOp<float, CUDAContext>::RunOnDevice() {
   auto* Y = Output(0, X.sizes(), at::dtype<float>());
 
   if (X.dim32(0) > 0) {
-    TORCH_DSA_KERNEL_LAUNCH(
-    BatchPermutationKernel<true>,
-        CAFFE_GET_BLOCKS(X.numel()),
+    BatchPermutationKernel<true>
+        <<<CAFFE_GET_BLOCKS(X.numel()),
            CAFFE_CUDA_NUM_THREADS,
            0,
-           context_.stream(),
+           context_.cuda_stream()>>>(
             X.dim32(0),
             X.numel() / X.dim32(0),
             X.data<float>(),
             indices.data<int>(),
             Y->mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
@@ -89,17 +86,17 @@ bool BatchPermutationGradientOp<float, CUDAContext>::RunOnDevice() {
   auto* dX = Output(0, dY.sizes(), at::dtype<float>());
 
   if (dY.dim32(0) > 0) {
-    TORCH_DSA_KERNEL_LAUNCH(
-    BatchPermutationKernel<false>,
-        CAFFE_GET_BLOCKS(dY.numel()),
+    BatchPermutationKernel<false>
+        <<<CAFFE_GET_BLOCKS(dY.numel()),
            CAFFE_CUDA_NUM_THREADS,
            0,
-           context_.stream(),
+           context_.cuda_stream()>>>(
             dY.dim32(0),
             dY.numel() / dY.dim32(0),
             dY.data<float>(),
             indices.data<int>(),
             dX->mutable_data<float>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return true;
 }
