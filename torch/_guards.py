@@ -2,6 +2,7 @@ import contextlib
 
 import dataclasses
 import enum
+import functools
 import logging
 import traceback
 import unittest.mock
@@ -146,11 +147,15 @@ class Guard:
         return hash((self.name, self.source, id(self.create_fn)))
 
     def sort_key(self):
+        if isinstance(self.create_fn, functools.partial):
+            fn = self.create_fn.func
+        else:
+            fn = self.create_fn
         return (
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
-            self.create_fn.__code__.co_firstlineno,
+            fn.__code__.co_firstlineno,
         )
 
     def __lt__(self, other):
@@ -183,7 +188,7 @@ class Guard:
 
     def __repr__(self):
         s = f"""
-        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
+        {self.source.name.lower() if self.source else ""} {repr(self.name)}
         {{
             'guard_types': {self.guard_types},
             'code': {self.code_list},
@@ -197,7 +202,7 @@ class Guard:
         output = f"Name: {repr(self.name)}\n"
         source = self.source.name.lower() if self.source else ""
         output += f"    Source: {source}\n"
-        output += f"    Create Function: {self.create_fn.__name__}\n"
+        output += f"    Create Function: {self.create_fn}\n"
         output += f"    Guard Types: {self.guard_types}\n"
         output += f"    Code List: {self.code_list}\n"
         output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"
@@ -538,6 +543,7 @@ def tracing(context: TracingContext):
 
 
 # Subclasses can be found in torch/_dynamo/source.py
+# TODO(voz): Consider a toplevel torch/_source.py
 @dataclasses.dataclass(frozen=True)
 class Source:
     def reconstruct(self, codegen):
@@ -556,6 +562,14 @@ class Source:
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+
+# Subclasses can be found in torch/_dynamo/source.py
+# Note - there is an odd exception to this invariant of a single base,
+# see class SuperSource
+@dataclasses.dataclass(frozen=True)
+class ChainedSource(Source):
+    base: Source
 
 
 def detect_fake_mode(inputs: Any = None):

@@ -916,7 +916,7 @@ class BuiltinVariable(VariableTracker):
         source = (
             None
             if a.source is None or b.source is None
-            else SuperSource(a.source, b.source)
+            else SuperSource(type=a.source, base=b.source)
         )
         return variables.SuperVariable(a, b, source=source)
 
@@ -1091,6 +1091,9 @@ class BuiltinVariable(VariableTracker):
             tx.output.side_effects.is_attribute_mutation(obj)
             and name_var.is_python_constant()
         ):
+            if isinstance(obj, variables.TensorVariable):
+                if name_var.value == "data":
+                    unimplemented("Setting data on a tensor is not supported.")
             tx.output.side_effects.store_attr(obj, name_var.as_python_constant(), val)
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
