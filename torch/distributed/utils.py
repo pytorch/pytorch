@@ -156,8 +156,6 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
         storage was already allocated.
     """
     with torch.no_grad():
-        if isinstance(size, tuple):
-            size = torch.Size(size)
         already_allocated = tensor._typed_storage()._size() == size.numel()
         if not already_allocated:
             tensor_storage_size = tensor._typed_storage()._size()

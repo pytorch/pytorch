@@ -502,9 +502,3 @@ class ShapeEnvSource(Source):
 
     def guard_source(self):
         return GuardSource.SHAPE_ENV
-
-
-def is_from_local_source(source: Source):
-    if isinstance(source, ChainedSource):
-        return is_from_local_source(source.base)
-    return isinstance(source, LocalSource)

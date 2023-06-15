@@ -103,6 +103,7 @@ from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
+graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 @functools.lru_cache(None)
@@ -417,11 +418,11 @@ def break_graph_if_unsupported(*, push):
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if (
-                    config.print_graph_breaks
+                    graph_break_log.isEnabledFor(logging.DEBUG)
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
-                    log.warning(
+                    graph_break_log.debug(
                         "Graph break: %s from user code at %s",
                         excp,
                         user_stack_formatted,
@@ -785,7 +786,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable(value=inst.argval))
 
     def get_global_source(self, name):
-        if self.output.global_scope is self.f_globals:
+        if self.output.root_globals is self.f_globals:
             source = GlobalSource(name)
         else:
             if "__name__" in self.f_globals:
@@ -794,7 +795,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 )
             else:
                 mangled_name = f"___unnamed_scope_{id(self.f_globals)}"
-                if mangled_name not in self.output.global_scope:
+                if mangled_name not in self.output.root_globals:
                     self.output.install_global(mangled_name, self.f_globals)
                 source = GetItemSource(GlobalSource(mangled_name), name)
         return source
@@ -852,7 +853,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
-        f_globals = self.output.global_scope
+        f_globals = self.output.root_globals
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
         self.output.update_co_names(alias)
@@ -1822,7 +1823,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.guards.add(
             GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
         )
-        if name not in self.output.global_scope:
+        if name not in self.output.root_globals:
             self.output.install_global(name, weakref.ref(value))
 
     @property
@@ -1937,14 +1938,13 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         super().__init__(
             output=OutputGraph(
+                f_globals,
                 code_options,
                 compiler_fn,
                 self,
                 export,
                 export_constraints,
                 frame_state,
-                local_scope=f_locals,
-                global_scope=f_globals,
             ),
             instructions=instructions,
             f_locals=f_locals,

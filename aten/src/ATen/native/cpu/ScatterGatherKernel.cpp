@@ -12,9 +12,6 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
-#ifdef USE_FBGEMM
-#include <fbgemm/Utils.h>
-#endif
 
 namespace at::native {
 
@@ -600,7 +597,6 @@ struct cpu_scatter_gather_base_kernel {
 //
 //   step 2: spmm reduce, parallel on M and vectorize on K
 //
-#ifdef USE_FBGEMM
 template <typename scalar_t, ReductionType reduce>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
   int64_t* index_data = index.data_ptr<int64_t>();
@@ -631,7 +627,7 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
 
   int64_t* sorted_col_index_keys = nullptr;
   int64_t* sorted_col_index_values = nullptr;
-  std::tie(sorted_col_index_keys, sorted_col_index_values) = fbgemm::radix_sort_parallel(
+  std::tie(sorted_col_index_keys, sorted_col_index_values) = radix_sort_parallel(
       keys.get(),
       values.get(),
       keys_tmp.get(),
@@ -702,7 +698,6 @@ void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, 
     }
   });
 }
-#endif
 
 template <typename scalar_t>
 void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index, const Tensor& self) {
@@ -742,7 +737,6 @@ void cpu_gather_expanded_index_kernel(const Tensor& result, const Tensor& index,
   });
 }
 
-#ifdef USE_FBGEMM
 void scatter_add_expanded_index_kernel(const Tensor& self, const Tensor& index, const Tensor& src) {
   AT_DISPATCH_FLOATING_TYPES_AND(
     ScalarType::BFloat16, self.scalar_type(), "scatter_add_expanded_index", [&] {
@@ -760,7 +754,6 @@ void scatter_reduce_expanded_index_kernel(
     });
   });
 }
-#endif
 
 void gather_expanded_index_kernel(const Tensor& result, const Tensor& self, const Tensor& index) {
   AT_DISPATCH_FLOATING_TYPES_AND(
@@ -860,10 +853,8 @@ REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel)
 REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cpu_kernel);
 
 // fast paths for GNN usage
-#ifdef USE_FBGEMM
 REGISTER_DISPATCH(scatter_add_expanded_index_stub, &scatter_add_expanded_index_kernel);
 REGISTER_DISPATCH(scatter_reduce_expanded_index_stub, &scatter_reduce_expanded_index_kernel);
-#endif
 REGISTER_DISPATCH(gather_expanded_index_stub, &gather_expanded_index_kernel);
 
 } // namespace at::native

@@ -13,7 +13,14 @@ from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import same
 
 
-@torch._dynamo.config.patch(dynamic_shapes=True)
+# The intention of this test file is you should put test cases specifically
+# for assume_static_by_default=False, aka you want to YOLO make everything as
+# dynamic as possible.  If you want to test the more normal situation where
+# you assume static by default, put it in a regular test file and
+# test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
+
+
+@torch._dynamo.config.patch(dynamic_shapes=True, assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
@@ -108,7 +115,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     # some models fail on missing codegen.tx.output.random_values_var. If we let the tensor value go into wrap as
     # it is, this test fails.
     # The real solution here is to rewrite RandomValueSource and all the codegen it does from the ground up.
-    @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)
@@ -156,6 +162,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
+    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/103545
     def test_builtin_getitem(self):
         # builtin getitem args[0] is python list and args[1] is unspec
         def fn(x, idx):
@@ -258,6 +265,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         # specialization is allowed)
         opt_fn(x)
 
+    @unittest.expectedFailure
     def test_conv1d_symint_padding(self):
         kernel = torch.randn(1, 1, 4)
 

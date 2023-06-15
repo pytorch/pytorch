@@ -297,12 +297,12 @@ class PyCodegen:
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
-        global_scope = self.tx.output.global_scope
+        root_globals = self.tx.output.root_globals
         name = re.sub(r"^.*[.]", "", mod.__name__)
-        if global_scope.get(name, None) is mod:
+        if root_globals.get(name, None) is mod:
             return self.create_load_global(name, push_null, add=True)
         mangled_name = f"___module_{name}_{id(mod)}"
-        if mangled_name not in global_scope:
+        if mangled_name not in root_globals:
             self.tx.output.install_global(mangled_name, mod)
         return self.create_load_global(mangled_name, push_null, add=True)
 
