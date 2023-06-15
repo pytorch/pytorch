@@ -284,7 +284,7 @@ def _sync_module_states(
     for name, param in module.named_parameters():
         if name not in params_and_buffers_to_ignore:
             if isinstance(param, DTensor):
-                module_states.append(param._local_tensor.detach())
+                module_states.append(param.to_local().detach())
             else:
                 module_states.append(param.detach())
 
@@ -292,7 +292,7 @@ def _sync_module_states(
         for name, buffer in module.named_buffers():
             if name not in params_and_buffers_to_ignore:
                 if isinstance(buffer, DTensor):
-                    module_states.append(buffer._local_tensor.detach())
+                    module_states.append(buffer.to_local().detach())
                 else:
                     module_states.append(buffer.detach())
 
