@@ -849,6 +849,9 @@ def run_subtests(
 
 
 class FSDPTestMultiThread(MultiThreadedTestCase):
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+
     @property
     def world_size(self):
         return torch.cuda.device_count() if torch.cuda.is_available() else 4
@@ -862,6 +865,9 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
 
 
 class FSDPTest(MultiProcessTestCase):
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+
     def setUp(self):
         super().setUp()
         # Set NCCL_DESYNC_DEBUG=0 to disable the NCCL `workCleanupLoop()`,

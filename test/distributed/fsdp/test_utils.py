@@ -36,6 +36,9 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestUtils(TestCase):
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+
     @parametrize(
         "devices", [["cpu"], ["cuda"], subtest(["cpu", "cuda"], name="cpu_cuda")]
     )
