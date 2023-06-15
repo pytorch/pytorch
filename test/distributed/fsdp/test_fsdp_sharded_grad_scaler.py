@@ -66,6 +66,9 @@ subtest_name = functools.partial(subtest_name, test_name_mapping)
 
 
 class TestShardGradScaler(TestCase):
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+
     @unittest.skipIf(
         amp_definitely_not_available(), "no supported device (cuda, xla) found"
     )

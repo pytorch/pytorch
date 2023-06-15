@@ -1322,6 +1322,9 @@ NUM_SIZE0_TENSORS = 1000
 
 
 class TestMultiTensorApply(TestCase):
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+
     def test_multi_tensor_apply_size0_tensors_cpu(self):
         size0_tensors = [torch.empty(0, device="cpu") for _ in range(NUM_SIZE0_TENSORS)]
         # Check that this does not segfault
