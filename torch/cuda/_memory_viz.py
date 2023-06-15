@@ -5,8 +5,10 @@ import io
 import subprocess
 import json
 from functools import lru_cache
-from typing import List, Tuple, Optional, Any, Dict
+from typing import Any
 from itertools import groupby
+import base64
+import warnings
 
 cache = lru_cache(None)
 
@@ -359,91 +361,43 @@ def trace(data):
             format(d)
     return out.getvalue()
 
-class PlotWriter:
-    def __init__(self, categories: List[str] = None):
-        string_table: List[str] = []
 
-        # compresses lists of strings that have common suffixes
-        # such as stack traces with the most recent frame first.
-        # (reference to string table, another suffix table entry)
-        suffix_table: List[Tuple[int, Optional[int]]] = []
+_memory_viz_template = r"""
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+pre {
+    margin: 0px;
+}
+html, body {
+    height: 100%;
+    overflow: clip;
+}
+</style>
+</head>
+<body>
+<script type="module">
+import {add_local_files} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch/torch/utils/viz/MemoryViz.js"
+const local_files = $SNAPSHOT
+add_local_files(local_files, $VIZ_KIND)
+</script>
+</body>
+"""
 
-        elements_size = []
+def _format_viz(data, viz_kind, device):
+    if device is not None:
+        warnings.warn('device argument is deprecated, plots now contain all device')
+    buffer = pickle.dumps(data)
+    buffer += b'\x00' * (3 - len(buffer) % 3)
+    # Encode the buffer with base64
+    encoded_buffer = base64.b64encode(buffer).decode('utf-8')
 
-        # indexes into the suffix_table
-        elements_info = []
+    json_format = json.dumps([{"name": 'snapshot.pickle', "base64": encoded_buffer}])
+    return _memory_viz_template.replace('$VIZ_KIND', repr(viz_kind)) \
+                               .replace('$SNAPSHOT', json_format)
 
-        # indexes into category table
-        elements_category: Optional[List[int]] = None if categories is None else []
-
-        # indexes into the elements_ tables
-        actions: List[int] = []
-
-        # indexes into the elements_ tables
-        initially_allocated: List[int] = []
-
-        @cache
-        def intern_str(s):
-            string_table.append(s)
-            return len(string_table) - 1
-
-        @cache
-        def intern_suffix(sid, restid):
-            suffix_table.append((sid, restid))
-            return len(suffix_table) - 1
-
-        def intern_stack(frames):
-            next_id = None
-            for f in reversed(frames):
-                next_id = intern_suffix(intern_str(f), next_id)
-            return next_id
-
-        def add_element(size, lines, category=None):
-            nonlocal elements_category
-            # note: struct of arrays format to info about elements
-            # avoids a lot of repeated string keys when serialized
-            elements_size.append(size)
-            elements_info.append(intern_stack(lines))
-
-            # lazily create since we will not always have categories
-            if categories is not None:
-                assert category >= 0 and category < len(categories)
-                assert elements_category is not None
-                elements_category.append(category)
-
-            return len(elements_size) - 1
-
-        def to_html():
-            r = {
-                'actions': actions,
-                'elements_size': elements_size,
-                'elements_info': elements_info,
-                'elements_category': elements_category,
-                'suffix_table': suffix_table,
-                'string_table': string_table,
-                'initially_allocated': list(reversed(initially_allocated)),
-                'categories': categories,
-            }
-            plot_data = json.dumps(r)
-            return _memory_over_time_template.replace('$PLOT_DATA', plot_data)
-
-        self.add_element = add_element
-        self.allocate = actions.append
-        self.free = actions.append
-        self.initially_allocated = initially_allocated.append
-        self.to_html = to_html
-        self.categories = categories
-
-def _choose_device(data, device):
-    if device is None:
-        for i, t in enumerate(data['device_traces']):
-            if len(t) > 0:
-                if device is not None:
-                    raise ValueError(f'Both device {device} and {i} have traces, use --device to specify which trace.')
-                device = i
-    return device
-
-def trace_plot(data, device=None, plot_segments=False, categories=None):
+def trace_plot(data, device=None, plot_segments=False):
     """Generate a visualization over time of the memory usage recorded by the trace as an html file.
 
     Args:
@@ -455,78 +409,14 @@ def trace_plot(data, device=None, plot_segments=False, categories=None):
     Returns:
         str: HTML of visualization
     """
-    w = PlotWriter(categories)
-    addr_to_alloc = {}
-    device = _choose_device(data, device)
-    if device is None:
-        raise ValueError('No trace information was recorded.')
+    return _format_viz(data, 'Active Memory Timeline' if not plot_segments else 'Active Cached Memory Timeline', device)
 
-    trace = data['device_traces'][device]
 
-    if plot_segments:
-        addr_prefix = 's'
-        alloc = 'segment_alloc'
-        free = 'segment_free'
-    else:
-        addr_prefix = 'b'
-        alloc = 'alloc'
-        free = 'free_completed'
-
-    addr_versions: Dict[int, int] = {}
-
-    def add_element(addr, size, frames, extra=(), category=None):
-        next_version = addr_versions[addr] = addr_versions.get(addr, 0) + 1
-        frames = [f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation ({size} bytes)",
-                  *extra,
-                  *_frames_fmt(frames, full_filename=True)]
-        return w.add_element(size, frames, category=None if categories is None else 0 if category is None else category)
-
-    for i, e in enumerate(trace):
-        if e['action'] == alloc:
-            elemid = add_element(e['addr'], e['size'], e.get('frames', []), category=e.get('category'))
-            addr_to_alloc[e['addr']] = elemid
-            w.allocate(elemid)
-        elif e['action'] == free:
-            idx = addr_to_alloc.pop(e['addr'], None)
-            if idx is None:
-                idx = add_element(e['addr'], e['size'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
-                w.initially_allocated(idx)
-            w.free(idx)
-
-    for seg in data['segments']:
-        if seg['device'] != device:
-            continue
-        addr = seg['address']
-        for b in seg['blocks']:
-            if b['state'] == 'active_allocated' and addr not in addr_to_alloc:
-                frames, real_size = _block_extra(b)
-                extra = () if frames else ('<block was allocated before _record_history was enabled>',)
-                elemid = add_element(addr, real_size, frames, extra=extra)
-                w.initially_allocated(elemid)
-            addr += b['size']
-
-    return w.to_html()
-
-def profile_plot(profile, device=None):
-    """Generate a visualization over time of the memory usage recorded by kineto memory profiling as an html file.
-
-    Args:
-        profile: profile as generated by `torch.profiler.profile(profile_memory=True)`
-        device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
-
-    Returns:
-        str: HTML of visualization
-    """
+def _profile_to_snapshot(profile):
     import torch
-    from torch.profiler._memory_profiler import Action, TensorKey, Category
+    from torch.profiler._memory_profiler import Action, TensorKey
     from torch._C._profiler import _EventType
     memory_profile = profile._memory_profile()
-
-    if device is None:
-        if torch.cuda.is_available():
-            device = torch.device('cuda', torch.cuda.current_device())
-        else:
-            device = torch.device('cpu')
 
     allocation_stacks = {}
     for event in memory_profile._op_tree.sorted_nodes:
@@ -570,7 +460,7 @@ def profile_plot(profile, device=None):
             seg['address'] = addr
         seg['total_size'] = max(seg['total_size'], addr + size)  # record max addr for now, we will make it the size later
         category = memory_profile._categories.get(tensor_key, version)
-        category = category.value if category is not None else 0
+        category = category.name.lower() if category is not None else "unknown"
         stack = allocation_stacks.get(tensor_key, ())
         stack = [{'filename': 'none', 'line': 0, 'name': p.name} for p in stack]
         r = {'action': 'alloc', 'addr': addr, 'size': size, 'stream': 0, 'frames': stack, 'category': category}
@@ -626,165 +516,24 @@ def profile_plot(profile, device=None):
         if not seg['blocks']:
             seg['blocks'].append({'size': seg['total_size'], 'state': 'inactive'})
 
-    categories = ["unknown", *(c.name.lower() for c in Category)]
-    return trace_plot(snapshot, device=device, categories=categories)
+    return snapshot
 
-# note: this template should eventually move to its own file,
-# however, we first need to package _memory_viz.py so that it can be
-# pip-installed separately from pytorch so it is easy to run e.g.
-# on a laptop with downloaded snapshots. Currently this is
-# accomplished by downloading _memory_viz.py so the template
-# needs to be included
-_memory_over_time_template = r"""
-<!DOCTYPE html>
-<html>
-<head></head>
-<body>
-<script type="module">
-import {main} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch/torch/utils/viz/MemoryViz.js"
-let alloc_data = $PLOT_DATA
-main(alloc_data)
-</script>
-</body>
-</html>
-"""
+def profile_plot(profile, device=None):
+    """Generate a visualization over time of the memory usage recorded by kineto memory profiling as an html file.
+
+    Args:
+        profile: profile as generated by `torch.profiler.profile(profile_memory=True)`
+        device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
+
+    Returns:
+        str: HTML of visualization
+    """
+    snapshot = _profile_to_snapshot(profile)
+    return _format_viz(snapshot, 'Active Memory Timeline', device)
+
 
 def segment_plot(data: Any, device=None):
-    device = _choose_device(data, device)
-    if device is None:
-        trace = []
-    else:
-        trace = data['device_traces'][device]
-
-    string_table: List[str] = []
-    suffix_table: List[Tuple[int, Optional[int]]] = []
-
-    @cache
-    def intern_str(s):
-        string_table.append(s)
-        return len(string_table) - 1
-
-    @cache
-    def intern_suffix(sid, restid):
-        suffix_table.append((sid, restid))
-        return len(suffix_table) - 1
-
-    def intern_stack(frames):
-        next_id = None
-        for f in reversed(frames):
-            next_id = intern_suffix(intern_str(f), next_id)
-        return next_id
-
-    def format_frames(frames):
-        return intern_stack(_frames_fmt(frames, full_filename=True))
-
-    result: Any = {
-        'string_table': string_table,
-        'suffix_table': suffix_table,
-        'events': {
-            'action': [],  # reference to string table
-            'addr': [],  # for OOM, this will hold device_free value
-            'size': [],
-            'stream': [],
-            'frames': []  # reference to suffix_table
-        },
-        'segments': {
-            'addr': [],
-            'size': [],
-            'stream': []
-        },
-        'blocks': {
-            'addr': [],
-            'size': [],
-            'real_size': [],
-            'frames': [],  # reference to string table
-            'pending_free': [],
-        }
-    }
-
-    def fold_free(ts):
-        # turn a free_requested/free_completed pair into a single free event
-        i = 0
-        while i < len(ts):
-            t = ts[i]
-            if i + 1 < len(ts):
-                tnext = ts[i + 1]
-                if t['action'] == 'free_requested' and tnext['action'] == 'free_completed' and t['addr'] == tnext['addr']:
-                    yield {**t, 'action': 'free'}
-                    i += 2
-                    continue
-            if t['action'] == 'oom':
-                yield {**t, 'addr': t['device_free']}
-            else:
-                yield t
-            i += 1
-
-    preproc: Any = {
-        'action': intern_str,
-        'frames': format_frames,
-    }
-
-    events: Any = result['events']
-    for event in fold_free(trace):
-        for k in events.keys():
-            # stack frames not recorded on event
-            # happens for snapshot even when
-            # frames are recorded for other things.
-            if k == 'frames' and k not in event:
-                events[k].append(None)
-                continue
-            events[k].append(preproc.get(k, lambda x: x)(event[k]))
-
-    segments = result['segments']
-    blocks = result['blocks']
-
-    segment_names = {
-        'addr': 'address',
-        'size': 'total_size',
-    }
-
-    for seg in data['segments']:
-        if seg['device'] != device:
-            continue
-        for k in segments.keys():
-            sk = segment_names.get(k, k)
-            segments[k].append(preproc.get(k, lambda x: x)(seg[sk]))
-        addr = seg['address']
-        for b in seg['blocks']:
-            if b['state'] in ('active_pending_free', 'active_allocated'):
-                frames, real_size = _block_extra(b)
-                blocks['addr'].append(addr)
-                blocks['size'].append(b['size'])
-                blocks['real_size'].append(real_size)
-                blocks['frames'].append(format_frames(frames))
-                blocks['pending_free'].append(1 if b['state'] == 'active_pending_free' else 0)
-            addr += b['size']
-
-    plot_data = json.dumps(result)
-    return _events_template.replace('$PLOT_DATA', plot_data)
-
-_events_template = r"""
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-pre {
-    margin: 0px;
-}
-html, body {
-    height: 100%;
-}
-</style>
-</head>
-<body>
-<script type="module">
-import {main} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch/torch/utils/viz/StatePlot.js"
-let trace_data = $PLOT_DATA
-main(trace_data)
-</script>
-</body>
-</html>
-"""
+    return _format_viz(data, 'Allocator State History', device)
 
 if __name__ == "__main__":
     import os.path
