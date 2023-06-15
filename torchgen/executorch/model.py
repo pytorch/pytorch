@@ -62,7 +62,7 @@ class ETKernelKey:
     def gen_from_yaml(
         args: Dict[str, Tuple[str, str]],
         type_alias_map: Dict[str, List[str]],  # TODO: Support unwrapped str val
-        dim_order_alias_map: Dict[str, List[int]],
+        dim_order_alias_map: Dict[str, List[str]],
     ) -> List["ETKernelKey"]:
         """Generate ETKernelKeys from arg kernel specs
         Multiple ETKernelKeys are returned due to dtype permutations from utilizing
@@ -194,10 +194,7 @@ class ETKernelIndex:
             assert (
                 len(kernel_dict.values()) == 1
             ), f"Can't convert ETKernelIndex to BackendIndex because {op} has more than one kernels. Got {kernel_dict}"
-            index[op] = kernel_dict.get(
-                ETKernelKey(default=True),
-                BackendMetadata(kernel="", structured=False, cpp_namespace=""),
-            )
+            index[op] = kernel_dict[ETKernelKey(default=True)]
         return BackendIndex(
             dispatch_key=DispatchKey.CPU,
             use_out_as_primary=False,
