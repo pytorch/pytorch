@@ -626,8 +626,6 @@ def profile_plot(profile, device=None):
         if not seg['blocks']:
             seg['blocks'].append({'size': seg['total_size'], 'state': 'inactive'})
 
-    with open('tmp.pickle', 'wb') as f:
-        pickle.dump(snapshot, f)
     categories = ["unknown", *(c.name.lower() for c in Category)]
     return trace_plot(snapshot, device=device, categories=categories)
 
