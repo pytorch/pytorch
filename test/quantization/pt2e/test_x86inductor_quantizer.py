@@ -18,6 +18,7 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
 from enum import Enum
+import itertools
 
 @skipIfNoDynamoSupport
 class TestX86InductorQuantizePT2E(QuantizationTestCase):
