@@ -410,37 +410,3 @@ def view_to_reshape(gm):
     for nd in gm.graph.nodes:
         if nd.target == torch.ops.aten.view.default:
             nd.target = torch.ops.aten.reshape.default
-
-def convert_conv_weights_to_channels_last(gm, example_inputs):
-    """
-    Convert 4d convolution weight tensor to channels last format.
-    Need change
-    1. the layout in example_inputs since they are compile time inputs
-    2. and the layout in params_flat since they are runtime inputs
-
-    TODO: need do this after freezing since the parameter need to be
-    converted to fp16 first???
-    """
-    params_flat = torch._guards.TracingContext.get().params_flat
-    assert len(params_flat) <= len(example_inputs)
-    phs = [n for n in gm.graph.nodes if n.op == "placeholder"]
-    assert len(phs) == len(example_inputs)
-
-    for real_param, fake_param, ph in zip(params_flat, example_inputs, phs):
-        if len(real_param.shape) != 4:
-            # not a 4d tensor, skip
-            continue
-
-        # if any user of the placehodler node is convolution and the placeholder
-        # node is used as weight, then convert the layout ahead of time.
-        conv_users = [n for n in ph.users if n.target == aten.convolution.default]
-
-        is_conv_weight = False
-        for conv_user in conv_users:
-            breakpoint() #TODO
-            if conv_users.args[1] is ph:
-                is_conv_weight = True
-                break
-
-        if is_conv_weight:
-            assert False, "convert real and fake param to cl" # TODO
