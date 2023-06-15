@@ -6,6 +6,7 @@ import subprocess
 import json
 from functools import lru_cache
 from typing import List, Tuple, Optional, Any, Dict
+from itertools import groupby
 
 cache = lru_cache(None)
 
@@ -442,7 +443,7 @@ def _choose_device(data, device):
                 device = i
     return device
 
-def trace_plot(data, device=None, plot_segments=False):
+def trace_plot(data, device=None, plot_segments=False, categories=None):
     """Generate a visualization over time of the memory usage recorded by the trace as an html file.
 
     Args:
@@ -454,7 +455,7 @@ def trace_plot(data, device=None, plot_segments=False):
     Returns:
         str: HTML of visualization
     """
-    w = PlotWriter()
+    w = PlotWriter(categories)
     addr_to_alloc = {}
     device = _choose_device(data, device)
     if device is None:
@@ -473,16 +474,16 @@ def trace_plot(data, device=None, plot_segments=False):
 
     addr_versions: Dict[int, int] = {}
 
-    def add_element(addr, size, frames, extra=()):
+    def add_element(addr, size, frames, extra=(), category=None):
         next_version = addr_versions[addr] = addr_versions.get(addr, 0) + 1
         frames = [f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation ({size} bytes)",
                   *extra,
                   *_frames_fmt(frames, full_filename=True)]
-        return w.add_element(size, frames)
+        return w.add_element(size, frames, category=None if categories is None else 0 if category is None else category)
 
     for i, e in enumerate(trace):
         if e['action'] == alloc:
-            elemid = add_element(e['addr'], e['size'], e.get('frames', []))
+            elemid = add_element(e['addr'], e['size'], e.get('frames', []), category=e.get('category'))
             addr_to_alloc[e['addr']] = elemid
             w.allocate(elemid)
         elif e['action'] == free:
@@ -527,9 +528,6 @@ def profile_plot(profile, device=None):
         else:
             device = torch.device('cpu')
 
-    w = PlotWriter(categories=["unknown", *(c.name.lower() for c in Category)])
-
-
     allocation_stacks = {}
     for event in memory_profile._op_tree.sorted_nodes:
         if event.tag == _EventType.Allocation:
@@ -546,33 +544,90 @@ def profile_plot(profile, device=None):
             if key and event.extra_fields.alloc_size > 0:
                 allocation_stacks[key] = python_parents
 
-    def add_element(size, tensor_key, version):
+
+    device_count = torch.cuda.device_count()
+    snapshot = {
+        'device_traces': [[] for _ in range(device_count + 1)],
+        'segments': [{'device': device,
+                      'address': None,
+                      'total_size': 0,
+                      'stream': 0,
+                      'blocks': []} for device in range(device_count + 1)]
+    }
+
+    def to_device(device):
+        if device.type == 'cuda':
+            return device.index
+        else:
+            return device_count
+
+    def allocate(size, tensor_key, version, during_trace=True):
+        device = to_device(tensor_key.device)
+        addr = tensor_key.storage.ptr
+
+        seg = snapshot['segments'][device]
+        if seg['address'] is None or seg['address'] > addr:
+            seg['address'] = addr
+        seg['total_size'] = max(seg['total_size'], addr + size)  # record max addr for now, we will make it the size later
         category = memory_profile._categories.get(tensor_key, version)
         category = category.value if category is not None else 0
         stack = allocation_stacks.get(tensor_key, ())
-        assert w.categories is not None
-        return w.add_element(size,
-                             [f"{_format_size(size)} ({size} bytes) allocation ({w.categories[category]})",
-                              *(p.name for p in stack)],
-                             category)
+        stack = [{'filename': 'none', 'line': 0, 'name': p.name} for p in stack]
+        r = {'action': 'alloc', 'addr': addr, 'size': size, 'stream': 0, 'frames': stack, 'category': category}
+        if during_trace:
+            snapshot['device_traces'][device].append(r)
+        return r
+
+    def free(alloc, device):
+        for e in ('free_requested', 'free_completed'):
+            snapshot['device_traces'][device].append({'action': e,
+                                                      'addr': alloc['addr'],
+                                                      'size': alloc['size'],
+                                                      'stream': 0,
+                                                      'frames': alloc['frames']})
 
     kv_to_elem = {}
+
+
+
+    # create the device trace
     for time, action, (tensor_key, version), size in memory_profile.timeline:
-        if tensor_key.device != device:
+        if not isinstance(tensor_key, TensorKey):
             continue
         if action == Action.CREATE:
-            kv_to_elem[(tensor_key, version)] = elemid = add_element(size, tensor_key, version)
-            w.allocate(elemid)
+            kv_to_elem[(tensor_key, version)] = allocate(size, tensor_key, version)
         elif action == Action.DESTROY:
-            w.free(kv_to_elem.pop((tensor_key, version)))
+            free(kv_to_elem.pop((tensor_key, version)), to_device(tensor_key.device))
         elif action == Action.INCREMENT_VERSION:
-            w.free(kv_to_elem.pop((tensor_key, version)))
-            kv_to_elem[(tensor_key, version + 1)] = elemid = add_element(size, tensor_key, version + 1)
-            w.allocate(elemid)
+            free(kv_to_elem.pop((tensor_key, version)), to_device(tensor_key.device))
+            kv_to_elem[(tensor_key, version + 1)] = allocate(size, tensor_key, version + 1)
         elif action == Action.PREEXISTING:
-            kv_to_elem[(tensor_key, version)] = elemid = add_element(size, tensor_key, version)
-            w.initially_allocated(elemid)
-    return w.to_html()
+            kv_to_elem[(tensor_key, version)] = allocate(size, tensor_key, version, during_trace=False)
+
+
+    # create the final snapshot state
+    blocks_at_end = [(to_device(tensor_key.device), event['addr'], event['size'], event['frames'])
+                     for (tensor_key, version), event in kv_to_elem.items()]
+    for device, blocks in groupby(sorted(blocks_at_end), key=lambda x: x[0]):
+        seg = snapshot['segments'][device]
+        last_addr = seg['address']
+        for _, addr, size, frames in blocks:
+            if last_addr < addr:
+                seg['blocks'].append({'size': addr - last_addr, 'state': 'inactive'})
+            seg['blocks'].append({'size': size, 'state': 'active_allocated',
+                                  'history': [{'addr': addr, 'frames': frames, 'real_size': size}]})
+            last_addr = addr + size
+        if last_addr < seg['total_size']:
+            seg['blocks'].append({'size': seg['total_size'] - last_addr, 'state': 'inactive'})
+
+    snapshot['segments'] = [seg for seg in snapshot['segments'] if seg['blocks']]
+    for seg in snapshot['segments']:
+        seg['total_size'] -= seg['address']
+        if not seg['blocks']:
+            seg['blocks'].append({'size': seg['total_size'], 'state': 'inactive'})
+
+    categories = ["unknown", *(c.name.lower() for c in Category)]
+    return trace_plot(snapshot, device=device, categories=categories)
 
 # note: this template should eventually move to its own file,
 # however, we first need to package _memory_viz.py so that it can be
@@ -586,7 +641,7 @@ _memory_over_time_template = r"""
 <head></head>
 <body>
 <script type="module">
-import {main} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch/torch/utils/viz/MemoryPlot.js"
+import {main} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch/torch/utils/viz/MemoryViz.js"
 let alloc_data = $PLOT_DATA
 main(alloc_data)
 </script>
