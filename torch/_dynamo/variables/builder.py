@@ -958,7 +958,12 @@ class VariableBuilder:
                 else:
                     frame_state_entry = self.tx.output.frame_state[name]
                     if frame_state_entry.scalar != value:
-                        log.debug("automatic dynamic int %s val %s != %s", name, value, frame_state_entry.scalar)
+                        log.debug(
+                            "automatic dynamic int %s val %s != %s",
+                            name,
+                            value,
+                            frame_state_entry.scalar,
+                        )
                         frame_state_entry.scalar = None
                 self.tx.output.frame_state[name] = frame_state_entry
 
@@ -1280,14 +1285,25 @@ def _automatic_dynamic(e, tx, name, static_shapes):
             if e.ndim != len(frame_state_entry.size):
                 # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
                 # E.g. {"x": [2, 3, 4]} -> {"x": None}
-                log.debug("automatic dynamic %s dim %s != %s", name, e.ndim, frame_state_entry.size)
+                log.debug(
+                    "automatic dynamic %s dim %s != %s",
+                    name,
+                    e.ndim,
+                    frame_state_entry.size,
+                )
                 frame_state_entry.size = None
             else:
                 # If there is already an entry, and the dim matches, for every size in the frame state which
                 # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
                 for i, dim in enumerate(frame_state_entry.size):
                     if dim is not None and e.size()[i] != dim:
-                        log.debug("automatic dynamic %s size(%s) %s != %s", name, i, e.size(i), dim)
+                        log.debug(
+                            "automatic dynamic %s size(%s) %s != %s",
+                            name,
+                            i,
+                            e.size(i),
+                            dim,
+                        )
                         frame_state_entry.size[i] = None
 
     # TODO: index export_constraints ahead of time so we don't have to
