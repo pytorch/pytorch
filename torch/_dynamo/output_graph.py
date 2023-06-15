@@ -196,6 +196,9 @@ class WrapperBackend:
             self.restore()
 
 
+Scope = Dict[str, object]
+
+
 class OutputGraph(Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -209,13 +212,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def __init__(
         self,
-        f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
         compiler_fn: CompilerFn,
         root_tx,
         export: bool,
         export_constraints,
         frame_state,
+        local_scope: Scope,
+        global_scope: Scope,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self)]
@@ -238,10 +242,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        if config.dynamic_shapes:
-            # Register a SHAPE_ENV guard to make sure we setup shape guards
-            # that show up in ShapeEnv
-            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+        # Register a SHAPE_ENV guard to make sure we setup shape guards
+        # that show up in ShapeEnv
+        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
 
         self.guards.add(
             DeterministicAlgorithmsSource().make_guard(
@@ -278,7 +281,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
-        self.root_globals = f_globals
+        self.global_scope = global_scope
+        self.local_scope = local_scope
         self.root_tx = root_tx
         from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
@@ -611,7 +615,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
-                self.root_globals[module_key] = target
+                self.global_scope[module_key] = target
                 return VariableBuilder(self, ConstantSource(source_name=module_key))(
                     target
                 )
@@ -985,7 +989,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.should_exit = True
 
     def install_global(self, name, value) -> None:
-        self.cleanups.append(CleanupHook.create(self.root_globals, name, value))
+        self.cleanups.append(CleanupHook.create(self.global_scope, name, value))
 
     def cleanup(self) -> None:
         # There is a reference cycle between tracer and OutputGraph, causing

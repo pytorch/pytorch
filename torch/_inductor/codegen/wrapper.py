@@ -288,7 +288,7 @@ class WrapperCodeGen(CodeGen):
         for name, value in V.graph.constants.items():
             # include a hash so our code cache gives different constants different files
             hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
-            self.header.writeline(f"{name} = None  # {hashed}")
+            self.write_constant(name, hashed)
 
         self.allocated = set()
         self.freed = set()
@@ -306,6 +306,9 @@ class WrapperCodeGen(CodeGen):
 
         self.add_import_once = add_import_once
         self._metas = {}
+
+    def write_constant(self, name, hashed):
+        self.header.writeline(f"{name} = None  # {hashed}")
 
     def write_header(self):
         self.header.splice(
@@ -880,6 +883,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         self.expr_printer = cexpr
 
+    def write_constant(self, name, hashed):
+        # include a hash so our code cache gives different constants different files
+        self.header.writeline(f"// {name} {hashed}")
+
     def write_header(self):
         if V.graph.aot_mode:
             self.header.splice(
@@ -942,6 +949,15 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     else:
                         self.prefix.writeline(f"at::Tensor {input_key} = args[{idx}];")
 
+            assert all(
+                isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
+            ), "Expect all constants to be Tensor"
+            for idx, constants_key in enumerate(V.graph.constants.keys()):
+                constants_idx = inputs_len + idx
+                self.prefix.writeline(
+                    f"at::Tensor {constants_key} = args[{constants_idx}];"
+                )
+
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
             self.wrapper_call.splice(
@@ -991,12 +1007,28 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     outputs = f(args_tensor)
                     return {outputs_str}
             """
+
+        args_str = "args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
+        if V.graph.constants:
+            # Append constants to the input args for cpp wrapper.
+            # Python wrapper directly gets the value inside the wrapper call
+            # as a global variable passed when calling exec(code, mod.__dict__, mod.__dict__).
+            # For cpp wrapper, we need to pass this python value to the inductor_entry_cpp function explicitly.
+            assert all(
+                isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
+            ), "Expect all constants to be Tensor"
+            constants_str = f"[{', '.join(V.graph.constants.keys())}]"
+            args_str += f"""
+                    constants_tensor = {constants_str}
+                    args_tensor.extend(constants_tensor)
+            """
+
         # Wrap the func to support setting result._boxed_call = True
         result.splice(
             f"""
             def _wrap_func(f):
                 def g(args):
-                    args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]
+                    {args_str}
                     {return_str}
                 return g
             call = _wrap_func(module.{self.call_func_name})
