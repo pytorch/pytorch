@@ -1147,11 +1147,11 @@ class HistogramObserver(UniformQuantizationObserverBase):
         # want to ignore torch.inf since we don't actually
         # want to make our quantization range infinite
         # and in practice those values will be clamped
-        if x_min==-torch.inf or x_max==torch.inf:
-            x = x[x.abs()!=torch.inf]
+        if x_min == -torch.inf or x_max == torch.inf:
+            x = x[x.abs() != torch.inf]
             if x.numel() == 0:
                 return x_orig
-            x_min,x_max = torch.aminmax(x)
+            x_min, x_max = torch.aminmax(x)
         min_val = self.min_val
         max_val = self.max_val
         same_values = min_val.item() == max_val.item()

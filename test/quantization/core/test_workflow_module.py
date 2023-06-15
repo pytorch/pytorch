@@ -334,11 +334,11 @@ class TestObserver(QuantizationTestCase):
         obs = HistogramObserver()
         obs2 = HistogramObserver()
         x = torch.randn(4, 4, 4, 4)
-        obs(x*torch.inf)
+        obs(x * torch.inf)
         obs(x)
         obs2(x)
-        obs(x*torch.inf)
-        self.assertTrue(obs.min_val!=-torch.inf and obs.max_val!=torch.inf)
+        obs(x * torch.inf)
+        self.assertTrue(obs.min_val != -torch.inf and obs.max_val != torch.inf)
         self.assertEqual(obs.histogram, obs2.histogram)
 
     def test_histogram_observer_handle_close_to_infinity(self):
