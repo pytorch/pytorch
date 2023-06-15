@@ -17,7 +17,6 @@ from .exported_program import (
     ExportGraphSignature,
     _process_constraints,
 )
-from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 from torch._functorch.aot_autograd import aot_export_module
