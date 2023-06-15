@@ -1,3 +1,8 @@
+# NOTE: We allow Dynamo to see this file (via torch/_dynamo/skipfiles.py) so that it can
+#       trace through `grad`.
+#       Currently, we can't allow Dynamo to see `eager_transforms.py` as that break a lot of thing
+#       and there isn't a mechanism to selectively expose only some functions (eg. grad) from a file
+#       to Dynamo.
 from torch._functorch.eager_transforms import grad_impl, exposed_in, Callable, argnums_t
 
 @exposed_in("torch.func")
