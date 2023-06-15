@@ -2428,7 +2428,7 @@ def forward(self, x):
         self.assertEqual(ep(torch.tensor([6])).shape, (6, 4))
 
         FileCheck().check_count(
-            "orch.ops.aten.sym_constrain_range.default", 1, exactly=True
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         with self.assertRaisesRegex(
@@ -2448,7 +2448,7 @@ def forward(self, x):
         ep = torch._export.export(f, (torch.tensor([6]),))
         self.assertEqual(ep(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
-            "orch.ops.aten.sym_constrain_range.default", 1, exactly=True
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_export_dynamic_dim_not_1(self):

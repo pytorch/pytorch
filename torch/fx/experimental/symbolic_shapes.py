@@ -341,7 +341,7 @@ def constrain_range_int(a, *, min, max):
     Constrain range on concrete int value.
     This can happens for the following scenarios:
     - Eager mode execution and real int value is provided.
-    _ During tracing the traced symbol is resolved as a static integer (see
+    - During tracing the traced symbol is resolved as a static integer (see
       PR #101655 for more details).
     """
 
