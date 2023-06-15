@@ -162,6 +162,9 @@ class TestGetSubmoduleToStates(TestCase):
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.seq2(self.lin(self.seq1(x)))  # equivalent to one matmul
 
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+
     def test_get_fully_sharded_module_to_states(self):
         """
         Tests the helper function ``_get_fully_sharded_module_states()`` that
