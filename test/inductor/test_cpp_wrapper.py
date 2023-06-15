@@ -21,6 +21,8 @@ try:
             test_cpu_repro,
             test_foreach,
             test_mkldnn_pattern_matcher,
+            test_pattern_matcher,
+            test_select_algorithm,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
@@ -28,6 +30,8 @@ try:
         import test_cpu_repro
         import test_foreach
         import test_mkldnn_pattern_matcher
+        import test_pattern_matcher
+        import test_select_algorithm
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
@@ -74,6 +78,19 @@ test_failures_cpp_wrapper = {
     ),
     "test_conv2d_binary_inplace_fusion_pass_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
+    ),
+}
+
+# see https://github.com/pytorch/pytorch/issues/103194
+test_failures_cuda_wrapper = {
+    "test_batch_norm_2d_2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",)
+    ),
+    "test_fft_real_input_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",)
+    ),
+    "test_fft_real_input_real_output_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",)
     ),
 }
 
@@ -126,7 +143,7 @@ if RUN_CPU:
             "test_conv2d_binary_inplace_fusion_failed",
             "cpu",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            condition=torch._C.has_mkldnn,
+            condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["op_convolution_pointwise_binary.call"],
                 ["op_convolution_pointwise_binary_.call"],
@@ -136,7 +153,7 @@ if RUN_CPU:
             "test_conv2d_binary_inplace_fusion_pass",
             "cpu",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            condition=torch._C.has_mkldnn,
+            condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["op_convolution_pointwise_binary_.call"],
                 ["op_convolution_pointwise_binary.call"],
@@ -146,9 +163,10 @@ if RUN_CPU:
             "test_conv2d_unary",
             "cpu",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            condition=torch._C.has_mkldnn,
+            condition=torch.backends.mkldnn.is_available(),
             slow=True,
         ),
+        BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
@@ -159,7 +177,8 @@ if RUN_CPU:
             "test_linear_binary",
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
+            torch.backends.mkldnn.is_available()
+            and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_mm_views"),
@@ -173,6 +192,7 @@ if RUN_CPU:
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
+        BaseTest("test_view_as_complex"),
     ]:
         make_test_case(
             item.name,
@@ -206,6 +226,7 @@ if RUN_CUDA:
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
@@ -233,6 +254,28 @@ if RUN_CUDA:
             device=None,
             tests=test_foreach.ForeachTests(),
         ),  # test foreach
+        BaseTest(
+            "test_cat_slice_cat",
+            device=None,
+            tests=test_pattern_matcher.TestPaternMatcher(),
+        ),
+        BaseTest(
+            "test_addmm",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_linear_relu",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_convolution1",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest("test_fft_real_input"),
+        BaseTest("test_fft_real_input_real_output"),
     ]:
         make_test_case(item.name, item.device, item.tests)
 
@@ -246,6 +289,7 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperTemplate,
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
+        test_failures_cuda_wrapper,
     )
 
 if __name__ == "__main__":

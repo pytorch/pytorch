@@ -251,15 +251,8 @@ class Shard(Placement):
 
         # Unpad the tensor if the input tensor was padded
         if is_padded:
-            gathered_list = torch.chunk(result, num_chunks, dim=self.dim)
-            gathered_list = [
-                self._unpad_tensor(gathered_tensor, pad_size)  # type: ignore[misc]
-                if pad_size > 0
-                else gathered_tensor
-                for gathered_tensor, pad_size in zip(gathered_list, pad_sizes)
-            ]
-
-            result = torch.cat(gathered_list, dim=self.dim)
+            full_pad_size = sum(pad_sizes)
+            result = self._unpad_tensor(result, full_pad_size)
         return result
 
     def __eq__(self, other: object) -> bool:
