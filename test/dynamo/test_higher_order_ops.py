@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import functools
 import re
 import unittest
@@ -1179,6 +1180,39 @@ class GraphModule(torch.nn.Module):
             strip_comment(wrapped_gm.print_readable(print_output=False))
         )
         self.assertExpectedInline(actual, expected)
+
+    def test_grad_disable_capture(self):
+        counters.clear()
+
+        @contextlib.contextmanager
+        def disable_grad_capture():
+            org_val = torch._dynamo.config.capture_func_grad
+            torch._dynamo.config.capture_func_grad = False
+            try:
+                yield
+            finally:
+                torch._dynamo.config.capture_func_grad = org_val
+
+        with disable_grad_capture():
+            # We have verified above that this
+            # function compiles
+            def fn(x):
+                return x.sin().sum()
+
+            def wrapper_fn(x):
+                return torch.func.grad(fn)(x)
+
+            x = torch.randn(3, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                dict(counters["graph_break"]),
+                {"torch.func.grad capture is disabled": 2},
+            )
+            self.assertEqual(actual, expected)
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
