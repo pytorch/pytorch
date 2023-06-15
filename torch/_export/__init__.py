@@ -237,7 +237,7 @@ def export(
             if _add_runtime_assertions:
                 exported_program = exported_program._add_runtime_assertions()
 
-            return exported_program.transform(_ReplaceSymSizeOpPass())
+            return exported_program
 
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
