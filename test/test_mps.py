@@ -817,7 +817,7 @@ if not torch.backends.mps.is_available():
     TestCase = NoTest  # noqa: F811
     NNTestCase = NoTest  # noqa: F811
 
-product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]))
+product_version = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
@@ -6187,8 +6187,8 @@ class TestNLLLoss(TestCaseMPS):
 
     # Test softplus
     def test_softplus(self):
-        def helper(shape, beta=1, threshold=20):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+        def helper(shape, beta, threshold, dtype):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             softplus_result = torch.nn.Softplus(beta=beta, threshold=threshold)(x)
@@ -6204,10 +6204,13 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(x.grad, cpu_x.grad)
 
         # Test empty shape too
-        for shape in [(), (2, 3), (10, 10), (2, 3, 4, 5)]:
-            for beta in [0.5, 1, 2, 3, 4]:
-                for threshold in [0.5, 20, 30, 40, 50]:
-                    helper(shape, beta, threshold)
+        for shape, beta, threshold, dtype in product(
+            [(), (2, 3), (10, 10), (2, 3, 4, 5)],
+            [0.5, 1, 2, 3, 4],
+            [0.5, 20, 30, 40, 50],
+            [torch.float16, torch.float32]
+        ):
+            helper(shape, beta, threshold, dtype)
 
     # Test silu
 
@@ -10375,6 +10378,17 @@ class TestNoRegression(TestCase):
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "cpu")
 
+        # Ensures that `mps:0` Tensors can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps:0")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="mps:0")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
 
 MPS_DTYPES = get_all_dtypes()
 for t in [torch.double, torch.cdouble, torch.cfloat, torch.bfloat16]:
@@ -10404,7 +10418,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
-        'round', 'xlogy',
+        'round', 'xlogy', 'addcmul',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10573,6 +10587,10 @@ class TestConsistency(TestCaseMPS):
             # allow_unused is needed in those cases.
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
+
+            if op.name in ["nn.functional.gelu", "nn.functional.glu"] and dtype == torch.float16:
+                atol = 1e-3
+                rtol = 1e-3
 
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
