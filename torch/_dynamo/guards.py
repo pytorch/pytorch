@@ -812,6 +812,8 @@ class CheckFunctionManager:
     def __init__(
         self,
         output_graph=None,
+        f_locals: Optional[Dict[str, object]] = None,
+        f_globals: Optional[Dict[str, object]] = None,
         guard_fail_fn: Optional[Callable[[Tuple[str, str]], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
@@ -842,12 +844,12 @@ class CheckFunctionManager:
         local_builder = GuardBuilder(
             self.id_ref,
             source_ref,
-            combine_scopes(output_graph.global_scope, output_graph.local_scope),
+            combine_scopes(f_globals, f_locals),
             self,
             local=True,
         )
         global_builder = GuardBuilder(
-            self.id_ref, source_ref, output_graph.global_scope, self, local=False
+            self.id_ref, source_ref, f_globals, self, local=False
         )
         # We need to transplant a copy here, because some guards
         # might get a cross ref between local and global, like L['mod_name'][G['some_key']]

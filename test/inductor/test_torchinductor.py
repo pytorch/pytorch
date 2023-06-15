@@ -22,6 +22,7 @@ import numpy as np
 import torch
 
 import torch._dynamo
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import rand_strided, same
@@ -2751,6 +2752,43 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
+    @skipIfRocm
+    def test_batch_norm_2d_2(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.self_0 = torch.nn.Conv2d(
+                    64,
+                    128,
+                    kernel_size=(3, 3),
+                    stride=(2, 2),
+                    padding=(1, 1),
+                    bias=False,
+                )
+                self.self_1 = torch.nn.BatchNorm2d(
+                    128,
+                    eps=0.0001,
+                    momentum=0.03,
+                    affine=True,
+                    track_running_stats=True,
+                )
+                self.self_2 = torch.nn.LeakyReLU(negative_slope=0.1, inplace=True)
+
+            def forward(self, l_input_: torch.Tensor):
+                self_0 = self.self_0(l_input_)
+                self_1 = self.self_1(self_0)
+                self_2 = self.self_2(self_1)
+                return (self_2,)
+
+        inp = torch.randn((4, 64, 192, 256), dtype=torch.float32, device="cuda")
+        mod = Repro().cuda()
+        o1 = mod(inp)
+        o2 = torch.compile(mod)(inp)
+        self.assertEqual(o1, o2)
+
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
@@ -3929,6 +3967,7 @@ class CommonTemplate:
         self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
     @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -3941,6 +3980,7 @@ class CommonTemplate:
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
     @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
@@ -4727,6 +4767,7 @@ class CommonTemplate:
         self.common(fn2, [torch.randn(55)])
 
     @config.patch({"triton.cudagraphs": True})
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_dropout(self):
         random.seed(1234)
         torch.manual_seed(1234)
@@ -4751,6 +4792,7 @@ class CommonTemplate:
         self.assertTrue(400 < result2.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result2.mean().item() < 1.1)
 
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_dropout_deterministic(self):
         @torch._dynamo.optimize("inductor")
         def fn(a):
@@ -4813,6 +4855,50 @@ class CommonTemplate:
         self.assertTrue((c < 1).all())
         self.assertTrue((d >= 0).all())
         self.assertTrue((d < 1).all())
+
+    def test_functionalize_rng_wrappers(self):
+        # Ideally, we would like to use torch.compile for these operators. But
+        # currently the plan is to introduce these operators at the partitioner
+        # level, obviating the need to support them fully through the
+        # torch.compile stack. To ensure that we have good enough debugging with
+        # minifiers, we have ensure that they work with make_fx. This test uses
+        # make_fx to do the testing. In future, we can move on torch.compile.
+        def fn():
+            rng_state1, a1 = torch._prims.rng_prims.run_and_save_rng_state(
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            rng_state2, a2 = torch._prims.rng_prims.run_and_save_rng_state(
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            b1 = torch._prims.rng_prims.run_with_rng_state(
+                rng_state1,
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            b2 = torch._prims.rng_prims.run_with_rng_state(
+                rng_state2,
+                torch.ops.aten.rand.default,
+                [4, 4],
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            return (a1, a2, b1, b2)
+
+        mod = make_fx(fn)()
+        compiled_f = compile_fx_inner(mod, ())
+        a1, a2, b1, b2 = compiled_f(())
+        self.assertEqual(a1, b1)
+        self.assertEqual(a2, b2)
 
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     def test_philox_rand(self):
@@ -5709,6 +5795,7 @@ class CommonTemplate:
             inputs = (inputs[1], inputs[0])
             self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_list_clearing(self):
         if self.device == "cpu":
             contexts = [contextlib.nullcontext]
@@ -6324,12 +6411,10 @@ class CommonTemplate:
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
 
-        # The first two values should be the same, attention output
-        # and logsumexp since dropout is not being set
         def fn(q, k, v, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
                 q, k, v, compute_log_sumexp
-            )[:2]
+            )
 
         self.common(
             fn,
