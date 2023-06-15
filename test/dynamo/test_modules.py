@@ -19,6 +19,11 @@ from torch._dynamo.testing import same
 from torch.nn import functional as F
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+from torch.testing._internal.common_modules import module_db, modules
+from torch.testing._internal.common_methods_invocations import DecorateInfo
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+import torch.utils._pytree as pytree
+from torch.nn.utils.rnn import PackedSequence
 
 try:
     from . import test_functions
@@ -1831,6 +1836,102 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+
+dynamo_inlining_module_failures = set({
+    # TODO: this just documents the first graph break, there may be more!
+    #       currently "torch._dynamo.explain" doesn't work for some reason
+    #       maybe it makes some assumptions that we are breaking with this hack
+    # TODO: there needs to be a way to separate out train/eval
+
+    # Fail even if we don't trace through:
+
+    # Still fail due to data dependent operator
+    torch.nn.GaussianNLLLoss,  # data dependent operator: aten._local_scalar_dense.default
+    torch.nn.BatchNorm1d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
+                           # data dependent operator: aten._local_scalar_dense.default
+    torch.nn.BatchNorm2d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
+                           # data dependent operator: aten._local_scalar_dense.default
+    torch.nn.BatchNorm3d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
+                           # data dependent operator: aten._local_scalar_dense.default
+    torch.nn.TransformerEncoder,  # comparison TensorVariable() <built-in function is_not> TensorVariable()
+                                  # 'data dependent operator: aten.equal.default
+    torch.nn.Transformer,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10c44b040>
+                           # data dependent operator: aten.equal.default
+
+    # Purposely graph break when wrapping into VariableTracker
+    torch.nn.GRU,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
+    torch.nn.LSTM,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
+    torch.nn.RNN,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
+
+    # No longer fail if we don't trace through:
+
+    torch.nn.TransformerDecoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
+    torch.nn.TransformerEncoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
+    torch.nn.MultiheadAttention,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10ecf5dc0>
+})
+
+# Copy from test/functorch/common_utils.py
+def decorateForModules(decorator, module_classes, device_type=None, dtypes=None):
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn, module_classes=module_classes, decorator=decorator,
+                device_type=device_type, dtypes=dtypes):
+        name_parts = fn.__qualname__.split('.')
+        assert len(name_parts) == 2, "Decorator only applies to a test function of a test class"
+        test_case_name, base_test_name = name_parts
+        for module_cls in module_classes:
+            matching_module_infos = [m for m in module_db if m.module_cls == module_cls]
+            assert len(matching_module_infos) == 1, f"Couldn't find single ModuleInfo for {module_cls}"
+            module_info = matching_module_infos[0]
+            decorators = list(module_info.decorators)
+            new_decorator = DecorateInfo(decorator,
+                                         test_case_name, base_test_name,
+                                         device_type=device_type,
+                                         dtypes=dtypes)
+            decorators.append(new_decorator)
+            module_info.decorators = tuple(decorators)
+        return fn
+    return wrapped
+
+class TestTemp(torch._dynamo.test_case.TestCase):
+    @modules(module_db, allowed_dtypes=(torch.float,))
+    @decorateForModules(unittest.expectedFailure, dynamo_inlining_module_failures)
+    def test_dynamo_inline_module(self, device, dtype, training, module_info):
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                   requires_grad=True, training=training)
+
+        if issubclass(module_info.module_cls, torch.nn.modules.lazy.LazyModuleMixin):
+            # Always inlined I think, but we want to test anyway?
+            return self.skipTest("skipping lazy module")
+
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+            m.train(training)
+
+            args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+
+            def fn(*args, **kwargs):
+                return m(*args, **kwargs)
+
+            # TODO: this doesn't quite work for some reason
+            # explain_str, _, graphs, _, break_reasons, _ = torch._dynamo.explain(fn, *args, **kwargs)
+            # print(explain_str)
+            # self.assertEqual(len(graphs), 1, f"Expected one graph, but got {len(graphs)}")
+            # break_reasons_str = '\n'.join(break_reasons)
+            # msg = f"Expected no graph breaks, but got: {break_reasons_str}"
+            # self.assertEqual(len(break_reasons), 0,msg)
+
+            opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+            ref = fn(*args, **kwargs)
+            res = opt_fn(*args, **kwargs)
+            self.assertEqual(ref, res)
+
+instantiate_device_type_tests(TestTemp, globals(), only_for=("cpu",))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
