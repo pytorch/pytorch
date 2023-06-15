@@ -102,6 +102,7 @@ def constant_fold(gm):
             # TODO - remove constant from node_replacement when it has no uses
             if node.op != "get_attr" and isinstance(out, torch.Tensor):
                 node_replacements[node] = out
+                # print(f"Shunting: {node.format_node()} becomes a const") # TODO
 
             return out
 

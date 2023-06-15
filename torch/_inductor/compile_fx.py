@@ -30,7 +30,7 @@ from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import post_grad_passes, view_to_reshape
+from .fx_passes.post_grad import post_grad_passes, view_to_reshape, convert_conv_weights_to_channels_last
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .pattern_matcher import clone_graph
@@ -678,6 +678,8 @@ def fw_compiler_freezing(
 
     # partition_fn won't be called
     joint_graph_passes(aot_autograd_model)
+
+    convert_conv_weights_to_channels_last(aot_autograd_model, aot_example_inputs)
 
     opt_model, preserved_arg_indices = freeze(
         dynamo_model,
