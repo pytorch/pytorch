@@ -73,6 +73,7 @@
 
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/tensor.h>
+#include <ATen/NativeFunctions.h>
 
 ${Functions_includes}
 
@@ -147,7 +148,7 @@ TORCH_API inline at::Tensor mul(const at::Tensor & self, const at::Tensor & othe
 return at::native::mul(self, other);
 }
 TORCH_API inline at::Tensor & mul_out(at::Tensor & out, const at::Tensor & self, const at::Tensor & other) {
-return at::native::mul_out(out, self, other);
+return at::native::mul_out(self, other, out);
 }
 TORCH_API inline at::Tensor & mul_outf(const at::Tensor & self, const at::Tensor & other, at::Tensor & out) {
 return at::native::mul_out(self, other, out);
