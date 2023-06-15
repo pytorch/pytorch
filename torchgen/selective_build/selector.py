@@ -244,7 +244,10 @@ class SelectiveBuilder:
             key_found = False
             for key in kernel_key:
                 # Don't compare the version for now
-                if key != "default" and key.split("/")[1] == model_kernel_keys.split("/")[1]:
+                if (
+                    key != "default"
+                    and key.split("/")[1] == model_kernel_keys.split("/")[1]
+                ):
                     result_set.add(key)
                     key_found = True
                     break
@@ -255,8 +258,6 @@ class SelectiveBuilder:
                     return ["default"]
 
         return list(result_set)
-
-
 
     def to_dict(self) -> Dict[str, object]:
         ret: Dict[str, object] = {

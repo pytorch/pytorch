@@ -171,7 +171,9 @@ class ComputeCodegenUnboxedKernels:
         op_name = f.namespace + "::" + str(f.func.name)
         if not isinstance(kernel_key, list):
             kernel_key = [kernel_key]
-        used_kernel_keys = self.selector.et_get_selected_kernels(op_name, [k.to_native_string() for k in kernel_key])
+        used_kernel_keys = self.selector.et_get_selected_kernels(
+            op_name, [k.to_native_string() for k in kernel_key]
+        )
         if not used_kernel_keys or not self.selector.is_root_operator(op_name):
             return ""
         sig: Union[CppSignature, ExecutorchCppSignature]
