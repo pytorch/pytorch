@@ -1,8 +1,10 @@
+"""Module for handling op-level validation during exporting."""
+
 from __future__ import annotations
 
 import warnings
 
-from typing import Callable, Dict, List, Sequence, Tuple, Union
+from typing import Dict, List, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator  # type: ignore[import]
@@ -18,8 +20,9 @@ from torch.utils import _pytree
 
 @_beartype.beartype
 def validate_op_between_ort_torch(
+    diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
-    symbolic_fn: Union[onnxscript.OnnxFunction, Callable],
+    symbolic_fn: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
     torch_args: tuple,
     torch_kwargs: dict,
 ):
@@ -36,19 +39,21 @@ def validate_op_between_ort_torch(
 
     Args:
         node (torch.fx.Node): The validated fx.node
-        symbolic_fn (Union[onnxscript.OnnxFunction, Callable]): The corresponded ONNX node
+        symbolic_fn (Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]): The corresponded ONNX node
         torch_args (tuple): torch argument inputs
         torch_kwargs (dict): torch keyword argument inputs
     """
     # op-level validation
     # Symbolic_fn should have the same output as node.target (torch ops)
-    # trace_only function is regular python function
-    function_name = (
-        symbolic_fn.name
-        if isinstance(symbolic_fn, onnxscript.OnnxFunction)
-        else symbolic_fn.__name__
-    )
+    function_name = symbolic_fn.name
 
+    # TODO(bowbao, titaiwang): Diagnostics.
+    # - Add dedicated diagnostic for op-level validation.
+    # - Consider follow up steps. E.g., dump repro.
+    #   - What to do next when validation fails?
+    #   - What can diagnostics offer?
+    # - Warning vs Error. Should this raise?
+    # - False positives. E.g., Mismatch caused by invalid random data.
     with evaluator.default_as(evaluator.ort_evaluator):
         try:
             expected_outputs = node.target(*torch_args, **torch_kwargs)  # type: ignore[operator]
@@ -59,11 +64,12 @@ def validate_op_between_ort_torch(
                 f"IndexError: \n{index_error}.\n This is possibly raised by "
                 f"unsupported input args of randomnized dim/indices(INT64).\n"
             )
-            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug is bypassed\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(index_error)}"
             )
+            diagnostic.with_source_exception(index_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
         except RuntimeError as runtime_error:
@@ -71,12 +77,13 @@ def validate_op_between_ort_torch(
                 f"\nFail the test of running on PyTorch Op {node.target} with "
                 f"RuntimeError: \n{runtime_error}.\n"
             )
-            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug fails on PyTorch\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
             )
-            diagnostic.level = diagnostics.levels.ERROR
+            diagnostic.with_source_exception(runtime_error)
+            diagnostic.level = diagnostics.levels.WARNING
             return
 
         # TODO(titaiwang): Need Opschema from ONNX function to better split args/kwargs
@@ -101,11 +108,12 @@ def validate_op_between_ort_torch(
                 f"ValueError: \n{value_error}.\n This is possibly raised by "
                 f"unsupported input args due to lack of Opschema.\n"
             )
-            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug is bypassed\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(value_error)}"
             )
+            diagnostic.with_source_exception(value_error)
             diagnostic.level = diagnostics.levels.WARNING
             return
         except RuntimeError as runtime_error:
@@ -113,12 +121,13 @@ def validate_op_between_ort_torch(
                 f"\nFail the test of running on ONNX Op {function_name} with "
                 f"RuntimeError: \n{runtime_error}.\n"
             )
-            diagnostic = diagnostics.export_context().inflight_diagnostic()
+            diagnostic = diagnostic_context.inflight_diagnostic()
             diagnostic.with_additional_message(
                 f"### Op level debug fails on ONNXRUNTIME:\n"
                 f"{diagnostics.decorator.format_exception_in_markdown(runtime_error)}"
             )
-            diagnostic.level = diagnostics.levels.ERROR
+            diagnostic.with_source_exception(runtime_error)
+            diagnostic.level = diagnostics.levels.WARNING
             return
 
         flattened_torch_outputs, _ = _pytree.tree_flatten(expected_outputs)
@@ -149,12 +158,13 @@ def validate_op_between_ort_torch(
                     f"Op {node.target} has mismatch outputs. "
                     f"Please check the implementation of {function_name}.\n"
                 )
-                diagnostic = diagnostics.export_context().inflight_diagnostic()
+                diagnostic = diagnostic_context.inflight_diagnostic()
                 diagnostic.with_additional_message(
                     f"### Validation failed\n"
                     f"{diagnostics.decorator.format_exception_in_markdown(e)}"
                 )
-                diagnostic.level = diagnostics.levels.ERROR
+                diagnostic.with_source_exception(e)
+                diagnostic.level = diagnostics.levels.WARNING
 
 
 @_beartype.beartype
@@ -221,7 +231,7 @@ def _fx_args_to_torch_args(
                 )
         elif isinstance(arg, Sequence):
             wrapped_args.append(_fx_args_to_torch_args(arg))
-        elif isinstance(arg, (int, float, torch.dtype)):
+        elif isinstance(arg, (int, float, torch.dtype)) or arg is None:
             wrapped_args.append(arg)
         else:
             raise ValueError(

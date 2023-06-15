@@ -57,6 +57,7 @@ __all__ = [
     "setup_onnx_logging",
     "exporter_context",
     "export",
+    "model_signature",
     "warn_on_static_input_change",
     "unpack_quantized_tensor",
     "export_to_pretty_string",
@@ -2064,3 +2065,9 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                 else:
                     value_dict[x] = str(key) + "_dynamic_axes_" + str(i + 1)
             dynamic_axes[key] = value_dict
+
+
+def model_signature(model: Union[torch.nn.Module, Callable]) -> inspect.Signature:
+    return inspect.signature(
+        model.forward if isinstance(model, torch.nn.Module) else model
+    )

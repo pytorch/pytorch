@@ -33,7 +33,6 @@ if IS_WINDOWS and IS_CI:
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from inductor.test_cpp_wrapper import CppWrapperTemplate
 from inductor.test_torchinductor import (
     check_model,
     check_model_cuda,
@@ -48,7 +47,23 @@ importlib.import_module("filelock")
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
+
+if TEST_WITH_ROCM:
+    # Tensor-likes are not close
+    test_failures["test_convolution1_dynamic_shapes"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    )
+    test_failures["test_convolution3_dynamic_shapes"] = TestFailure(
+        ("cuda"), is_skip=True
+    )
+    test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
+        ("cuda"), is_skip=True
+    )
+    # aten.miopen_batch_norm is not registered for lowering
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
 
 
 def make_dynamic_cls(cls):
@@ -62,7 +77,6 @@ def make_dynamic_cls(cls):
 
 
 DynamicShapesCommonTemplate = make_dynamic_cls(CommonTemplate)
-DynamicShapesCppWrapperTemplate = make_dynamic_cls(CppWrapperTemplate)
 
 
 if HAS_CPU:
@@ -71,15 +85,7 @@ if HAS_CPU:
         common = check_model
         device = "cpu"
 
-    class DynamicShapesCppWrapperCpuTests(TestCase):
-        device = "cpu"
-
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
-    copy_tests(
-        DynamicShapesCppWrapperTemplate,
-        DynamicShapesCppWrapperCpuTests,
-        "cpp_wrapper",
-    )
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
@@ -141,6 +147,37 @@ class TestInductorDynamic(TestCase):
         ref = fn(a)
         self.assertEqual(res, ref)
 
+    def test_shape_as_constant_reciprocal_float_exp(self, device):
+        def fn(x, a):
+            return x, -1 / a**1.0
+
+        x = torch.rand(10, 20, device=device)
+        opt = self.compile_fn(fn)
+        res = opt(x, x.size(0))
+        ref = fn(x, x.size(0))
+        self.assertEqual(res, ref)
+
+    @torch._inductor.config.patch(disable_cpp_codegen=True)
+    def test_floor(self):
+        # `int(n * 0.2)` will be generated as `floor(0.2*s0)` of torch.SymInt type.
+        # If cpp codegen is disabled, we should generate `math.floor` using PythonPrinter.
+        def fn(x):
+            n = x.size(-1)
+            y = x + int(n * 0.2) + 1
+            return y
+
+        opt = self.compile_fn(fn)
+        # The first run doesn't trigger dynamic shapes.
+        x0 = torch.rand(5)
+        ref0 = fn(x0)
+        res0 = opt(x0)
+        self.assertEqual(ref0, res0)
+        # The second run triggers dynamic shapes.
+        x1 = torch.rand(8)
+        ref1 = fn(x1)
+        res1 = opt(x1)
+        self.assertEqual(ref1, res1)
+
     @onlyCUDA
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
@@ -172,5 +209,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

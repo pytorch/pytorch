@@ -95,6 +95,7 @@ _builtin_ops = [
     (torch.nn.init._no_grad_uniform_, "aten::_no_grad_uniform_"),
     (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
+    (torch._C._get_cpu_capability, "aten::_get_cpu_capability"),
     (warnings.warn, "aten::warn"),
     (torch._VF.stft, "aten::stft"),  # type: ignore[attr-defined]
     (torch._VF.istft, "aten::istft"),  # type: ignore[attr-defined]

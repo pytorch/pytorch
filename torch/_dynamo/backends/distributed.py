@@ -10,6 +10,7 @@ from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
+ddp_graph_log = torch._logging.getArtifactLogger(__name__, "ddp_graphs")
 
 
 def args_str(args):
@@ -33,28 +34,70 @@ class Bucket:
     # param_ids is just used for unit testing
     param_ids: List = field(default_factory=list)
 
+    # keep track of any buckets that were extended for logging purposes
+    opcount_increased_to_capture_external_output: int = 0
+    paramsize_before_opcount_increase: int = 0
+
+
+def bucket_has_external_output(bucket: Bucket) -> bool:
+    nodes_in_bucket = set()
+    # we want to iterate in reverse order, but clumsi-luckily the bucket.nodes list was already created backwards
+    # so we don't reverse it here
+    for node in bucket.nodes:
+        # assume node.op != output, since those are filtered in the original iteration
+        nodes_in_bucket.add(node)
+        for user in node.users:
+            if user not in nodes_in_bucket:
+                return True
+    return False
+
 
 def pretty_print_buckets(buckets: List[Bucket]):
     headers = ("Index", "Size (b)", "Param Names")
     rows = []
+    extended_buckets = []
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
             rows.append((idx, bucket.size, bucket.params[0]))
             for param in bucket.params[1:]:
                 rows.append((None, None, param))
-    try:
-        from tabulate import tabulate
+        if bucket.opcount_increased_to_capture_external_output > 0:
+            extended_buckets.append(
+                (
+                    idx,
+                    bucket.opcount_increased_to_capture_external_output,
+                    bucket.size - bucket.paramsize_before_opcount_increase,
+                )
+            )
 
-        # TODO: Do you really want to log.info this?  It would get
-        # suppressed if log level is too low
-        log.info(
-            "\nDDPOptimizer bucket assignments\n%s",
-            tabulate(rows, headers=headers, tablefmt="simple_grid"),
-        )
-    except ImportError:
-        log.info(
-            "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
-        )
+    if len(rows):
+        try:
+            from tabulate import tabulate
+
+            log.debug(
+                "\nDDPOptimizer produced the following bucket assignments:\n%s",
+                tabulate(rows, headers=headers, tablefmt="simple_grid"),
+            )
+
+            if len(extended_buckets):
+                log.warning(
+                    "These buckets were extended beyond their requested parameter capacities"
+                    " in order to ensure each subgraph has"
+                    " an output node, required for fx graph partitioning. This can be the case when a subgraph would have"
+                    " only contained nodes performing inplace mutation, and returning no logical outputs. This should not"
+                    " be a problem, unless it results in too few graph partitions for optimal DDP performance."
+                    "\n%s",
+                    tabulate(
+                        extended_buckets,
+                        headers=("Index", "Extra Ops", "Extra Param Size (b)"),
+                    ),
+                )
+        except ImportError:
+            log.info(
+                "Please `pip install tabulate` in order to pretty-print ddp bucket sizes"
+            )
+    else:
+        log.debug("DDPOptimizer captured no parameters and did not split this graph.")
 
 
 class DDPOptimizer:
@@ -164,7 +207,16 @@ class DDPOptimizer:
                 or len(buckets) == 1
                 and buckets[0].size >= self.first_bucket_cap
             ):
-                buckets.insert(0, Bucket())
+                if bucket_has_external_output(buckets[0]):
+                    buckets.insert(0, Bucket())
+                else:
+                    # continue building this bucket past the point of filling its parameter capacity,
+                    # to increase chances it contains at least one node that is either a global output or
+                    # passed as input to a subsequent graph
+
+                    if buckets[0].opcount_increased_to_capture_external_output == 0:
+                        buckets[0].paramsize_before_opcount_increase = buckets[0].size
+                    buckets[0].opcount_increased_to_capture_external_output += 1
 
             if node.op == "call_module":
                 target = gm.get_submodule(node.target)
@@ -223,7 +275,7 @@ class DDPOptimizer:
                 # only print the submod graphs, not their children
                 debug_str += f"\n---{name} graph---\n{module.graph}\n"
         debug_str += "\n---------------\n"
-        log.debug(debug_str)
+        ddp_graph_log.debug(debug_str)
 
         # 3: compile each of the partitioned submodules using the user-provided compiler
         class SubmodCompiler(torch.fx.interpreter.Interpreter):
@@ -298,58 +350,59 @@ class DDPOptimizer:
             # 5) We end up with a compilation mode that takes a real submodule and fake tensors,
             # to match what aot_autograd expects. See Note: [Fake Modules and AOTAutograd]
             def run_node(self, n: Node) -> Any:
-                with self._set_current_node(n):
-                    args, kwargs = self.fetch_args_kwargs_from_env(n)
-                    new_args = []
-                    assert fake_mode
-                    for arg in args:
-                        if isinstance(arg, torch.Tensor) and not isinstance(
-                            arg, torch._subclasses.FakeTensor
-                        ):
-                            new_args.append(fake_mode.from_tensor(arg))
-                        else:
-                            new_args.append(arg)
-
-                    log.debug(
-                        "run_node %s, %s got args %s", n.op, n.target, args_str(args)
-                    )
-                    assert isinstance(args, tuple)
-                    assert isinstance(kwargs, dict)
-
-                    if n.op == "call_module":
-                        real_mod = self.fetch_attr(n.target)
-                        if fake_mode:
-                            curr_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
-                        else:
-                            curr_submod = real_mod
-
-                        log.debug("\n---%s graph---\n%s", n.target, curr_submod.graph)
-
-                        # When calling the compiler on the submod, inputs (new_args) are expected to
-                        # be FakeTensors already since Dynamo would have made them FakeTensors in the
-                        # non-DDP flow.  However, the parameters are _not_ expected to be FakeTensors,
-                        # since this wrapping happens during compilation
-                        compiled_submod_real = self.compile_submod(
-                            real_mod, new_args, kwargs
-                        )
-
-                        # We update the original (outer) graph with a call into the compiled module
-                        # instead of the uncompiled one.
-                        self.module.delete_submodule(n.target)
-                        n.target = "compiled_" + n.target
-                        self.module.add_submodule(n.target, compiled_submod_real)
-
-                        # Finally, we have to produce inputs for use compiling the next submodule,
-                        # and these need to be FakeTensors, so we execute the module under fake_mode
-                        with fake_mode:
-                            return curr_submod(*new_args, **kwargs)
+                args, kwargs = self.fetch_args_kwargs_from_env(n)
+                new_args = []
+                assert fake_mode
+                for arg in args:
+                    if isinstance(arg, torch.Tensor) and not isinstance(
+                        arg, torch._subclasses.FakeTensor
+                    ):
+                        new_args.append(fake_mode.from_tensor(arg))
                     else:
-                        # placeholder or output nodes don't need to get compiled, just executed
-                        return getattr(self, n.op)(n.target, new_args, kwargs)
+                        new_args.append(arg)
+
+                log.debug("run_node %s, %s got args %s", n.op, n.target, args_str(args))
+                assert isinstance(args, tuple)
+                assert isinstance(kwargs, dict)
+
+                if n.op == "call_module":
+                    real_mod = self.fetch_attr(n.target)
+                    if fake_mode:
+                        curr_submod = deepcopy_to_fake_tensor(real_mod, fake_mode)
+                    else:
+                        curr_submod = real_mod
+
+                    ddp_graph_log.debug(
+                        "\n---%s graph---\n%s", n.target, curr_submod.graph
+                    )
+
+                    # When calling the compiler on the submod, inputs (new_args) are expected to
+                    # be FakeTensors already since Dynamo would have made them FakeTensors in the
+                    # non-DDP flow.  However, the parameters are _not_ expected to be FakeTensors,
+                    # since this wrapping happens during compilation
+                    compiled_submod_real = self.compile_submod(
+                        real_mod, new_args, kwargs
+                    )
+
+                    # We update the original (outer) graph with a call into the compiled module
+                    # instead of the uncompiled one.
+                    self.module.delete_submodule(n.target)
+                    n.target = "compiled_" + n.target
+                    self.module.add_submodule(n.target, compiled_submod_real)
+
+                    # Finally, we have to produce inputs for use compiling the next submodule,
+                    # and these need to be FakeTensors, so we execute the module under fake_mode
+                    with fake_mode:
+                        return curr_submod(*new_args, **kwargs)
+                else:
+                    # placeholder or output nodes don't need to get compiled, just executed
+                    return getattr(self, n.op)(n.target, new_args, kwargs)
 
         submod_compiler = SubmodCompiler(split_gm, self.backend_compile_fn)
         submod_compiler.run(*example_inputs)
         split_gm.recompile()
 
-        log.debug("\n---final graph---\n%s\n---------------\n", split_gm.graph)
+        ddp_graph_log.debug(
+            "\n---final graph---\n%s\n---------------\n", split_gm.graph
+        )
         return split_gm

@@ -51,7 +51,10 @@ C10_DEFINE_bool(
 namespace at {
 namespace native {
 
-void repeat_out(at::Tensor& result, const Tensor& self, IntArrayRef repeats) {
+static void repeat_out(
+    at::Tensor& result,
+    const Tensor& self,
+    IntArrayRef repeats) {
   TORCH_CHECK(
       repeats.size() >= static_cast<size_t>(self.dim()),
       "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
@@ -108,14 +111,14 @@ at::Tensor& reshape_copy_out(
     return out;
   }
 
-  const void* self_data = self_contig->data_ptr();
-  void* out_data = out.data_ptr();
+  const void* self_data = self_contig->const_data_ptr();
+  void* out_data = out.mutable_data_ptr();
   memcpy(out_data, self_data, nbytes);
 
   return out;
 }
 
-at::Tensor& flatten_copy_out(
+static at::Tensor& flatten_copy_out(
     at::Tensor& out,
     const at::Tensor& self,
     int64_t start_dim,
@@ -171,7 +174,7 @@ namespace {
 #define TO_COPY_OUT_FAST_PATH_LOGIC(out, self, self_t)             \
   do {                                                             \
     const auto N = self.numel();                                   \
-    const auto self_data = self.data_ptr<self_t>();                \
+    const auto self_data = self.const_data_ptr<self_t>();          \
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(                        \
         kHalf,                                                     \
         kBFloat16,                                                 \
@@ -179,7 +182,7 @@ namespace {
         out.scalar_type(),                                         \
         "to_copy_out_inner_loop",                                  \
         [&]() {                                                    \
-          const auto out_data = out.data_ptr<scalar_t>();          \
+          const auto out_data = out.mutable_data_ptr<scalar_t>();  \
           for (const auto idx : c10::irange(N)) {                  \
             /* NOLINTNEXTLINE(bugprone-signed-char-misuse) */      \
             out_data[idx] = static_cast<scalar_t>(self_data[idx]); \
@@ -253,7 +256,7 @@ at::Tensor& to_copy_out(
   return out;
 }
 
-Tensor& linear_out(
+static Tensor& linear_out(
     Tensor& output,
     const Tensor& input,
     const Tensor& weight,
@@ -275,7 +278,7 @@ Tensor& linear_out(
   return output;
 }
 
-Tensor& c2_argmin_out(
+static Tensor& c2_argmin_out(
     Tensor& output,
     const Tensor& input,
     const int64_t dim,
@@ -308,8 +311,8 @@ Tensor& c2_argmin_out(
   if (next_size == 1) {
     AT_DISPATCH_ALL_TYPES_AND2(
         kHalf, kBFloat16, input.scalar_type(), "argmin_input", [&]() {
-          const auto in_ptr = input.data_ptr<scalar_t>();
-          const auto out_ptr = output.data_ptr<int64_t>();
+          const auto in_ptr = input.const_data_ptr<scalar_t>();
+          const auto out_ptr = output.mutable_data_ptr<int64_t>();
           // input is a [prev_size, n] tensor.
           // output is a [prev_size,] tensor.
           // Thus, access is contiguous/coalesced.
@@ -337,8 +340,8 @@ Tensor& c2_argmin_out(
         kHalf, kBFloat16, input.scalar_type(), "argmin_input", [&]() {
           const auto less_or_nan = native::detail::LessOrNan<scalar_t>{};
 
-          const auto in_ptr = input.data_ptr<scalar_t>();
-          const auto out_ptr = output.data_ptr<int64_t>();
+          const auto in_ptr = input.const_data_ptr<scalar_t>();
+          const auto out_ptr = output.mutable_data_ptr<int64_t>();
 
           std::memset(out_ptr, 0, prev_size * next_size * sizeof(int64_t));
 
@@ -364,7 +367,7 @@ Tensor& c2_argmin_out(
   return output;
 }
 
-at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
+static at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
   if (C10_UNLIKELY(!self.is_quantized())) {
     // fallback to dequantize_cpu equivalent case: make sure out is at::kFloat
     DCHECK(out.scalar_type() == kFloat);
@@ -385,7 +388,7 @@ bool opIsRegistered(const c10::Symbol& op_name) {
   return SROperatorRegistry()->Has(name);
 }
 
-bool disableUnsafeMathOp(const char* op_name) {
+static bool disableUnsafeMathOp(const char* op_name) {
   if (FLAGS_static_runtime_enable_fast_math) {
     return false;
   }
@@ -428,7 +431,7 @@ bool canReuseInputsOutputs(
 // returns true if the producers of the inputs
 // to this operations are out of place.
 // This means the IValues will not change run to run
-bool inputsCanRunOutOfPlace(
+static bool inputsCanRunOutOfPlace(
     Node* n,
     const c10::FastMap<Node*, bool>& node_has_out_variant) {
   for (auto* input : n->inputs()) {
@@ -833,10 +836,10 @@ void varStackFastOut(
   at::native::resize_(out, output_size, c10::nullopt);
 
   AT_DISPATCH_ALL_TYPES(out.scalar_type(), "varStackFastOut", [&]() {
-    auto* out_data = out.data_ptr<scalar_t>();
+    auto* out_data = out.mutable_data_ptr<scalar_t>();
     for (const auto i : c10::irange(num_inputs)) {
       auto& tensor = inputs[i];
-      auto* input_ptr = tensor.data_ptr<scalar_t>();
+      auto* input_ptr = tensor.const_data_ptr<scalar_t>();
       out_data[i] = *input_ptr;
     }
   });
@@ -877,7 +880,7 @@ void varStackOut(ProcessedNode& pnode, int64_t dim) {
 } // namespace
 
 // Split out into a function to appease MSVC's pre-processor
-SROperator aten_stack(Node* n) {
+static SROperator aten_stack(Node* n) {
   if (!n->matches(torch::schema(
           "aten::stack(Tensor[] tensors, int dim=0) -> Tensor"))) {
     LogAndDumpSchema(n);
@@ -2715,8 +2718,8 @@ void signed_log1p_out(at::Tensor& out, const at::Tensor& input) {
   auto output_contig = out.expect_contiguous();
 
   AT_DISPATCH_ALL_TYPES(input.scalar_type(), "signed_log1p_kernel", [&]() {
-    const auto input_data = input_contig->data_ptr<scalar_t>();
-    auto output_data = output_contig->data_ptr<float>();
+    const auto input_data = input_contig->const_data_ptr<scalar_t>();
+    auto output_data = output_contig->mutable_data_ptr<float>();
     const auto N = input.numel();
 
     for (const auto i : c10::irange(N)) {

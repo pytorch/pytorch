@@ -1,6 +1,7 @@
 import copy
 import functools
 import getpass
+import itertools
 import logging
 import os
 import subprocess
@@ -8,14 +9,23 @@ import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
+from typing import Callable, Optional, Sequence, TypeVar
 
 import torch
+import torch._prims_common as utils
+import torch._subclasses.meta_utils
+
+from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
+from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
 from .utils import clone_inputs, get_debug_dir
 
 log = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 inductor_config = import_module("torch._inductor.config")
@@ -103,6 +113,9 @@ def minifier_dir():
     return path
 
 
+MAX_CONSTANT_NUMEL_INLINE = 4
+
+
 class NNModuleToString:
     safe_reprs = [
         torch.nn.Linear,
@@ -167,7 +180,13 @@ class NNModuleToString:
         for buffer_name, buffer in gm._buffers.items():
             if buffer is None:
                 continue
-            if torch.is_floating_point(buffer):
+            # Serialize full data for small buffers
+            if buffer.numel() <= MAX_CONSTANT_NUMEL_INLINE:
+                from torch._tensor_str import PRINT_OPTS
+
+                assert PRINT_OPTS.threshold >= MAX_CONSTANT_NUMEL_INLINE
+                tensor_str = repr(buffer)
+            elif torch.is_floating_point(buffer):
                 tensor_str = f"torch.randn({list(buffer.shape)}, dtype={buffer.dtype})"
             else:
                 tensor_str = (
@@ -180,9 +199,10 @@ class NNModuleToString:
         for param_name, param in gm._parameters.items():
             if param is None:
                 continue
-            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}))"
+            maybe_device = ""
             if param.is_cuda:
-                tensor_str = f"{tensor_str}.cuda()"
+                maybe_device = ', device="cuda"'
+            tensor_str = f"torch.nn.Parameter(torch.randn({list(param.shape)}, dtype={param.dtype}{maybe_device}))"
             model_str += f"{tab*2}self.{param_name} = {tensor_str}\n"
 
         # TODO - Keep this code for now. But, I don't think we will need this.
@@ -228,19 +248,14 @@ def generate_config_string(*, stable_output=False):
     if stable_output:
         return "# config omitted due to stable_output=True"
 
-    return textwrap.dedent(
-        f"""\
+    return f"""\
 import torch._dynamo.config
 import torch._inductor.config
 import torch._functorch.config
-torch._dynamo.config.load_config({repr(torch._dynamo.config.save_config())})
-torch._inductor.config.load_config({repr(torch._inductor.config.save_config())})
-torch._functorch.config.load_config({repr(torch._functorch.config.save_config())})
-        """
-    )
-
-
-TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
+{torch._dynamo.config.codegen_config()}
+{torch._inductor.config.codegen_config()}
+{torch._functorch.config.codegen_config()}
+"""
 
 
 def get_minifier_repro_path():
@@ -249,7 +264,7 @@ def get_minifier_repro_path():
 
 def helper_for_dump_minify(contents):
     minified_repro_path = get_minifier_repro_path()
-    log.warning("Writing minified repro to %s", minified_repro_path)
+    log.warning("Writing minified repro to:\n%s", minified_repro_path)
 
     if use_buck:
         BuckTargetWriter(minified_repro_path).write()
@@ -266,22 +281,33 @@ class AccuracyError(Exception):
     pass
 
 
-def run_fwd_maybe_bwd(gm, args, only_fwd=False):
+def clone_inputs_retaining_gradness(example_inputs):
+    """
+    This clone inputs is different from utils clone_input. In case of minifier,
+    all the tensors are leaf tensors while creating a new graph. So, we set the
+    requires_grad field w/o checking the leafness of the tensor.
+    """
+    cloned_inputs = clone_inputs(example_inputs)
+    for idx in range(len(example_inputs)):
+        if isinstance(cloned_inputs[idx], torch.Tensor):
+            cloned_inputs[idx].requires_grad_(example_inputs[idx].requires_grad)
+    return cloned_inputs
+
+
+def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
+
+    When disable_clone is True, we will use args as-is without cloning.
+    This is higher fidelity but we may destroy the args in the process.
     """
     from torch._functorch.aot_autograd import make_boxed_func
 
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
-    new_args = clone_inputs(args)
-    # Set the requires_grad field explicitly because clone_inputs only sets
-    # requires_grad for leaf tensors.
-    for narg, arg in zip(new_args, args):
-        if isinstance(arg, torch.Tensor):
-            narg.requires_grad_(arg.requires_grad)
-    args = new_args
+    if not disable_clone:
+        args = clone_inputs_retaining_gradness(args)
 
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
@@ -307,9 +333,22 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     return collect_results(gm, out, None, args)
 
 
-def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
+def same_two_models(
+    gm,
+    opt_gm,
+    example_inputs,
+    only_fwd=False,
+    *,
+    require_fp64=False,
+    ignore_non_fp=False,
+):
     """
     Check two models have same accuracy.
+
+    require_fp64: if True, raise an error if we unable to calculate the fp64 reference
+    ignore_non_fp: if True, do not compare outputs which are not floating point.  This
+        is mostly useful for the minifier (which wants to avoid quantizing floating point
+        error into integer/boolean error)
     """
     from .eval_frame import OptimizedModule
     from .testing import (
@@ -328,14 +367,17 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
-    try:
-        fp64_model, fp64_examples = cast_to_fp64(
-            copy.deepcopy(gm), clone_inputs(example_inputs)
-        )
-        fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
-    except Exception:
-        log.warning("Could not generate fp64 outputs")
-        fp64_ref = None
+    fp64_ref = None
+    if config.same_two_models_use_fp64:
+        try:
+            fp64_model, fp64_examples = cast_to_fp64(
+                copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
+            )
+            fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
+        except Exception:
+            if require_fp64:
+                raise RuntimeError("Could not generate fp64 outputs")
+            log.warning("Could not generate fp64 outputs")
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
@@ -351,7 +393,14 @@ def same_two_models(gm, opt_gm, example_inputs, only_fwd=False):
         )
         return True
 
-    passing = same(ref, res, fp64_ref, tol=config.repro_tolerance, equal_nan=True)
+    passing = same(
+        ref,
+        res,
+        fp64_ref,
+        tol=config.repro_tolerance,
+        equal_nan=True,
+        ignore_non_fp=ignore_non_fp,
+    )
     return passing
 
 
@@ -391,9 +440,27 @@ def cast_to_fp64(model, inputs):
     return cast_to(torch.float64, model, inputs)
 
 
-def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
+def backend_accuracy_fails(
+    gm,
+    example_inputs,
+    compiler_fn,
+    only_fwd=False,
+    *,
+    require_fp64=False,
+    ignore_non_fp=False,
+):
     try:
-        compiled_gm = compiler_fn(copy.deepcopy(gm), clone_inputs(example_inputs))
+        compiled_gm = compiler_fn(
+            copy.deepcopy(gm), clone_inputs_retaining_gradness(example_inputs)
+        )
+        return not same_two_models(
+            gm,
+            compiled_gm,
+            example_inputs,
+            only_fwd,
+            require_fp64=require_fp64,
+            ignore_non_fp=ignore_non_fp,
+        )
     except Exception as e:
         # This means that the the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
@@ -406,4 +473,217 @@ def backend_accuracy_fails(gm, example_inputs, compiler_fn, only_fwd=False):
         )
         return False
 
-    return not same_two_models(gm, compiled_gm, example_inputs, only_fwd)
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#                       REPRO SUPPORT CODE
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+
+# Helper functions for computing what the default values of tensor
+# values should be.  These all coincide with factory functions, e.g., torch.empty
+
+
+def _stride_or_default(
+    stride: Optional[Sequence[int]], *, shape: Sequence[int]
+) -> Sequence[int]:
+    return stride if stride is not None else utils.make_contiguous_strides_for(shape)
+
+
+def _mk_defaulter(d: T) -> Callable[[Optional[T]], T]:
+    return lambda x: x if x is not None else d
+
+
+_dtype_or_default = _mk_defaulter(torch.float32)
+_device_or_default = _mk_defaulter(torch.device("cpu"))
+_storage_offset_or_default = _mk_defaulter(0)
+_requires_grad_or_default = _mk_defaulter(False)
+_is_leaf_or_default = _mk_defaulter(False)
+
+
+class NopInputReader:
+    def __init__(self):
+        self.total = 0
+
+    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
+        self.total += 1
+
+    def tensor(self, *args, **kwargs):
+        pass
+
+    def symint(self, *args, **kwargs):
+        pass
+
+
+# TODO: Support bundling the entire repro into a zip file for ease of
+# transferring around
+class InputReader:
+    def __init__(self, save_dir=None, *, pbar=None):
+        # If None, we will generate random data instead.  It's important
+        # to natively support this use case as it will allow people to
+        # share repros without including the real data, if the problem
+        # reproduces even on random data.
+        if save_dir is None:
+            log.warning("no save_dir specified, will generate random data")
+        self.store = ContentStoreReader(save_dir) if save_dir is not None else None
+        self.args = []
+        self.pbar = pbar
+
+    def storage(self, storage_hash, nbytes, *, device=None, dtype_hint=None):
+        if self.pbar is not None:
+            self.pbar.update(1)
+        device = _device_or_default(device)
+        dtype_hint = _dtype_or_default(dtype_hint)
+        if self.store is not None and storage_hash is not None:
+            try:
+                storage = self.store.read_storage(storage_hash)
+            except FileNotFoundError:
+                pass
+            else:
+                if device != storage.device:
+                    log.warning("device mismatch: %s != %s", device, storage.device)
+                    # TODO: transfer it to the right device?  But failing this
+                    # way would be very mysterious!  Would have been better
+                    # not to store device in the serialized format...
+                return storage
+        log.warning("could not load %s, generating random data instead", storage_hash)
+        shape = (nbytes // dtype_hint.itemsize,)
+        stride = _stride_or_default(None, shape=shape)
+        return rand_strided(shape, stride, dtype_hint, device).untyped_storage()
+
+    def tensor(
+        self,
+        storage,
+        shape,
+        stride=None,
+        *,
+        storage_offset=None,
+        dtype=None,
+        requires_grad=None,
+        is_leaf=None,
+        **metadata,
+    ):
+        stride = _stride_or_default(stride, shape=shape)
+        storage_offset = _storage_offset_or_default(storage_offset)
+        dtype = _dtype_or_default(dtype)
+        is_leaf = _is_leaf_or_default(is_leaf)
+        requires_grad = _requires_grad_or_default(requires_grad)
+        t = torch.tensor(
+            [], dtype=dtype, device=storage.device, requires_grad=requires_grad
+        )
+        with torch.no_grad():
+            t.set_(storage, storage_offset, shape, stride)
+        if not is_leaf:
+            # Fake up some autograd history in a very naughty way
+            with torch.enable_grad():
+                t = t.clone(memory_format=torch.preserve_format)
+            with torch.no_grad():
+                t.set_(storage, storage_offset, shape, stride)
+        assert torch._subclasses.meta_utils.safe_is_leaf(t) == is_leaf
+        torch._utils.set_tensor_metadata(t, metadata)
+        self.args.append(t)
+        return t  # for BC
+
+    def symint(self, val):
+        self.args.append(val)
+        return val  # for BC
+
+
+# Here is our writer strategy:
+#  1. We will stream all of the inputs to disk
+#  2. You can now deterministically randomize the inputs, or reload
+#     the inputs from disk
+#  3. You can YOLO run the script without the inputs, in which case
+#     we'll fill the inputs with random data and pray.  This is the
+#     legacy behavior, but it's also useful if you want to find out
+#     if we're so broken even random inputs trigger it
+#  4. We could offer an in process "check if the randomized thing
+#     works too" but this is delicate so we don't do it
+
+
+class InputWriter:
+    def __init__(self, save_dir, *, stable_hash=False):
+        self._lines = []
+        # TODO: consider ensuring tensor and storage counters line up?
+        self.storage_counter = itertools.count()
+        self.save_dir = save_dir
+        self.store = (
+            ContentStoreWriter(save_dir, stable_hash=stable_hash)
+            if save_dir is not None
+            else None
+        )
+        self.seen_storages = {}
+
+    def lines(self):
+        r = [
+            "def load_args(reader):",
+        ]
+        r.extend(f"    {l}" for l in self._lines)
+        # In case we need to change the internal format of load_args
+        # in an FC-breaking way
+        r.append("load_args._version = 0")
+        return r
+
+    # Storages are untyped, but we need to initialize them with data if
+    # we don't have the real data, so we give a hint saying what kind
+    # of initialization may be appropriate
+    #
+    # If we had a FakeTensor, device_hint tells us what device should be
+    def storage(self, untyped_storage, *, dtype_hint=None, device_hint=None) -> str:
+        ws = StorageWeakRef(untyped_storage)
+        v = self.seen_storages.get(ws)
+        if v is not None:
+            return v
+        v = f"buf{next(self.storage_counter)}"
+        maybe_dtype_hint = ""
+        if _dtype_or_default(None) != _dtype_or_default(dtype_hint):
+            maybe_dtype_hint = f", dtype_hint={dtype_hint!r}"
+        # TODO: being optional on device is kind of pointless as the default
+        # is CPU but most repros we care about are CUDA
+        maybe_device = ""
+        device = untyped_storage.device
+        if device.type == "meta":
+            assert device_hint is not None
+            device = device_hint
+        if _device_or_default(None) != device:
+            maybe_device = f", device={device!r}"
+        nbytes = untyped_storage.nbytes()
+        storage_hash = None
+        if self.store is not None and untyped_storage.device.type != "meta":
+            storage_hash = self.store.write_storage(untyped_storage)
+        self._lines.append(
+            f"{v} = reader.storage({storage_hash!r}, {nbytes!r}{maybe_device}{maybe_dtype_hint})"
+        )
+        self.seen_storages[ws] = v
+        return v
+
+    def tensor(self, name, t) -> None:
+        storage = self.storage(
+            t.untyped_storage(), dtype_hint=t.dtype, device_hint=t.device
+        )
+        args = []
+        # NB: this is positional, must come first
+        if _stride_or_default(None, shape=t.shape) != t.stride():
+            args.append(str(tuple(t.stride())))
+        if _dtype_or_default(None) != t.dtype:
+            args.append(f"dtype={t.dtype!r}")
+        if _storage_offset_or_default(None) != t.storage_offset():
+            args.append(f"storage_offset={t.storage_offset()!r}")
+        tensor_metadata = torch._utils.get_tensor_metadata(t)
+        if tensor_metadata:
+            args.extend(f"{k}={v!r}" for k, v in tensor_metadata.items())
+        if _requires_grad_or_default(None) != t.requires_grad:
+            args.append(f"requires_grad={t.requires_grad!r}")
+        is_leaf = torch._subclasses.meta_utils.safe_is_leaf(t)
+        if _is_leaf_or_default(None) != is_leaf:
+            args.append(f"is_leaf={is_leaf!r}")
+        self._lines.append(
+            "reader.tensor("
+            + ", ".join([storage, str(tuple(t.shape)), *args])
+            + f")  # {name}"
+        )
+
+    # TODO: this doesn't actually symint atm
+    def symint(self, name, val) -> None:
+        if isinstance(val, torch.SymInt):
+            val = val.node.hint
+        self._lines.append(f"reader.symint({val!r})  # {name}")

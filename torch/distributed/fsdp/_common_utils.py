@@ -8,6 +8,7 @@ from enum import auto, Enum
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterable,
@@ -23,6 +24,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp.flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
@@ -39,6 +41,54 @@ from .api import (
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
 FSDP_FLATTENED = "_fsdp_flattened"
+
+
+class _FSDPDeviceHandle:
+    """
+    This is a simple abstraction for FSDP computing devices,
+    which enables custom backends that implement CUDA-like
+    semantics to be integrated with FSDP.
+    """
+
+    def __init__(self, device: torch.device, backend: Any = None):
+        if backend is None:
+            try:
+                self.__backend = getattr(torch, device.type)
+                self.__device = device
+            except AttributeError:
+                raise AttributeError(
+                    f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
+                )
+        else:
+            self.__backend = backend
+
+    @classmethod
+    def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
+        """
+        Return an device handle corresponding to the device, and through this handle,
+        operations with the same semantics as CUDA can be performed on the device.
+        Just return torch.cuda if the device is cuda to make attribute-access faster.
+        Custom backend must first register a module with the same name with {device.type} on torch.
+        """
+        if device.type == "cuda":
+            return cast(_FSDPDeviceHandle, torch.cuda)
+        return cls(device)
+
+    def __getattr__(self, __name: str) -> Any:
+        try:
+            return getattr(self.__backend, __name)
+        except AttributeError:
+            raise AttributeError(
+                f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
+            )
+
+
+class _UninitializedDeviceHandle(_FSDPDeviceHandle):
+    def __init__(self):
+        pass
+
+    def __getattribute__(self, __name: str) -> Any:
+        raise RuntimeError("Trying to use an uninitialized device handle.")
 
 
 class _FSDPState(_State):
@@ -63,10 +113,14 @@ class _FSDPState(_State):
             nn.Module, List[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
+        # Abstract device handle for fsdp compute device. For now,
+        # the compute device must implement cuda semantics used by fsdp
+        self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._device_mesh: Optional[DeviceMesh] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -231,7 +285,7 @@ def _get_param_to_fqns(
         ):
             local_fqns = (
                 param._fqns
-                if type(param) is flat_param_file.FlatParameter
+                if isinstance(param, flat_param_file.FlatParameter)
                 else [param_name]
             )  # prefixed from `module`
             global_fqns = [
@@ -241,7 +295,7 @@ def _get_param_to_fqns(
             if not is_shared_param:
                 param_to_fqns[param] = global_fqns
             else:
-                if type(param) is flat_param_file.FlatParameter:
+                if isinstance(param, flat_param_file.FlatParameter):
                     # DMP overwrites `named_parameters` and skip (advance to
                     # the next child module) the wrapped_module (e.g.,
                     # _dmp_wrapped_module and _fsdp_wrapped_module). When a user

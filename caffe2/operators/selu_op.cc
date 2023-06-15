@@ -55,8 +55,8 @@ The default value of *alpha* is 1.6732632423543772848170429916717 and the defaul
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/selu_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/selu_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/selu_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/selu_op.cc
 
 
 <details>

@@ -4,18 +4,22 @@ from torch._dynamo.testing import make_test_cls_with_patches
 
 try:
     from . import (
+        test_aot_autograd,
         test_ctx_manager,
         test_export,
         test_functions,
+        test_higher_order_ops,
         test_misc,
         test_modules,
         test_repros,
         test_subgraphs,
     )
 except ImportError:
+    import test_aot_autograd
     import test_ctx_manager
     import test_export
     import test_functions
+    import test_higher_order_ops
     import test_misc
     import test_modules
     import test_repros
@@ -31,9 +35,6 @@ ALL_DYNAMIC_XFAILS = {
     "ReproTests": [
         # Could not infer dtype of torch._C.SymIntNode
         "test_convert_boxes_to_pooler_format",
-    ],
-    "SubGraphTests": [
-        "test_enumerate_not_break_graph",
     ],
 }
 
@@ -56,6 +57,7 @@ def make_dynamic_cls(cls, *, static_default=False):
         (config, "dynamic_shapes", True),
         (config, "assume_static_by_default", static_default),
         (config, "specialize_int", static_default),
+        xfail_prop="_expected_failure_dynamic" if not static_default else None,
     )
 
     xfail_tests = ALL_DYNAMIC_XFAILS.get(cls.__name__)
@@ -79,6 +81,8 @@ tests = [
     test_modules.NNModuleTests,
     test_export.ExportTests,
     test_subgraphs.SubGraphTests,
+    test_higher_order_ops.HigherOrderOpTests,
+    test_aot_autograd.AotAutogradFallbackTests,
 ]
 for test in tests:
     make_dynamic_cls(test)
@@ -124,6 +128,11 @@ unittest.expectedFailure(
 
 unittest.expectedFailure(
     DynamicShapesNNModuleTests.test_lazy_module5_dynamic_shapes
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+)
+
+unittest.expectedFailure(
+    DynamicShapesNNModuleTests.test_lazy_module6_dynamic_shapes
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
 )
 

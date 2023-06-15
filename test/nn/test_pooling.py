@@ -273,6 +273,23 @@ class TestPoolingNN(NNTestCase):
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_avg_pooling_overflow(self):
+        input = torch.randint(-256, 256, (20, 32, 256, 256), dtype=torch.half, device='cuda')
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_avg_pooling_nhwc_overflow(self):
+        input = torch.randint(-256, 256, (20, 32, 256, 256), dtype=torch.half, device='cuda')
+        input = input.contiguous(memory_format=torch.channels_last)
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
+
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)

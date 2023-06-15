@@ -19,8 +19,10 @@ from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    get_higher_order_op,
     istype,
     proxy_args_kwargs,
+    requires_higher_order_op,
     specialize_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
@@ -30,6 +32,7 @@ from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SizeVariable,
     TupleIteratorVariable,
     TupleVariable,
 )
@@ -272,10 +275,17 @@ class BuiltinVariable(VariableTracker):
         def tuple_add_handler(tx, a, b, options):
             return TupleVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
 
+        def size_add_handler(tx, a, b, options):
+            return SizeVariable(a.items + list(b.unpack_var_sequence(tx)), **options)
+
         list_like_addition_handlers = [
             # NB: Prefer the tuple-specific logic over base logic because of
             # some SizeVariable weirdness. Specifically, the tuple-specific logic
             # drops the subclass type (e.g. SizeVariable) and returns TupleVariables.
+            (
+                (SizeVariable, SizeVariable),
+                size_add_handler,
+            ),
             (
                 (TupleVariable, TupleVariable),
                 tuple_add_handler,
@@ -442,15 +452,6 @@ class BuiltinVariable(VariableTracker):
         )
         assert isinstance(args, (list, tuple))
         assert isinstance(kwargs, dict)
-
-        if (
-            self.fn is operator.getitem
-            and len(args) == 2
-            and isinstance(args[1], variables.TensorVariable)
-            and args[1].dtype == torch.bool
-            and not config.dynamic_shapes
-        ):
-            unimplemented("dynamic Tensor.__getitem__(bool[])")
 
         # args[0] is list and args[1] is unspec
         if self.fn is operator.getitem and not isinstance(
@@ -803,9 +804,9 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):
-        if arg is None:
+        if arg is None or isinstance(arg, dict):
             return ConstDictVariable(
-                {}, user_cls, mutable_local=MutableLocal()
+                arg if arg is not None else {}, user_cls, mutable_local=MutableLocal()
             ).add_options(options)
         elif isinstance(arg, variables.ConstDictVariable):
             return arg.clone(
@@ -915,7 +916,7 @@ class BuiltinVariable(VariableTracker):
         source = (
             None
             if a.source is None or b.source is None
-            else SuperSource(a.source, b.source)
+            else SuperSource(type=a.source, base=b.source)
         )
         return variables.SuperVariable(a, b, source=source)
 
@@ -984,6 +985,7 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
+            TorchHigherOrderOperatorVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1051,7 +1053,11 @@ class BuiltinVariable(VariableTracker):
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
-            if is_allowed(member):
+            if requires_higher_order_op(member):
+                return TorchHigherOrderOperatorVariable(
+                    get_higher_order_op(member), **options
+                )
+            elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable(member, **options)
@@ -1200,6 +1206,7 @@ class BuiltinVariable(VariableTracker):
         from . import (
             BaseListVariable,
             ConstantVariable,
+            NNModuleVariable,
             TensorVariable,
             UserFunctionVariable,
         )
@@ -1213,6 +1220,13 @@ class BuiltinVariable(VariableTracker):
 
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
+
+        if (
+            isinstance(left, NNModuleVariable)
+            and isinstance(right, NNModuleVariable)
+            and op in supported_const_comparison_ops
+        ):
+            self.push(ConstantVariable(op(left, right)))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():
@@ -1255,11 +1269,16 @@ class BuiltinVariable(VariableTracker):
                 sym_num=None,
             )
 
+        if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
+            return ConstantVariable(op(left.value, right.value))
+
         _unimplemented()
 
     # and_ is a constant fold function, so we only get here if constant fold is not valid
     def call_and_(self, tx, a, b):
-        if isinstance(a, SymNodeVariable) and isinstance(b, SymNodeVariable):
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -1272,7 +1291,9 @@ class BuiltinVariable(VariableTracker):
 
     # or_ is a constant fold function, so we only get here if constant fold is not valid
     def call_or_(self, tx, a, b):
-        if isinstance(a, SymNodeVariable) and isinstance(b, SymNodeVariable):
+        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
+            b, (SymNodeVariable, ConstantVariable)
+        ):
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -1292,6 +1313,10 @@ class BuiltinVariable(VariableTracker):
                 ),
                 sym_num=None,
             )
+
+        if isinstance(a, ListVariable):
+            return ConstantVariable(len(a.items) == 0).add_options(self, a)
+
         return None
 
     call_eq = _comparison

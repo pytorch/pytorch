@@ -37,15 +37,26 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
     HAS_NUMPY = False
 
+try:
+    import torch_np
+
+    HAS_NUMPY_TORCH_INTEROP = True
+except ModuleNotFoundError:
+    torch_np = None
+    HAS_NUMPY_TORCH_INTEROP = False
+
 import importlib
 
 import torch
+import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils.checkpoint
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
+
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
@@ -261,7 +272,7 @@ graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
 def setup_compile_debug():
-    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     if compile_debug:
         torch._logging.set_logs(
@@ -513,7 +524,7 @@ def clone_tensor(x):
     return y
 
 
-def clone_input(x):
+def clone_input(x, *, dtype=None):
     """copy while preserving strides"""
     # TODO: this is questionable
     if isinstance(x, torch._subclasses.FakeTensor):
@@ -525,7 +536,7 @@ def clone_input(x):
         if x.is_leaf:
             y.requires_grad_(x.requires_grad)
         if x.is_leaf and x.grad is not None:
-            y.grad = clone_input(x.grad)
+            y.grad = clone_input(x.grad, dtype=dtype)
         if hasattr(x, "_dynamo_dynamic_indices"):
             y._dynamo_dynamic_indices = x._dynamo_dynamic_indices.copy()
         return y
@@ -541,7 +552,9 @@ def clone_input(x):
         if x.is_quantized:
             result = torch.empty_quantized((needed_size + 32,), x)
         else:
-            result = torch.empty(needed_size + 32, dtype=x.dtype, device=x.device)
+            result = torch.empty(
+                needed_size + 32, dtype=dtype or x.dtype, device=x.device
+            )
         cache_line_offset = (
             (x.data_ptr() - result.data_ptr()) % 32
         ) // x.element_size()
@@ -551,7 +564,7 @@ def clone_input(x):
             if x.is_leaf:
                 result.requires_grad_(x.requires_grad)
             if x.is_leaf and x.grad is not None:
-                result.grad = clone_input(x.grad)
+                result.grad = clone_input(x.grad, dtype=dtype)
         except RuntimeError:
             # RuntimeError: unsupported operation: more than one element of the written-to
             # tensor refers to a single memory location. Please clone() the tensor before
@@ -566,8 +579,11 @@ def clone_inputs(example_inputs):
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
-            assert isinstance(value, torch.Tensor)
-            res[key] = clone_input(value)
+            if isinstance(value, tuple):
+                res[key] = clone_inputs(value)
+            else:
+                assert isinstance(value, torch.Tensor), type(value)
+                res[key] = clone_input(value)
         return res
 
     res = list(example_inputs)
@@ -726,7 +742,7 @@ def rot_n_helper(n):
 def is_safe_constant(v):
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
-    return istype(
+    return isinstance(v, (enum.Enum, type)) or istype(
         v,
         (
             types.CodeType,
@@ -741,7 +757,7 @@ def is_safe_constant(v):
             torch.device,
             torch.dtype,
         ),
-    ) or isinstance(v, enum.Enum)
+    )
 
 
 def check_constant_args(args, kwargs):
@@ -806,11 +822,15 @@ def enum_repr(value, local):
 
 
 def dict_param_key_ids(value):
-    return {id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)}
+    return {
+        id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))
+    }
 
 
 def dict_const_keys(value):
-    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
+    return {
+        k for k in value.keys() if not isinstance(k, (torch.nn.Parameter, torch.Tensor))
+    }
 
 
 def dict_const_keys_repr(const_keys, *, local):
@@ -867,6 +887,8 @@ def same(
     equal_nan=False,
     exact_dtype=True,
     relax_numpy_equality=False,
+    ignore_non_fp=False,
+    log_error=log.error,
 ):
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -883,6 +905,8 @@ def same(
                 equal_nan,
                 exact_dtype,
                 relax_numpy_equality,
+                ignore_non_fp,
+                log_error=log_error,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -902,9 +926,11 @@ def same(
                     equal_nan=equal_nan,
                     exact_dtype=exact_dtype,
                     relax_numpy_equality=relax_numpy_equality,
+                    ignore_non_fp=ignore_non_fp,
+                    log_error=log_error,
                 )
             ):
-                log.error("Accuracy failed for key name %s", k)
+                log_error("Accuracy failed for key name %s", k)
                 return False
         return True
     elif isinstance(ref, torch.Tensor):
@@ -918,9 +944,11 @@ def same(
         assert isinstance(res, torch.Tensor), f"type mismatch {type(ref)} {type(res)}"
         if exact_dtype:
             if ref.dtype != res.dtype:
-                log.error("dtype mismatch %s, %s", ref.dtype, res.dtype)
+                log_error("dtype mismatch %s, %s", ref.dtype, res.dtype)
                 return False
             if ref.dtype == torch.bool:
+                if ignore_non_fp:
+                    return True
                 # triton stores bool as int8, so add this for more accurate checking
                 r = torch.allclose(
                     ref.to(dtype=torch.uint8),
@@ -930,7 +958,7 @@ def same(
                     equal_nan=equal_nan,
                 )
                 if not r:
-                    log.error("Accuracy failed: uint8 tensor did not match")
+                    log_error("Accuracy failed: uint8 tensor did not match")
                 return r
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
@@ -970,7 +998,7 @@ def same(
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
-                    log.error(
+                    log_error(
                         "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s",
                         res_error,
                         ref_error,
@@ -979,17 +1007,22 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
-            log.error("Accuracy failed: allclose not within tol=%s", tol)
+            if ignore_non_fp:
+                return True
+
+            log_error("Accuracy failed: allclose not within tol=%s", tol)
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
+        if ignore_non_fp:
+            return True
         r = ref == res
         if not r:
-            log.error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
+            log_error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
         return r
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error(
+            log_error(
                 "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
             )
         return r
@@ -1000,7 +1033,7 @@ def same(
             ref = ref.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error("Accuracy failed (numpy): %s != %s", ref, res)
+            log_error("Accuracy failed (numpy): %s != %s", ref, res)
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
@@ -1028,6 +1061,8 @@ def same(
                 equal_nan=equal_nan,
                 exact_dtype=exact_dtype,
                 relax_numpy_equality=relax_numpy_equality,
+                ignore_non_fp=ignore_non_fp,
+                log_error=log_error,
             )
             for key in ref.__dict__.keys()
         )
@@ -1057,6 +1092,9 @@ orig_code_map = ExactWeakKeyDictionary()
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures = collections.defaultdict(list)
 
+# Keep a record of graph break reasons for logging
+graph_break_reasons = list()
+
 # keep record of compiled code, if we are in "error if recompile"
 # to track code that dynamo has compiled previously
 seen_code_map = ExactWeakKeyDictionary()
@@ -1082,6 +1120,14 @@ class CompileProfiler:
             if "call" in node.op:
                 self.op_count += 1
         return gm.forward
+
+    def __enter__(self):
+        self.old_report_guard_failure = config.report_guard_failures
+        config.report_guard_failures = True
+        return self
+
+    def __exit__(self, typ, val, traceback):
+        config.report_guard_failures = self.old_report_guard_failure
 
     def get_metrics(self):
         return {"guard_failures": guard_failures}
@@ -1226,6 +1272,7 @@ def get_fake_value(node, tx):
         cause = e
         if e.__cause__ is not None:
             cause = e.__cause__
+
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
@@ -1248,10 +1295,10 @@ def get_fake_value(node, tx):
             unimplemented("guard on data-dependent symbolic int/float")
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
-        raise TorchRuntimeError() from e
+        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
 
-def run_node(output_graph, node, args, kwargs, nnmodule):
+def run_node(tracer, node, args, kwargs, nnmodule):
     """
     Runs a given node, with the given args and kwargs.
 
@@ -1260,7 +1307,7 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
     run_node is useful for extracting real values out of nodes.
     See get_real_value for more info on common usage.
 
-    Note: The output_graph arg is only used for 'get_attr' ops
+    Note: The tracer arg is only used for 'get_attr' ops
     Note: The nnmodule arg is only used for 'call_module' ops
 
     Nodes that are not call_function, call_method, call_module, or get_attr will
@@ -1276,34 +1323,36 @@ def run_node(output_graph, node, args, kwargs, nnmodule):
             assert nnmodule is not None
             return nnmodule(*args, **kwargs)
         elif op == "get_attr":
-            return output_graph.get_submodule(node.target)
+            return tracer.get_submodule(node.target)
         elif op == "placeholder":
             assert "example_value" in node.meta
             return node.meta["example_value"]
     except Exception as e:
-        raise RuntimeError(
-            f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n{e}\n(scroll up for backtrace)"
-        ) from e
+        fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
+        raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+
     raise AssertionError(op)
 
 
-def get_real_value(node, output_graph):
+def get_real_value(node, tracer):
     """
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
     """
-    cache = output_graph.real_value_cache
+    from .exc import TorchRuntimeError
+
+    cache = tracer.real_value_cache
     if node in cache:
         return cache[node]
 
     op = node.op
     args, kwargs = torch.fx.node.map_arg(
         (node.args, node.kwargs),
-        lambda n: get_real_value(n, output_graph),
+        lambda n: get_real_value(n, tracer),
     )
 
     if op == "call_module":
-        nn_module = output_graph.nn_modules[node.target]
+        nn_module = tracer.output_graph.nn_modules[node.target]
         if not is_lazy_module(nn_module):
             nn_module = copy.deepcopy(nn_module)
         else:
@@ -1314,10 +1363,10 @@ def get_real_value(node, output_graph):
         nn_module = None
 
     try:
-        real_value = run_node(output_graph, node, args, kwargs, nn_module)
+        real_value = run_node(tracer, node, args, kwargs, nn_module)
         cache[node] = real_value
     except RuntimeError as e:
-        raise TorchRuntimeError() from e
+        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
     return real_value
 
 
@@ -1351,6 +1400,13 @@ def fqn(obj: Any):
 
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
+
+
+def ifdynstaticdefault(count1, count2):
+    if torch._dynamo.config.assume_static_by_default:
         return count1
     else:
         return count2
@@ -1397,7 +1453,6 @@ def get_custom_getattr(value: Any):
 
 class TensorStaticReason(enum.Enum):
     PARAMETER = 2
-    CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
     NN_MODULE_PROPERTY = 5
 
@@ -1405,8 +1460,6 @@ class TensorStaticReason(enum.Enum):
 def tensor_static_reason_to_message(reason: TensorStaticReason):
     if reason == TensorStaticReason.PARAMETER:
         return "mark_dynamic on parameter, parameters are always static today."
-    if reason == TensorStaticReason.CONFIG_NOT_DYN:
-        return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
     if reason == TensorStaticReason.NOT_TENSOR:
         return "mark_dynamic on a non tensor, how did this happen?"
     if reason == TensorStaticReason.NN_MODULE_PROPERTY:
@@ -1430,8 +1483,6 @@ def tensor_always_has_static_shape(
     """
     if type(tensor) is torch.nn.Parameter:
         return True, TensorStaticReason.PARAMETER
-    if config.dynamic_shapes is False:
-        return True, TensorStaticReason.CONFIG_NOT_DYN
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     if guard_source.is_nn_module():
@@ -1476,7 +1527,7 @@ def lazy_format_graph_tabular(fn_name, gm):
         except ImportError:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
-                + format_graph_code(fn_name, gm)
+                + str(lazy_format_graph_code(fn_name, gm))
             )
 
         node_specs = [
@@ -1492,6 +1543,17 @@ def lazy_format_graph_tabular(fn_name, gm):
 
 def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
+
+
+forward_hook_names = ["_forward_pre_hooks", "_forward_hooks"]
+backward_hook_names = ["_backward_pre_hooks", "_backward_hooks"]
+state_dict_hook_names = [
+    "_state_dict_pre_hooks",
+    "_state_dict_hooks",
+    "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
+]
+all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
 
 
 def nnmodule_has_hooks(
@@ -1511,26 +1573,147 @@ def nnmodule_has_hooks(
         and not check_state_dict_hooks
     )
     if check_forward_hooks or check_all_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_forward_pre_hooks",
-                "_forward_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(forward_hook_names)
     if check_backward_hooks or check_all_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_backward_pre_hooks",
-                "_backward_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(backward_hook_names)
     if check_state_dict_hooks:
-        hook_dicts_to_check.extend(
-            [
-                "_state_dict_pre_hooks",
-                "_state_dict_hooks",
-                "_load_state_dict_pre_hooks",
-                "_load_state_dict_post_hooks",
-            ]
-        )
+        hook_dicts_to_check.extend(state_dict_hook_names)
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
+
+
+def to_numpy_helper(value):
+    """Convert tensor and torch_np.ndarray to numpy.ndarray."""
+    if isinstance(value, torch_np.ndarray):
+        return value.tensor.numpy()
+    elif isinstance(value, torch.Tensor):
+        return value.numpy()
+    elif isinstance(value, (tuple, list)):
+        return type(value)(to_numpy_helper(obj) for obj in value)
+    else:
+        return value
+
+
+def numpy_to_tensor(value):
+    """Convert torch_np.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
+    if isinstance(value, torch_np.ndarray):
+        return value.tensor
+    elif isinstance(value, (tuple, list)):
+        return type(value)(numpy_to_tensor(obj) for obj in value)
+    else:
+        return value
+
+
+class numpy_to_tensor_wrapper:
+    def __init__(self, f):
+        self.f = f
+        self.__name__ = "wrapped_" + self.f.__name__
+
+    def __repr__(self):
+        return f"<Wrapped function <original {self.f.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        out = self.f(*args, **kwargs)
+        return numpy_to_tensor(out)
+
+
+def numpy_attr_wrapper(obj, name):
+    if isinstance(obj, torch_np.ndarray):
+        out = getattr(obj, name)
+        return numpy_to_tensor(out)
+    elif isinstance(obj, torch.Tensor):
+        out = getattr(torch_np.ndarray(obj), name)
+        return numpy_to_tensor(out)
+
+
+class numpy_method_wrapper:
+    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
+
+    def __init__(self, method: str):
+        self.method = method
+        self.__name__ = "wrapped_" + self.method
+
+    def __repr__(self):
+        return f"<Wrapped method <original {self.method}>>"
+
+    def __call__(self, *args, **kwargs):
+        obj = args[0]
+        if isinstance(obj, torch.Tensor):
+            obj = torch_np.ndarray(obj)
+        method_callable = getattr(obj, self.method)
+        out = method_callable(*args[1:], **kwargs)
+        return numpy_to_tensor(out)
+
+
+def defake(x):
+    if not isinstance(x, FakeTensor):
+        return x
+    if x._has_symbolic_sizes_strides:
+        size = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.size()
+        ]
+        stride = [
+            s.node.shape_env.size_hint(s.node.expr)
+            if isinstance(s, torch.SymInt)
+            else s
+            for s in x.stride()
+        ]
+    else:
+        size = x.size()
+        stride = x.stride()
+    y = torch.empty_strided(
+        size,
+        stride,
+        dtype=x.dtype,
+        device=x.device,
+        requires_grad=x.requires_grad,
+    )
+    y.zero_()
+    return y
+
+
+# NB: The dictionary has to be created lazily after TorchPatcher is called so
+# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
+# sitting in a separate function.
+@functools.lru_cache(None)
+def higher_order_op_converter():
+    import torch._higher_order_ops.wrap
+
+    return {
+        torch.utils.checkpoint.checkpoint: torch._higher_order_ops.wrap.wrap_activation_checkpoint,
+    }
+
+
+def requires_higher_order_op(obj):
+    return obj in higher_order_op_converter()
+
+
+def get_higher_order_op(obj):
+    if (
+        obj is torch.utils.checkpoint.checkpoint
+        and not torch._functorch.config.functionalize_rng_ops
+    ):
+        from .exc import unimplemented
+
+        # TODO - functionalize_rng_ops flags cannot be turned ON by default
+        # because 1) Performance concerns - seed and offset are read and passed
+        # to each AOT graph 2) Inductor has rand-specific optimizations and
+        # there is work remaining to compose them together with
+        # functionalization.
+        #
+        # Until we make it ON by default, we will have to ask users to turn on
+        # this flag manually.  TODO - Revisit if there is a simpler way to
+        # resolve this problem.
+        torch._logging.warning_once(
+            log,
+            "torch.compile on activation checkpointing is an experimental feature. "
+            "Please manually set torch._functorch.config.functionalize_rng_ops=True "
+            "to run torch.compile with activation checkpointing. Without this flag, "
+            "checkpointed function will not get compiled and fallback to eager.",
+        )
+        unimplemented(
+            "torch.compile requires functioanlization of rng ops to be turned on"
+        )
+    return higher_order_op_converter().get(obj)

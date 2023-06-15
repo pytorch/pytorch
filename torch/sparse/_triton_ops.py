@@ -1,6 +1,7 @@
 import torch
 from torch._inductor.cuda_properties import get_device_capability
 
+
 def _has_triton():
     if not torch.cuda.is_available():
         return False
@@ -11,26 +12,85 @@ def _has_triton():
     except ImportError:
         return False
 
-def compressed_indices_to_plain_indices(cidx, pidx):
-    nnz = pidx.shape[-1]
-    cdim = cidx.shape[-1] - 1
-    batch_numel = cidx.shape[0]
-    batch_offset = torch.arange(batch_numel, dtype=cidx.dtype, device=cidx.device)[
-        :, None
-    ]
 
-    cidx_batch_offsetted = cidx[:, :-1] + nnz * batch_offset
-    cidx_linear = torch.empty(
-        (batch_numel * cdim + 1,), dtype=cidx.dtype, device=cidx.device
+def check(cond, msg):
+    if not cond:
+        raise ValueError(msg)
+
+
+def check_bsr_layout(f_name, t):
+    check(
+        t.layout == torch.sparse_bsr,
+        f"{f_name}(): only BSR sparse format is supported for the sparse argument.",
     )
-    cidx_linear[:-1] = cidx_batch_offsetted.reshape(-1)
-    cidx_linear[-1] = nnz * batch_numel
 
-    idx_linear = torch._convert_indices_from_csr_to_coo(
-        cidx_linear, pidx.reshape(-1), out_int32=(cidx.dtype == torch.int32)
-    ).select(0, 0)
 
-    return idx_linear.reshape(batch_numel, -1).sub_(cdim * batch_offset)
+def check_device(f_name, t, device):
+    check(
+        t.device == device and t.device.type == "cuda",
+        f"{f_name}(): all inputs are expected to be on the same GPU device.",
+    )
+
+
+def check_mm_compatible_shapes(f_name, lhs, rhs):
+    check(
+        lhs.dim() >= 2 and rhs.dim() >= 2,
+        f"{f_name}(): all inputs involved in the matrix product are expected to be at least 2D, "
+        f"but got lhs.dim() == {lhs.dim()} and rhs.dim() == {rhs.dim()}."
+    )
+
+    m, kl = lhs.shape[-2:]
+    kr, n = rhs.shape[-2:]
+
+    check(
+        kl == kr,
+        f"{f_name}(): arguments' sizes involved in the matrix product are not compatible for matrix multiplication, "
+        f"got lhs.shape[-1] == {kl} which is not equal to rhs.shape[-2] == {kr}.",
+    )
+
+
+def check_dtype(f_name, t, dtype):
+    check(
+        t.dtype == dtype
+        and t.dtype in (torch.half, torch.bfloat16, torch.float),
+        f"{f_name}(): all inputs are expected to be of the same dtype "
+        "and one of (half, bfloat16, float32), "
+        f"but got dtype == {t.dtype}.",
+    )
+
+
+def check_blocksize(f_name, blocksize):
+    assert len(blocksize) == 2
+
+    def is_power_of_two(v):
+        return not (v & (v - 1))
+
+    def is_compatible_blocksize(b):
+        res = True
+        for blocksize in b:
+            # Triton loads only blocks which are at least 16 and powers of 2.
+            res = (blocksize >= 16 and is_power_of_two(blocksize)) and res
+        return res
+
+    check(
+        is_compatible_blocksize(blocksize),
+        f"{f_name}(): sparse inputs' blocksize ({blocksize[0]}, {blocksize[1]}) "
+        "should be at least 16 and a power of 2 in each dimension.",
+    )
+
+
+def make_triton_contiguous(t):
+    if t.stride(-2) > 1 and t.stride(-1) > 1:
+        return t.contiguous()
+    else:
+        return t
+
+
+def broadcast_batch_dims(f_name, *tensors):
+    try:
+        return torch.broadcast_shapes(*(t.shape[:-2] for t in tensors))
+    except Exception:
+        check(False, f"{f_name}(): inputs' batch dimensions are not broadcastable!")
 
 
 def slicer(dim, slice_range, *tensors):
@@ -39,10 +99,249 @@ def slicer(dim, slice_range, *tensors):
         slices[dim] = slice_range
         yield t[slices]
 
+
+def multidim_slicer(dims, slices, *tensors):
+    for t in tensors:
+        s = [slice(None)] * t.dim()
+        for d, d_slice in zip(dims, slices):
+            if d is not None:
+                s[d] = d_slice
+        yield t[s]
+
+
+def ptr_stride_extractor(*tensors):
+    for t in tensors:
+        yield t
+        yield from t.stride()
+
+
+def grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
+    assert 0 <= len(full_grid) <= 3
+    assert 0 <= len(grid_blocks) <= 3
+
+    import itertools
+
+    def generate_grid_points():
+        for fg, mg in zip(full_grid, grid_blocks):
+            yield range(0, fg, mg)
+
+    def generate_sliced_tensors(slices):
+        for t, t_dims in tensor_dims_map.items():
+            yield next(multidim_slicer(t_dims, slices, t))
+
+    for grid_point in itertools.product(*generate_grid_points()):
+        grid = [min(fg - gp, mg) for fg, gp, mg in zip(full_grid, grid_point, grid_blocks)]
+        slices = [slice(gp, gp + g) for gp, g in zip(grid_point, grid)]
+        # grid_points are iterated in a "contiguous" order, i.e.
+        # left dimensions traversed slower than right dimensions.
+        # This order is reversed for CUDA grids.
+        yield grid[::-1], *generate_sliced_tensors(slices)
+
+
+def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
+    # cuda_max_grid = (2 ** 31 - 1, 2 ** 16 - 1, 2 ** 16 - 1)
+    cuda_max_grid = (2147483647, 65535, 65535)[::-1]
+    if grid_blocks is None:
+        grid_blocks = cuda_max_grid
+    else:
+
+        def valid_grid_dim(g, mg):
+            if g is None:
+                return mg
+            else:
+                # grid must be at least 1 and no greater than mg
+                return max(1, min(g, mg))
+
+        grid_blocks = tuple(
+            valid_grid_dim(g, mg) for g, mg in zip(grid_blocks, cuda_max_grid)
+        )  # type: ignore[assignment]
+
+    for grid, *sliced_tensors in grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
+        kernel(grid, *sliced_tensors)
+
+
+def prepare_inputs(bsr, *dense_tensors):
+    # Introduce fake batch dimension if not present for convenience.
+    crow_indices = bsr.crow_indices().unsqueeze(0)
+    col_indices = bsr.col_indices().unsqueeze(0)
+    values = make_triton_contiguous(bsr.values().unsqueeze(0))
+    tensors = [make_triton_contiguous(t.unsqueeze(0)) for t in dense_tensors]
+
+    # Compute broadcasted batch dimension
+    batch_dims_broadcasted = torch.broadcast_shapes(values.shape[:-3], *(t.shape[:-2] for t in tensors))
+
+    # Broadcast batch dimensions and squash
+    def batch_broadcast_and_squash(t, batch_dims, invariant_dims):
+        return t.broadcast_to(batch_dims + invariant_dims).flatten(
+            0, len(batch_dims) - 1
+        )
+
+    crow_indices = batch_broadcast_and_squash(
+        crow_indices, batch_dims_broadcasted, (-1,)
+    )
+
+    col_indices = batch_broadcast_and_squash(
+        col_indices, batch_dims_broadcasted, (-1,)
+    )
+    values = batch_broadcast_and_squash(
+        values, batch_dims_broadcasted, values.shape[-3:]
+    )
+    tensors = [
+        batch_broadcast_and_squash(t, batch_dims_broadcasted, t.shape[-2:]) for t in tensors
+    ]
+
+    return crow_indices, col_indices, values, *tensors
+
+
+def broadcast_batch_dims_bsr(f_name, bsr, *tensors):
+    batch_shape = broadcast_batch_dims(f_name, bsr, *tensors)
+
+    crow_indices = bsr.crow_indices().broadcast_to(batch_shape + (-1,))
+    col_indices = bsr.col_indices().broadcast_to(batch_shape + (-1,))
+    values = bsr.values().broadcast_to(batch_shape + bsr.values().shape[-3:])
+    size = batch_shape + bsr.shape[-2:]
+    return torch.sparse_compressed_tensor(crow_indices, col_indices, values, size=size, layout=bsr.layout)
+
+
+# NOTE: this function will ALWAYS create a view
+def tile_to_blocksize(t, blocksize):
+    *rest, m, n = t.shape
+    new_shape = rest + [
+        m // blocksize[0],
+        blocksize[0],
+        n // blocksize[1],
+        blocksize[1],
+    ]
+    return t.reshape(new_shape).transpose(-3, -2)
+
+
 if _has_triton():
     import triton
     import triton.language as tl
     from typing import Optional, Tuple
+
+    @triton.jit
+    def _sampled_addmm_kernel(
+        alpha,
+        beta,
+        IS_BETA_ZERO: tl.constexpr,
+        BLOCKSIZE_ROW: tl.constexpr,
+        BLOCKSIZE_COL: tl.constexpr,
+        k,
+        TILE_K: tl.constexpr,
+        values_ptr,
+        values_batch_stride,
+        values_nnz_stride,
+        values_row_block_stride,
+        values_col_block_stride,
+        crow_indices_ptr,
+        crow_indices_batch_stride,
+        crow_indices_stride,
+        col_indices_ptr,
+        col_indices_batch_stride,
+        col_indices_stride,
+        mat1_ptr,
+        mat1_batch_stride,
+        mat1_tiled_row_stride,
+        mat1_tiled_col_stride,
+        mat1_row_block_stride,
+        mat1_col_block_stride,
+        mat2_ptr,
+        mat2_batch_stride,
+        mat2_tiled_row_stride,
+        mat2_tiled_col_stride,
+        mat2_row_block_stride,
+        mat2_col_block_stride,
+        acc_dtype: tl.constexpr,
+        allow_tf32: tl.constexpr,
+    ):
+        batch_pid = tl.program_id(axis=1)
+        row_block_pid = tl.program_id(axis=0)
+
+        crow_indices_offset_ptr = (
+            crow_indices_ptr
+            + crow_indices_batch_stride * batch_pid
+            + crow_indices_stride * row_block_pid
+        )
+        nnz_offset = tl.load(crow_indices_offset_ptr)
+        nnz_offset_next = tl.load(crow_indices_offset_ptr + crow_indices_stride)
+
+        # Compute nnz for the row with number row_block_pid.
+        # If it is zero, skip the row.
+        row_nnz = nnz_offset_next - nnz_offset
+        if row_nnz == 0:
+            return
+
+        row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
+        col_block_arange = tl.arange(0, BLOCKSIZE_COL)
+
+        # Pointers are set to the first block of the current row.
+        values_block_ptrs = (
+            values_ptr
+            + values_batch_stride * batch_pid
+            + values_nnz_stride * nnz_offset
+            + values_row_block_stride * row_block_arange[:, None]
+            + values_col_block_stride * col_block_arange[None, :]
+        )
+
+        col_index_nnz_ptr = (
+            col_indices_ptr
+            + col_indices_batch_stride * batch_pid
+            + col_indices_stride * nnz_offset
+        )
+
+        # Advance mat1 to the current tiled row, ignore columns.
+        mat1_block_ptrs = (
+            mat1_ptr
+            + mat1_batch_stride * batch_pid
+            + mat1_tiled_row_stride * row_block_pid
+            + mat1_row_block_stride * row_block_arange[:, None]
+        )
+
+        # Advance mat2 in batch and block col dimension.
+        mat2_block_ptrs = (
+            mat2_ptr
+            + mat2_batch_stride * batch_pid
+            + mat2_col_block_stride * col_block_arange[None, :]
+        )
+
+        k_tile_arange = tl.arange(0, TILE_K)
+        for _ in range(row_nnz):
+            acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
+
+            # find column block index
+            col_block = tl.load(col_index_nnz_ptr)
+
+            for k_tile in range(0, k, TILE_K):
+                k_offsets = k_tile + k_tile_arange
+                mask_k = k_offsets < k
+
+                mat1_block = tl.load(
+                    mat1_block_ptrs
+                    + mat1_col_block_stride * k_offsets[None, :],
+                    mask=mask_k[None, :], other=0.0
+                )
+
+                mat2_block = tl.load(
+                    mat2_block_ptrs
+                    + mat2_tiled_col_stride * col_block
+                    + mat2_row_block_stride * k_offsets[:, None],
+                    mask=mask_k[:, None], other=0.0
+                )
+
+                acc_block += tl.dot(mat1_block, mat2_block, allow_tf32=allow_tf32)
+
+            if IS_BETA_ZERO:
+                acc_block *= alpha
+            else:
+                acc_block = alpha * acc_block + beta * tl.load(values_block_ptrs)
+
+            # write result
+            tl.store(values_block_ptrs, acc_block.to(values_ptr.dtype.element_ty))
+
+            # advance val/col_index ptrs to the next block in the row.
+            values_block_ptrs += values_nnz_stride
+            col_index_nnz_ptr += col_indices_stride
 
     @triton.jit
     def _bsr_strided_dense_rowspace_kernel(
@@ -81,6 +380,8 @@ if _has_triton():
         output_row_block_stride,
         output_col_block_stride,
         # output epilogue
+        acc_dtype: tl.constexpr,
+        allow_tf32: tl.constexpr,
         GROUP_SIZE_ROW: tl.constexpr,
     ):
         batch_pid = tl.program_id(axis=2)
@@ -146,7 +447,7 @@ if _has_triton():
             + col_indices_stride * nnz_offset
         )
 
-        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), tl.float32)
+        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), dtype=acc_dtype)
         for _ in range(row_nnz):
             values_block = tl.load(values_block_ptrs)
 
@@ -156,7 +457,7 @@ if _has_triton():
             dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
 
             # do block mm
-            output_acc_block += tl.dot(values_block, dense_block)
+            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32)
 
             # move val/col_index ptrs to the next block in the row
             values_block_ptrs += values_nnz_stride
@@ -164,278 +465,196 @@ if _has_triton():
 
         # write back the result
         tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
-
-
-    @triton.jit
-    def _bsr_strided_sparse_rowspace_kernel(
-        BLOCKSIZE_ROW: tl.constexpr,
-        BLOCKSIZE_COL: tl.constexpr,
-        batch_idx_ptr,
-        row_idx_ptr,
-        nnz_per_row_ptr,
-        nnz_per_row_cumsum_ptr,
-        col_indices_ptr,
-        col_indices_stride,
-        # values prologue
-        values_ptr,
-        values_nnz_stride,
-        values_row_block_stride,
-        values_col_block_stride,
-        # values epilogue
-        # dense prologue
-        dense_ptr,
-        dense_batch_stride,
-        dense_tiled_row_stride,
-        dense_tiled_col_stride,
-        dense_row_block_stride,
-        dense_col_block_stride,
-        # dense epilogue
-        # output prologue
-        output_ptr,
-        output_batch_stride,
-        output_tiled_row_stride,
-        output_tiled_col_stride,
-        output_row_block_stride,
-        output_col_block_stride,
-        # output epilogue
-        GROUP_SIZE_ROW: tl.constexpr,
-    ):
-        row_block_pid = tl.program_id(axis=0)
-        col_block_pid = tl.program_id(axis=1)
-        n_block_rows = tl.num_programs(axis=0)
-        n_block_cols = tl.num_programs(axis=1)
-
-        row_block_pid, col_block_pid = tl.swizzle2d(
-            row_block_pid, col_block_pid, n_block_rows, n_block_cols, GROUP_SIZE_ROW
-        )
-
-        batch_idx = tl.load(batch_idx_ptr + row_block_pid)
-        row_idx = tl.load(row_idx_ptr + row_block_pid)
-        row_idx_nnz = tl.load(nnz_per_row_ptr + row_block_pid)
-        row_idx_nnz_cumsum = tl.load(nnz_per_row_cumsum_ptr + row_block_pid)
-        row_idx_nnz_offset = row_idx_nnz_cumsum - row_idx_nnz
-
-        row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
-        col_block_arange = tl.arange(0, BLOCKSIZE_COL)
-
-        # Pointers are set to the first block of the current row.
-        values_block_ptrs = (
-            values_ptr
-            + values_nnz_stride * row_idx_nnz_offset
-            + values_row_block_stride * row_block_arange[:, None]
-            + values_col_block_stride * col_block_arange[None, :]
-        )
-
-        # NOTE: dense is advanced into all dimensions but the tiled row one.
-        # That will be advanced in the loop according to values in col_indices.
-        dense_block_ptrs = (
-            dense_ptr
-            + dense_batch_stride * batch_idx
-            + dense_tiled_col_stride * col_block_pid
-            + dense_row_block_stride * col_block_arange[:, None]
-            + dense_col_block_stride * row_block_arange[None, :]
-        )
-
-        # Pointers are set to exact write-to locations
-        output_ptrs = (
-            output_ptr
-            + output_batch_stride * batch_idx
-            + output_tiled_row_stride * row_idx
-            + output_tiled_col_stride * col_block_pid
-            + output_row_block_stride * row_block_arange[:, None]
-            + output_col_block_stride * row_block_arange[None, :]
-        )
-
-        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_ROW), tl.float32)
-        col_index_nnz_ptr = col_indices_ptr + row_idx_nnz_offset * col_indices_stride
-        for _ in range(row_idx_nnz):
-            values_block = tl.load(values_block_ptrs)
-
-            # find which row of dense needs to get loaded
-            # for multiplication with values_block.
-            dense_row_idx = tl.load(col_index_nnz_ptr)
-            dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
-
-            # do block mm
-            output_acc_block += tl.dot(values_block, dense_block)
-
-            # move val/col_index ptrs to the next block in the row
-            values_block_ptrs += values_nnz_stride
-            col_index_nnz_ptr += col_indices_stride
-
-        # write back the result
-        tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
-
-
-    def _run_sparse_rowspace_kernel(
-        blocksize, values, crow_indices, col_indices, dense, output, max_grid
-    ):
-        # Compute a vector of non-zero elements numbers per each row.
-        # We want to ultimately iterate over non-zero rows.
-        nnz_per_row = crow_indices[:, 1:] - crow_indices[:, :-1]
-
-        # Compute indices of non-zero counts.
-        # batch_idx maps to a broadcasted batch index, while
-        # row_idx tracks non-zero rows of the sparse argument
-        # and rows of the output that get modified.
-        batch_idx, row_idx = nnz_per_row.nonzero(as_tuple=True)
-
-        # Compress the vector of counts to hold only non-zero values.
-        nnz_per_row = nnz_per_row[batch_idx, row_idx]
-        # Compute cumulative counts which along with nnz_per_row
-        # are used to compute offsets into nnz values.
-        nnz_per_row_cumsum = nnz_per_row.cumsum(-1)
-
-        n_nnz_block_rows = row_idx.size(-1)
-        n_block_cols = dense.size(-3)
-        max_n_nnz_block_rows, max_n_block_cols = max_grid[:2]
-
-        for c_start in range(0, n_block_cols, max_n_block_cols):
-            c_dense, c_output = slicer(
-                -3, slice(c_start, c_start + max_n_block_cols), dense, output
-            )
-            c_grid = min(n_block_cols - c_start, max_n_block_cols)
-
-            for r_start in range(0, n_nnz_block_rows, max_n_nnz_block_rows):
-                r_batch_idx, r_row_idx, r_nnz_per_row, r_nnz_per_row_cumsum = slicer(
-                    0,
-                    slice(r_start, r_start + max_n_nnz_block_rows),
-                    batch_idx,
-                    row_idx,
-                    nnz_per_row,
-                    nnz_per_row_cumsum,
-                )
-                r_grid = min(n_nnz_block_rows - r_start, max_n_nnz_block_rows)
-
-                _bsr_strided_sparse_rowspace_kernel[(r_grid, c_grid)](
-                    *blocksize,
-                    r_batch_idx,
-                    r_row_idx,
-                    r_nnz_per_row,
-                    r_nnz_per_row_cumsum,
-                    col_indices,
-                    *col_indices.stride(),
-                    values,
-                    *values.stride(),
-                    c_dense,
-                    *c_dense.stride(),
-                    c_output,
-                    *c_output.stride(),
-                    GROUP_SIZE_ROW=4,
-                    num_stages=1,
-                    num_warps=4,
-                )
 
 
     def _run_dense_rowspace_kernel(
         blocksize, values, crow_indices, col_indices, dense, output, max_grid
     ):
-        # Launch kernel
         n_batches = dense.size(0)
         n_block_rows = crow_indices.size(-1) - 1
         n_block_cols = dense.size(-3)
-        max_n_block_rows, max_n_block_cols, max_n_batches = max_grid
 
-        for b_start in range(0, n_batches, max_n_batches):
-            b_v, b_crow, b_col, b_d, b_o = slicer(
-                0,
-                slice(b_start, b_start + max_n_batches),
-                values,
-                crow_indices,
-                col_indices,
-                dense,
-                output,
+        full_grid = (n_batches, n_block_cols, n_block_rows)
+        if max_grid is not None:
+            grid_blocks = tuple(max_grid[:3][::-1]) + (None,) * (3 - len(max_grid[:3]))
+        else:
+            grid_blocks = None
+        tensor_dims_map = {
+            values: (0, None, None),
+            crow_indices: (0, None, -1),
+            col_indices: (0, None, None),
+            dense: (0, -3, None),
+            output: (0, -3, -4)
+        }
+        if values.dtype in (torch.half, torch.bfloat16):
+            acc_dtype = tl.float32
+            allow_tf32 = True
+        else:
+            acc_dtype = tl.float64
+            allow_tf32 = False
+
+        def kernel(grid, *sliced_tensors):
+            _bsr_strided_dense_rowspace_kernel[grid](
+                *blocksize,
+                *ptr_stride_extractor(*sliced_tensors),
+                acc_dtype=acc_dtype,
+                allow_tf32=allow_tf32,
+                GROUP_SIZE_ROW=4,
+                num_stages=1,
+                num_warps=4
             )
-            b_grid = min(n_batches - b_start, max_n_batches)
 
-            for c_start in range(0, n_block_cols, max_n_block_cols):
-                bc_d, bc_o = slicer(
-                    -3, slice(c_start, c_start + max_n_block_cols), b_d, b_o
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+
+    def _run_sampled_addmm_kernel(
+        alpha, beta, is_beta_zero,
+        blocksize, k, tile_k,
+        values, crow_indices, col_indices,
+        mat1, mat2,
+        max_grid
+    ):
+        n_batches = values.size(0)
+        n_block_rows = crow_indices.size(-1) - 1
+
+        full_grid = (n_batches, n_block_rows)
+        if max_grid is not None:
+            grid_blocks = tuple(max_grid[:2][::-1]) + (None,) * (2 - len(max_grid[:2]))
+        else:
+            grid_blocks = None
+        tensor_dims_map = {
+            values: (0, None),
+            crow_indices: (0, -1),
+            col_indices: (0, None),
+            mat1: (0, -4),
+            mat2: (0, None),
+        }
+        if values.dtype in (torch.half, torch.bfloat16):
+            acc_dtype = tl.float32
+            allow_tf32 = True
+        else:
+            acc_dtype = tl.float64
+            allow_tf32 = False
+
+        def kernel(grid, *sliced_tensors):
+            _sampled_addmm_kernel[grid](
+                alpha, beta, is_beta_zero,
+                *blocksize, k, tile_k,
+                *ptr_stride_extractor(*sliced_tensors),
+                acc_dtype=acc_dtype,
+                allow_tf32=allow_tf32,
+                num_stages=1,
+                num_warps=4
+            )
+
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+
+    def sampled_addmm(
+        input: torch.Tensor,
+        mat1: torch.Tensor,
+        mat2: torch.Tensor,
+        *,
+        beta=1.0,
+        alpha=1.0,
+        out: Optional[torch.Tensor] = None,
+        skip_checks: bool = False,
+        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    ):
+        f_name = "sampled_addmm"
+
+        input_broadcasted = broadcast_batch_dims_bsr(f_name, input, mat1, mat2)
+
+        if not skip_checks:
+            check_bsr_layout(f_name, input)
+            check_device(f_name, mat1, input.device)
+            check_device(f_name, mat2, input.device)
+            check_dtype(f_name, mat1, input.dtype)
+            check_dtype(f_name, mat2, input.dtype)
+            check_mm_compatible_shapes(f_name, mat1, mat2)
+            if out is not None:
+                check_bsr_layout(f_name, out)
+                check_device(f_name, out, input.device)
+                check_dtype(f_name, out, input.dtype)
+                check(
+                    out.shape == input_broadcasted.shape
+                    and out._nnz() == input._nnz(),
+                    f"{f_name}(): Expects `out` to be of shape {input_broadcasted.shape} "
+                    f"and with nnz equal to {input_broadcasted._nnz()} "
+                    f"but got out.shape = {out.shape} and out.nnz = {out._nnz()}"
                 )
-                c_grid = min(n_block_cols - c_start, max_n_block_cols)
 
-                for r_start in range(0, n_block_rows, max_n_block_rows):
-                    r_slice = slice(r_start, r_start + max_n_block_rows)
-                    br_crow = next(slicer(-1, r_slice, b_crow))
-                    brc_o = next(slicer(-4, r_slice, bc_o))
-                    r_grid = min(n_block_rows - r_start, max_n_block_rows)
+        if out is None:
+            out = input_broadcasted.clone()
+        else:
+            out.copy_(input_broadcasted)
 
-                    _bsr_strided_dense_rowspace_kernel[(r_grid, c_grid, b_grid)](
-                        *blocksize,
-                        b_v,
-                        *b_v.stride(),
-                        br_crow,
-                        *br_crow.stride(),
-                        b_col,
-                        *b_col.stride(),
-                        bc_d,
-                        *bc_d.stride(),
-                        brc_o,
-                        *brc_o.stride(),
-                        GROUP_SIZE_ROW=4,
-                        num_stages=1,
-                        num_warps=4,
-                    )
+        if out.numel() == 0 or out._nnz() == 0:
+            return out
+
+        blocksize = out.values().shape[-2:]
+        m = mat1.size(-2)
+        n = mat2.size(-1)
+        k = mat1.size(-1)
+
+        # NOTE: (m, 0) @ (0, n) == zeros(m, n)
+        if alpha == 0.0 or k == 0:
+            out.values().mul_(beta)
+            return out
+
+        # prepare inputs by reshaping them to be kernel-compatible
+        out_backup = out
+        crow_indices, col_indices, values, mat1, mat2 = prepare_inputs(out, mat1, mat2)
+
+        mat1 = tile_to_blocksize(mat1, (blocksize[0], k))
+        mat2 = tile_to_blocksize(mat2, (k, blocksize[1]))
+        tile_k = max(*blocksize)
+
+        _run_sampled_addmm_kernel(
+            alpha, beta, beta == 0.0,
+            blocksize, k, tile_k,
+            values, crow_indices, col_indices,
+            mat1, mat2,
+            max_grid
+        )
+
+        # If nnz x block strides are not the same in out_backup.values and values,
+        # it means that out_backup.values and values are not the views of each other,
+        # so we have to copy.
+        if out_backup.values().stride()[-3:] != values.stride()[-3:]:
+            out_backup.values().copy_(values.reshape(out_backup.values().shape))
+        return out_backup
 
 
     def bsr_dense_mm(
         bsr: torch.Tensor,
         dense: torch.Tensor,
         *,
-        skip_checks: bool = False,
-        is_sparse_rowspace_mode: Optional[bool] = None,
-        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
         out: Optional[torch.Tensor] = None,
+        skip_checks: bool = False,
+        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
     ):
-        m, kl = bsr.shape[-2:]
-        kr, n = dense.shape[-2:]
-
-        def check(cond, msg):
-            if not cond:
-                raise ValueError(msg)
-
+        f_name = "bsr_dense_mm"
         if not skip_checks:
-            check(
-                bsr.layout == torch.sparse_bsr,
-                "bsr_dense_mm(): only BSR sparse format is supported for the sparse argument.",
-            )
+            check_bsr_layout(f_name, bsr)
+            check_device(f_name, bsr, dense.device)
+            check_dtype(f_name, bsr, dense.dtype)
+            check_mm_compatible_shapes(f_name, bsr, dense)
 
-            check(
-                bsr.device == dense.device and bsr.device.type == "cuda",
-                "bsr_dense_mm(): all inputs are expected to be on the same GPU device.",
-            )
-
-            check(
-                bsr.dtype == dense.dtype
-                and bsr.dtype in (torch.half, torch.bfloat16, torch.float),
-                "bsr_dense_mm(): all inputs are expected to be of the same dtype "
-                "and one of (half, bfloat16, float32), "
-                f"but got bsr.dtype == {bsr.dtype} and dense.dtype == {dense.dtype}.",
-            )
-
-            check(
-                bsr.dim() >= 2 and dense.dim() >= 2,
-                "bsr_dense_mm(): all inputs are expected to be at least 2D, "
-                f"but got bsr.dim() == {bsr.dim()} and dense.dim() == {dense.dim()}.",
-            )
-
-            check(
-                kl == kr,
-                "bsr_dense_mm(): argument sizes are not compatible for matrix multiplication, "
-                f"got bsr.shape[-1] == {kl} which is not equal to dense.shape[-2] == {kr}.",
-            )
-
-            row_block = bsr.values().shape[-2]
+            m = bsr.size(-2)
+            n = dense.size(-1)
+            row_block, col_block = bsr.values().shape[-2:]
             check(
                 not n % row_block,
                 f"bsr_dense_mm(): dense.size(-1) == {n} should be divisible by "
                 f"blocksize[0] == {row_block}.",
             )
+            check_blocksize(f_name, (row_block, col_block))
+        else:
+            m, kl = bsr.shape[-2:]
+            kr, n = dense.shape[-2:]
 
-        # Required to undo the fake batch dimension insertion.
-        original_batch_dims_broadcasted = torch.broadcast_shapes(
-            bsr.shape[:-2], dense.shape[:-2]
-        )
+        original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
 
         if out is not None and not skip_checks:
             expected_out_shape = original_batch_dims_broadcasted + (m, n)
@@ -453,89 +672,20 @@ if _has_triton():
 
         # Allocate out
         if out is None:
-            out = dense.new_zeros(original_batch_dims_broadcasted + (m, n))
-        else:
-            out.zero_()
+            out = dense.new_empty(original_batch_dims_broadcasted + (m, n))
 
         # Short circuit if lhs is zero
         if bsr._nnz() == 0:
-            return out
+            return out.zero_()
 
-        # TODO: insert switch
-        if is_sparse_rowspace_mode is None:
-            is_sparse_rowspace_mode = False
+        blocksize = bsr.values().shape[-2:]
 
-        # Introduce fake batch dimension if not present for convenience.
-        def unsqueeze_batch_dim(t, n_non_batch_dims):
-            if t.dim() > n_non_batch_dims:
-                return t
-            else:
-                return t.unsqueeze(0)
-
-        def make_triton_contiguous(t):
-            # Triton does not distinguish between row- and col-majorness
-            # and will be fast as long as there is a contiguous dimension.
-            if not (t.is_contiguous() or t.transpose(-2, -1).is_contiguous()):
-                return t.contiguous()
-            else:
-                return t
-
-        crow_indices = unsqueeze_batch_dim(bsr.crow_indices(), 1)
-        col_indices = unsqueeze_batch_dim(bsr.col_indices(), 1)
-        values = make_triton_contiguous(unsqueeze_batch_dim(bsr.values(), 3))
-        dense = make_triton_contiguous(unsqueeze_batch_dim(dense, 2))
-        nnz = values.shape[-3]
-        blocksize = values.shape[-2:]
-
-        # Compute broadcasted batch dimension
-        bsr_batch_dims = values.shape[:-3]
-        dense_batch_dims = dense.shape[:-2]
-        batch_dims_broadcasted = torch.broadcast_shapes(bsr_batch_dims, dense_batch_dims)
-
-        # Broadcast batch dimensions and squash
-        def batch_broadcast_and_squash(t, batch_dims, invariant_dims):
-            return t.broadcast_to(batch_dims + invariant_dims).flatten(
-                0, len(batch_dims) - 1
-            )
-
-        crow_indices = batch_broadcast_and_squash(
-            crow_indices, batch_dims_broadcasted, (-1,)
-        )
-
-        if is_sparse_rowspace_mode:
-            # Flatten batch dimension with nnz dimension
-            # as required by the sparse rowspace kernel.
-            col_indices = batch_broadcast_and_squash(
-                col_indices, batch_dims_broadcasted + (-1,), ()
-            )
-            values = batch_broadcast_and_squash(
-                values, batch_dims_broadcasted + (values.shape[-3],), values.shape[-2:]
-            )
-        else:
-            col_indices = batch_broadcast_and_squash(
-                col_indices, batch_dims_broadcasted, (-1,)
-            )
-            values = batch_broadcast_and_squash(
-                values, batch_dims_broadcasted, values.shape[-3:]
-            )
-
-        dense = batch_broadcast_and_squash(dense, batch_dims_broadcasted, dense.shape[-2:])
-
-        # NOTE: out is contiguous, so batch_broadcast_and_squash will create a view
+        # NOTE: out is contiguous, so prepare_inputs will create a view.
         # out gets modified in-place, so we store a backup copy.
         out_backup = out
-        out = batch_broadcast_and_squash(out, batch_dims_broadcasted, out.shape[-2:])
 
-        # NOTE: this function will ALWAYS create a view
-        def tile_to_blocksize(t, blocksize):
-            *rest, m, n = t.shape
-            new_shape = rest + [
-                m // blocksize[0],
-                blocksize[0],
-                n // blocksize[1],
-                blocksize[1],
-            ]
-            return t.reshape(new_shape).transpose(-3, -2)
+        # prepare inputs by reshaping them to be kernel-compatible.
+        crow_indices, col_indices, values, dense, out = prepare_inputs(bsr, dense, out)
 
         # "Blockify" the row dimension of dense with blocksize[1]
         # since dense is on the rhs of matmul
@@ -550,60 +700,9 @@ if _has_triton():
         out = tile_to_blocksize(out, (blocksize[0], blocksize[0]))
 
         # Launch kernel
-        if is_sparse_rowspace_mode:
-            kernel = _run_sparse_rowspace_kernel
-        else:
-            kernel = _run_dense_rowspace_kernel
-
-        # cuda_max_grid = (2 ** 31 - 1, 2 ** 16 - 1, 2 ** 16 - 1)
-        cuda_max_grid = (2147483647, 65535, 65535)
-        if max_grid is None:
-            max_grid = cuda_max_grid
-        else:
-
-            def valid_grid_dim(g, mg):
-                if g is None:
-                    return mg
-                else:
-                    # grid must be at least 1 and no greater than mg
-                    return max(1, min(g, mg))
-
-            max_grid = tuple(
-                valid_grid_dim(g, mg) for g, mg in zip(max_grid, cuda_max_grid)
-            )  # type: ignore[assignment]
-
-        kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
+        _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
 
         return out_backup
 else:
     bsr_dense_mm = None  # type: ignore[assignment]
-
-
-if __name__ == "__main__":
-    from torch._inductor.utils import has_triton
-
-    if has_triton():
-        torch.manual_seed(13)
-        dtype = torch.float32
-        p = 0.5
-        mask_size = (8, 8)
-        block_size = (64, 64)
-        size = (mask_size[0] * block_size[0], mask_size[1] * block_size[1])
-
-        n_exp = 512
-        diff = torch.ones(n_exp, device="cuda", dtype=torch.float32)
-        for i in range(n_exp):
-            mask = torch.rand(*mask_size, device="cuda") < p
-            x = torch.rand(*mask_size, *block_size, dtype=dtype, device="cuda") / 10
-            x = (
-                (mask[:, :, None, None] * x)
-                .transpose(-3, -2)
-                .reshape(*size)
-                .to_sparse_bsr(*block_size)
-            )
-            y = torch.rand(5, *size, dtype=dtype, device="cuda") / 10
-            res_dense = x.to_dense() @ y
-            res = bsr_dense_mm(x, y)
-            diff[i] = (res - res_dense).abs().max()
-        print(f"mean: {diff.mean()}, std: {diff.std()}")
-        print(f"max diff: {diff.max()}")
+    sampled_addmm = None  # type: ignore[assignment]
