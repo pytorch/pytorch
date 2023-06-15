@@ -440,7 +440,7 @@ def resize_as_(fake_mode, func, *args, **kwargs):
 
 
 # Don't default to default device handling since range check is only applied to
-# scalar and doing the check as side effect.
+# scalar and doing the check as side effect and the op returns None.
 @register_op_impl(aten.sym_constrain_range.default)
 def sym_constrain_range(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):

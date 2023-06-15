@@ -317,7 +317,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     if max is None:
         max = sympy.oo
     if not isinstance(a, SymInt):
-        constrain_range_eager(a, min=min, max=max)
+        constrain_range_int(a, min=min, max=max)
         return
 
 
@@ -336,7 +336,15 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
         builtins.max(r.lower, min), builtins.min(r.upper, max)
     )
 
-def constrain_range_eager(a, *, min, max):
+def constrain_range_int(a, *, min, max):
+    """
+    Constrain range on concrete int value.
+    This can happens for the following scenarios:
+    - Eager mode execution and real int value is provided.
+    _ During tracing the traced symbol is resolved as a static integer (see
+      PR #101655 for more details).
+    """
+
     assert not isinstance(a, SymInt)
     if not (min <= a <= max):
         raise ValueRangeError(f"Invalid value {a} for range [{min}:{max}]")
