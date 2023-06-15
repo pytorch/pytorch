@@ -38,6 +38,9 @@ class Model(torch.nn.Module):
 
 
 class TestSymbolicTracing(TestCase):
+    def __init__(self, methodName="runTest"):
+        super().__init__(methodName)
+
     def test_symbolic_tracing_outputs(self):
         """
         Tests running ``tracer.trace()`` inside ``patch_tracer()`` by checking
