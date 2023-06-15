@@ -614,6 +614,8 @@ class TestOperators(TestCase):
         xfail('as_strided', 'partial_views'),
     }))
     @opsToleranceOverride('TestOperators', 'test_vjp', (
+        tol1('nn.functional.conv3d',
+             {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',

@@ -12591,9 +12591,6 @@ op_db: List[OpInfo] = [
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
                             dtypes=(torch.complex64,), device_type='cuda'),
-               # AssertionError: Tensor-likes are not close!
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward',
-                            dtypes=(torch.float32,), device_type='cuda'),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
