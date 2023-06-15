@@ -409,6 +409,19 @@ void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
   TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
 
+Tensor _functional_assert_async(const Tensor& self, const Tensor& dep_token) {
+  _assert_async_cpu(self);
+  return dep_token;
+}
+Tensor _functional_assert_async_msg_cpu(
+  const Tensor& self,
+  c10::string_view assert_msg,
+  const Tensor& dep_token) {
+  _assert_async_msg_cpu(self, assert_msg);
+  return dep_token;
+}
+
+
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
     const Tensor& elements,
