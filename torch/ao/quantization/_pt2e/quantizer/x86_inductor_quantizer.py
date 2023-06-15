@@ -191,6 +191,8 @@ class X86InductorQuantizer(Quantizer):
             annotate_output: bool,
             quantization_config: QuantizationConfig,
     ) -> None :
+        """ Helper function to annotate the conv node
+        """
         input_qspec_map = {}
         input_node = conv_node.args[0]
         assert isinstance(input_node, Node)
@@ -221,6 +223,8 @@ class X86InductorQuantizer(Quantizer):
         self,
         partition_list: List[SourcePartition],
     ) -> List[torch.fx.Node]:
+        """ Helper function to get the output node list from partition list
+        """
         output_node_list = []
         for partition in partition_list:
             if len(partition.output_nodes) > 1:
@@ -237,6 +241,9 @@ class X86InductorQuantizer(Quantizer):
         conv_gemm_node: torch.fx.Node,
         binary_node: torch.fx.Node,
     ):
+        """ Helper function to check conv_gemm and extra input node index
+        for binary node fused with conv_gemm.
+        """
         conv_gemm_node_idx = None
         extra_input_node_idx = None
         if (binary_node.args[0].op == "call_function") and (
