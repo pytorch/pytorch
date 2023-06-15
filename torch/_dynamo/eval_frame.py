@@ -143,6 +143,12 @@ class OptimizedModule(torch.nn.Module):
             self._orig_mod._infer_parameters(self._orig_mod, args)
         return self._forward(*args, **kwargs)
 
+    def __dir__(self):
+        orig_mod_attrs = self._orig_mod.__dir__()
+        return orig_mod_attrs + [
+            attr for attr in super().__dir__() if attr not in orig_mod_attrs
+        ]
+
 
 def remove_from_cache(f):
     """
@@ -183,7 +189,10 @@ def enable_dynamic(enable: bool = True, export: bool = False):
     if not enable:
         yield
         return
-    with config.patch(dynamic_shapes=True):
+    # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
+    # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
+    # dynamic=True here to mean "fully dynamic from the start".
+    with config.patch(dynamic_shapes=True, assume_static_by_default=False):
         yield
 
 
@@ -559,32 +568,29 @@ def explain(f, *args, **kwargs):
 
     reset()
 
-    out_guards = []
-    graphs = []
-    ops_per_graph = []
-    op_count = 0
-    break_reasons = []
+    graphs: List[torch.fx.GraphModule] = []
+    break_reasons: List[Any] = []
+    op_count: int = 0
+    ops_per_graph: List[torch.fx.Node] = []
+    out_guards: List[_guards.Guard] = []
 
     def dynamo_graph_accumulating_compiler(gm: torch.fx.GraphModule, example_inputs):
+        from .backends.debugging import _explain_graph_detail
+
         nonlocal graphs
         nonlocal op_count
         nonlocal ops_per_graph
+        nonlocal break_reasons
 
-        graphs.append(gm)
-        ops = []
-        for node in gm.graph.nodes:
-            if node.op == "call_function":
-                ops.append(node.target)
+        gm, graphs, op_count, ops_per_graph, break_reasons = _explain_graph_detail(
+            gm, graphs, op_count, ops_per_graph, break_reasons
+        )
 
-        op_count += len(ops)
-        ops_per_graph.append(ops)
-        if gm.compile_subgraph_reason.graph_break:
-            break_reasons.append(gm.compile_subgraph_reason)
         return gm.forward
 
     def guard_export_print(guards):
         nonlocal out_guards
-        out_guards.append(guards)
+        out_guards.extend(guards)
 
     with patch(f"{__name__}.most_recent_backend", None):
         opt_f = optimize(
@@ -607,25 +613,25 @@ def explain(f, *args, **kwargs):
     formatted_list = ""
     for idx, break_reason in enumerate(deduped_reasons.values()):
         formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
-        msg = f"{break_reason.reason}\n{formatted_stack}"
-        formatted_list += f"{idx + 1}. {msg} \n"
+        msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
+        formatted_list += msg
 
-    explanation = f"Dynamo produced {graph_count} graphs "
-    explanation += f"with {graph_count - 1} graph break and {op_count} ops"
-    explanation_verbose = explanation
-    explanation_verbose += f"\n Break reasons: \n\n{formatted_list}"
-
-    explanation_verbose += compile_times()
+    graph_break_count = graph_count - 1
+    compile_time = compile_times(repr="str")
 
     # TODO(voz): Do we want a decorator for this?
     reset()
-    return (
-        explanation,
-        out_guards,
+    from .backends.debugging import ExplainOutput
+
+    return ExplainOutput(
         graphs,
-        ops_per_graph,
+        graph_count,
+        graph_break_count,
         break_reasons,
-        explanation_verbose,
+        op_count,
+        ops_per_graph,
+        out_guards,
+        compile_time,
     )
 
 
@@ -792,7 +798,6 @@ def export(
     tracing_mode: str = "symbolic",
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
-    functionalize: bool = False,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -816,9 +821,6 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
-
-        functionalize (bool): If True, the resulting aten graph module will be functional. You will need to
-        set aten_graph=True to see the effect. By default, this flag will be false.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -846,12 +848,6 @@ def export(
     f = innermost_fn(f)
     call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
     original_signature = inspect.signature(call_to_inspect)
-
-    if functionalize and not aten_graph:
-        raise UserError(
-            UserErrorType.ANTI_PATTERN,
-            "TorchDynamo won't functionalize non-aten graphs. Please set `functionalize` to true",
-        )
 
     graph = None
     out_guards = None
@@ -923,10 +919,13 @@ def export(
 
     remove_from_cache(f)
     constraint_violation_error = None
+    if tracing_mode != "symbolic":
+        assume_static_by_default = True
     with patch(f"{__name__}.most_recent_backend", None), config.patch(
         summarize_dim_constraints=True,
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
+        automatic_dynamic_shapes=False,
     ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
@@ -936,7 +935,6 @@ def export(
             ),
             export=True,
             export_constraints=constraints,
-            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         try:
@@ -946,21 +944,31 @@ def export(
     remove_from_cache(f)
 
     if (
-        shape_env := getattr(fake_mode, "shape_env", None)
-    ) is not None and not skipfiles.check(inspect.getsourcefile(call_to_inspect)):
-        dim_constraints = shape_env.dim_constraints
-        assert dim_constraints is not None
+        (shape_env := getattr(fake_mode, "shape_env", None)) is not None
+        and (dim_constraints := shape_env.dim_constraints) is not None
+        and not skipfiles.check(inspect.getsourcefile(call_to_inspect))
+    ):
         dim_constraints.solve()
         msg = dim_constraints.prettify_results(original_signature)
+        forced_specializations = dim_constraints.forced_specializations()
+        if forced_specializations:
+            msg = (
+                "Some dynamic dimensions need to be specialized because "
+                "the constraints inferred for them are too complex to specify.\n"
+                f"{forced_specializations}\n{msg}"
+            )
         if constraint_violation_error:
             constraint_violation_error.args = (
                 constraint_violation_error.args[0] + msg,
             )
         else:
-            log.info(
-                "Summary of dimension constraints:%s",
-                msg,
-            )
+            if forced_specializations:
+                constraint_violation_error = ConstraintViolationError(msg)
+            else:
+                log.info(
+                    "Summary of dimension constraints:%s",
+                    msg,
+                )
 
         # Error if we have any constraints on static values
         for k in shape_env.var_to_range.keys():
@@ -991,40 +999,10 @@ def export(
     matched_output_elements_positions = produce_matching(flat_both, flat_results_traced)
 
     if aten_graph:
-        memo: Dict[torch.Tensor, torch.Tensor] = {}
-
-        def to_fun(t):
-            if isinstance(t, torch.Tensor):
-                if t in memo:
-                    return memo[t]
-                r = torch._to_functional_tensor(t, mirror_autograd_meta=True)
-                memo[t] = r
-                return r
-            else:
-                return t
-
-        def from_fun(t):
-            if not isinstance(t, torch.Tensor) or not torch._is_functional_tensor(t):
-                return t
-            torch._sync(t)
-            return torch._from_functional_tensor(t)
-
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
             with torch.fx.traceback.preserve_node_meta():
-                if functionalize:
-                    torch._enable_functionalization(reapply_views=True)
-                    try:
-                        return pytree.tree_map(
-                            from_fun,
-                            torch.fx.Interpreter(graph).run(
-                                *pytree.tree_map(to_fun, args)
-                            ),
-                        )
-                    finally:
-                        torch._disable_functionalization()
-                else:
-                    return torch.fx.Interpreter(graph).run(*args)
+                return torch.fx.Interpreter(graph).run(*args)
 
         with enable_python_dispatcher(), fake_mode:
             try:
@@ -1268,6 +1246,12 @@ class TorchPatcher:
                 opt.step = disable(opt.step)
 
             opt.zero_grad = disable(opt.zero_grad)
+            opt.state_dict = disable(opt.state_dict)
+            opt.load_state_dict = disable(opt.load_state_dict)
+            opt.add_param_group = disable(opt.add_param_group)
+
+            if hasattr(opt, "_init_group"):
+                opt._init_group = disable(opt._init_group)
 
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook
