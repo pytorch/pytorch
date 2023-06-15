@@ -30,7 +30,7 @@ import torch.library
 
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
-from torch._dynamo.testing import rand_strided, requires_static_shapes, same
+from torch._dynamo.testing import expectedFailureDynamic, rand_strided, same
 from torch.nn import functional as F
 
 
@@ -1058,7 +1058,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
-    @requires_static_shapes
+    @expectedFailureDynamic
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
         model = ChunkReformerFeedForward()
@@ -1075,7 +1075,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     # uncomment/adjust the assertEqual below
     @unittest.expectedFailure
     @torch._dynamo.config.patch(
-        fake_tensor_propagation=True, capture_scalar_outputs=True, dynamic_shapes=True
+        fake_tensor_propagation=True, capture_scalar_outputs=True
     )
     def test_maml_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
@@ -1097,7 +1097,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertIn(cnt.op_count, (36, 35, 34, 29, 28, 27))
 
     # see: https://github.com/pytorch/pytorch/issues/80067
-    @torch._dynamo.config.patch(capture_scalar_outputs=False, dynamic_shapes=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=False)
     def test_maml_no_item_capture(self):
         a = torch.randn(5, 1, 28, 28)
         b = torch.zeros(5, dtype=torch.int64)
@@ -1138,7 +1138,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(cnt.op_count, 1)
 
-    @requires_static_shapes
+    @expectedFailureDynamic
     def test_create_rand_mask_from_inputs(self):
         args = [
             torch.randn([1, 64, 64]),
@@ -1990,7 +1990,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 1)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_bigbird_unsqueeze_inplace(self):
         def fn(reshape_2):
             view_2 = reshape_2.clone()
@@ -2758,7 +2757,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(*inputs).size(), torch.Size([1, 3, 4]))
         self.assertEqual(inputs[0].size(), torch.Size([1, 3, 4]))
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_batchnorm_e2e(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -2814,7 +2812,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             for buffer_ref, buffer_test in zip(m_ref.buffers(), m_test.buffers()):
                 self.assertTrue(same(buffer_ref, buffer_test))
 
-    @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_dynamic_shapes_right_side(self):
         def f(x):
@@ -2936,7 +2933,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         mod.is_compiled = True
         self.assertTrue("is_compiled" in dir(mod))
 
-    @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     def test_dynamic_shapes_implicit_guard(self):
         def f(x):
@@ -2979,7 +2975,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result.__name__, "cool_name")
         self.assertEqual(result(), torch.ones([]).cos().sin())
 
-    @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_dynamic_shapes_float_guard(self):
         def f(x):
             return torch.nn.functional.dropout(x, x.shape[0] / 6)
@@ -2989,7 +2984,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(torch.randn(3))
         self.assertEqual(cnt.frame_count, 1)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True, capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_tensor_item(self):
         def f(x, y):
             val = y.item()
@@ -3090,7 +3085,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         (gx,) = torch.autograd.grad(y, x)
         self.assertEqual(gx, x.cos())
 
-    @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_tensor_split(self):
         def f(x):

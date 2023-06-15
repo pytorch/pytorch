@@ -257,8 +257,9 @@ class CppPrinter(ExprPrinter):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
-        if exp == 0.5:
-            r = f"std::sqrt({base})"
+
+        if exp == 0.5 or exp == -0.5:
+            r = f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
             return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
         assert exp.is_integer
         exp = int(exp)
