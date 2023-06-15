@@ -308,16 +308,16 @@ class UserMethodVariable(UserFunctionVariable):
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
         # Note this is not only for allowed modules, as user customized modules can extend from
         # allowed modules but using parent's `forward` method, which is also covered by this branch.
-        if isinstance(self.obj, variables.NNModuleVariable):
-            module_attr = getattr(self.fn, "__module__", "")
-            if (
-                module_attr is not None
-                and module_attr.startswith("torch.nn.")
-                or self.is_constant
-            ):
-                return self.obj.call_method(
-                    tx, self.fn.__name__, args, kwargs, constant=self.is_constant
-                ).add_options(self)
+        # if isinstance(self.obj, variables.NNModuleVariable):
+        #     module_attr = getattr(self.fn, "__module__", "")
+        #     if (
+        #         module_attr is not None
+        #         and module_attr.startswith("torch.nn.")
+        #         or self.is_constant
+        #     ):
+        #         return self.obj.call_method(
+        #             tx, self.fn.__name__, args, kwargs, constant=self.is_constant
+        #         ).add_options(self)
         return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
