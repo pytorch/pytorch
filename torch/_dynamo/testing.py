@@ -301,6 +301,18 @@ def rand_strided(size, stride, dtype=torch.float32, device="cpu", extra_size=0):
         buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)
 
+def one_strided(size, stride, dtype=torch.float32, device="cpu", extra_size=0):
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(size, stride))
+        + 1
+        + extra_size
+    )
+    if dtype.is_floating_point:
+        buffer = torch.ones(needed_size, dtype=dtype, device=device)
+    else:
+        buffer = torch.ones(size=[needed_size], dtype=dtype, device=device)
+    return torch.as_strided(buffer, size, stride)
+
 
 def _make_fn_with_patches(fn, *patches):
     @functools.wraps(fn)

@@ -429,6 +429,7 @@ class HuggingfaceRunner(BenchmarkRunner):
                 or model_cls.__name__.startswith("Marian")
             ):
                 config.pad_token_id = 0
+                config.n_layer = 2
 
         else:
             config, model_cls = EXTRA_MODELS[model_name]

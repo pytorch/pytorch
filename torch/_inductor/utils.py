@@ -1089,24 +1089,41 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         action="store_true",
         help="Whether to profile the compiled module",
     )
+    parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default="",
+    )
+    parser.add_argument(
+        "-n",
+        type=int,
+        default=2,
+    )
     args = parser.parse_args()
 
     if args.benchmark_kernels:
         benchmark_all_kernels(benchmark_name, args.benchmark_all_configs)
     else:
-        times = 10
-        repeat = 10
+        if args.profile:
+            times = 10
+            repeat = 10
+        else:
+            times = 20
+            repeat = 20
         wall_time_ms = (
             benchmark_compiled_module_fn(times=times, repeat=repeat) / times * 1000
         )
 
         if not args.profile:
             return
-
         with torch.profiler.profile(record_shapes=True) as p:
-            benchmark_compiled_module_fn(times=times, repeat=repeat)
+            benchmark_compiled_module_fn(times=args.n, repeat=args.n)
 
-        path = f"{tempfile.gettempdir()}/compiled_module_profile.json"
+        from datetime import datetime
+        current_time = datetime.now().strftime("%Y%m%d%H%M")
+        # path = f"{tempfile.gettempdir()}/yhao/profile/{args.model}_profile_{current_time}.json"
+        path = f"/mnt/beegfs/users/yhao24/tmp/profile/{args.model}_profile_{current_time}.json"
         p.export_chrome_trace(path)
         print(f"Profiling result for a compiled module of benchmark {benchmark_name}:")
         print(f"Chrome trace for the profile is written to {path}")
