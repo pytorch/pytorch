@@ -140,9 +140,10 @@ class ConstDictVariable(VariableTracker):
             if args[1].mutable_local is not None:
                 new_rec_contains.add(args[1].mutable_local)
 
+            newvar = self.modifed(newval, new_rec_contains, **options)
             return tx.replace_all(
                 self,
-                self.modifed(newval, new_rec_contains, **options),
+                newvar,
             )
         elif (
             name in ("pop", "get")

@@ -236,7 +236,7 @@ class TensorVariable(VariableTracker):
             result = try_generic_attr_handling()
 
         if result is None:
-            raise NotImplementedError()
+            result = super().var_getattr(tx, name)
 
         return result
 
