@@ -177,6 +177,11 @@
 
 - func: _assert_tensor_metadata(Tensor a, SymInt[]? size=None, SymInt[]? stride=None, ScalarType? dtype=None) -> ()
 
+- func: sym_constrain_range(Scalar size, int? min=None, int? max=None) -> ()
+  dispatch:
+    CPU: sym_constrain_range_cpu
+    CUDA: sym_constrain_range_cuda
+
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
 
