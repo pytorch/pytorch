@@ -4,7 +4,7 @@ import json
 import os
 
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Dict, List, Optional
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -21,14 +21,14 @@ class GitHubComment:
     url: str
 
 
-def gh_fetch_url(
+def gh_fetch_url_and_headers(
     url: str,
     *,
     headers: Optional[Dict[str, str]] = None,
     data: Optional[Dict[str, Any]] = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
-) -> Any:
+) -> Tuple[Any, Any]:
     if headers is None:
         headers = {}
     token = os.environ.get("GITHUB_TOKEN")
@@ -37,7 +37,7 @@ def gh_fetch_url(
     data_ = json.dumps(data).encode() if data is not None else None
     try:
         with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
-            return reader(conn)
+            return conn.headers, reader(conn)
     except HTTPError as err:
         if err.code == 403 and all(
             key in err.headers for key in ["X-RateLimit-Limit", "X-RateLimit-Used"]
@@ -50,6 +50,19 @@ def gh_fetch_url(
                 Resets at: {err.headers['x-RateLimit-Reset']}"""
             )
         raise
+
+
+def gh_fetch_url(
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    method: Optional[str] = None,
+    reader: Callable[[Any], Any] = lambda x: x.read(),
+) -> Any:
+    return gh_fetch_url_and_headers(
+        url, headers=headers, data=data, reader=json.load, method=method
+    )[0]
 
 
 def gh_fetch_json(

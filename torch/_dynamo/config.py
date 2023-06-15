@@ -51,8 +51,8 @@ constant_functions = {
     torch._utils.is_compiling: True,
 }
 
-# don't specialize on shapes and strides and put shape ops in graph
-dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
+# legacy config, does nothing now!
+dynamic_shapes = True
 
 # This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
