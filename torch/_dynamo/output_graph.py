@@ -75,6 +75,7 @@ from .variables.base import VariableTracker
 from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
@@ -195,6 +196,9 @@ class WrapperBackend:
             self.restore()
 
 
+Scope = Dict[str, object]
+
+
 class OutputGraph(Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -208,13 +212,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
     def __init__(
         self,
-        f_globals: Dict[str, Any],
         code_options: Dict[str, Any],
         compiler_fn: CompilerFn,
         root_tx,
         export: bool,
         export_constraints,
         frame_state,
+        local_scope: Scope,
+        global_scope: Scope,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self)]
@@ -232,17 +237,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
-            )
-            if config.dynamic_shapes
-            else None,
+            ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        if config.dynamic_shapes:
-            # Register a SHAPE_ENV guard to make sure we setup shape guards
-            # that show up in ShapeEnv
-            self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+        # Register a SHAPE_ENV guard to make sure we setup shape guards
+        # that show up in ShapeEnv
+        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
 
         self.guards.add(
             DeterministicAlgorithmsSource().make_guard(
@@ -279,7 +281,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
-        self.root_globals = f_globals
+        self.global_scope = global_scope
+        self.local_scope = local_scope
         self.root_tx = root_tx
         from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
@@ -612,7 +615,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
             def wrap_name(module_key):
                 self.output.update_co_names(module_key)
-                self.root_globals[module_key] = target
+                self.global_scope[module_key] = target
                 return VariableBuilder(self, ConstantSource(source_name=module_key))(
                     target
                 )
@@ -705,7 +708,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
         root = FakeRootModule(self.nn_modules)
-
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
         val_to_names: OrderedDict[
@@ -749,7 +751,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if (
             stack_values
             and all(
-                not isinstance(v, UnspecializedPythonVariable) for v in stack_values
+                not isinstance(v, (UnspecializedPythonVariable, NumpyNdarrayVariable))
+                for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
@@ -761,7 +764,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
-            codegen = PyCodegen(tx)
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
@@ -792,14 +794,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     output.append(create_instruction("POP_TOP"))
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
-            codegen = pass2
 
-        if config.numpy_ndarray_as_tensor:
-            from .variables.tensor import NumpyNdarrayVariable
-
-            self.add_output_instructions(
-                NumpyNdarrayVariable.reconstruct_ndarray_before_return(codegen, self)
-            )
         # restore all the live local vars
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
@@ -994,7 +989,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.should_exit = True
 
     def install_global(self, name, value) -> None:
-        self.cleanups.append(CleanupHook.create(self.root_globals, name, value))
+        self.cleanups.append(CleanupHook.create(self.global_scope, name, value))
 
     def cleanup(self) -> None:
         # There is a reference cycle between tracer and OutputGraph, causing

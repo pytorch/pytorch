@@ -8,7 +8,7 @@ import functools
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests,
+    (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests,
      load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm, IS_FBCODE, IS_REMOTE_GPU)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
@@ -515,6 +515,14 @@ class TestSparseCompressed(TestCase):
         if len(samples) == 0:
             raise ValueError("Expected at least one 2 or higher D tensor in samples.")
 
+        # Re-define atol and rtol for operations that result values
+        # are random (and hence, non-comparable) be we still want to
+        # check the shape, dtype, etc attributes of the results:
+        atol = rtol = None
+        if op.name == 'randn_like':
+            atol = 1e300
+            rtol = 1
+
         for sample, sparse_sample in samples:
             expected = op(sample.input, *sample.args, **sample.kwargs)
             assert torch.is_tensor(expected)
@@ -524,7 +532,7 @@ class TestSparseCompressed(TestCase):
             if require_mask and sample.kwargs.get('mask') is not None:
                 output_mask = torch.masked._output_mask(op.op, sample.input, *sample.args, **sample.kwargs)
                 expected.masked_fill_(~output_mask, 0)
-            self.assertEqual(strided_output, expected)
+            self.assertEqual(strided_output, expected, atol=atol, rtol=rtol)
 
     @skipMeta
     @all_sparse_compressed_layouts()
@@ -3380,7 +3388,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU or torch._running_with_deploy(),
+    @unittest.skipIf((not TEST_WITH_TORCHINDUCTOR) or (IS_FBCODE and IS_REMOTE_GPU) or torch._running_with_deploy(),
                      "Skipped for deploy and internal with remote GPUs")
     def test_triton_bsr_dense_bmm(self, device, dtype, index_dtype, block_size):
         from functools import partial

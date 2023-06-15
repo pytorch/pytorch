@@ -15,15 +15,7 @@ import functools
 # the `autograd_not_implemented` behavior, but then the user may come
 # and register something that is actually a backward formula
 def autograd_kernel_indirection(custom_op):
-    # TODO(#101191): Use the actual C++ autograd not implemented fallback,
-    # or change the default autograd fallback to the autograd not implemented fallback.
-    def autograd_not_implemented(*args, **kwargs) -> None:
-        if torch.is_grad_enabled() and pytree.tree_any(
-            lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)
-        ):
-            raise RuntimeError("Autograd has not been implemented for operator")
-        with torch._C._AutoDispatchBelowAutograd():
-            return custom_op(*args, **kwargs)
+    autograd_fallback = autograd_not_implemented(custom_op)
 
     def inner(*args, **kwargs):
         if custom_op._has_impl('autograd'):
@@ -47,8 +39,21 @@ def autograd_kernel_indirection(custom_op):
                 f"please provide us both a backward function and a "
                 f"'save for backward' function via `impl_backward` and "
                 f"`impl_save_for_backward` respectively.")
-        return autograd_not_implemented(*args, **kwargs)
+        return autograd_fallback(*args, **kwargs)
     return inner
+
+
+# TODO(#101191): Use the actual C++ autograd not implemented fallback,
+# or change the default autograd fallback to the autograd not implemented fallback.
+def autograd_not_implemented(custom_op):
+    def kernel(*args, **kwargs):
+        if torch.is_grad_enabled() and pytree.tree_any(
+            lambda x: isinstance(x, torch.Tensor) and x.requires_grad, (args, kwargs)
+        ):
+            raise RuntimeError("Autograd has not been implemented for operator")
+        with torch._C._AutoDispatchBelowAutograd():
+            return custom_op(*args, **kwargs)
+    return kernel
 
 
 def construct_autograd_kernel(
