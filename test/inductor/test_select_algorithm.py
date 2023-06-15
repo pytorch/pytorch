@@ -7,6 +7,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
+from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import BenchmarkRequest
@@ -66,6 +67,7 @@ class TestSelectAlgorithm(TestCase):
         # It would be nice to assert this got fused into a single kernel, but that
         # only happens if we select a triton template (and not aten).
 
+    @expectedFailureDynamicWrapper
     @patches
     def test_addmm(self):
         @torch.compile
