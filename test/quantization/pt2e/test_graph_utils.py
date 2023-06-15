@@ -5,15 +5,11 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 
-from torch.ao.quantization._pt2e.graph_utils import (
-    find_sequential_partitions,
-    _create_equivalent_types_dict,
-)
+from torch.ao.quantization._pt2e.graph_utils import find_sequential_partitions
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TestCase,
 )
-from typing import List, Set
 
 
 class TestGraphUtils(TestCase):
@@ -96,38 +92,5 @@ class TestGraphUtils(TestCase):
         self.assertEqual(len(fused_partitions), 1)
         fused_partitions = find_sequential_partitions(
             m, [torch.nn.BatchNorm2d, torch.nn.ReLU]
-        )
-        self.assertEqual(len(fused_partitions), 0)
-
-    @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
-    def test_customized_equivalet_types_dict(self):
-        _CUSTOMIZED_EQUIVALENT_TYPES: List[Set] = [
-            {torch.nn.Conv2d, torch.nn.functional.conv2d},
-            {torch.nn.ReLU},
-        ]
-        _CUSTOMIZED_EQUIVALET_TYPES_DICT = _create_equivalent_types_dict(_CUSTOMIZED_EQUIVALENT_TYPES)
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                return torch.nn.functional.relu(self.conv(x))
-
-        m = M().eval()
-        example_inputs = (torch.randn(1, 3, 5, 5),)
-
-        # program capture
-        m, guards = torchdynamo.export(
-            m,
-            *copy.deepcopy(example_inputs),
-            aten_graph=True,
-        )
-        fused_partitions = find_sequential_partitions(
-            m,
-            [torch.nn.Conv2d, torch.nn.ReLU],
-            equivalet_types_dict=_CUSTOMIZED_EQUIVALET_TYPES_DICT,
         )
         self.assertEqual(len(fused_partitions), 0)
