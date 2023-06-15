@@ -26,8 +26,15 @@ checks the following ``torch.Tensor`` properties:
 - requires_grad
 - dispatch_key (with thread-local includes/excludes applied)
 - ndim
-- sizes\*
-- strides\*
+- sizes\* (optional)
+- strides\* (optional)
+
+For sizes/strides you can disable this specialization by setting the
+following parameter:
+
+.. code-block:: python
+
+   torch._dynamo.config.dynamic_shapes = True
 
 The full specialization mode allows the backend compiler to assume an
 entirely static graph. Unfortunately, most backends require this.

@@ -25,7 +25,7 @@ import torch._dynamo
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.testing import expectedFailureCodegenDynamic, rand_strided, same
+from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -3930,7 +3930,7 @@ class CommonTemplate:
         self.assertTrue(same(fn(*inputs), 2 * inputs[0]))
 
     @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
-    @dynamo_config.patch(automatic_dynamic_shapes=True)
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_strided_inputs(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -3943,7 +3943,7 @@ class CommonTemplate:
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
     @config.patch({"triton.cudagraphs": True if not torch.version.hip else False})
-    @dynamo_config.patch(automatic_dynamic_shapes=True)
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_input_mutation1(self):
         def fn(a):
             b = a + 1
@@ -4730,7 +4730,7 @@ class CommonTemplate:
         self.common(fn2, [torch.randn(55)])
 
     @config.patch({"triton.cudagraphs": True})
-    @dynamo_config.patch(automatic_dynamic_shapes=True)
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_dropout(self):
         random.seed(1234)
         torch.manual_seed(1234)
@@ -4755,7 +4755,7 @@ class CommonTemplate:
         self.assertTrue(400 < result2.nonzero().shape[0] < 600)
         self.assertTrue(0.9 < result2.mean().item() < 1.1)
 
-    @dynamo_config.patch(automatic_dynamic_shapes=True)
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_dropout_deterministic(self):
         @torch._dynamo.optimize("inductor")
         def fn(a):
@@ -5254,6 +5254,7 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dtype_sympy_expr(self):
         torch._inductor.metrics.disable_cpp_wrapper = 0
@@ -5757,7 +5758,7 @@ class CommonTemplate:
             inputs = (inputs[1], inputs[0])
             self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
-    @dynamo_config.patch(automatic_dynamic_shapes=True)
+    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
     def test_list_clearing(self):
         if self.device == "cpu":
             contexts = [contextlib.nullcontext]
@@ -5855,13 +5856,13 @@ class CommonTemplate:
             [torch.randn((4, 2)), torch.randn((4))],
         )
 
-    # Shape padding causes the inputs to all get specialized, so the codegen
-    # test fails
-    @expectedFailureCodegenDynamic
     @requires_cuda()
     @skipIfRocm
     @torch._inductor.config.patch("shape_padding", True)
     def test_shape_padding(self):
+        if torch._dynamo.config.dynamic_shapes:
+            raise unittest.SkipTest("dynamic shapes do not support padding")
+
         dtypes = [
             torch.float16,
             torch.float32,
@@ -5888,6 +5889,7 @@ class CommonTemplate:
             self.common(lambda x, y: torch.matmul(x, y), (x, y))
             self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x, i):
@@ -5897,6 +5899,7 @@ class CommonTemplate:
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_sqrt_dynamic_shapes(self):
         # TIMM convit_base model: https://github.com/pytorch/pytorch/issues/97877.
         # TODO: support cuda path.
@@ -5923,22 +5926,7 @@ class CommonTemplate:
             ],
         )
 
-    def test_rsqrt_dynamic_shapes(self):
-        # From HF hf_BigBird model.
-        @torch.compile(dynamic=True)
-        def fn(a, b):
-            r = 1 / math.sqrt(a.size(1))
-            return torch.bmm(a, b) / r
-            return (r,)
-
-        self.common(
-            fn,
-            [
-                torch.randn(2, 4, 4),
-                torch.randn(2, 4, 4),
-            ],
-        )
-
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_index_dynamic_shapes(self):
         if self.device == "cuda":
             raise unittest.SkipTest("index dynamic shapes only supports cpu")
@@ -6063,18 +6051,19 @@ class CommonTemplate:
             (torch.tensor([[True]]), torch.rand(13, 7, 3), torch.rand(1, 1)),
         )
 
-        args = [
-            torch.randn(1, 4, 64, 64),
-            torch.zeros(1, 1, 64, 64, dtype=torch.uint8),
-        ]
-        args[1][:, :, :32, :32] = 1
-        eager_args = [x.clone() for x in args]
-        eager_mod = Repro()
-        mod = make_fx(eager_mod, tracing_mode="real")(*args)
-        compiled = compile_fx_inner(mod, args)
-        inductor_out = compiled(args)
-        eager_out = eager_mod(*eager_args)
-        self.assertEqual(inductor_out, eager_out)
+        if not torch._dynamo.config.dynamic_shapes:
+            args = [
+                torch.randn(1, 4, 64, 64),
+                torch.zeros(1, 1, 64, 64, dtype=torch.uint8),
+            ]
+            args[1][:, :, :32, :32] = 1
+            eager_args = [x.clone() for x in args]
+            eager_mod = Repro()
+            mod = make_fx(eager_mod, tracing_mode="real")(*args)
+            compiled = compile_fx_inner(mod, args)
+            inductor_out = compiled(args)
+            eager_out = eager_mod(*eager_args)
+            self.assertEqual(inductor_out, eager_out)
 
     def test_where_with_logical_op(self):
         def fn_and(x, y):
@@ -6146,13 +6135,16 @@ class CommonTemplate:
         def fn(a):
             return a[out_features.index(in_feature)]
 
-        x = [
-            torch.rand([1, 256, 100, 152]),
-            torch.rand([1, 256, 50, 76]),
-            torch.rand([1, 256, 25, 38]),
-        ]
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
-        same(fn(x), opt_fn(x))
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = [
+                    torch.rand([1, 256, 100, 152]),
+                    torch.rand([1, 256, 50, 76]),
+                    torch.rand([1, 256, 25, 38]),
+                ]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x), opt_fn(x))
 
     def test_pad_view(self):
         def fn(a):
@@ -6160,9 +6152,12 @@ class CommonTemplate:
             y = y.view(*y.size()[:-2], y.size(-1), y.size(-2))
             return y
 
-        x = torch.rand(48, 3, 512, 512)
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
-        same(fn(x), opt_fn(x))
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.rand(48, 3, 512, 512)
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x), opt_fn(x))
 
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
@@ -6299,13 +6294,16 @@ class CommonTemplate:
             )
             return input_tensor
 
-        args = [
-            ((4, 1024, 12, 64), (768, 3072, 64, 1), torch.float32, "cpu"),
-            ((48, 3, 512, 513), (787968, 262656, 513, 1), torch.float32, "cpu"),
-        ]
-        args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
-        same(fn(*args, 256), opt_fn(*args, 256))
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                args = [
+                    ((4, 1024, 12, 64), (768, 3072, 64, 1), torch.float32, "cpu"),
+                    ((48, 3, 512, 513), (787968, 262656, 513, 1), torch.float32, "cpu"),
+                ]
+                args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(*args, 256), opt_fn(*args, 256))
 
     def test_cumsum_pattern_matcher_issue(self):
         def fn(input_ids) -> torch.Tensor:
@@ -6318,21 +6316,25 @@ class CommonTemplate:
             attention_mask = attention_mask.long()
             return torch.cumsum(attention_mask, dim=1)
 
-        torch._dynamo.reset()
-        x = torch.randn(2, 2)
-        opt = torch._dynamo.optimize("inductor")(fn)
-        res = opt(x)
-        ref = fn(x)
-        self.assertEqual(res, ref, atol=0, rtol=0)
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.randn(2, 2)
+                opt = torch._dynamo.optimize("inductor")(fn)
+                res = opt(x)
+                ref = fn(x)
+                self.assertEqual(res, ref, atol=0, rtol=0)
 
     def test_slice(self):
         def fn(a, b):
             return torch.ops.aten.slice.Tensor(a, 0, 0, -b)
 
-        torch._dynamo.reset()
-        x = torch.rand(48, 3, 512, 512)
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
-        same(fn(x, 2), opt_fn(x, 2))
+        for dynamic_shapes in [True, False]:
+            with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                torch._dynamo.reset()
+                x = torch.rand(48, 3, 512, 512)
+                opt_fn = torch._dynamo.optimize("inductor")(fn)
+                same(fn(x, 2), opt_fn(x, 2))
 
     def test_inplace_resize_as(self):
         def fn(x, y):
@@ -6408,9 +6410,7 @@ class TestFailure:
     __test__: bool = False
 
 
-def copy_tests(
-    my_cls, other_cls, suffix, test_failures=None, xfail_prop=None
-):  # noqa: B902
+def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use closures here to
@@ -6425,9 +6425,6 @@ def copy_tests(
 
             # Copy __dict__ which may contain test metadata
             new_test.__dict__ = copy.deepcopy(value.__dict__)
-
-            if xfail_prop is not None and hasattr(value, xfail_prop):
-                new_test = unittest.expectedFailure(new_test)
 
             tf = test_failures and test_failures.get(name)
             if tf is not None and suffix in tf.suffixes:

@@ -199,7 +199,7 @@ def _cuda_deserialize(obj, location):
 
 
 def _mps_deserialize(obj, location):
-    if location.startswith('mps'):
+    if location == 'mps':
         return obj.mps()
 
 

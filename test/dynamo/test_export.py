@@ -2330,6 +2330,7 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(
+        dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,
         capture_scalar_outputs=True,
@@ -2358,6 +2359,7 @@ def forward(self, x):
         )
 
     @torch._dynamo.config.patch(
+        dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,
         capture_scalar_outputs=True,
@@ -2379,6 +2381,7 @@ def forward(self, x):
         )
 
     @config.patch(
+        dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,
         capture_scalar_outputs=True,
@@ -2697,6 +2700,7 @@ def forward(self, x):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
+    @config.patch(dynamic_shapes=True)
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2723,6 +2727,7 @@ def forward(self, x):
         test_inp_v2 = (torch.ones(1, 2, 3),)
         self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
 
+    @config.patch(dynamic_shapes=True)
     def test_round_dynamic_shapes(self):
         def f(x):
             return x[: round(x.shape[0] / 2)]

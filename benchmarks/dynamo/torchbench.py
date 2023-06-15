@@ -181,6 +181,11 @@ TRT_NOT_YET_WORKING = {
     "resnext50_32x4d",
 }
 
+DYNAMIC_SHAPES_NOT_YET_WORKING = {
+    "demucs",
+    "timm_nfnet",
+}
+
 DONT_CHANGE_BATCH_SIZE = {
     "demucs",
     "pytorch_struct",
@@ -248,6 +253,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def failing_fx2trt_models(self):
         return TRT_NOT_YET_WORKING
+
+    @property
+    def failing_dynamic_shape_models(self):
+        return DYNAMIC_SHAPES_NOT_YET_WORKING
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
