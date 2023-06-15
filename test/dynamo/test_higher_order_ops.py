@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import re
 import unittest
 
 import functorch.experimental.control_flow as control_flow
@@ -17,6 +18,15 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
+
+def strip_comment(code):
+    code = str(code)
+    return re.sub(r"(?m)^ *#.*\n?", "", code)
+
+
+def remove_trailing_space(code):
+    return "\n".join([line.rstrip() for line in code.split("\n")])
 
 
 # Equivalent to backend="eager", but also records graphs that
@@ -654,30 +664,15 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
-    def _grad_compile_check(
-        self, fn, *inputs, expected_module_names=(), expected_node_names=()
-    ):
+    def _grad_compile_check(self, fn, *inputs):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
         expected = torch.compile(fn, backend=backend, fullgraph=True)(*inputs)
 
         self.assertEqual(actual, expected)
 
-        wrap_gm = backend.graphs[0]
-        module_names = set()
-        for mod_name, _ in wrap_gm.named_modules():
-            module_names.add(mod_name)
-
-        # make sure that all expected names were present.
-        for name in expected_module_names:
-            self.assertTrue(name in module_names)
-
-        node_names = set()
-        for node in wrap_gm.graph.nodes:
-            node_names.add(node.name)
-
-        for name in expected_node_names:
-            self.assertTrue(name in node_names)
+        wrapped_gm = backend.graphs[0]
+        return wrapped_gm
 
     def test_grad(self):
         counters.clear()
@@ -689,12 +684,36 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(
-            wrapper_fn,
-            x,
-            expected_module_names=("grad_body_0",),
-            expected_node_names=("contiguous",),
+        wrapped_gm = self._grad_compile_check(wrapper_fn, x)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            sin = l_x_.sin();  l_x_ = None
+            sum_1 = sin.sum();  sin = None
+            return sum_1
+"""
+
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
         )
+        self.assertExpectedInline(actual, expected)
 
     def test_grad_freevar_tensor(self):
         counters.clear()
@@ -707,12 +726,37 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(
-            wrapper_fn,
-            x,
-            expected_module_names=("grad_body_0",),
-            expected_node_names=("contiguous",),
+        wrapped_gm = self._grad_compile_check(wrapper_fn, x)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_fn_closure_0_cell_contents : torch.Tensor):
+        l_x_ = L_x_
+        l_fn_closure_0_cell_contents = L_fn_closure_0_cell_contents
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, l_fn_closure_0_cell_contents);  grad_proxy = l_x_ = l_fn_closure_0_cell_contents = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, l_fn_closure_0_cell_contents):
+            sin = l_x_.sin();  l_x_ = None
+            add = sin + l_fn_closure_0_cell_contents;  sin = l_fn_closure_0_cell_contents = None
+            sum_1 = add.sum();  add = None
+            return sum_1
+"""
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
         )
+        self.assertExpectedInline(actual, expected)
 
     def test_grad_freevar_python_scalar(self):
         counters.clear()
@@ -725,12 +769,36 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(
-            wrapper_fn,
-            x,
-            expected_module_names=("grad_body_0",),
-            expected_node_names=("contiguous",),
+        wrapped_gm = self._grad_compile_check(wrapper_fn, x)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            sin = l_x_.sin();  l_x_ = None
+            add = sin + 3;  sin = None
+            sum_1 = add.sum();  add = None
+            return sum_1
+"""
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
         )
+        self.assertExpectedInline(actual, expected)
 
     def test_grad_closure_tensor(self):
         counters.clear()
@@ -746,12 +814,36 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(
+        wrapped_gm = self._grad_compile_check(
             wrapper_fn,
             x,
-            expected_module_names=("grad_body_0",),
-            expected_node_names=("contiguous",),
         )
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        randn = torch.randn(3)
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, randn);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (randn, contiguous)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, randn):
+            sin = l_x_.sin();  l_x_ = None
+            add = sin + randn;  sin = randn = None
+            sum_1 = add.sum();  add = None
+            return sum_1
+"""
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
+        )
+        self.assertExpectedInline(actual, expected)
 
     def test_grad_closure_scalar(self):
         counters.clear()
@@ -765,12 +857,36 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(
-            wrapper_fn,
-            x,
-            expected_module_names=("grad_body_0",),
-            expected_node_names=("contiguous",),
+        wrapped_gm = self._grad_compile_check(wrapper_fn, x)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            sin = l_x_.sin();  l_x_ = None
+            add = sin + 3.14;  sin = None
+            sum_1 = add.sum();  add = None
+            return sum_1
+"""
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
         )
+        self.assertExpectedInline(actual, expected)
 
     def test_grad_has_aux(self):
         counters.clear()
@@ -784,12 +900,39 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn, has_aux=True)(x)
 
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(
-            wrapper_fn,
-            x,
-            expected_module_names=("grad_body_0",),
-            expected_node_names=("contiguous",),
+        wrapped_gm = self._grad_compile_check(wrapper_fn, x)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, True);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        contiguous = getitem.contiguous();  getitem = None
+        return (contiguous, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            sin = l_x_.sin()
+            add = sin + 3.14;  sin = None
+            sum_1 = add.sum();  add = None
+            cos = l_x_.cos();  l_x_ = None
+            return (sum_1, cos)
+"""
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
         )
+        self.assertExpectedInline(actual, expected)
 
     def test_grad_two_tensor_has_aux(self):
         counters.clear()
@@ -802,13 +945,40 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(
-            wrapper_fn,
-            x,
-            y,
-            expected_module_names=("grad_body_0",),
-            expected_node_names=("contiguous",),
+        wrapped_gm = self._grad_compile_check(wrapper_fn, x, y)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, True);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        contiguous = getitem.contiguous();  getitem = None
+        return (contiguous, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, l_y_):
+            sin = l_x_.sin()
+            add = sin + l_y_;  sin = l_y_ = None
+            sum_1 = add.sum();  add = None
+            cos = l_x_.cos();  l_x_ = None
+            return (sum_1, cos)
+"""
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
         )
+        self.assertExpectedInline(actual, expected)
 
     def test_grad_two_tensor_all_grad_has_aux(self):
         counters.clear()
@@ -821,13 +991,43 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
-        self._grad_compile_check(
-            wrapper_fn,
-            x,
-            y,
-            expected_module_names=("grad_body_0",),
-            expected_node_names=("contiguous", "contiguous_1"),
+        wrapped_gm = self._grad_compile_check(wrapper_fn, x, y)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, (0, 1), True);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        getitem = call[0]
+        getitem_1 = getitem[0]
+        getitem_2 = getitem[1];  getitem = None
+        getitem_3 = call[1];  call = None
+        contiguous = getitem_1.contiguous();  getitem_1 = None
+        contiguous_1 = getitem_2.contiguous();  getitem_2 = None
+        return (contiguous, contiguous_1, getitem_3)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, l_y_):
+            sin = l_x_.sin()
+            add = sin + l_y_;  sin = l_y_ = None
+            sum_1 = add.sum();  add = None
+            cos = l_x_.cos();  l_x_ = None
+            return (sum_1, cos)
+"""
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
         )
+        self.assertExpectedInline(actual, expected)
 
     def test_grad_over_grad(self):
         counters.clear()
@@ -839,11 +1039,46 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(torch.func.grad(fn))(x)
 
         x = torch.randn(())
-        self._grad_compile_check(
+        wrapped_gm = self._grad_compile_check(
             wrapper_fn,
             x,
-            expected_module_names=("grad_body_1.grad_body_0", "grad_body_1"),
         )
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_1 = self.grad_body_1
+        grad_proxy = torch.func.grad(grad_body_1, 0, False);  grad_body_1 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            grad_body_0 = self.grad_body_0
+            grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+            call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+            contiguous = call.contiguous();  call = None
+            return contiguous
+
+        class GraphModule(torch.nn.Module):
+            def forward(self, l_x_):
+                sin = l_x_.sin();  l_x_ = None
+                sum_1 = sin.sum();  sin = None
+                return sum_1
+"""
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
+        )
+        self.assertExpectedInline(actual, expected)
 
     def test_grad_with_graph_break(self):
         counters.clear()
