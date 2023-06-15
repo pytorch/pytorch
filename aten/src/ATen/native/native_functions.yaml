@@ -181,7 +181,7 @@
   dispatch:
     CPU: sym_constrain_range_cpu
     CUDA: sym_constrain_range_cuda
-#
+
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
 
