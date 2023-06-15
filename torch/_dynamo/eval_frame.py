@@ -192,7 +192,7 @@ def enable_dynamic(enable: bool = True, export: bool = False):
     # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
     # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
     # dynamic=True here to mean "fully dynamic from the start".
-    with config.patch(dynamic_shapes=True, assume_static_by_default=False):
+    with config.patch(assume_static_by_default=False):
         yield
 
 
