@@ -1,7 +1,7 @@
 import types
 import math
 from torch import inf
-from functools import wraps
+from functools import wraps, partial
 import warnings
 import weakref
 from collections import Counter
@@ -1250,7 +1250,7 @@ class CyclicLR(LRScheduler):
             self._scale_fn_ref = self._triangular2_scale_fn
             self.scale_mode = 'cycle'
         elif self.mode == 'exp_range':
-            self._scale_fn_ref = weakref.WeakMethod(self._exp_range_scale_fn)
+            self._scale_fn_ref = partial(self._exp_range_scale_fn, self.gamma)
             self.scale_mode = 'iterations'
 
     def _format_param(self, name, optimizer, param):
@@ -1266,8 +1266,6 @@ class CyclicLR(LRScheduler):
     def scale_fn(self, x):
         if self._scale_fn_custom is not None:
             return self._scale_fn_custom(x)
-        elif isinstance(self._scale_fn_ref, weakref.WeakMethod):  # method is bound
-            return self._scale_fn_ref()(x)
         else:
             return self._scale_fn_ref(x)  # static method
 
@@ -1279,8 +1277,9 @@ class CyclicLR(LRScheduler):
     def _triangular2_scale_fn(x):
         return 1 / (2. ** (x - 1))
 
-    def _exp_range_scale_fn(self, x):
-        return self.gamma**(x)
+    @staticmethod
+    def _exp_range_scale_fn(gamma, x):
+        return gamma ** x
 
     def get_lr(self):
         """Calculates the learning rate at batch index. This function treats
