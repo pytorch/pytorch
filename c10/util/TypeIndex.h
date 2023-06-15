@@ -43,16 +43,8 @@ namespace util {
 
 // GCC works
 #elif defined(__GNUC__)
-
-// except when gcc < 9
-#if (__GNUC__ < 9) || defined(__CUDACC__)
-#define C10_TYPENAME_SUPPORTS_CONSTEXPR 0
-#define C10_TYPENAME_CONSTEXPR
-#else
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
 #define C10_TYPENAME_CONSTEXPR constexpr
-#endif
-
 // some other compiler we don't know about
 #else
 #define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
