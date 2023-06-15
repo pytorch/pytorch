@@ -54,6 +54,7 @@
 
 using namespace gemm_kernel_utils;
 
+namespace PyTorchMemEffAttention {
 namespace {
 template <typename scalar_t, typename Arch>
 constexpr int getWarpsPerSmFw() {
@@ -186,7 +187,6 @@ struct AttentionKernel {
     unsigned long long dropout_batch_head_rng_offset;
     float dropout_prob;
     at::PhiloxCudaState rng_engine_inputs;
-
 
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do
@@ -862,7 +862,6 @@ struct AttentionKernel {
 
       __syncthreads();
 
-
       // apply dropout (if applicable) after we've written Pij to smem.
       // dropout is applied by multiplying each element of Pij by:
       // - 0 with probability dropout_p
@@ -1269,3 +1268,5 @@ __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
 template <typename AK>
 __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
     attention_kernel_batched(typename AK::Params params);
+
+} // namespace PyTorchMemEffAttention

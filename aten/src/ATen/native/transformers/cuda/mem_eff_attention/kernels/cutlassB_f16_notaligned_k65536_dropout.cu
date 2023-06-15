@@ -8,16 +8,16 @@
 // This file is auto-generated. See "generate_kernels.py"
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
 __global__ void __launch_bounds__(
-    AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536>::kNumThreads,
-    AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536>::kMinBlocksPerSm)
-fmha_cutlassB_f16_notaligned_128x64_k65536_dropout_sm70(typename AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536>::Params p) {
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536>::kNumThreads,
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536>::kMinBlocksPerSm)
+fmha_cutlassB_f16_notaligned_128x64_k65536_dropout_sm70(typename PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 700
 #if __CUDA_ARCH__ < 750
   if (!p.advance_to_block()) {
     return;
   }
-  AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536>::attention_kernel(p);
+  PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 128, 64, 65536>::attention_kernel(p);
   return;
 #endif
 #endif
@@ -27,16 +27,16 @@ fmha_cutlassB_f16_notaligned_128x64_k65536_dropout_sm70(typename AttentionBackwa
 #endif
 }
 __global__ void __launch_bounds__(
-    AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 128, 64, 65536>::kNumThreads,
-    AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 128, 64, 65536>::kMinBlocksPerSm)
-fmha_cutlassB_f16_notaligned_128x64_k65536_dropout_sm75(typename AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 128, 64, 65536>::Params p) {
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 128, 64, 65536>::kNumThreads,
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 128, 64, 65536>::kMinBlocksPerSm)
+fmha_cutlassB_f16_notaligned_128x64_k65536_dropout_sm75(typename PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 128, 64, 65536>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 750
 #if __CUDA_ARCH__ < 800
   if (!p.advance_to_block()) {
     return;
   }
-  AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 128, 64, 65536>::attention_kernel(p);
+  PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 128, 64, 65536>::attention_kernel(p);
   return;
 #endif
 #endif
@@ -46,16 +46,16 @@ fmha_cutlassB_f16_notaligned_128x64_k65536_dropout_sm75(typename AttentionBackwa
 #endif
 }
 __global__ void __launch_bounds__(
-    AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536>::kNumThreads,
-    AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536>::kMinBlocksPerSm)
-fmha_cutlassB_f16_notaligned_64x64_k65536_dropout_sm50(typename AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536>::Params p) {
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536>::kNumThreads,
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536>::kMinBlocksPerSm)
+fmha_cutlassB_f16_notaligned_64x64_k65536_dropout_sm50(typename PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 500
 #if __CUDA_ARCH__ < 700
   if (!p.advance_to_block()) {
     return;
   }
-  AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536>::attention_kernel(p);
+  PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm50, cutlass::half_t, false, true, false, 64, 64, 65536>::attention_kernel(p);
   return;
 #endif
 #endif
@@ -65,16 +65,16 @@ fmha_cutlassB_f16_notaligned_64x64_k65536_dropout_sm50(typename AttentionBackwar
 #endif
 }
 __global__ void __launch_bounds__(
-    AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536>::kNumThreads,
-    AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536>::kMinBlocksPerSm)
-fmha_cutlassB_f16_notaligned_64x64_k65536_dropout_sm70(typename AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536>::Params p) {
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536>::kNumThreads,
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536>::kMinBlocksPerSm)
+fmha_cutlassB_f16_notaligned_64x64_k65536_dropout_sm70(typename PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 700
 #if __CUDA_ARCH__ < 750
   if (!p.advance_to_block()) {
     return;
   }
-  AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536>::attention_kernel(p);
+  PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, true, false, 64, 64, 65536>::attention_kernel(p);
   return;
 #endif
 #endif
@@ -84,16 +84,16 @@ fmha_cutlassB_f16_notaligned_64x64_k65536_dropout_sm70(typename AttentionBackwar
 #endif
 }
 __global__ void __launch_bounds__(
-    AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 64, 64, 65536>::kNumThreads,
-    AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 64, 64, 65536>::kMinBlocksPerSm)
-fmha_cutlassB_f16_notaligned_64x64_k65536_dropout_sm75(typename AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 64, 64, 65536>::Params p) {
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 64, 64, 65536>::kNumThreads,
+    PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 64, 64, 65536>::kMinBlocksPerSm)
+fmha_cutlassB_f16_notaligned_64x64_k65536_dropout_sm75(typename PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 64, 64, 65536>::Params p) {
 #ifdef __CUDA_ARCH__
 #if __CUDA_ARCH__ >= 750
 #if __CUDA_ARCH__ < 800
   if (!p.advance_to_block()) {
     return;
   }
-  AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 64, 64, 65536>::attention_kernel(p);
+  PyTorchMemEffAttention::AttentionBackwardKernel<cutlass::arch::Sm75, cutlass::half_t, false, true, false, 64, 64, 65536>::attention_kernel(p);
   return;
 #endif
 #endif

@@ -96,7 +96,7 @@ class FwdKernel:
                 "true" if self.supports_bias else "false",
             ]
         )
-        return f"AttentionKernel<{template_args}>"
+        return f"PyTorchMemEffAttention::AttentionKernel<{template_args}>"
 
     @property
     def impl_group(self) -> str:
@@ -204,7 +204,7 @@ class BwdKernel:
         )
         if self.keys_queries_aligned_to_blocksizes:
             template_args += ", true"
-        return f"AttentionBackwardKernel<{template_args}>"
+        return f"PyTorchMemEffAttention::AttentionBackwardKernel<{template_args}>"
 
     @property
     def impl_group(self) -> str:
