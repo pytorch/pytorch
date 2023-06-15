@@ -1229,7 +1229,7 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward, recursive=False
             )
 
-        # Note: this exculdes the optimizers that are unsupported below
+        # Note: this excludes the optimizers that are unsupported in excluded_opts below
         from ..optim import (
             adadelta,
             adagrad,
