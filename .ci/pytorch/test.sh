@@ -126,7 +126,7 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true
     export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -166,6 +166,8 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
 
     # TODO: get rid of the hardcoded path
     export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.0.1/lib/linux/libclang_rt.asan-x86_64.so
+    # Disable valgrind for asan
+    export VALGRIND=OFF
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
@@ -248,6 +250,8 @@ test_dynamo_shard() {
       test_fx \
       test_package \
       test_legacy_vmap \
+      test_custom_op_testing \
+      export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
     --shard "$1" "$NUM_TEST_SHARDS" \
@@ -425,10 +429,10 @@ test_dynamo_benchmark() {
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
-    # Check inference with --float32
-    test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
-    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
-      # Check training with --amp
+    if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
+    else
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --amp "$@"
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
     fi
   fi
@@ -467,7 +471,7 @@ test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
   # scalar_tensor_test, basic, native_test
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
 
     if [[ -n "$IN_WHEEL_TEST" ]]; then
@@ -527,6 +531,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
 fi
 
 test_libtorch() {
+  local SHARD="$1"
+
   # The slow test config corresponds to a default test config that should run
   # the libtorch tests instead.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$TEST_CONFIG" != "slow" ]]; then
@@ -541,61 +547,60 @@ test_libtorch() {
 
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
 
-    # Start background download
-    MNIST_DIR="${PWD}/test/cpp/api/mnist"
-    python tools/download_mnist.py --quiet -d "${MNIST_DIR}" &
-
-    # Prepare the model used by test_jit, the model needs to be in the test directory
-    # to get picked up by run_test
-    pushd test
-    python cpp/jit/tests_setup.py setup
-    popd
-
-    # Run JIT cpp tests
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests
-    else
-      # CUDA tests have already been skipped when CUDA is not available
-      python test/run_test.py --cpp --verbose -i cpp/test_jit -k "not CUDA"
+    if [[ -z "${SHARD}" || "${SHARD}" == "1" ]]; then
+      test_libtorch_api
     fi
 
-    # Run Lazy Tensor cpp tests
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
-      LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_lazy
-    else
-      python test/run_test.py --cpp --verbose -i cpp/test_lazy
-    fi
-
-    # Cleaning up test artifacts in the test folder
-    pushd test
-    python cpp/jit/tests_setup.py shutdown
-    popd
-
-    # Wait for background download to finish
-    wait
-
-    if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
-        TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
-        mkdir -p $TEST_REPORTS_DIR
-
-        # TODO: Not quite sure why these tests time out on ASAN and SLOW, probably
-        # this is due to the fact that a python executable is used or some logic
-        # inside run_test. This test usually takes only minutes to run
-        OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
-        "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
-    else
-        # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
-        OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
-        python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
-    fi
-
-    if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
-      # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
-      export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
-      python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
+    if [[ -z "${SHARD}" || "${SHARD}" == "2" ]]; then
+      test_libtorch_jit
     fi
 
     assert_git_not_dirty
+  fi
+}
+
+test_libtorch_jit() {
+  # Prepare the model used by test_jit, the model needs to be in the test directory
+  # to get picked up by run_test
+  pushd test
+  python cpp/jit/tests_setup.py setup
+  popd
+
+  # Run jit and lazy tensor cpp tests together to finish them faster
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
+    LTC_TS_CUDA=1 python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/nvfuser_tests cpp/test_lazy
+  else
+    # CUDA tests have already been skipped when CUDA is not available
+    python test/run_test.py --cpp --verbose -i cpp/test_jit cpp/test_lazy -k "not CUDA"
+  fi
+
+  # Cleaning up test artifacts in the test folder
+  pushd test
+  python cpp/jit/tests_setup.py shutdown
+  popd
+}
+
+test_libtorch_api() {
+  # Start background download
+  MNIST_DIR="${PWD}/test/cpp/api/mnist"
+  python tools/download_mnist.py --quiet -d "${MNIST_DIR}"
+
+  if [[ "$BUILD_ENVIRONMENT" == *asan* || "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
+    TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
+    mkdir -p $TEST_REPORTS_DIR
+
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
+    "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+  else
+    # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="${MNIST_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_api -k "not IMethodTest"
+    python test/run_test.py --cpp --verbose -i cpp/test_tensorexpr
+  fi
+
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
+    # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
+    export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
+    python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
   fi
 }
 
@@ -666,51 +671,45 @@ test_rpc() {
 }
 
 test_custom_backend() {
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    echo "Testing custom backends"
-    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
-    pushd test/custom_backend
-    cp -a "$CUSTOM_BACKEND_BUILD" build
-    # Run tests Python-side and export a lowered module.
-    python test_custom_backend.py -v
-    python backend.py --export-module-to=model.pt
-    # Run tests C++-side and load the exported lowered module.
-    build/test_custom_backend ./model.pt
-    rm -f ./model.pt
-    popd
-    assert_git_not_dirty
-  fi
+  echo "Testing custom backends"
+  CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
+  pushd test/custom_backend
+  cp -a "$CUSTOM_BACKEND_BUILD" build
+  # Run tests Python-side and export a lowered module.
+  python test_custom_backend.py -v
+  python backend.py --export-module-to=model.pt
+  # Run tests C++-side and load the exported lowered module.
+  build/test_custom_backend ./model.pt
+  rm -f ./model.pt
+  popd
+  assert_git_not_dirty
 }
 
 test_custom_script_ops() {
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    echo "Testing custom script operators"
-    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
-    pushd test/custom_operator
-    cp -a "$CUSTOM_OP_BUILD" build
-    # Run tests Python-side and export a script module.
-    python test_custom_ops.py -v
-    python model.py --export-script-module=model.pt
-    # Run tests C++-side and load the exported script module.
-    build/test_custom_ops ./model.pt
-    popd
-    assert_git_not_dirty
-  fi
+  echo "Testing custom script operators"
+  CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
+  pushd test/custom_operator
+  cp -a "$CUSTOM_OP_BUILD" build
+  # Run tests Python-side and export a script module.
+  python test_custom_ops.py -v
+  python model.py --export-script-module=model.pt
+  # Run tests C++-side and load the exported script module.
+  build/test_custom_ops ./model.pt
+  popd
+  assert_git_not_dirty
 }
 
 test_jit_hooks() {
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    echo "Testing jit hooks in cpp"
-    HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
-    pushd test/jit_hooks
-    cp -a "$HOOK_BUILD" build
-    # Run tests Python-side and export the script modules with hooks
-    python model.py --export-script-module=model
-    # Run tests C++-side and load the exported script modules
-    build/test_jit_hooks ./model
-    popd
-    assert_git_not_dirty
-  fi
+  echo "Testing jit hooks in cpp"
+  HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
+  pushd test/jit_hooks
+  cp -a "$HOOK_BUILD" build
+  # Run tests Python-side and export the script modules with hooks
+  python model.py --export-script-module=model
+  # Run tests C++-side and load the exported script modules
+  build/test_jit_hooks ./model
+  popd
+  assert_git_not_dirty
 }
 
 test_torch_function_benchmark() {
@@ -726,6 +725,11 @@ test_torch_function_benchmark() {
 }
 
 build_xla() {
+  # xla test needs pytorch headers in torch/include
+  pushd ..
+  python -c "import os, torch, shutil; shutil.copytree(os.path.join(os.path.dirname(torch.__file__), 'include'), 'workspace/torch/include', dirs_exist_ok=True)"
+  popd
+
   # xla test needs sccache setup.
   # shellcheck source=./common-build.sh
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
@@ -757,6 +761,8 @@ test_xla() {
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  # Set LD_LIBRARY_PATH for C++ tests
+  export LD_LIBRARY_PATH="/opt/conda/lib/:${LD_LIBRARY_PATH}"
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SKIP_MP_OP_TESTS=1 run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 }
@@ -913,7 +919,7 @@ test_cpp_extensions() {
 
 test_vec256() {
   # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing vec256 instructions"
     mkdir -p test/test-reports/vec256
     pushd build/bin
@@ -964,11 +970,9 @@ elif [[ "$TEST_CONFIG" == deploy ]]; then
   checkout_install_torchdeploy
   test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
-  install_huggingface
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
-  install_huggingface
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
@@ -999,20 +1003,23 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
+  install_numpy_pytorch_interop
   test_dynamo_shard 1
   test_aten
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
+  install_numpy_pytorch_interop
   test_dynamo_shard 2
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
   test_python_shard 1
   test_aten
+  test_libtorch 1
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 2
-  test_libtorch
+  test_libtorch 2
   test_aot_compilation
   test_custom_script_ops
   test_custom_backend

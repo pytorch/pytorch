@@ -1509,6 +1509,11 @@ def get_classifications(
                 check.job_id,
             )
             continue
+        if "unstable" in name:
+            checks_with_classifications[name] = JobCheckState(
+                check.name, check.url, check.status, "UNSTABLE", check.job_id
+            )
+            continue
         head_sha_job = head_sha_jobs.get(name)
         merge_base_job = merge_base_jobs.get(name)
         if (
@@ -1677,6 +1682,8 @@ def categorize_checks(
             pending_checks.append((checkname, url, job_id))
         elif not is_passing_status(check_runs[checkname].status):
             if classification == "IGNORE_CURRENT_CHECK":
+                pass
+            elif classification == "UNSTABLE":
                 pass
             elif classification in ("BROKEN_TRUNK", "FLAKY"):
                 ok_failed_checks.append((checkname, url, job_id))

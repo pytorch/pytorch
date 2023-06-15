@@ -10,8 +10,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     return "<unloaded interpreter>";
   }
 
-  void decref(PyObject* pyobj, bool has_pyobj_slot) const override {
-  } // do nothing
+  void decref(PyObject* pyobj, bool is_tensor) const override {} // do nothing
 
 #define PANIC(m)              \
   TORCH_INTERNAL_ASSERT(      \

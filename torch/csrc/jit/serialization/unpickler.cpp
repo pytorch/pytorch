@@ -188,7 +188,9 @@ bool is(const Type& type) {
 }
 } // namespace
 
-void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
+static void restoreContainerTypeTags(
+    const IValue& ivalue,
+    const TypePtr& type) {
   if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(type->containedType(0));
@@ -362,6 +364,12 @@ PickleOpCode Unpickler::readInstruction() {
       size_t start = marks_.back();
       marks_.pop_back();
       std::vector<IValue> elements;
+      TORCH_CHECK(
+          stack_.size() >= start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       const auto tupleSize = stack_.size() - start;
       switch (tupleSize) {
         case 3: {
@@ -434,7 +442,10 @@ PickleOpCode Unpickler::readInstruction() {
       size_t start = marks_.back();
       TORCH_CHECK(
           start > 0 && start <= stack_.size(),
-          "Parsing error: wrong start index for stack_");
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       auto list_ivalue = stack_.at(start - 1);
       readList(list_ivalue);
     } break;
@@ -447,6 +458,12 @@ PickleOpCode Unpickler::readInstruction() {
       TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
+      TORCH_CHECK(
+          stack_.size() > start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ which of size ",
+          stack_.size());
       auto dict = c10::impl::GenericDict(AnyType::get(), AnyType::get());
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
@@ -1057,6 +1074,11 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
 std::string Unpickler::readBytes(size_t length) {
   std::string data;
   static const size_t kSmallString = 64;
+  TORCH_CHECK(
+      length <= data.max_size(),
+      "Parsing error: can't read ",
+      length,
+      " bytes to a string");
   if (length <= buffer_remaining_) {
     // Fast-path: entirely in buffer.
     data.assign(buffer_.data() + buffer_pos_, length);

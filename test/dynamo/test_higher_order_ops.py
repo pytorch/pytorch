@@ -90,6 +90,30 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3)
 
+    def test_capture_constants(self):
+        x = torch.randn(3, 3)
+        y = 4.0
+
+        def fn(x, y, z):
+            if z:
+                return x + y
+            return x * y
+
+        def f(x, y, z):
+            return wrap(fn, x, y, z)
+
+        args = (x, 4.0, None)
+        opt_f = torch.compile(f, fullgraph=True, backend=CompileCounter())
+        expected = f(*args)
+        result = opt_f(*args)
+        self.assertEqual(result, expected)
+
+        # Ensure that we recompile here
+        args = (x, 5.0, None)
+        expected = f(*args)
+        result = opt_f(*args)
+        self.assertEqual(result, expected)
+
     def test_capture_untracked_global_nested(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -133,6 +157,15 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         def f(x, y):
             return wrap(lambda x: x + y, x)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_capture_tracked_nested(self):
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        def f(x, y):
+            return wrap(lambda x: wrap(lambda x: x + y, x), x)
 
         self._test_wrap_simple(f, (x, y), 3)
 
@@ -628,10 +661,13 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         for arg in args:
             cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
 
+        torch.manual_seed(0)
         expected = fn(*args)
         expected.sum().backward()
 
-        result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*cloned_args)
+        opt_fn = torch.compile(fn, fullgraph=fullgraph, backend=backend)
+        torch.manual_seed(0)
+        result = opt_fn(*cloned_args)
         result.sum().backward()
 
         if not skip_check:
@@ -745,25 +781,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
-
-    def test_without_functionalization_turned_on(self):
-        def gn(x, y):
-            return torch.sigmoid(torch.matmul(x, y))
-
-        def fn(x, y):
-            return torch.cos(torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y))
-
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-        args = (x, y)
-
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
-        expected = fn(*args)
-        result = torch.compile(fn, backend=cnt)(*args)
-
-        self.assertEqual(result, expected)
 
     @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)

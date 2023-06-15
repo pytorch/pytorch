@@ -39,7 +39,7 @@ bool isQuantized(const BufHandle& qx) {
   return qx.node()->qscale() && qx.node()->qzero();
 }
 
-BufHandle makeQBufHandleChannelsLast(
+static BufHandle makeQBufHandleChannelsLast(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
@@ -52,7 +52,7 @@ BufHandle makeQBufHandleChannelsLast(
   return ResultBuf;
 }
 
-BufHandle makeQBufHandleChannelsLast(
+static BufHandle makeQBufHandleChannelsLast(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
@@ -66,7 +66,7 @@ BufHandle makeQBufHandleChannelsLast(
       LongImm::make(qzero).node());
 }
 
-BufHandle makeQBufHandleContiguous(
+static BufHandle makeQBufHandleContiguous(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
@@ -79,7 +79,7 @@ BufHandle makeQBufHandleContiguous(
   return ResultBuf;
 }
 
-BufHandle makeQBufHandleContiguous(
+static BufHandle makeQBufHandleContiguous(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
@@ -93,7 +93,7 @@ BufHandle makeQBufHandleContiguous(
       LongImm::make(qzero).node());
 }
 
-bool isChannelsLast(const BufHandle& buf) {
+static bool isChannelsLast(const BufHandle& buf) {
   const auto& strides = buf.node()->strides();
   const auto& dims = buf.node()->dims();
   const auto rank = dims.size();
@@ -108,7 +108,7 @@ bool isChannelsLast(const BufHandle& buf) {
   return ((stridesLast == dimsC) && (stridesC == 1));
 }
 
-ExprHandle quant(
+static ExprHandle quant(
     ExprHandle x,
     Dtype out_dtype,
     ExprHandle qscale,
@@ -120,7 +120,7 @@ ExprHandle quant(
       out_dtype.scalar_type());
 }
 
-ExprHandle dequant(
+static ExprHandle dequant(
     ExprHandle qx,
     Dtype out_dtype,
     ExprHandle qscale,

@@ -266,6 +266,7 @@ def _make_prim(
     meta: Callable,
     impl_aten: Callable,
     doc: str,
+    tags: Optional[Sequence[torch.Tag]] = None,
 ):
     """
     Creates a primitive operation.
@@ -301,6 +302,8 @@ def _make_prim(
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
+    if tags:
+        _prim._tags = tags
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
@@ -2732,9 +2735,9 @@ def _svd_meta(
     is_cuda = A.device.type == "cuda"
     strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
-    # Also makes sure this is CUDA and not HIP:
+    # Also makes sure this is CUDA or HIP:
     # https://pytorch.org/docs/stable/notes/hip.html#checking-for-hip
-    if A.numel() != 0 and is_cuda and torch.version.cuda and Vh.is_complex():
+    if A.numel() != 0 and Vh.is_complex() and torch.cuda.is_available():
         Vh = Vh.conj()
     return U, S, Vh
 

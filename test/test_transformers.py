@@ -419,7 +419,10 @@ class TestTransformers(NNTestCase):
             encoder_layer = get_a_test_layer(activation=activation,
                                              batch_first=batch_first)
 
-            model = nn.TransformerEncoder(encoder_layer, 1).to(device)
+            model = nn.TransformerEncoder(
+                encoder_layer, 1, enable_nested_tensor=enable_nested_tensor
+            ).to(device)
+
             if not training:
                 model = model.eval()
 
@@ -465,9 +468,6 @@ class TestTransformers(NNTestCase):
             mask[0, 1] = 1
             mask[1, 3] = 1
             mask[1, 4] = 1
-            # If mask is not left aligned
-            # We disable nested tensor
-            model.enable_nested_tensor = enable_nested_tensor
             result = model(encoder_input, src_key_padding_mask=mask)
             ref_output = perm_fn(torch.tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
                                                 [2.428811, 0.021445, -0.601912, -0.084252]],
@@ -731,6 +731,15 @@ class TestTransformers(NNTestCase):
             out = transformer_encoder(src=x, src_key_padding_mask=None)
 
         self.assertEqual(out.is_nested, True)
+
+    def test_script_encoder_subclass(self, device):
+        class MyCustomLayer(nn.TransformerEncoderLayer):
+            pass
+
+        encoder = nn.TransformerEncoder(
+            MyCustomLayer(d_model=256, nhead=8), num_layers=6
+        ).to(device=device)
+        torch.jit.script(encoder)
 
     @onlyCUDA
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
@@ -1092,20 +1101,6 @@ class TestSDPAFailureModes(NNTestCase):
     """
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
-
-    @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
-                     "Does not support fused SDPA or not SM86+ hardware")
-    @parametrize("head_dim", [72, 96, 128])
-    def test_memory_efficient_sm86_plus_failure(self, device, head_dim: int):
-        dtype = torch.float16
-        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
-        # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-        size = (2, 2, 4, head_dim)
-        q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-        with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, None, 0.0, False))
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
@@ -1864,15 +1859,7 @@ class TestSDPA(NNTestCase):
 
         # Create real output
         with sdp_kernel(enable_mem_efficient=True, enable_flash=False, enable_math=False):
-            # See check_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
-            if isSM86or89Device and head_dim in range(65, 129):
-                self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
-                                                                                       dropout_p=dropout_p,
-                                                                                       is_causal=is_causal, scale=scale))
-                return
-            else:
-                out = F.scaled_dot_product_attention(
-                    query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
+            out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             # High Precision Math Reference
@@ -1904,8 +1891,9 @@ class TestSDPA(NNTestCase):
 
         # TODO: Investigate why grad_k needs larger tolerances
         grad_k_deviation = key_ref.grad - key_ref_lp.grad
-        grad_k_ref_atol = max(7 * torch.abs(grad_k_deviation).max().item(), 7 * default_atol[out.dtype])
-        grad_k_ref_rtol = max(7 * get_rtol(key_ref.grad, key_ref_lp.grad), 7 * default_rtol[out.dtype])
+        fudge_factor = 7 if not isSM86or89Device else 8
+        grad_k_ref_atol = max(fudge_factor * torch.abs(grad_k_deviation).max().item(), fudge_factor * default_atol[out.dtype])
+        grad_k_ref_rtol = max(fudge_factor * get_rtol(key_ref.grad, key_ref_lp.grad), fudge_factor * default_rtol[out.dtype])
 
         grad_v_deviation = value_ref.grad - value_ref_lp.grad
         grad_v_ref_atol = max(torch.abs(grad_v_deviation).max().item(), default_atol[out.dtype])
