@@ -14,7 +14,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import requires_numpy_pytorch_interop, requires_static_shapes
+from torch._dynamo.testing import expectedFailureDynamic, requires_numpy_pytorch_interop
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 
@@ -515,13 +515,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if not x.is_sparse:
             return x + 1
 
-    @requires_static_shapes
     @make_test
     def test_shape1(x):
         if x.shape[0] == 10:
             return x + 1
 
-    @requires_static_shapes
     @make_test
     def test_shape2(x):
         if x.size(1) == 10:
@@ -534,7 +532,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         del c, a
         return b + d
 
-    @requires_static_shapes
     @make_test
     def test_chunks1(x):
         chunk_size = 5
@@ -923,7 +920,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("1.23"):
             return a + b
 
-    @requires_static_shapes
+    # https://github.com/pytorch/pytorch/issues/103602
+    @expectedFailureDynamic
     @make_test
     def test_fstrings2(x):
         tmp = f"{x.shape[0]} bar"
@@ -953,7 +951,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         y = torch.jit.annotate(Any, x + 1)
         return y + 2
 
-    @requires_static_shapes
+    @expectedFailureDynamic
     @make_test
     def test_is_contiguous_memory_format(tensor):
         if torch.jit.is_scripting():
