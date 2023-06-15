@@ -35,7 +35,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
+from torch.fx.experimental.symbolic_shapes import free_symbols, fx_placeholder_targets
 from torch.hub import tqdm
 
 from .. import config
@@ -263,7 +263,7 @@ def save_graph_repro(
     if accuracy is None:
         accuracy = "_accuracy" in compiler_name
     tracing_mode = "real"
-    if config.dynamic_shapes:
+    if any(free_symbols(a) for a in args):
         tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
