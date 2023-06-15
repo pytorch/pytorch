@@ -1229,6 +1229,7 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward, recursive=False
             )
 
+        # Note: this exculdes the optimizers that are unsupported below
         from ..optim import (
             adadelta,
             adagrad,
@@ -1269,6 +1270,7 @@ class TorchPatcher:
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
                 )
 
+        # Note: we don't support sparsity, data-dependent control, or tracing through backwards
         excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
             if opt in excluded_opts:
