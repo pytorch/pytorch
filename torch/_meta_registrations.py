@@ -227,6 +227,29 @@ def inferUnsqueezeGeometry(tensor, dim):
     result_strides.insert(dim, new_stride)
     return result_sizes, result_strides
 
+@register_meta(aten.__lshift__.Tensor)
+def meta_lshift(self, other, dtype=None, layout=None, device=None):
+    # Handle broadcast
+    out_shape = _broadcast_shapes(self.shape, other.shape)
+    # Handle dtype promotion
+    out_dtype = utils.get_higher_dtype(self.dtype, other.dtype)
+    return self.new_empty(
+        out_shape,
+        dtype=out_dtype,
+        layout=layout,
+        device=device)
+
+@register_meta(aten.__rshift__.Tensor)
+def meta_rshift(self, other, dtype=None, layout=None, device=None):
+    # Handle broadcast
+    out_shape = _broadcast_shapes(self.shape, other.shape)
+    # Handle dtype promotion
+    out_dtype = utils.get_higher_dtype(self.dtype, other.dtype)
+    return self.new_empty(
+        out_shape,
+        dtype=out_dtype,
+        layout=layout,
+        device=device)
 
 @register_meta(aten.unsqueeze_.default)
 def meta_unsqueeze_(self, dim):
