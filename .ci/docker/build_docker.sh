@@ -11,9 +11,9 @@ registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
 
 # NB: The image name could now be both the short form, like pytorch-linux-bionic-py3.11-clang9, or the
 # full name, like 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.11-clang9
-if [[ "${IMAGE_NAME}" == *"${registry}/pytorch"* ]]; then
+if [[ "${IMAGE_NAME}" == *"${registry}/pytorch/"* ]]; then
   # Extract the image name from the long name
-  EXTRACTED_IMAGE_NAME=$(echo ${IMAGE_NAME#"${registry}/pytorch"} | awk -F '[:,]' '{print $1}')
+  EXTRACTED_IMAGE_NAME=$(echo ${IMAGE_NAME#"${registry}/pytorch/"} | awk -F '[:,]' '{print $1}')
   IMAGE_NAME="${EXTRACTED_IMAGE_NAME}"
 fi
 
