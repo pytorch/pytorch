@@ -660,7 +660,6 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_vec_dynamic_shapes(self):
         def fn(x):
             return torch.softmax(x, -1)

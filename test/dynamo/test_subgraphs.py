@@ -305,7 +305,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 2, 5)
 
-    @patch("torch._dynamo.config.dynamic_shapes", True)
     def test_restore_state(self):
         def fn(a, b):
             len_ = len
@@ -351,7 +350,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 2, 6)
 
-    @patch("torch._dynamo.config.dynamic_shapes", True)
     @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_getitem(self):
         def fn(a, b):
@@ -395,7 +393,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, y), fn(x, y))
         self.assertEqual(cnt_dynamic.frame_count, 2)
 
-    @patch("torch._dynamo.config.dynamic_shapes", True)
     def test_dynamic_order_dependence(self):
         def fn(a, b):
             return a.sum() + b.sum()
@@ -438,7 +435,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(cnt_dynamic.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):
         def fn(a, b):
@@ -450,7 +446,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 1, 6)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
         def fn(a, b):
