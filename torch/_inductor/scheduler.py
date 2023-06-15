@@ -935,10 +935,39 @@ class Scheduler:
             again = len(self.nodes) > len(updated_nodes)
             self.nodes = updated_nodes
 
+    def calculate_depth(self):
+        name_to_node = dict()
+        name_to_depth = dict()
+        seen = set()
+
+        for node in self.nodes:
+            for name in node.get_names():
+                name_to_node[name] = node
+
+        def visit(n):
+            if n not in seen:
+                seen.add(n)
+                deps_depths = dict()
+                max_depth = 0
+                for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
+                    dep_depth = visit(name_to_node[dep.name])
+                    max_depth = max(dep_depth, max_depth)
+                for name in node.get_names():
+                    name_to_depth[name] = max_depth + 1
+            return name_to_depth[n.get_first_name()]
+
+        for node in self.nodes:
+            for name in node.get_names():
+                name_to_node[name] = node
+        for node in self.nodes:
+            visit(node)
+        return name_to_depth
+
     def topological_sort_schedule(self):
         """
         Ensure self.nodes is in topologically sorted order
         """
+        name_to_depth = self.calculate_depth()
         seen = set()
         name_to_node = dict()
         result = []
@@ -946,14 +975,14 @@ class Scheduler:
         def visit(n):
             if n not in seen:
                 seen.add(n)
-                for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
+                for dep in sorted(n.unmet_dependencies, key=lambda d: name_to_depth[d.name], reverse=True):
                     visit(name_to_node[dep.name])
                 result.append(n)
 
         for node in self.nodes:
             for name in node.get_names():
                 name_to_node[name] = node
-        for node in self.nodes:
+        for node in sorted(self.nodes, key=lambda d: name_to_depth[d.get_first_name()], reverse=True):
             visit(node)
         self.nodes = result
 
