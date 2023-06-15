@@ -164,27 +164,6 @@ class X86InductorQuantizer(Quantizer):
         self.operator_type_config[operator_type] = quantization_config
         return self
 
-    def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-        """ just handling global spec for now
-        """
-        model = self._annotate_for_static_quantization_config(model)
-        return model
-
-    def _annotate_for_static_quantization_config(
-        self, model: torch.fx.GraphModule
-    ) -> torch.fx.GraphModule:
-        # annotate the nodes from last to first since the matching is in the reversed order
-        # and fusion operator patterns (conv - relu) can get matched before single operator pattern (conv)
-        # and we will mark the matched node with "_annoated" so fusion operator pattern
-        # can take precedence over single operator pattern in this way
-        config = self.global_config
-        self._annotate_conv2d_binary_unary(model, config)
-        self._annotate_conv2d_binary(model, config)
-        self._annotate_conv2d_unary(model, config)
-        self._annotate_conv2d(model, config)
-
-        return model
-
     def _annotate_conv_node_helper(
             self,
             conv_node: torch.fx.Node,
@@ -197,15 +176,12 @@ class X86InductorQuantizer(Quantizer):
         input_node = conv_node.args[0]
         assert isinstance(input_node, Node)
         input_qspec_map[input_node] = get_input_act_qspec(quantization_config)
-
         weight_node = conv_node.args[1]
         assert isinstance(weight_node, Node)
         input_qspec_map[weight_node] = get_weight_qspec(quantization_config)
-
         bias_node = conv_node.args[2]
         if isinstance(bias_node, Node):
             input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
-
         if annotate_output:
             conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
@@ -219,7 +195,7 @@ class X86InductorQuantizer(Quantizer):
                 _annotated=True
             )
 
-    def _get_nodes_from_partitions(
+    def _get_output_nodes_of_partitions(
         self,
         partition_list: List[SourcePartition],
     ) -> List[torch.fx.Node]:
@@ -260,6 +236,26 @@ class X86InductorQuantizer(Quantizer):
         assert isinstance(extra_input_node, Node)
         return conv_gemm_node_idx, extra_input_node_idx
 
+    def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+        """ just handling global spec for now
+        """
+        model = self._annotate_for_static_quantization_config(model)
+        return model
+
+    def _annotate_for_static_quantization_config(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        # annotate the nodes from last to first since the matching is in the reversed order
+        # and fusion operator patterns (conv - relu) can get matched before single operator pattern (conv)
+        # and we will mark the matched node with "_annoated" so fusion operator pattern
+        # can take precedence over single operator pattern in this way
+        config = self.global_config
+        self._annotate_conv2d_binary_unary(model, config)
+        self._annotate_conv2d_binary(model, config)
+        self._annotate_conv2d_unary(model, config)
+        self._annotate_conv2d(model, config)
+        return model
+
     def _annotate_conv2d_binary_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
@@ -268,16 +264,13 @@ class X86InductorQuantizer(Quantizer):
             gm, [torch.nn.Conv2d, operator.add, torch.nn.ReLU]
         )
         for fused_partition in fused_partitions:
-            conv_partition, add_partition, relu_partition = fused_partition
-            conv_node, binary_node, unary_node = self._get_nodes_from_partitions(
-                [conv_partition, add_partition, relu_partition]
+            conv_partition, binary_partition, unary_partition = fused_partition
+            conv_node, binary_node, unary_node = self._get_output_nodes_of_partitions(
+                [conv_partition, binary_partition, unary_partition]
             )
-
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(conv_node, binary_node)
-
             if (conv_node_idx is None) or (extra_input_node_idx is None):
                 continue
-
             if conv_node != binary_node.args[conv_node_idx]:
                 raise ValueError(f"{conv_node} doesn't match input of binary node")
             extra_input_node = binary_node.args[extra_input_node_idx]
@@ -286,9 +279,7 @@ class X86InductorQuantizer(Quantizer):
                 continue
             if _is_annotated([unary_node, binary_node, conv_node]):
                 continue
-
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
-
             binary_node_input_qspec_map = {}
             binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(quantization_config)
             binary_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -309,16 +300,13 @@ class X86InductorQuantizer(Quantizer):
             gm, [torch.nn.Conv2d, operator.add]
         )
         for fused_partition in fused_partitions:
-            conv_partition, add_partition = fused_partition
-
-            conv_node, binary_node = self._get_nodes_from_partitions(
-                [conv_partition, add_partition]
+            conv_partition, binary_partition = fused_partition
+            conv_node, binary_node = self._get_output_nodes_of_partitions(
+                [conv_partition, binary_partition]
             )
-
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(conv_node, binary_node)
             if (conv_node_idx is None) or (extra_input_node_idx is None):
                 continue
-
             if conv_node != binary_node.args[conv_node_idx]:
                 raise ValueError(f"{conv_node} doesn't match input of binary node")
             extra_input_node = binary_node.args[extra_input_node_idx]
@@ -328,9 +316,7 @@ class X86InductorQuantizer(Quantizer):
                 continue
             if _is_annotated([binary_node, conv_node]):
                 continue
-
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
-
             binary_node_input_qspec_map = {}
             binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(quantization_config)
             binary_node.meta["quantization_annotation"] = QuantizationAnnotation(
@@ -347,9 +333,9 @@ class X86InductorQuantizer(Quantizer):
             gm, [torch.nn.Conv2d, torch.nn.ReLU]
         )
         for fused_partition in fused_partitions:
-            conv_partition, relu_partition = fused_partition
-            conv_node, unary_node = self._get_nodes_from_partitions(
-                [conv_partition, relu_partition]
+            conv_partition, unary_partition = fused_partition
+            conv_node, unary_node = self._get_output_nodes_of_partitions(
+                [conv_partition, unary_partition]
             )
             if conv_node.op != "call_function" or conv_node.target != torch.ops.aten.convolution.default:
                 continue
