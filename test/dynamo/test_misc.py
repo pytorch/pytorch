@@ -26,7 +26,6 @@ import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
-from torch._dynamo.exc import Unsupported
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
@@ -3319,7 +3318,7 @@ def fn():
 
         mod = Module()
         with self.assertRaisesRegex(
-            Unsupported, "Can't inplace modify module params/buffers"
+            TypeError, "missing 1 required positional argument"
         ):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
