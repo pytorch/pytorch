@@ -580,8 +580,11 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         and node.target == torch.ops.aten.convolution.default
                     ):
                         input_act = node.args[0]
+                        assert isinstance(input_act, Node)
                         weight = node.args[1]
+                        assert isinstance(weight, Node)
                         bias = node.args[2]
+                        assert isinstance(bias, Node)
                         node.meta["quantization_annotation"] = QuantizationAnnotation(
                             input_qspec_map={
                                 input_act: act_qspec,
@@ -598,6 +601,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                         getitem_node = node
                         maxpool_node = getitem_node.args[0]
                         input_act = maxpool_node.args[0]
+                        assert isinstance(input_act, Node)
                         maxpool_node.meta[
                             "quantization_annotation"
                         ] = QuantizationAnnotation(
