@@ -81,6 +81,20 @@ struct ReflectionPad {
   }
 };
 
+struct ReplicationPad {
+  static int64_t index(int64_t j, int64_t size, int64_t pad, int64_t offset) {
+    int64_t i;
+    if (j < pad) {
+      i = pad;
+    } else if (j >= pad && j < size + pad) {
+      i = j;
+    } else {
+      i = size + pad - 1;
+    }
+    return i + offset;
+  }
+};
+
 template <typename scalar_t>
 static inline void copy_stub(scalar_t* out, const scalar_t* in, int64_t size) {
   using Vec = Vectorized<scalar_t>;
@@ -362,6 +376,52 @@ void reflection_pad3d_backward_kernel_impl(
   });
 }
 
+// replication padding
+void replication_pad1d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
+  PaddingParams param{input, output, padding};
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad1d", [&] {
+    cpu_padding<scalar_t, ReplicationPad>(output, input, param);
+  });
+}
+
+void replication_pad1d_backward_kernel_impl(
+    const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
+  PaddingParams param{grad_input, grad_output, padding};
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad1d_backward", [&] {
+    cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+  });
+}
+
+void replication_pad2d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
+  PaddingParams param{input, output, padding};
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad2d", [&] {
+    cpu_padding<scalar_t, ReplicationPad>(output, input, param);
+  });
+}
+
+void replication_pad2d_backward_kernel_impl(
+    const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
+  PaddingParams param{grad_input, grad_output, padding};
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad2d_backward", [&] {
+    cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+  });
+}
+
+void replication_pad3d_kernel_impl(const Tensor& output, const Tensor& input, IntArrayRef padding) {
+  PaddingParams param{input, output, padding};
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "replication_pad3d", [&] {
+    cpu_padding<scalar_t, ReplicationPad>(output, input, param);
+  });
+}
+
+void replication_pad3d_backward_kernel_impl(
+    const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding) {
+  PaddingParams param{grad_input, grad_output, padding};
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "replication_pad3d_backward", [&] {
+    cpu_padding_backward<scalar_t, ReplicationPad>(grad_input, grad_output, param);
+  });
+}
+
 } // anonymous namespace
 
 // reflection padding
@@ -371,5 +431,13 @@ REGISTER_DISPATCH(reflection_pad2d_kernel, &reflection_pad2d_kernel_impl);
 REGISTER_DISPATCH(reflection_pad2d_backward_kernel, &reflection_pad2d_backward_kernel_impl);
 REGISTER_DISPATCH(reflection_pad3d_kernel, &reflection_pad3d_kernel_impl);
 REGISTER_DISPATCH(reflection_pad3d_backward_kernel, &reflection_pad3d_backward_kernel_impl);
+
+// replication padding
+REGISTER_DISPATCH(replication_pad1d_kernel, &replication_pad1d_kernel_impl);
+REGISTER_DISPATCH(replication_pad1d_backward_kernel, &replication_pad1d_backward_kernel_impl);
+REGISTER_DISPATCH(replication_pad2d_kernel, &replication_pad2d_kernel_impl);
+REGISTER_DISPATCH(replication_pad2d_backward_kernel, &replication_pad2d_backward_kernel_impl);
+REGISTER_DISPATCH(replication_pad3d_kernel, &replication_pad3d_kernel_impl);
+REGISTER_DISPATCH(replication_pad3d_backward_kernel, &replication_pad3d_backward_kernel_impl);
 
 } // at::native

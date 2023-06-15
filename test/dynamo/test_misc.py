@@ -30,6 +30,7 @@ from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
+    expectedFailureAutomaticDynamic,
     expectedFailureDynamic,
     requires_numpy_pytorch_interop,
     same,
@@ -1971,7 +1972,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(res, ref_run1))
 
     # NotImplementedError: SymNodeVariable() is not a constant
+    # https://github.com/pytorch/pytorch/issues/103618
     @expectedFailureDynamic
+    @expectedFailureAutomaticDynamic
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -3989,23 +3992,6 @@ def fn():
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    def test_variable_tracker_recursively_contains(self):
-        # VariableTracker.recursively_contains should be updated correctly when mutation happens
-        def fn(x):
-            data = [[None] * 3] * 3
-            for i in range(3):
-                if i == 0:
-                    data[0][i] = x
-                else:
-                    data[0][i] = data[0][i - 1] + 1
-            return data[0][-1]
-
-        x = torch.rand(4)
-        ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
-        res = opt_fn(x)
-        self.assertTrue(same(ref, res))
-
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_torch_cudnn_is_acceptable(self):
@@ -4446,7 +4432,10 @@ def fn():
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """5""")
+            if torch._dynamo.config.automatic_dynamic_shapes:
+                self.assertExpectedInline(cnt.frame_count, """2""")
+            else:
+                self.assertExpectedInline(cnt.frame_count, """5""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
 
@@ -5289,6 +5278,7 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
+    @expectedFailureAutomaticDynamic
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):

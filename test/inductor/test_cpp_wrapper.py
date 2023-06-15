@@ -237,6 +237,7 @@ if RUN_CUDA:
         BaseTest("test_conv_backward"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
+        BaseTest("test_index_tensor"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
