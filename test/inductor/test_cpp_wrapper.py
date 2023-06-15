@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import copy
 import sys
 import unittest
 from typing import NamedTuple
@@ -113,7 +114,6 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
             tests.tearDownClass()
 
     fn.__name__ = test_name
-    import copy
     fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
