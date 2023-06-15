@@ -27,9 +27,10 @@ import itertools
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
-from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
+from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
+from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -2733,7 +2734,6 @@ aot_autograd_failures = {
 
     # Too annoying to generate random inputs
     xfail('cholesky'),
-    xfail('linalg.cholesky'),
 
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
@@ -2862,66 +2862,6 @@ symbolic_aot_autograd_failures = {
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
 }
 
-def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
-    # Verify grads are equal between compiled and non-compiled versions of f.
-
-    def call_forwards_backwards(f):
-        out = wrapper_set_seed(f, args)
-        if not isinstance(out, torch.Tensor):
-            flat_out, _ = pytree.tree_flatten(out)
-            sm = 0
-            for i in flat_out:
-                sm += i.sum().abs()
-            sm.backward()
-        else:
-            out.sum().abs().backward()
-
-    def reset_grads():
-        def f(x):
-            x.grad = None
-        pytree.tree_map(f, args)
-
-    def get_grads(args):
-        return pytree.tree_map(lambda x: x.grad, args)
-
-    try:
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-
-        reset_grads()
-        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all(x is None for x in orig_grad):
-            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
-                call_forwards_backwards(compiled_f)
-        else:
-            call_forwards_backwards(compiled_f)
-            compiled_grad = get_grads(args)
-            self.assertEqual(orig_grad, compiled_grad)
-
-        def create_new_arg(x):
-            if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
-                return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
-            return x
-
-        args = pytree.tree_map(create_new_arg, args)
-
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-
-        reset_grads()
-        # See https://github.com/pytorch/pytorch/pull/98960#issuecomment-1505962215
-        if all(x is None for x in orig_grad):
-            with self.assertRaisesRegex(RuntimeError, 'does not require grad and does not have a grad_fn'):
-                call_forwards_backwards(compiled_f)
-        else:
-            call_forwards_backwards(compiled_f)
-            compiled_grad = get_grads(args)
-            self.assertEqual(orig_grad, compiled_grad)
-    except DynamicOutputShapeException:
-        self.skipTest("Dynamic output shape operation in trace")
-
 def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
@@ -2930,23 +2870,13 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
     for sample_input in sample_inputs_itr:
         t_args = [sample_input.input] + list(sample_input.args)
         t_kwargs = sample_input.kwargs
-        flat_args, args_spec = pytree.tree_flatten((t_args, t_kwargs))
-        sentinel_val = -42
-        is_tensor_spec = [sentinel_val if isinstance(arg, torch.Tensor) else arg for arg in flat_args]
-        args = [arg for arg in flat_args if isinstance(arg, torch.Tensor)]
-
-        def f(args):
-            cur_flat_args = list(is_tensor_spec)
-            args = iter(args)
-            for idx, v in enumerate(cur_flat_args):
-                if v == sentinel_val:
-                    cur_flat_args[idx] = next(args)
-            c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
-            return op.op(*c_args, **c_kwargs)
-
-        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic, partition_fn=min_cut_rematerialization_partition)
         try:
-            _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
+            aot_autograd_check(
+                op.op, t_args, t_kwargs, dynamic,
+                self.assertRaisesRegex, self.assertEqual,
+                try_check_data_specialization=True)
+        except DynamicOutputShapeException:
+            self.skipTest("Dynamic output shape operation in trace")
         except GuardOnDataDependentSymNode:
             # Carveout for getitem; I don't want to xfail the entire test
             # because that will reject known to be good tests see
@@ -3003,7 +2933,9 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info,
         num_params_buffers = len(named_params) + len(named_buffers)
         compiled_f = aot_function(f, nop, num_params_buffers=num_params_buffers, dynamic=dynamic)
         params_buffers_args = [named_params, named_buffers, args]
-        _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, params_buffers_args)
+        _test_aot_autograd_forwards_backwards_helper(
+            f, compiled_f, params_buffers_args,
+            self.assertRaisesRegex, self.assertEqual, True)
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
