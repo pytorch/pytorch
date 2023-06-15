@@ -4,14 +4,8 @@
 from functools import partial
 
 import torch
-from torch.distributed._tensor import (
-    DeviceMesh,
-    distribute_tensor,
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
 from torch.distributed._tensor.experimental.dmap import dmap
-from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -47,8 +41,3 @@ class TestDMap(DTensorTestBase):
         # dtensor style global computation
         dt_out = torch.mm(lhs_dtensor, rhs_dtensor).redistribute(mesh, [Replicate()])
         self.assertEqual(dt_dmap_out, dt_out)
-
-
-
-        
-
