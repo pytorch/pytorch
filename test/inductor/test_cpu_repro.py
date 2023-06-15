@@ -398,6 +398,16 @@ class CPUReproTests(TestCase):
         )
 
     @patch("torch.cuda.is_available", lambda: False)
+    def test_vec_transpose_bf16(self):
+        def fn(x):
+            return x.to(memory_format=torch.channels_last).bfloat16()
+
+        self.common(
+            fn,
+            (torch.randn(2, 3, 4, 4),),
+        )
+
+    @patch("torch.cuda.is_available", lambda: False)
     def test_fp32_load_with_to_bf16(self):
         # From llama model.
         class Model(torch.nn.Module):
