@@ -1034,7 +1034,9 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 
 # Run PyTorch tests with TorchDynamo
 TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
-TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
+# AOT_EAGER not tested in ci, useful for debugging
+TEST_WITH_AOT_EAGER = os.getenv('PYTORCH_TEST_WITH_AOT_EAGER') == '1'
+TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER
 
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
@@ -2263,6 +2265,8 @@ class TestCase(expecttest.TestCase):
         super_run = super().run
         if TEST_WITH_TORCHINDUCTOR:
             super_run = torch._dynamo.optimize("inductor")(super_run)
+        elif TEST_WITH_AOT_EAGER:
+            super_run = torch._dynamo.optimize("aot_eager")(super_run)
         elif TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
             super_run = torch._dynamo.optimize("eager")(super_run)
