@@ -43,27 +43,26 @@ def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
         "conv2d": [
             [torch.nn.Conv2d],
             [F.conv2d],
-            # Conv ReLU
-            [torch.nn.Conv2d, torch.nn.ReLU],
-            [torch.nn.Conv2d, F.relu],
-            [F.conv2d, torch.nn.ReLU],
-            [F.conv2d, F.relu],
-            # Conv Add
-            [torch.nn.Conv2d, torch.add],
-            [torch.nn.Conv2d, operator.add],
-            [F.conv2d, torch.add],
-            [F.conv2d, operator.add],
-            # Conv Add ReLU
-            [torch.nn.Conv2d, torch.add, torch.nn.ReLU],
-            [torch.nn.Conv2d, torch.add, F.relu],
-            [torch.nn.Conv2d, operator.add, torch.nn.ReLU],
-            [torch.nn.Conv2d, operator.add, F.relu],
-            [F.conv2d, torch.add, torch.nn.ReLU],
-            [F.conv2d, torch.add, F.relu],
-            [F.conv2d, operator.add, torch.nn.ReLU],
-            [F.conv2d, operator.add, F.relu],
         ],
     }
+
+    # Append Conv Optional(Add) Optioinal(ReLU)
+    conv_add_relu_options = itertools.product(
+        [torch.nn.Conv2d, F.conv2d],
+        [torch.add, operator.add, None],  # add
+        [torch.nn.ReLU, F.relu, None],  # relu
+    )
+    for conv_op, add_op, relu_op in conv_add_relu_options:
+        if add_op is None:
+            # Append Conv ReLU
+            supported_operators["conv2d"].append([conv_op, relu_op])
+        elif relu_op is None:
+            # Append Conv Add
+            supported_operators["conv2d"].append([conv_op, add_op])
+        else:
+            # Append Conv Add ReLU
+            supported_operators["conv2d"].append([conv_op, add_op, relu_op])
+
     return copy.deepcopy(supported_operators)
 
 
