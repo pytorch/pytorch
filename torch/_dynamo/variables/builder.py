@@ -202,11 +202,11 @@ class VariableBuilder:
             # Note - we may end up in a situation where we invoke something like
             # def fn(x, y)
             # with fn(x, x)
-            # Prior to the addition of tracking to all input objects, we would handle this just fine by
+            # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
             # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
-            # with tracking on inputs, we do not produce deduping guard correctly, and duplicate inputs or aliased
-            # relationships may end up getting erased here - the fn(x, x) call above, with side effects, would
-            # look like a graph with a single input (not necessarily incorrectly so).
+            # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
+            # In the the fn(x, x) example call above look like a graph with a single input.
+            # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
 
             # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
             # leave unsourced - like a local list created and discharged entirely within a local scope.
@@ -218,6 +218,8 @@ class VariableBuilder:
                 # so maybe we should do this refactor before we land this...
                 # TODO(voz): Combine local and global guard builders.
                 if ser_source_is_local == source_is_local:
+                    # Note - this is a little agressive - these being duplicate input does not always matter.
+                    # However, this should always be a sound guard to add here.
                     dup_guard = functools.partial(
                         GuardBuilder.DUPLICATE_INPUT, source_b=side_effect_result.source
                     )

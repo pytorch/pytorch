@@ -139,11 +139,13 @@ class TestEmbeddingNN(NNTestCase):
 
         embed_old = torch.nn.Embedding(4, 3)
         embed_old.weight.data = embeddings.data
-
+        # A silly test for eager, this test is useful for when we run under PYTORCH_TEST_WITH_DYNAMO=1
+        # as it ensures that setattr correctly works.
         self.assertEqual(embed_old.weight.data, embeddings.data)
         res_old = embed_old(a)
+
         res_F = F.embedding(a, embeddings)
-        self.assertEqual(res_F, res_old)
+        self.assertEqual(res_old, res_F)
 
         embed_old = torch.nn.Embedding(4, 3)
         embed_old = embed_old.from_pretrained(embeddings, padding_idx=2)

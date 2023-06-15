@@ -198,12 +198,7 @@ class VariableTracker(metaclass=HasPostInit):
         # Note - this scope construction is mirrored in guards
         # A subsequent PR will introduce a util.
         scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
-        try:
-            _input_associated_real_value = eval(self.source.name(), scope)
-        except Exception:
-            # TODO(voz): Check in on this and find owner of SuperSource.
-            # We seem to have bugs in SuperSource producing code that does not eval properly.
-            raise NotImplementedError()
+        _input_associated_real_value = eval(self.source.name(), scope)
 
         if _input_associated_real_value is None:
             raise NotImplementedError()
