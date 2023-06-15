@@ -40,6 +40,12 @@ endif()
 set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
+# ---[ Sanity check versions
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.0.0)
+  message(FATAL_ERROR "GCC 9.0.0 or greater is required for PyTorch! Found {CMAKE_CXX_COMPILER_VERSION}.")
+endif()
+
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
@@ -788,7 +794,7 @@ endif()
 include(cmake/Allowlist.cmake)
 
 # ---[ Set link flag, handle additional deps for gcc 4.8 and above
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0 AND NOT ANDROID)
+if(CMAKE_COMPILER_IS_GNUCXX AND NOT ANDROID)
   message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line")
   list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
 endif()
@@ -821,9 +827,7 @@ if(NOT MSVC)
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
   endif()
-  if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
-  endif()
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
     string(APPEND CMAKE_CXX_FLAGS " -Wno-psabi")
