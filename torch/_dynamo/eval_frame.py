@@ -1229,9 +1229,9 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward, recursive=False
             )
 
-        from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd
+        from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd, adadelta
 
-        for opt_mod in adagrad, adam, adamax, adamw, asgd, nadam, sgd:
+        for opt_mod in adagrad, adam, adamax, adamw, asgd, nadam, sgd, adadelta:
             multi_tensor_fn_name = f"_multi_tensor_{opt_mod.__name__.split('.')[-1]}"
             if hasattr(opt_mod, multi_tensor_fn_name):
                 setattr(
