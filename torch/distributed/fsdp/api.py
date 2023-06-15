@@ -273,7 +273,6 @@ class StateDictConfig:
     """
 
     offload_to_cpu: bool = False
-    use_dtensor: bool = False
 
 
 @dataclass
@@ -329,7 +328,6 @@ class OptimStateDictConfig:
 
     # TODO: actually use this flag in the _optim_utils.py
     offload_to_cpu: bool = True
-    use_dtensor: bool = False
 
 
 @dataclass

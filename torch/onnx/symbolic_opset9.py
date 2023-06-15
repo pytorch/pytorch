@@ -3865,9 +3865,7 @@ def zeros_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.from_value(
-            input, _type_utils.JitScalarType.FLOAT
-        )
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
@@ -3927,9 +3925,7 @@ def ones_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.from_value(
-            input, _type_utils.JitScalarType.FLOAT
-        )
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
@@ -3991,9 +3987,7 @@ def full_like(
     fill_value = symbolic_helper._maybe_get_const(fill_value, "f")
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.from_value(
-            input, _type_utils.JitScalarType.FLOAT
-        )
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     if symbolic_helper._is_value(fill_value):
@@ -5191,9 +5185,7 @@ def randn_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.from_value(
-            self, _type_utils.JitScalarType.FLOAT
-        )
+        scalar_type = _type_utils.JitScalarType.FLOAT
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op("RandomNormalLike", self, dtype_i=scalar_type.onnx_type())
@@ -5212,9 +5204,7 @@ def rand_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = _type_utils.JitScalarType.from_value(
-            self, _type_utils.JitScalarType.FLOAT
-        )
+        dtype = _type_utils.JitScalarType.FLOAT
     return g.op(
         "RandomUniformLike", self, dtype_i=_type_utils.JitScalarType(dtype).onnx_type()
     )

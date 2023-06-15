@@ -190,23 +190,18 @@ def tensor_has_hints(t):
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
         return val.node.expr.free_symbols
-    elif isinstance(val, sympy.Expr):
-        return val.free_symbols
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
-        return (
-            free_symbols(val.size()) |
-            free_symbols(val.stride()) |
-            free_symbols(val.storage_offset())
-        )
-    elif isinstance(val, (tuple, list)):
         r = set()
-        for s in val:
+        for s in val.size():
             r |= free_symbols(s)
+        for s in val.stride():
+            r |= free_symbols(s)
+        r |= free_symbols(val.storage_offset())
         return r
     else:
-        raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
+        raise AssertionError(f"cannot compute free_symbols of {val}")
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
@@ -301,14 +296,6 @@ def guard_scalar(a):
     else:
         raise AssertionError(f"unrecognized scalar {a}")
 
-def _constrain_symbol_range(shape_env, s: sympy.Symbol, min: int, max: int):
-    if r := shape_env.var_to_range.get(s, None):
-        shape_env.var_to_range[s] = ValueRanges(
-            builtins.max(r.lower, min), builtins.min(r.upper, max)
-        )
-    else:
-        shape_env.var_to_range[s] = ValueRanges(min, max)
-
 # inclusive both ways
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     """
@@ -359,7 +346,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
             # shape_env's var_to_range
             sym_integer = sympy.Integer(a)
             shape_env = fake_mode.shape_env
-            _constrain_symbol_range(shape_env, sym_integer, min, max)
+            shape_env.var_to_range[sym_integer] = ValueRanges(min, max)
             shape_env.var_to_stack[sym_integer] = TracingContext(fake_mode).extract_stack()
 
         return
@@ -374,7 +361,11 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     # semantics that this is an "unchecked" assert (but it this actually
     # something useful?  Might be better to restrict only for unbacked
     # SymInt).
-    _constrain_symbol_range(a.node.shape_env, a.node.expr, min, max)
+    r = a.node.shape_env.var_to_range[a.node.expr]
+    a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
+        builtins.max(r.lower, min), builtins.min(r.upper, max)
+    )
+
 
 def constrain_unify(a, b):
     """
@@ -2125,9 +2116,6 @@ class ShapeEnv:
             return int(sym)
         return SymInt(SymNode(sym, self, int, hint))
 
-    def create_symboolnode(self, sym: "sympy.Expr"):
-        return SymBool(SymNode(sym, self, bool, None))
-
     def create_unbacked_symfloat(self):
         symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
@@ -2138,13 +2126,13 @@ class ShapeEnv:
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
-        return self.create_symintnode(symbol, hint=None)
+        return SymInt(SymNode(symbol, self, int, None))
 
     def create_unbacked_symbool(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
-        return self.create_symboolnode(sympy.Eq(symbol, 1))
+        return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None))
 
     def create_symbol(
         self,

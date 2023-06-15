@@ -248,7 +248,6 @@ test_dynamo_shard() {
       test_fx \
       test_package \
       test_legacy_vmap \
-      test_custom_op_testing \
       export/test_db \
       functorch/test_dims \
       functorch/test_aotdispatch \
@@ -427,10 +426,10 @@ test_dynamo_benchmark() {
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
-    if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
-    else
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --amp "$@"
+    # Check inference with --float32
+    test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
+      # Check training with --amp
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
     fi
   fi
@@ -1007,12 +1006,10 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_numpy_pytorch_interop
   test_dynamo_shard 1
   test_aten
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  install_numpy_pytorch_interop
   test_dynamo_shard 2
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy

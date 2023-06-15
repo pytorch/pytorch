@@ -202,11 +202,11 @@ protected:
 };
 
 
-static bool isinstance(handle h, handle c) {
+bool isinstance(handle h, handle c) {
     return PyObject_IsInstance(h.ptr(), c.ptr());
 }
 
-[[ noreturn ]] inline void raise_error(handle exception, const char *format, ...) {
+[[ noreturn ]] void raise_error(handle exception, const char *format, ...) {
     va_list args;
     va_start(args, format);
     PyErr_FormatV(exception.ptr(), format, args);
@@ -323,7 +323,6 @@ struct list : public object {
     : object(checked_steal(PyList_New(size))) {}
 };
 
-namespace{
 mpy::object unicode_from_format(const char* format, ...) {
     va_list args;
     va_start(args, format);
@@ -345,7 +344,7 @@ mpy::object from_bool(bool b) {
 bool is_sequence(handle h) {
     return PySequence_Check(h.ptr());
 }
-}
+
 
 struct sequence_view : public handle {
     sequence_view(handle h)
@@ -371,7 +370,7 @@ struct sequence_view : public handle {
     }
 };
 
-namespace {
+
 mpy::object repr(handle h) {
     return mpy::object::checked_steal(PyObject_Repr(h.ptr()));
 }
@@ -420,7 +419,6 @@ bool to_bool_unsafe(handle h) {
 bool to_bool(handle h) {
     return PyObject_IsTrue(h.ptr()) != 0;
 }
-}
 
 struct slice_view {
     slice_view(handle h, Py_ssize_t size)  {
@@ -432,7 +430,7 @@ struct slice_view {
     Py_ssize_t start, stop, step, slicelength;
 };
 
-static bool is_slice(handle h) {
+bool is_slice(handle h) {
     return PySlice_Check(h.ptr());
 }
 

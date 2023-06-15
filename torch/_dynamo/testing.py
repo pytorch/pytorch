@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset, utils
 from .bytecode_transformation import (
@@ -158,8 +159,18 @@ def debug_insert_nops(frame, cache_size, hooks, _):
 
     debug_checks(frame.f_code)
     code = transform_code_object(frame.f_code, insert_nops)
+    graph = OutputGraph(
+        code_options={},
+        compiler_fn=None,
+        root_tx=None,
+        export=False,
+        export_constraints=None,
+        frame_state={"_id": 0},
+        local_scope=locals(),
+        global_scope=globals(),
+    )
 
-    return GuardedCode(code, CheckFunctionManager().check_fn)
+    return GuardedCode(code, CheckFunctionManager(graph).check_fn)
 
 
 class CompileCounter:
@@ -309,7 +320,7 @@ def _make_fn_with_patches(fn, *patches):
     return _fn
 
 
-def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=None):
+def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
     class DummyTestClass(cls):
         pass
 
@@ -322,11 +333,9 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=
             if not callable(fn):
                 continue
             new_name = f"{name}{fn_suffix}"
-            new_fn = _make_fn_with_patches(fn, *patches)
-            new_fn.__name__ = new_name
-            if xfail_prop is not None and hasattr(fn, xfail_prop):
-                new_fn = unittest.expectedFailure(new_fn)
-            setattr(DummyTestClass, new_name, new_fn)
+            fn = _make_fn_with_patches(fn, *patches)
+            fn.__name__ = new_name
+            setattr(DummyTestClass, new_name, fn)
 
     return DummyTestClass
 
@@ -336,8 +345,3 @@ def skipIfNotPy311(fn):
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
-
-
-def expectedFailureDynamic(fn):
-    fn._expected_failure_dynamic = True
-    return fn

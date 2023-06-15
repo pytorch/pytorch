@@ -11,60 +11,60 @@
 namespace torch {
 namespace executor {
 
-using KernelFunction = std::function<void(RuntimeContext&, EValue**)>;
+using OpFunction = std::function<void(RuntimeContext&, EValue**)>;
 
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
 
 #define EXECUTORCH_SCOPE_PROF(x)
 
-struct Kernel {
+struct Operator {
   const char* name_;
-  KernelFunction kernel_;
+  OpFunction op_;
 
-  Kernel() = default;
+  Operator() = default;
 
   /**
    * We are doing a copy of the string pointer instead of duplicating the string
-   * itself, we require the lifetime of the kernel name to be at least as long
-   * as the kernel registry.
+   * itself, we require the lifetime of the operator name to be at least as long
+   * as the operator registry.
    */
-  explicit Kernel(const char* name, KernelFunction func)
-      : name_(name), kernel_(func) {}
+  explicit Operator(const char* name, OpFunction func)
+      : name_(name), op_(func) {}
 };
 
 /**
- * See KernelRegistry::hasKernelFn()
+ * See OperatorRegistry::hasOpsFn()
  */
-bool hasKernelFn(const char* name);
+bool hasOpsFn(const char* name);
 
 /**
- * See KernelRegistry::getKernelFn()
+ * See OperatorRegistry::getOpsFn()
  */
-KernelFunction& getKernelFn(const char* name);
+OpFunction& getOpsFn(const char* name);
 
 
-[[nodiscard]] bool register_kernels(const ArrayRef<Kernel>&);
+[[nodiscard]] bool register_operators(const ArrayRef<Operator>&);
 
-struct KernelRegistry {
+struct OperatorRegistry {
  public:
-  KernelRegistry() : kernelRegSize_(0) {}
+  OperatorRegistry() : operatorRegSize_(0) {}
 
-  bool register_kernels(const ArrayRef<Kernel>&);
-
-  /**
-   * Checks whether an kernel with a given name is registered
-   */
-  bool hasKernelFn(const char* name);
+  bool register_operators(const ArrayRef<Operator>&);
 
   /**
-   * Checks whether an kernel with a given name is registered
+   * Checks whether an operator with a given name is registered
    */
-  KernelFunction& getKernelFn(const char* name);
+  bool hasOpsFn(const char* name);
+
+  /**
+   * Checks whether an operator with a given name is registered
+   */
+  OpFunction& getOpsFn(const char* name);
 
  private:
-  std::map<const char*, KernelFunction> kernels_map_;
-  uint32_t kernelRegSize_;
+  std::map<const char*, OpFunction> operators_map_;
+  uint32_t operatorRegSize_;
 };
 
 } // namespace executor

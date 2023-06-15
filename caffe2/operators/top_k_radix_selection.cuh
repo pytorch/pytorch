@@ -6,7 +6,6 @@
 #include "caffe2/utils/GpuScanUtils.cuh"
 #include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
-#include <c10/cuda/CUDADeviceAssertion.h>
 #include <cuda_runtime.h>
 
 namespace caffe2 {

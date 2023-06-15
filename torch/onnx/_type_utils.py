@@ -372,7 +372,6 @@ BaseArgumentTypes = Union[
     torch.device,
     torch.memory_format,
     torch.layout,
-    torch._ops.OpOverload,
 ]
 Argument = Optional[
     Union[

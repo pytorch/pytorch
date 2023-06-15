@@ -476,7 +476,7 @@ def boolean_dispatch(
     """
 
     def fn(*args, **kwargs):
-        dispatch_flag = default
+        dispatch_flag = False
         if arg_name in kwargs:
             dispatch_flag = kwargs[arg_name]
         elif arg_index < len(args):
