@@ -1,4 +1,6 @@
+import operator
 import torch
+import warnings
 from itertools import chain
 from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
 from ..modules import Module
@@ -8,10 +10,35 @@ from .parallel_apply import parallel_apply
 from torch._utils import (
     _get_all_device_indices,
     _get_available_device_type,
-    _get_device_index
+    _get_device_index,
+    _get_devices_properties
 )
 
 __all__ = ['DataParallel', 'data_parallel']
+
+def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
+    imbalance_warn = """
+    There is an imbalance between your GPUs. You may want to exclude GPU {} which
+    has less than 75% of the memory or cores of GPU {}. You can do so by setting
+    the device_ids argument to DataParallel, or by setting the CUDA_VISIBLE_DEVICES
+    environment variable."""
+    device_ids = [_get_device_index(x, True) for x in device_ids]
+    dev_props = _get_devices_properties(device_ids)
+
+    def warn_imbalance(get_prop):
+        values = [get_prop(props) for props in dev_props]
+        min_pos, min_val = min(enumerate(values), key=operator.itemgetter(1))
+        max_pos, max_val = max(enumerate(values), key=operator.itemgetter(1))
+        if min_val / max_val < 0.75:
+            warnings.warn(imbalance_warn.format(device_ids[min_pos], device_ids[max_pos]))
+            return True
+        return False
+
+    if warn_imbalance(lambda props: props.total_memory):
+        return
+    if warn_imbalance(lambda props: props.multi_processor_count):
+        return
+
 
 T = TypeVar("T", bound=Module)
 
@@ -127,6 +154,9 @@ class DataParallel(Module, Generic[T]):
         self.device_ids = [_get_device_index(x, True) for x in device_ids]
         self.output_device = _get_device_index(output_device, True)
         self.src_device_obj = torch.device(device_type, self.device_ids[0])
+
+        if device_type == "cuda":
+            _check_balance(self.device_ids)
 
         if len(self.device_ids) == 1:
             self.module.to(self.src_device_obj)
