@@ -65,16 +65,21 @@ __all__ = [
     "conj_physical",
     "cos",
     "cosh",
+    "count_nonzero",
+    "deg2rad",
     "digamma",
     "erf",
     "erfinv",
     "erfc",
     "exp",
     "expm1",
+    "exponential",
     "exp2",
     "fill",
+    "fill_",
     "floor",
     "frac",
+    "geometric",
     "index_add",
     "index_copy",
     "index_copy_",
@@ -94,10 +99,15 @@ __all__ = [
     "log1p",
     "log2",
     "log10",
+    "log_normal",
     "log_softmax",
+    "mvlgamma",
+    "norm",
+    "normal",
     "nan_to_num",
     "neg",
     "positive",
+    "rad2deg",
     "reciprocal",
     "round",  # TODO: model kwargs
     "sigmoid",
@@ -144,6 +154,8 @@ __all__ = [
     "imag",
     "isclose",
     "lcm",
+    "logaddexp",
+    "logsumexp",
     # 'ldexp',
     "le",
     "logical_and",
@@ -180,6 +192,7 @@ __all__ = [
     # Conditional references
     #
     "masked_fill",
+    "masked_fill_",
     "where",
     #
     # Data conversion and movement references
@@ -212,10 +225,12 @@ __all__ = [
     #
     # View & Shape Ops
     #
+    "alias",
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
     "as_strided",
+    "as_strided_scatter",
     "broadcast_shapes",
     "broadcast_tensors",
     "broadcast_to",
@@ -250,6 +265,7 @@ __all__ = [
     "ravel",
     "repeat",
     "reshape",
+    "reshape_as",
     "roll",
     "rot90",
     "rsqrt",
@@ -264,6 +280,7 @@ __all__ = [
     "unfold_copy",
     "unsqueeze",
     "view",
+    "view_as",
     "vsplit",
     "vstack",
     "unflatten",
@@ -276,6 +293,7 @@ __all__ = [
     # Tensor Creation
     #
     "arange",
+    "cauchy",
     "empty",
     "empty_like",
     "empty_permuted",
@@ -285,10 +303,16 @@ __all__ = [
     "full_like",
     "linspace",
     "logspace",
+    "new_empty",
+    "new_empty_strided",
+    "new_full",
+    "new_ones",
+    "new_zeros",
     "ones",
     "ones_like",
     "randn",
     "scalar_tensor",
+    "zero",
     "zeros",
     "zeros_like",
     #
@@ -415,16 +439,19 @@ def _make_elementwise_unary_reference(
     return inner
 
 
-def _make_alias(fn, name):
+def _make_alias(fn, name, module_name):
     """
-    This function defines an alias of another function and sets its __name__argument
-    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`.
+    This function defines an alias of another function and sets its __name__ and __module__
+    argument.
+    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`, and
+    `alias.__module__ == fn.__module__`.
     """
 
     def _fn(*args, **kwargs):
         return fn(*args, **kwargs)
 
     _fn.__name__ = name
+    _fn.__module__ = module_name
     return _fn
 
 
@@ -652,7 +679,7 @@ def isnan(a: TensorLikeType) -> TensorLikeType:
 
 
 # alias
-mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma")  # type: ignore[has-type]
+mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma", __name__)  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(
@@ -1972,7 +1999,7 @@ def _to_other(
 
 
 # remove to_kwargs that is already present in `a`
-def canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
+def _canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
     options_to_check = ["dtype", "device", "layout", "memory_format"]
     # "device" option could be passed a str instead torch.device
     if "device" in to_kwargs and isinstance(to_kwargs["device"], str):
@@ -2004,7 +2031,7 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     # TODO: is_pinned is not currently supported in refs or fake_tensor
     # https://github.com/pytorch/pytorch/issues/84925
     assert "pin_memory" not in kwargs
-    canonicalize_to_arguments(a, kwargs)
+    _canonicalize_to_arguments(a, kwargs)
 
     if _to_will_alias(a, **kwargs):
         return a
