@@ -36,7 +36,7 @@ if [ -z "${MAX_JOBS}" ]; then
     export MAX_JOBS=$(nproc)
 fi
 
-if [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" == "7" ]]; then
+if [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" <= "9" ]]; then
   # Triton needs at least gcc-9 to build
   apt-get install -y g++-9
 
