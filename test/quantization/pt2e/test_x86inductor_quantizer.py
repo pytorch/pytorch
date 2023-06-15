@@ -3,7 +3,6 @@ import copy
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
-from torch.ao.ns.fx.utils import compute_sqnr
 from torch.ao.quantization._pt2e.quantizer import (
     X86InductorQuantizer,
 )
