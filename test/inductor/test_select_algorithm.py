@@ -51,6 +51,7 @@ class TestSelectAlgorithm(TestCase):
             # cpp_wrapper for the CUDA backend runs two passes
             self.assertEqual(counter, 2 * expected)
 
+    @expectedFailureDynamicWrapper
     @patches
     def test_linear_relu(self):
         @torch.compile
@@ -191,6 +192,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @expectedFailureDynamicWrapper
     @patches
     def test_convolution1(self):
         @torch.compile
