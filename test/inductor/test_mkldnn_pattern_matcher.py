@@ -259,7 +259,6 @@ class TestPaternMatcher(TestCase):
             )
             self._test_common(mod, (v,), 1, match_nodes)
 
-    @unittest.expectedFailure
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
@@ -279,6 +278,7 @@ class TestPaternMatcher(TestCase):
         out_feature = 30
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
+                torch._dynamo.reset()
                 mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
                 v = torch.randn(input_shape).to(dtype)
                 other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
