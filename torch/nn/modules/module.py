@@ -2013,6 +2013,9 @@ class Module:
             assign (bool, optional): whether to assign items in the state
                 dictionary to their corresponding keys in the module instead
                 of copying them inplace into the module's current parameters and buffers.
+                When ``False``, the properties of the tensors in the current
+                module are preserved while when ``True``, the properties of the
+                Tensors in the state dict are preserved.
                 Default: ``False``
 
         Returns:
