@@ -352,6 +352,8 @@ Tensor& empty_out(IntArrayRef size,
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
+// Some scalar types in CAST_OP have no declarations, they may be unused in Pytorch.
+// But we keep them and ignore the warning here until verified in the future.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmissing-prototypes"
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
