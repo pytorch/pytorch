@@ -281,7 +281,9 @@ test_failures = {
 }
 
 
-DynamicShapesCodegenCommonTemplate = make_dynamic_cls(CommonTemplate)
+DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
+    CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"
+)
 
 
 if HAS_CPU:
