@@ -33,7 +33,7 @@ maml_omniglot,pass,0
 mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
-moco,pass,77
+moco,pass,11
 nanogpt_generate,fail_to_run,0
 nvidia_deeprecommender,pass,0
 opacus_cifar10,pass,45
@@ -59,5 +59,5 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,0
 tts_angular,pass,2
 vgg16,pass,0
-vision_maskrcnn,fail_accuracy,124
+vision_maskrcnn,fail_accuracy,58
 yolov3,pass,2
