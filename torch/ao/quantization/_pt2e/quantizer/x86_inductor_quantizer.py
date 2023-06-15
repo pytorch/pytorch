@@ -38,6 +38,7 @@ __all__ = [
 ]
 
 def supported_quantized_operators() -> Dict[str, List[OperatorPatternType]]:
+    # TODO: Add more supported operators here.
     supported_operators: Dict[str, List[OperatorPatternType]] = {
         "conv2d": [
             [torch.nn.Conv2d],
