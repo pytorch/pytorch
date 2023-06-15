@@ -5626,7 +5626,7 @@ def ___make_guard_fn():
         opt_out = opt_model(x)
         self.assertTrue(same(orig_out, opt_out))
 
-    def test_dynamo_compiling_fake_tensor_to_symint(self):
+    def test_scalar_tensor_is_equivalent_to_symint_argument(self):
         class GumbelTopKSampler(torch.nn.Module):
             def __init__(self, T, k):
                 super(GumbelTopKSampler, self).__init__()
@@ -5653,7 +5653,7 @@ def ___make_guard_fn():
         opt_out = opt_m(x)
         self.assertTrue(same(orig_out, opt_out))
 
-    def test_dynamo_compiling_fake_tensor_to_symint_list(self):
+    def test_scalar_tensor_is_equivalent_to_symint_list_argument(self):
         class Jitter(torch.nn.Module):
             def __init__(self, jitter_val):
                 super(Jitter, self).__init__()
@@ -5676,7 +5676,7 @@ def ___make_guard_fn():
         opt_out = opt_m(x)
         self.assertTrue(same(orig_out, opt_out))
 
-    def test_dynamo_compiling_fake_tensor_to_int_list(self):
+    def test_scalar_tensor_is_equivalent_to_int_list_argument(self):
         class MyModel(torch.nn.Module):
             def forward(self, input):
                 permute = torch.tensor([0, 2, 1])
