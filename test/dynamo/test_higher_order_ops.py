@@ -1093,6 +1093,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3, 3)
         actual = wrapper_fn(x)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(actual, expected)
 
     def test_grad_with_side_effect(self):
@@ -1110,7 +1111,74 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3, 3)
         actual = wrapper_fn(x)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(dict(counters["graph_break"]), {"list was mutated.": 2})
         self.assertEqual(actual, expected)
+
+    def test_grad_pytree(self):
+        counters.clear()
+
+        def fn(x):
+            x1, x2 = x
+            return x1.sin().sum() + x2
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x1 = torch.randn(3, 3, 3)
+        x2 = torch.randn(())
+        actual = wrapper_fn((x1, x2))
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+            (x1, x2)
+        )
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"HigherOrderOperator with body that accepts non-Tensors as input": 2},
+        )
+        self.assertEqual(actual, expected)
+
+    def test_grad_non_tensor_input(self):
+        counters.clear()
+
+        def fn(x, y):
+            return x.sin().sum() + y
+
+        def wrapper_fn(x, y):
+            return torch.func.grad(fn)(x, y)
+
+        x = torch.randn(3, 3, 3)
+        y = 3.0
+        wrapped_gm = self._grad_compile_check(wrapper_fn, x, y)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, 3.0);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, const):
+            sin = l_x_.sin();  l_x_ = None
+            sum_1 = sin.sum();  sin = None
+            add = sum_1 + 3.0;  sum_1 = None
+            return add
+"""
+        # strip comments as comments have path to files which may differ from
+        # system to system.
+        actual = remove_trailing_space(
+            strip_comment(wrapped_gm.print_readable(print_output=False))
+        )
+        self.assertExpectedInline(actual, expected)
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
