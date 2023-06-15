@@ -11,7 +11,6 @@ from caffe2.python import workspace, core, scope
 from caffe2.python.predictor_constants import predictor_constants
 import caffe2.python.predictor.serde as serde
 import caffe2.python.predictor.predictor_py_utils as utils
-from builtins import bytes
 import collections
 
 

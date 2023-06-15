@@ -125,7 +125,7 @@ Existing Backends
 ~~~~~~~~~~~~~~~~~
 
 TorchDynamo has a growing list of backends, which can be found in the
-`backends <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/backends/>`__ folder
+`backends <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/backends/>`__ folder
 or ``torch._dynamo.list_backends()`` each of which with its optional dependencies.
 
 Some of the most commonly used backends include:
@@ -133,7 +133,7 @@ Some of the most commonly used backends include:
 **Training & inference backends**:
   * ``torch.compile(m, backend="inductor")`` - Uses ``TorchInductor`` backend. `Read more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
   * ``torch.compile(m, backend="aot_ts_nvfuser")`` - nvFuser with AotAutograd/TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
-  * ``torch.compile(m, backend=""nvprims_nvfuser")`` - nvFuser with PrimTorch. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
+  * ``torch.compile(m, backend="nvprims_nvfuser")`` - nvFuser with PrimTorch. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
   * ``torch.compile(m, backend="cudagraphs")`` - cudagraphs with AotAutograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
 
 **Inference-only backends**:

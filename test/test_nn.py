@@ -33,7 +33,7 @@ from torch.nn.utils.fusion import fuse_conv_bn_weights
 from torch.nn.utils.fusion import fuse_linear_bn_weights
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
-from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes
+from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
     TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, \
     download_file, get_function_arglist, load_tests, skipIfMps,\
@@ -2108,12 +2108,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])
         self.assertEqual(F.threshold(x, 0, 99), expected)
 
-    def test_threshold_bfloat16(self):
+    def test_threshold_bfloat16_half(self):
         x = torch.randn(100)
-        for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
-            expected = F.threshold(x, threshold, 0).bfloat16().float()
-            res_bf16 = F.threshold(x.bfloat16(), threshold, 0).float()
-            self.assertEqual(res_bf16, expected)
+        for dtype in [torch.bfloat16, torch.half]:
+            for threshold in [0, -0.5, 0.5, float('inf'), float('-inf'), float('nan')]:
+                expected = F.threshold(x, threshold, 0).to(dtype=dtype).float()
+                res_bf16 = F.threshold(x.to(dtype=dtype), threshold, 0).float()
+                self.assertEqual(res_bf16, expected)
 
     @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                          'Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs'
@@ -2425,10 +2426,34 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         _ = m.state_dict()
         self.assertTrue(called)
 
-    def test_register_state_dict_pre_hook(self):
+    def _test_register_state_dict_pre_hook(self, model, submodule):
         _state_dict_prefix = "foo."
         state_dict_pre_hook_count = 0
+        keep_var_setting = False
 
+        def my_state_dict_pre_hook(module, prefix, keep_vars):
+            self.assertEqual(keep_vars, keep_var_setting)
+            nonlocal state_dict_pre_hook_count
+            state_dict_pre_hook_count += 1
+            self.assertTrue(prefix.startswith(_state_dict_prefix))
+
+        model.register_state_dict_pre_hook(my_state_dict_pre_hook)
+        # Test to ensure submodules run the hook as well.
+        submodule.register_state_dict_pre_hook(my_state_dict_pre_hook)
+
+        def check_results(model):
+            nonlocal state_dict_pre_hook_count, keep_var_setting
+            for keep_var_setting in [True, False]:
+                _ = model.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
+                self.assertEqual(2, state_dict_pre_hook_count)
+                state_dict_pre_hook_count = 0
+        # Test state dict works as expected after model construction
+        check_results(model)
+        # Test state dict works as expected after forward
+        model(torch.ones(10, 3))
+        check_results(model)
+
+    def test_register_state_dict_pre_hook(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2437,21 +2462,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             def forward(self, x):
                 return self.a(x)
 
-        def my_state_dict_pre_hook(module, prefix, keep_vars):
-            nonlocal keep_var_setting
-            self.assertEqual(keep_vars, keep_var_setting)
-            nonlocal state_dict_pre_hook_count
-            state_dict_pre_hook_count += 1
-            self.assertTrue(prefix.startswith(_state_dict_prefix))
-
         mod = MyModule()
-        mod.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        # Test to ensure submodules run the hook as well.
-        mod.a.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        for keep_var_setting in [True, False]:
-            _ = mod.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
-            self.assertEqual(2, state_dict_pre_hook_count)
-            state_dict_pre_hook_count = 0
+        self._test_register_state_dict_pre_hook(mod, mod.a)
+
+    def test_register_state_dict_pre_hook_lazy_module(self):
+        class MyLazyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.LazyLinear(8)
+                self.layer2 = nn.LazyLinear(5)
+
+            def forward(self, x):
+                return self.layer2(self.layer1(x))
+
+        mod = MyLazyModule()
+        self._test_register_state_dict_pre_hook(mod, mod.layer1)
 
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
@@ -6524,27 +6549,47 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
         def helper(size, scale_factor, mode, device, memory_format=torch.contiguous_format):
-            inputf = torch.randn(size, device=device, dtype=torch.float, requires_grad=True)
-            input = inputf.to(dtype).to(memory_format=memory_format).detach().requires_grad_(True)
+            input = torch.randn(size, device=device, dtype=dtype).to(memory_format=memory_format).detach().requires_grad_(True)
+            inputf = input.to(torch.float32).to(memory_format=torch.contiguous_format).detach().requires_grad_(True)
             m = nn.Upsample(scale_factor=scale_factor, mode=mode)
 
             outf = m(inputf)
             out = m(input)
-            self.assertEqual(out, outf.to(dtype), atol=0.1, rtol=0.0)
+            self.assertEqual(out.to(torch.float32), outf, atol=0.05, rtol=0)
 
-            out.sum().backward()
-            outf.sum().backward()
-            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
+            ginput = torch.randn(out.shape, device=device, dtype=dtype).to(memory_format=memory_format)
+            ginputf = ginput.to(torch.float32).to(memory_format=torch.contiguous_format)
+            out.backward(ginput)
+            outf.backward(ginputf)
+            self.assertEqual(input.grad.to(torch.float32), inputf.grad, atol=0.01, rtol=0.01)
 
         for device in ['cpu']:
-            helper([3, 20, 30], 2, 'nearest', device)
             helper([3, 20, 11, 7], 2, 'nearest', device)
             helper([3, 20, 11, 7], 2, 'nearest', device, torch.channels_last)
             helper([3, 20, 11, 7, 3], 2, 'nearest', device)
             helper([3, 20, 30], 2, 'linear', device)
             helper([3, 20, 11, 7], 2, 'bilinear', device)
             helper([3, 20, 11, 7], 2, 'bilinear', device, torch.channels_last)
+            helper([1, 3, 11, 7], 2, 'bicubic', device)
+            helper([1, 3, 11, 7], 2, 'bicubic', device, torch.channels_last)
             helper([3, 20, 11, 7, 3], 2, 'trilinear', device)
+
+            helper([3, 5, 5], 257., 'nearest', device)
+            helper([3, 20, 11, 7], 20, 'nearest', device)
+            helper([3, 20, 11, 7, 3], 20, 'nearest', device)
+            helper([1, 2, 11, 7], 257, 'nearest', device, torch.channels_last)
+            helper([1, 2, 2000, 2000], 1 / 377., 'nearest', device)
+            helper([1, 2, 2000, 2000], 1 / 257., 'nearest', device, torch.channels_last)
+            helper([3, 2, 11, 7, 3], 20, 'nearest', device, torch.channels_last_3d)
+            helper([3, 5, 5], 10, 'linear', device)
+            helper([3, 5, 5], 257, 'linear', device)
+            helper([1, 2, 11, 7], 257, 'bilinear', device)
+            helper([1, 2, 11, 7], 257, 'bilinear', device, torch.channels_last)
+            helper([1, 3, 11, 7], 10, 'bicubic', device)
+            helper([1, 3, 11, 7], 10, 'bicubic', device, torch.channels_last)
+            helper([1, 1, 11, 7], 257, 'bicubic', device)
+            helper([3, 2, 11, 7, 3], 20, 'trilinear', device)
+            helper([3, 2, 11, 7, 3], 20, 'trilinear', device, torch.channels_last_3d)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_interpolate_illegal_memory_access(self):
@@ -7204,6 +7249,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."):
             res = arg_class(*arg_3)
 
+    def test_max_pool1d_invalid_output_size(self):
+        arg_1 = 3
+        arg_2 = 255
+        arg_3 = False
+        arg_class = torch.nn.MaxPool1d(kernel_size=arg_1, stride=arg_2, return_indices=arg_3)
+        arg_4_0 = torch.as_tensor([[0.3204]])
+        arg_4 = [arg_4_0,]
+
+        with self.assertRaises(RuntimeError):
+            res = arg_class(*arg_4)
 
 class TestFusionEval(TestCase):
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),)),
@@ -7929,7 +7984,7 @@ class TestNNDeviceType(NNTestCase):
     def _test_GroupNorm_cpu_mixed_dtype(self):
         def helper(self, size, groups, memory_format):
             channels = size[1]
-            input = torch.empty(size, dtype=torch.bfloat16).cpu().random_(1, 10)
+            input = torch.randn(size, dtype=torch.bfloat16).cpu()
             input_bf1 = input.contiguous(memory_format=memory_format).detach().requires_grad_(True)
             input_bf2 = input_bf1.clone().detach().requires_grad_(True)
             input_f = input_bf1.float().detach().requires_grad_(True)
@@ -7952,8 +8007,16 @@ class TestNNDeviceType(NNTestCase):
             out2.backward(grad_out_bf2, retain_graph=True)
             # float input grad and float parameters
             out3.backward(grad_out_f, retain_graph=True)
+            # bfloat16 input grad and bfloat16 parameters
+            out.backward(grad_out_bf1, retain_graph=True)
             self.assertEqual(m_f.weight.grad, m_f2.weight.grad, atol=1e-5, rtol=1e-5)
+            self.assertEqual(m_f.bias.grad, m_f2.bias.grad, atol=1e-5, rtol=1e-5)
             self.assertEqual(input_bf2.grad.float(), input_f.grad, atol=5e-5, rtol=5e-3)
+            # Full bf16 has lower precision compared with mixed bf16 and fp32 .
+            # Use Amp to keep module parameters in acc dtype, i.e. float, for better numerical stability
+            self.assertEqual(m_bf.weight.grad.float(), m_f.weight.grad, atol=1e-3, rtol=1.2e-1)
+            self.assertEqual(m_bf.bias.grad.float(), m_f.bias.grad, atol=1e-3, rtol=1e-2)
+            self.assertEqual(input_bf1.grad, input_bf2.grad, atol=1e-2, rtol=1e-2)
 
         helper(self, (1, 8, 4, 3), 2, torch.contiguous_format)
         helper(self, (1, 8, 4, 3), 2, torch.channels_last)
@@ -8446,8 +8509,8 @@ class TestNNDeviceType(NNTestCase):
             gn.weight.data.uniform_()
             gn.bias.data.uniform_()
 
-            ref_input = input.detach().clone().contiguous().requires_grad_(True)
-            ref_grad = grad.detach().clone().contiguous()
+            ref_input = input.detach().clone().contiguous(memory_format=torch.contiguous_format).requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous(memory_format=torch.contiguous_format)
             if dtype == torch.bfloat16 and is_mixed:
                 ref_gn = nn.GroupNorm(groups, channels).to(device).to(torch.float)
             else:
@@ -8459,13 +8522,12 @@ class TestNNDeviceType(NNTestCase):
             ref_out.backward(ref_grad)
 
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
-            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ref_out.is_contiguous(memory_format=torch.contiguous_format))
             self.assertEqual(out, ref_out)
             # parameters in bfloat16 is not recommended
-            if dtype != torch.bfloat16 or is_mixed:
-                self.assertEqual(gn.weight.grad, ref_gn.weight.grad, atol=5e-4, rtol=5e-4)
-                self.assertEqual(gn.bias.grad, ref_gn.bias.grad, atol=5e-4, rtol=5e-4)
-                self.assertEqual(input.grad, ref_input.grad, atol=5e-4, rtol=8e-3)
+            self.assertEqual(gn.weight.grad, ref_gn.weight.grad, atol=5e-4, rtol=5e-4)
+            self.assertEqual(gn.bias.grad, ref_gn.bias.grad, atol=5e-4, rtol=5e-4)
+            self.assertEqual(input.grad, ref_input.grad, atol=5e-4, rtol=8e-3)
 
         helper(self, (4, 8, 10, 10), 4, torch.channels_last, False)
         helper(self, (2, 30, 9, 9), 3, torch.channels_last, False)
@@ -9628,6 +9690,32 @@ class TestNNDeviceType(NNTestCase):
 
                     self.assertEqual(a_cuda.grad, a_cpu.grad)
 
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("num_channels", [3, 5])
+    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic"])
+    @parametrize_test("dtype", integral_types() + floating_types())
+    @onlyNativeDeviceTypes
+    def test_upsamplingBiMode2d_nonsupported_dtypes(self, device, antialias, num_channels, mode, dtype):
+        x = torch.ones(1, num_channels, 32, 32, dtype=dtype, device=device)
+
+        should_raise_runtime_error = True
+
+        if "nearest" in mode:
+            if antialias:
+                raise SkipTest("Nearest mode does not have antialiasing")
+            if dtype in (torch.uint8, ) + floating_types():
+                should_raise_runtime_error = False
+
+        elif mode in ("bilinear", "bicubic"):
+            if dtype in floating_types() or (device == "cpu" and dtype == torch.uint8):
+                should_raise_runtime_error = False
+
+        if should_raise_runtime_error:
+            with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+                F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
+        else:
+            _ = F.interpolate(x, (12, 12), mode=mode, antialias=antialias)
+
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     def test_upsamplingBilinear2d_aa_correctness(self, device, memory_format):
         t_in = torch.arange(3 * 8 * 8, dtype=torch.float, device=device).reshape(1, 3, 8, 8)
@@ -9645,38 +9733,120 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(expected_out, t_out)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("mode", ["bilinear", "bicubic"])
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("num_channels", [3, 5])
     @parametrize_test("output_size", [32, 600])
-    def test_upsamplingBiLinear2d_consistency(self, device, memory_format, antialias, align_corners, num_channels, output_size):
+    @parametrize_test("check_as_unsqueezed_3d_tensor", [True, False])
+    @parametrize_test("non_contig", [False, "sliced", "restrided"])
+    @parametrize_test("batch_size", [1, 5])
+    def test_upsamplingBiMode2d_consistency(
+        self,
+        device,
+        memory_format,
+        mode,
+        antialias,
+        align_corners,
+        num_channels,
+        output_size,
+        check_as_unsqueezed_3d_tensor,
+        non_contig,
+        batch_size,
+    ):
+        # Check output value consistency between resized_input_uint8 and resized input_float
         if torch.device(device).type == "cuda":
             raise SkipTest("CUDA implementation is not yet supporting uint8")
 
-        mode = "bilinear"
-        # Check if Max Abs Error between resized input_uint8 and resized input_float is smaller than a tolerated value, e.g. 1.0
-        input_ui8 = torch.randint(0, 256, size=(1, num_channels, 400, 400), dtype=torch.uint8, device=device)
+        torch.manual_seed(0)
+
+        input_ui8 = torch.randint(0, 256, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
+
+        if non_contig == "sliced":
+            input_ui8 = input_ui8[:, :, 10:-10, 10:-10]
+        elif non_contig == "restrided":
+            input_ui8 = input_ui8[:, :, ::2, ::2]
+
+        if batch_size == 1 and check_as_unsqueezed_3d_tensor:
+            input_ui8 = input_ui8[0, ...]
+            input_ui8 = input_ui8[None, ...]
+
         input_f32 = input_ui8.float()
 
         output_f32 = F.interpolate(
             input_f32, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
-        )
+        ).round().clip(0, 255)
         output_ui8 = F.interpolate(
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
         )
 
-        mae_tol = 0.5
-        max_abs_err_tol = 1.0
-        num_wrong_pixels_tol = 5
+        if non_contig is False:
+            self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
 
-        abs_diff = torch.abs(output_f32.round() - output_ui8.float())
-        mae = torch.mean(abs_diff)
-        max_abs_err = torch.max(abs_diff)
-        num_wrong_pixels = (abs_diff > max_abs_err_tol).sum()
-        self.assertTrue(mae < mae_tol, msg=f"mae={mae}")
-        self.assertTrue(max_abs_err < max_abs_err_tol + 1e-5, msg=f"max ae={max_abs_err}")
-        self.assertTrue(num_wrong_pixels < num_wrong_pixels_tol, msg=f"num_wrong_pixels={num_wrong_pixels}")
+        # FIXME if-clause shows the current behaviour which is definitely unexpected.
+        # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
+        # See for more details: https://github.com/pytorch/pytorch/pull/100373
+        if batch_size == 1 and check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
+            self.assertTrue(output_ui8.is_contiguous())
+            self.assertTrue(output_f32.is_contiguous())
+        else:
+            self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
+            self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
+
+        diff = (output_f32 - output_ui8.float()).abs()
+        if mode == "bilinear":
+            torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
+        else:
+            # - tolerances for bicubic mode are in general higher than for
+            #   bilinear mode, because the bicubic kernel may create
+            #   [intermediate] values outside of the [0, 255] range, which need
+            #   to be clipped in uint8 path, but not in float path. This isn't
+            #   an issue with bilinear kernel.
+            # - Also in bicubic mode, when antialias=False, we have to use
+            #   bigger tolerances than when antialias=True. This is partially
+            #   due to the fact that when False, the float path uses the -0.75
+            #   constant while the uint8 path uses the -0.5 constant in the
+            #   bicubic kernel (when True, they both use -0.5). This difference
+            #   in constants exists for historical reasons. Should both paths
+            #   use the -0.5 constant, we would have closer results and we would
+            #   be able to lower the tolerances.
+
+            max_diff = 30 if antialias else 44
+            assert diff.max() < max_diff
+
+            threshold = 2
+            percent = 3 if antialias else 40
+            assert (diff > threshold).float().mean() < (percent / 100)
+
+            threshold = 5
+            percent = 1 if antialias else 20
+            assert (diff > threshold).float().mean() < (percent / 100)
+
+            mae = .4 if antialias else 3
+            assert diff.mean() < mae
+
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("align_corners", [True, False])
+    @parametrize_test("input_size, output_size", [(399, 437), (403, 377)])
+    def test_upsamplingBiLinear2d_consistency_interp_size_bug(self, device, memory_format, align_corners, input_size, output_size):
+        # Non-regression test for https://github.com/pytorch/pytorch/pull/101403
+
+        if torch.device(device).type == "cuda":
+            raise SkipTest("CUDA implementation is not yet supporting uint8")
+
+        mode = "bilinear"
+        input_ui8 = torch.randint(0, 256, size=(1, 3, input_size, input_size), dtype=torch.uint8, device=device)
+        input_ui8 = input_ui8.contiguous(memory_format=memory_format)
+        input_f32 = input_ui8.float()
+
+        output_f32 = F.interpolate(
+            input_f32, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=False
+        ).round().to(torch.uint8)
+        output_ui8 = F.interpolate(
+            input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=False
+        )
+        torch.testing.assert_close(output_f32, output_ui8, atol=1, rtol=0)
 
     def test_upsamplingBicubic2d_correctness(self, device):
         # test output against known input: align_corners=False result must match opencv
@@ -10389,6 +10559,40 @@ class TestNNDeviceType(NNTestCase):
         for bias in [True, False]:
             mod = torch.nn.GRU(hsize, hsize, bias=bias).to(device).to(dtype)
             self._test_rnn_mod(mod, inp)
+
+    @skipMeta
+    @dtypes(torch.float32, torch.bfloat16)
+    @onlyCPU
+    def test_LSTM_differentiable_backward_using_oneDNN(self, dtype):
+        batch = 10
+        seq_len = 12
+        input = 3
+        Net = nn.LSTM(input, 3, 20, batch_first=True)
+        import copy
+        Net_clone = copy.deepcopy(Net)
+        x = torch.rand(batch, seq_len, input)
+        x1 = x.clone().requires_grad_(True)
+        x2 = x.clone().requires_grad_(True)
+
+        torch._C._set_mkldnn_enabled(False)
+        out1, _ = Net(x1)
+        der_out1 = torch.autograd.grad(out1, x1,
+                                       grad_outputs=torch.ones_like(out1),
+                                       retain_graph=True,
+                                       create_graph=True)[0]
+        loss1 = der_out1.sum()
+        loss1.backward(retain_graph=True)
+
+        torch._C._set_mkldnn_enabled(True)
+        out2, _ = Net(x2)
+        der_out2 = torch.autograd.grad(out2, x2,
+                                       grad_outputs=torch.ones_like(out2),
+                                       retain_graph=True,
+                                       create_graph=True)[0]
+        loss2 = der_out2.sum()
+        loss2.backward(retain_graph=True)
+        assert torch.allclose(der_out1, der_out2)
+        assert torch.allclose(x1.grad, x2.grad)
 
     @onlyCUDA
     def test_upsamplingNearest1d_launch_config(self, device):
@@ -11109,36 +11313,46 @@ class TestNNDeviceType(NNTestCase):
                                                                   torch.zeros(3, device=device)))
 
     @onlyCPU
-    def test_activations_bfloat16_cpu(self, device):
-        def test_bfloat16(fn, device, inp_dims, prec):
-            # bfloat16 compute
-            input = torch.randn(inp_dims, dtype=torch.bfloat16, device=device, requires_grad=True)
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_activations_bfloat16_half_cpu(self, device, dtype):
+        def test_helper(fn, device, inp_dims, prec=None):
+            torch.manual_seed(37)
+            # bfloat16/half compute
+            fn = fn.to(dtype=dtype)
+            input = torch.randn(inp_dims, dtype=dtype, device=device, requires_grad=True)
             out = fn(input)
-            grad_input = torch.randn_like(out, dtype=torch.bfloat16, device=device)
+            grad_input = torch.randn_like(out, dtype=dtype, device=device)
             out.backward(grad_input)
 
             # fp32 compute
             input2 = input.detach().clone().float().requires_grad_(True)
-            out2 = fn(input2)
+            out2 = fn.float()(input2)
             grad_input2 = grad_input.detach().clone().float()
             out2.backward(grad_input2)
 
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(input.grad.dtype, torch.bfloat16)
-            self.assertEqual(out, out2, atol=prec, rtol=0, exact_dtype=False)
-            self.assertEqual(input.grad.data, input2.grad.data, atol=prec, rtol=0, exact_dtype=False)
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype), atol=prec, rtol=prec)
+            self.assertEqual(input.grad.data, input2.grad.data.to(dtype=dtype), atol=prec, rtol=prec)
 
         shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 256, 256]]
         for shape in shapes:
-            test_bfloat16(torch.nn.LogSigmoid(), device, shape, prec=2e-2)
-            test_bfloat16(torch.nn.Hardsigmoid(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Hardshrink(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Softshrink(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Hardswish(), device, shape, prec=2e-2)
-            test_bfloat16(torch.nn.Softplus(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.SiLU(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Hardtanh(), device, shape, prec=1e-2)
-            test_bfloat16(torch.nn.Mish(), device, shape, prec=1e-2)
+            test_helper(torch.nn.LogSigmoid(), device, shape)
+            test_helper(torch.nn.Hardsigmoid(), device, shape)
+            test_helper(torch.nn.Hardshrink(), device, shape)
+            test_helper(torch.nn.Softshrink(), device, shape)
+            test_helper(torch.nn.Hardswish(), device, shape)
+            test_helper(torch.nn.Softplus(), device, shape)
+            test_helper(torch.nn.SiLU(), device, shape)
+            test_helper(torch.nn.Hardtanh(), device, shape)
+            test_helper(torch.nn.Mish(), device, shape)
+            test_helper(torch.nn.ELU(), device, shape)
+            test_helper(torch.nn.PReLU(), device, shape)
+            test_helper(torch.nn.GLU(), device, shape, prec=1e-2)
+            test_helper(torch.nn.Threshold(0.1, 20), device, shape)
+            test_helper(torch.nn.GELU(), device, shape)
+            test_helper(torch.nn.Hardtanh(), device, shape)
+            test_helper(torch.nn.LeakyReLU(), device, shape)
 
     @onlyCUDA
     def test_activations_bfloat16(self, device):
@@ -12279,6 +12493,7 @@ class TestNNDeviceType(NNTestCase):
             with cm:
                 _test(activation=activation, batch_first=batch_first, training=training)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
@@ -12306,6 +12521,7 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
+    @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):

@@ -189,12 +189,12 @@ namespace fmt {
 
 template <>
 struct formatter<::addrinfo> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) {
+  constexpr decltype(auto) parse(format_parse_context& ctx) const {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) {
+  decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) const {
     char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
 
     int r = ::getnameinfo(
@@ -206,27 +206,27 @@ struct formatter<::addrinfo> {
         NI_MAXSERV,
         NI_NUMERICSERV);
     if (r != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
+      return fmt::format_to(ctx.out(), "?UNKNOWN?");
     }
 
     if (addr.ai_addr->sa_family == AF_INET) {
-      return format_to(ctx.out(), "{}:{}", host, port);
+      return fmt::format_to(ctx.out(), "{}:{}", host, port);
     } else {
-      return format_to(ctx.out(), "[{}]:{}", host, port);
+      return fmt::format_to(ctx.out(), "[{}]:{}", host, port);
     }
   }
 };
 
 template <>
 struct formatter<c10d::detail::SocketImpl> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) {
+  constexpr decltype(auto) parse(format_parse_context& ctx) const {
     return ctx.begin();
   }
 
   template <typename FormatContext>
   decltype(auto) format(
       const c10d::detail::SocketImpl& socket,
-      FormatContext& ctx) {
+      FormatContext& ctx) const {
     ::sockaddr_storage addr_s{};
 
     auto addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);
@@ -234,14 +234,14 @@ struct formatter<c10d::detail::SocketImpl> {
     ::socklen_t addr_len = sizeof(addr_s);
 
     if (::getsockname(socket.handle(), addr_ptr, &addr_len) != 0) {
-      return format_to(ctx.out(), "?UNKNOWN?");
+      return fmt::format_to(ctx.out(), "?UNKNOWN?");
     }
 
     ::addrinfo addr{};
     addr.ai_addr = addr_ptr;
     addr.ai_addrlen = addr_len;
 
-    return format_to(ctx.out(), "{}", addr);
+    return fmt::format_to(ctx.out(), "{}", addr);
   }
 };
 

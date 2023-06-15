@@ -20,7 +20,6 @@
 #else
 #include <ATen/cpu/vec/vec256/zarch/vec256_zarch.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
-#include <ATen/cpu/vec/vec256/vec256_float16.h>
 #endif
 
 #include <algorithm>

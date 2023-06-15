@@ -262,7 +262,7 @@ Checks if the db described by the arguments exists.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/load_save_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/load_save_op.cc
 
 <details>
 
@@ -319,7 +319,7 @@ to specify the type of the input db/dbs.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/load_save_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/load_save_op.cc
 
 <details>
 
@@ -410,7 +410,7 @@ settings specified by the arguments.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/load_save_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/load_save_op.cc
 
 <details>
 

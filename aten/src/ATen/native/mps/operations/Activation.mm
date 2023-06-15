@@ -1,5 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/Activation.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -712,15 +713,16 @@ TORCH_IMPL_FUNC(gelu_out_mps)(const Tensor& self, c10::string_view approximate, 
   if (output.numel() == 0)
     return;
 
+  auto approximate_type = get_gelutype_enum(approximate);
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "gelu_out_mps" + getTensorsStringKey({self}) + ":" + c10::str(approximate);
+    string key = "gelu_out_mps" + getTensorsStringKey({self}) + ":" + std::to_string(approximate_type);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), getMPSShape(self));
 
       MPSGraphTensor* outputTensor = nil;
-      if (approximate == "tanh") {
+      if (approximate_type == GeluType::Tanh) {
         outputTensor = tanh(mpsGraph, inputTensor);
       } else {
         outputTensor = normcdf(mpsGraph, inputTensor);
@@ -752,17 +754,18 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
   if (grad_input.numel() == 0)
     return;
 
+  auto approximate_type = get_gelutype_enum(approximate);
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "gelu_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + c10::str(approximate);
+    string key = "gelu_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + std::to_string(approximate_type);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto dataType = getMPSDataType(self);
 
       MPSGraphTensor* gradTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad), getMPSShape(grad));
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(self));
       MPSGraphTensor* outputTensor = nil;
-      if (approximate == "tanh") {
+      if (approximate_type == GeluType::Tanh) {
         constexpr float kBeta = M_SQRT2 * M_2_SQRTPI * (0.5f);
         constexpr float kKappa = 0.044715f;
         MPSGraphTensor* betaf = [mpsGraph constantWithScalar:kBeta shape:@[ @1 ] dataType:dataType];
@@ -1193,8 +1196,8 @@ TORCH_IMPL_FUNC(softplus_out_mps)
   };
 
   MPSStream* stream = getCurrentMPSStream();
-  MPSScalar beta_scalar = getMPSScalar(beta, ScalarType::Float);
-  MPSScalar threshold_scalar = getMPSScalar(threshold, ScalarType::Float);
+  MPSScalar beta_scalar = getMPSScalar(beta, self.scalar_type());
+  MPSScalar threshold_scalar = getMPSScalar(threshold, self.scalar_type());
 
   @autoreleasepool {
     string key = "softplus_out_mps:" + getTensorsStringKey({self}) + ":" + std::to_string(beta.to<double>()) + ":" +
@@ -1203,9 +1206,9 @@ TORCH_IMPL_FUNC(softplus_out_mps)
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-      MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSDataType(ScalarType::Float));
+      MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
 
-      MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSDataType(ScalarType::Float));
+      MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
 
       MPSGraphTensor* reluTensor = [mpsGraph reLUWithTensor:inputTensor name:nil];
 
@@ -1255,8 +1258,8 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps)
   if (grad_input.numel() == 0)
     return;
 
-  MPSScalar beta_scalar = getMPSScalar(beta, ScalarType::Float);
-  MPSScalar threshold_scalar = getMPSScalar(threshold, ScalarType::Float);
+  MPSScalar beta_scalar = getMPSScalar(beta, self.scalar_type());
+  MPSScalar threshold_scalar = getMPSScalar(threshold, self.scalar_type());
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -1278,9 +1281,9 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps)
 
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
-      MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(ScalarType::Float));
+      MPSGraphTensor* betaTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
 
-      MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, getMPSScalarType(ScalarType::Float));
+      MPSGraphTensor* thresholdTensor = mpsGraphScalarPlaceHolder(mpsGraph, inputTensor.dataType);
 
       MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:getMPSDataType(self)];
       MPSGraphTensor* bxTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor

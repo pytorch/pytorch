@@ -105,6 +105,7 @@ class _KinetoProfile:
         self.profiler = prof.profile(
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
+            use_mtia=(ProfilerActivity.MTIA in self.activities),
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -134,6 +135,19 @@ class _KinetoProfile:
             dist_info = self._get_distributed_info()
             if dist_info:
                 self.add_metadata_json("distributedInfo", json.dumps(dist_info))
+
+            # FIXME: CUPTI Lazy Re-init and CUDA Graph crashes with CUDA 11.
+            is_cuda11_or_lower = (
+                (torch.version.cuda is not None)
+                and ([int(x) for x in torch.version.cuda.split(".")] < [12, 0])
+            )
+            if (
+                is_cuda11_or_lower
+                and hasattr(torch, '_inductor')
+                and torch._inductor.config.triton.cudagraphs
+            ):
+                os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
 
     def stop_trace(self):
         assert self.profiler is not None

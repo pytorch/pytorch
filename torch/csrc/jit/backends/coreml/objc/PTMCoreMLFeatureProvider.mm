@@ -32,7 +32,7 @@
   NSError* error = nil;
   MLMultiArray *mlArray =
     [[MLMultiArray alloc]
-     initWithDataPointer:tensor.data_ptr<float>()
+     initWithDataPointer:tensor.mutable_data_ptr<float>()
      shape:shape
      dataType:MLMultiArrayDataTypeFloat32
      strides:strides
