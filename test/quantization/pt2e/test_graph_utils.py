@@ -105,7 +105,7 @@ class TestGraphUtils(TestCase):
             {torch.nn.Conv2d, torch.nn.functional.conv2d},
             {torch.nn.ReLU},
         ]
-        _CUSTOMIZED_EQUIVALET_TYPES_DICT = _create_equivalent_types_dict(_CUSTOMIZED_EQUIVALENT_TYPES)
+        _CUSTOMIZED_EQUIVALENT_TYPES_DICT = _create_equivalent_types_dict(_CUSTOMIZED_EQUIVALENT_TYPES)
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -128,6 +128,6 @@ class TestGraphUtils(TestCase):
         fused_partitions = find_sequential_partitions(
             m,
             [torch.nn.Conv2d, torch.nn.ReLU],
-            equivalet_types_dict=_CUSTOMIZED_EQUIVALET_TYPES_DICT,
+            equivalent_types_dict=_CUSTOMIZED_EQUIVALENT_TYPES_DICT,
         )
         self.assertEqual(len(fused_partitions), 0)
