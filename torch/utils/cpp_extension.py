@@ -1486,8 +1486,8 @@ def _jit_compile(name,
         baton = FileBaton(os.path.join(build_directory, 'lock'))
         if baton.try_acquire():
             try:
-                with hipify_python.GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
-                    if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
+                if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
+                    with hipify_python.GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
                         hipify_result = hipify_python.hipify(
                             project_directory=build_directory,
                             output_directory=build_directory,
@@ -1507,17 +1507,17 @@ def _jit_compile(name,
 
                         sources = list(hipified_sources)
 
-                    _write_ninja_file_and_build_library(
-                        name=name,
-                        sources=sources,
-                        extra_cflags=extra_cflags or [],
-                        extra_cuda_cflags=extra_cuda_cflags or [],
-                        extra_ldflags=extra_ldflags or [],
-                        extra_include_paths=extra_include_paths or [],
-                        build_directory=build_directory,
-                        verbose=verbose,
-                        with_cuda=with_cuda,
-                        is_standalone=is_standalone)
+                _write_ninja_file_and_build_library(
+                    name=name,
+                    sources=sources,
+                    extra_cflags=extra_cflags or [],
+                    extra_cuda_cflags=extra_cuda_cflags or [],
+                    extra_ldflags=extra_ldflags or [],
+                    extra_include_paths=extra_include_paths or [],
+                    build_directory=build_directory,
+                    verbose=verbose,
+                    with_cuda=with_cuda,
+                    is_standalone=is_standalone)
             finally:
                 baton.release()
         else:
