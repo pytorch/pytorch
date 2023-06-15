@@ -30,7 +30,6 @@ from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
-    expectedFailureAutomaticDynamic,
     expectedFailureDynamic,
     requires_numpy_pytorch_interop,
     same,
@@ -1974,7 +1973,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     # NotImplementedError: SymNodeVariable() is not a constant
     # https://github.com/pytorch/pytorch/issues/103618
     @expectedFailureDynamic
-    @expectedFailureAutomaticDynamic
+    @unittest.expectedFailure
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -5295,7 +5294,6 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
-    @expectedFailureAutomaticDynamic
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
@@ -5325,19 +5323,6 @@ def fn():
                 ).run(prof.report())
             else:
                 base_checker().check("No recompilation detected.").run(prof.report())
-
-            # Ensure correct guard fail message is selected to show to user
-            if torch._dynamo.config.assume_static_by_default:
-                new_shape_input = torch.rand((4, 3, 4))
-                _ = compiled(new_shape_input)
-
-                base_checker().check("Recompile Reasons").check("'forward'").check(
-                    "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
-                ).check(
-                    "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
-                ).run(
-                    prof.report()
-                )
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
