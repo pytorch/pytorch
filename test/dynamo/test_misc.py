@@ -318,7 +318,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 9)
         )
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -349,10 +348,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(counts.frame_count, 1)
 
-        expected_op_count = ifdynstaticdefault(1, 11)
+        expected_op_count = (
+            ifdynstaticdefault(1, 11)
+            if torch._dynamo.testing.config.dynamic_shapes
+            else 1
+        )
         self.assertEqual(counts.op_count, expected_op_count)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_user_defined_binop(self):
         class MyClass:
             def __init__(self, value):
@@ -375,7 +377,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
         self.assertEqual(counts.frame_count, 1)
-        expected_op_count = ifdynstaticdefault(1, 4)
+        expected_op_count = (
+            ifdynstaticdefault(1, 4)
+            if torch._dynamo.testing.config.dynamic_shapes
+            else 1
+        )
         self.assertEqual(counts.op_count, expected_op_count)
 
     def test_compare_shapes_eq(self):
@@ -4074,7 +4080,6 @@ def fn():
         x = torch.rand([4, 4])
         self.assertEqual(opt_fn(x), fn(x))
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
@@ -4101,7 +4106,8 @@ def fn():
         opt_fn(x2, y2, 5)
 
         if (
-            not torch._dynamo.config.specialize_int
+            torch._dynamo.config.dynamic_shapes
+            and not torch._dynamo.config.specialize_int
             and not torch._dynamo.config.assume_static_by_default
         ):
             # we didn't actually test guard_failure_fn here but whatever,
@@ -4109,6 +4115,8 @@ def fn():
             self.assertTrue(guard_failure is None)
         else:
             self.assertTrue(guard_failure is not None)
+            if not torch._dynamo.config.dynamic_shapes:
+                self.assertExpectedInline(guard_failure[0], """L['k'] == 3""")
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn_shape_control(self):
@@ -4149,7 +4157,6 @@ def fn():
         else:
             self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] < 3""")
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn2(self):
         def fn(x, y):
             x = x + 1
@@ -4175,13 +4182,20 @@ def fn():
         opt_fn(x, y)
         opt_fn(x2, y2)
 
-        if torch._dynamo.config.assume_static_by_default:
+        if torch._dynamo.config.dynamic_shapes:
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    guard_failure[0],
+                    """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
+                )
+            else:
+                self.assertTrue(guard_failure is None)
+        else:
+            self.assertTrue(guard_failure is not None)
             self.assertExpectedInline(
                 guard_failure[0],
                 """tensor 'L['x']' size mismatch at index 0. expected 2, actual 3""",
             )
-        else:
-            self.assertTrue(guard_failure is None)
 
     def test_guard_failure_fn_tensor_iter(self):
         def fn(x):
@@ -5261,7 +5275,6 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
@@ -5285,7 +5298,10 @@ def fn():
             _ = compiled(new_shape_input)
 
             # Not an exhaustive test of dynamic shapes behavior, but some sanity
-            if torch._dynamo.config.assume_static_by_default:
+            if (
+                not torch._dynamo.config.dynamic_shapes
+                or torch._dynamo.config.assume_static_by_default
+            ):
                 base_checker().check("Recompile Reasons").check("'forward'").check(
                     "cache_size_limit to 1"
                 ).run(prof.report())
@@ -5293,7 +5309,7 @@ def fn():
                 base_checker().check("No recompilation detected.").run(prof.report())
 
             # Ensure correct guard fail message is selected to show to user
-            if torch._dynamo.config.assume_static_by_default:
+            if not torch._dynamo.config.dynamic_shapes:
                 new_shape_input = torch.rand((4, 3, 4))
                 _ = compiled(new_shape_input)
 
