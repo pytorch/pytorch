@@ -73,7 +73,7 @@ class CoordescTuner:
             return self.size_hints[-1]  # the last one is for reduction
         else:
             # large enough. We should not pick this large RBLOCK anyway
-            return 2 ** 30
+            return 2**30
 
     def cache_benchmark_result(self, config, timing):
         self.cached_benchmark_results[triton_config_to_hashable(config)] = timing
@@ -120,7 +120,7 @@ class CoordescTuner:
             return val > self.get_zmax()
         if name == "RBLOCK":
             return val > self.get_rmax()
-    
+
         return False
 
     def get_neighbour_values(self, name, orig_val, radius=1, include_self=False):

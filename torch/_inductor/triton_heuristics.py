@@ -70,7 +70,14 @@ class CachingAutotuner(KernelInterface):
     """
 
     def __init__(
-        self, fn, meta, configs, save_cache_hook, mutated_arg_names, heuristic_type, size_hints,
+        self,
+        fn,
+        meta,
+        configs,
+        save_cache_hook,
+        mutated_arg_names,
+        heuristic_type,
+        size_hints=None,
     ):
         super().__init__()
         self.fn = fn
@@ -94,7 +101,9 @@ class CachingAutotuner(KernelInterface):
                 str(self.meta.get("device", 0)),
             )
 
-        self.coordesc_tuner = CoordescTuner(is_mm=False, name=self.fn.__name__, size_hints=size_hints)
+        self.coordesc_tuner = CoordescTuner(
+            is_mm=False, name=self.fn.__name__, size_hints=size_hints
+        )
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
