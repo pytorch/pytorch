@@ -580,6 +580,7 @@ class CUDAWarmupNode:
         def add_ref(o):
             return (
                 o is not None
+                and isinstance(o, torch.Tensor)
                 and o.is_cuda
                 and o.untyped_storage().data_ptr() not in non_cudagraph_inps
                 and o.untyped_storage().data_ptr() != 0

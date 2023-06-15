@@ -780,6 +780,15 @@ def check_unspec_python_args(args, kwargs):
     return unspec_count > 0
 
 
+def check_numpy_ndarray_args(args, kwargs):
+    from .variables.tensor import NumpyNdarrayVariable
+
+    return any(
+        isinstance(x, NumpyNdarrayVariable)
+        for x in itertools.chain(args, kwargs.values())
+    )
+
+
 def specialize_args_kwargs(tx, args, kwargs):
     specialized_args = []
     specialized_kwargs = {}
@@ -895,6 +904,9 @@ def same(
         fp64_ref = ref
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
+        if len(ref) != len(res):
+            log_error("Length mismatch")
+            return False
         return len(ref) == len(res) and all(
             same(
                 ai,
@@ -960,6 +972,7 @@ def same(
                 if not r:
                     log_error("Accuracy failed: uint8 tensor did not match")
                 return r
+
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
