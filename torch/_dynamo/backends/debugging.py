@@ -1,5 +1,4 @@
 import dataclasses
-import functools
 from importlib import import_module
 from typing import Any, List, Optional
 
@@ -8,6 +7,7 @@ from functorch.compile import min_cut_rematerialization_partition
 import torch
 from torch import _guards
 from torch._functorch.compilers import ts_compile
+from torch._inductor.compile_fx import inductor_partition_fn
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
 
@@ -67,9 +67,7 @@ aot_eager_decomp_partition = aot_autograd(
     decompositions=lambda: import_module(
         "torch._inductor.compile_fx"
     ).select_decomp_table(),
-    partition_fn=functools.partial(
-        min_cut_rematerialization_partition, compiler="inductor"
-    ),
+    partition_fn=inductor_partition_fn,
 )
 register_backend(
     name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
