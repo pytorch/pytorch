@@ -2528,6 +2528,39 @@ def meta_round(self, **kwargs):
     )
 
 
+def shift_dtype_check(fn_name, self, val):
+    check(
+        utils.is_integer_dtype(self.dtype),
+        lambda: f"{fn_name}: Expected input tensor to have an integral dtype. Got {self.dtype}",
+    )
+    if isinstance(val, torch.Tensor):
+        check(
+            utils.is_integer_dtype(val.dtype),
+            lambda: f"{fn_name}: Expected shift value to have an integral dtype. Got {val.dtype}",
+        )
+    else:
+        check(
+            isinstance(val, IntLike),
+            lambda: f"{fn_name}: Expected shift value to be an int. Got {val}",
+        )
+
+
+@register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
+def meta_rshifts(self, other):
+    shift_dtype_check("rshift", self, other)
+    return _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
+@register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
+def meta_lshifts(self, other):
+    shift_dtype_check("lshift", self, other)
+    return _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
 @register_meta(aten.zero.default)
 def meta_zero(self):
     return self.new_empty(self.shape)
