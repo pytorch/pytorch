@@ -1237,11 +1237,23 @@ class TorchPatcher:
             adamw,
             asgd,
             nadam,
+            rmsprop,
             rprop,
             sgd,
         )
 
-        for opt_mod in adagrad, adam, adamax, adamw, asgd, nadam, sgd, adadelta, rprop:
+        for opt_mod in (
+            adadelta,
+            adagrad,
+            adam,
+            adamax,
+            adamw,
+            asgd,
+            nadam,
+            rmsprop,
+            rprop,
+            sgd,
+        ):
             opt_name = opt_mod.__name__.split(".")[-1]
             multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
             fused_fn_name = f"_fused_{opt_name}"
