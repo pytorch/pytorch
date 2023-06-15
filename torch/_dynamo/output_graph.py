@@ -27,6 +27,7 @@ from torch._guards import (
     GuardsCheckpointState,
     Source,
     TracingContext,
+    scope,
 )
 from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary
@@ -222,6 +223,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         global_scope: Scope,
     ):
         super().__init__()
+        
         self.tracers = [SubgraphTracer(self)]
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker

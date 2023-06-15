@@ -9,7 +9,7 @@ from typing import Dict, Optional, Set
 
 import torch
 import torch._logging
-from torch._guards import tracing
+from torch._guards import tracing, scope
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -427,7 +427,9 @@ def _compile(
     try:
         for attempt in itertools.count():
             try:
-                out_code = transform_code_object(code, transform)
+                guard_scope = {"L":frame.f_locals, "G": frame.f_globals}
+                with scope(guard_scope):
+                    out_code = transform_code_object(code, transform)
                 orig_code_map[out_code] = code
                 break
             except exc.RestartAnalysis as e:

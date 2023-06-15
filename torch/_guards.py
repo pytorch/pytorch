@@ -537,10 +537,39 @@ def tracing(context: TracingContext):
         _CURRENT_TRACING_CONTEXT = old_context
 
 
+
+_CURRENT_SCOPE = None
+
+@contextmanager
+def scope(scope_context):
+    global _CURRENT_SCOPE
+    old_scope = _CURRENT_SCOPE
+    _CURRENT_SCOPE = scope_context
+    try:
+        yield _CURRENT_SCOPE
+    finally:
+        _CURRENT_SCOPE = old_scope
+
 # Subclasses can be found in torch/_dynamo/source.py
 # TODO(voz): Consider a toplevel torch/_source.py
 @dataclasses.dataclass(frozen=True)
 class Source:
+    guard_forbidden = False
+
+    def __post_init__(self):
+        from torch._dynamo.source import is_from_local_source
+        name = self.name()
+        # We have to do a name check because DeterministicAlgorithmsSource are abusing sources and guards
+        # We only check local, because global does a ton of weird import munging and builtin remapping
+        # I can't be bothered with atm
+        if name and not self.guard_forbidden_source() and is_from_local_source(self):
+            try:
+                eval(self.name(), _CURRENT_SCOPE)
+            except:
+                # Note - I wanted this to raise, but that was annoying because we don't have a good way of doing
+                # defaults where guard_forbidden is set as needed in the constructor due to dataclass limitiations.
+                object.__setattr__(self, 'guard_forbidden', True)
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
@@ -551,6 +580,9 @@ class Source:
         raise NotImplementedError()
 
     def make_guard(self, fn, is_volatile=False) -> Guard:
+        # We have to do a name check because DeterministicAlgorithmsSource are abusing sources and guards
+        if self.name() and self.guard_forbidden_source():
+            raise RuntimeError(f"Explicitly fordbidden source {self} leaked into guard creation! This will not eval")
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
         return Guard(self.name(), self.guard_source(), fn, is_volatile)
@@ -558,6 +590,13 @@ class Source:
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
 
+    def guard_forbidden_source(self):
+        return _is_guard_forbidden_source(self)
+
+    def forbid_in_guards(self, forbid):
+        self.guard_forbidden = forbid
+        return self
+        
 
 # Subclasses can be found in torch/_dynamo/source.py
 # Note - there is an odd exception to this invariant of a single base,
@@ -609,3 +648,12 @@ def detect_fake_mode(inputs: Any = None):
         return fake_mode
     else:
         return None
+
+def _is_guard_forbidden_source(source: Source):
+    # If its forbidden, this returns True
+    if source.guard_forbidden:
+        return True
+    # Walk the chain, and re-enter the func to check every source in the chain
+    if isinstance(source, ChainedSource):
+        return _is_guard_forbidden_source(source.base)
+    return source.guard_forbidden

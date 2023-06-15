@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._guards import Checkpointable, tracing, TracingContext
+from torch._guards import Checkpointable, tracing, TracingContext, scope
 
 from . import (
     allowed_functions,
