@@ -8,4 +8,4 @@ Compiled workloads on modern x86 CPUs are usually optimized by SIMD instruction 
 
 Which ISAs are supported by a machine can be checked with `the tutorial <https://linuxconfig.org/identify-if-my-cpu-using-32-bit-or-64-bit-instruction-set>`.
 
-Specifically, with a server having AMX instructions enabled, workloads performance can be further boosted by `leveraging AMX <https://pytorch.org/tutorials/recipes/recipes/amx.html>`.
+Specifically, with a server having AMX instructions enabled, workloads performance can be further boosted by `leveraging AMX <https://pytorch.org/tutorials/recipes/amx.html>`.
