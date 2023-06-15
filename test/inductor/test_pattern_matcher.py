@@ -5,8 +5,8 @@ import unittest
 import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import count_calls, counters
 from torch._dynamo.testing import expectedFailureDynamicWrapper
+from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM

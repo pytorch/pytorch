@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset, utils
 from .bytecode_transformation import (
@@ -158,8 +159,18 @@ def debug_insert_nops(frame, cache_size, hooks, _):
 
     debug_checks(frame.f_code)
     code = transform_code_object(frame.f_code, insert_nops)
+    graph = OutputGraph(
+        code_options={},
+        compiler_fn=None,
+        root_tx=None,
+        export=False,
+        export_constraints=None,
+        frame_state={"_id": 0},
+        local_scope=locals(),
+        global_scope=globals(),
+    )
 
-    return GuardedCode(code, CheckFunctionManager().check_fn)
+    return GuardedCode(code, CheckFunctionManager(graph).check_fn)
 
 
 class CompileCounter:
