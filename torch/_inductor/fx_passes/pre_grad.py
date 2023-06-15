@@ -59,8 +59,10 @@ def pre_grad_passes(gm, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
-        for pattern_matcher_pass in pattern_matcher_passes:
-            pattern_matcher_pass.apply(gm.graph)
+
+        if config.experimental_patterns:
+            for pattern_matcher_pass in pattern_matcher_passes:
+                pattern_matcher_pass.apply(gm.graph)
 
     gm.graph.lint()
     gm.recompile()

@@ -86,12 +86,10 @@ def normalize_split_base(match: Match, _get_split_args: Callable):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.split, users=MULTIPLE),
     pass_dict=normalization_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
     CallMethodVarArgs("split", users=MULTIPLE),
     pass_dict=normalization_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 def normalize_split_default(match: Match, *args, **kwargs):
     return normalize_split_base(match, _get_split_args_default)
@@ -100,7 +98,6 @@ def normalize_split_default(match: Match, *args, **kwargs):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.cat, users=MULTIPLE),
     pass_dict=normalization_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
     cat_node = match.nodes[0]
@@ -150,7 +147,6 @@ def find_next_users(split_node):
 @register_graph_pattern(
     CallMethodVarArgs("squeeze", users=MULTIPLE),
     pass_dict=normalization_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 def normalize_squeeze_default(match: Match, *args, **kwargs):
     squeeze_node = match.nodes[0]
@@ -218,7 +214,6 @@ class TorchSplit(CallFunction):
         KeywordArg("next_split_sections"),
     ),
     pass_dict=merge_splits_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 def merge_splits(
     match: Match,
@@ -813,7 +808,6 @@ class GetItem(CallFunction):
         ),
     ),
     pass_dict=split_cat_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
     RepeatedExpr(
@@ -883,21 +877,18 @@ getitem_unbind = ListOf(
 @register_graph_pattern(
     CallFunction([torch.stack, torch.cat], getitem_unbind, Ignored(), _users=MULTIPLE),
     pass_dict=unbind_stack_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
     CallFunction(
         [torch.stack, torch.cat], getitem_unbind, dim=Ignored(), _users=MULTIPLE
     ),
     pass_dict=unbind_stack_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
     CallFunction(
         [torch.stack, torch.cat], tensors=getitem_unbind, dim=Ignored(), _users=MULTIPLE
     ),
     pass_dict=unbind_stack_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 def merge_unbind_stack(match: Match, unbind_input: torch.fx.Node, dim: int):
     unbind_node = next(node for node in match.nodes if node.target == torch.unbind)
@@ -926,7 +917,6 @@ getitem_split = ListOf(
         _users=MULTIPLE,
     ),
     pass_dict=split_cat_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -936,7 +926,6 @@ getitem_split = ListOf(
         _users=MULTIPLE,
     ),
     pass_dict=split_cat_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -946,7 +935,6 @@ getitem_split = ListOf(
         _users=MULTIPLE,
     ),
     pass_dict=split_cat_pass,
-    extra_check=config_flag("split_cat_fx_passes"),
 )
 def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split

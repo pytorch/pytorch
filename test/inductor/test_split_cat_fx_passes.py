@@ -8,7 +8,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 def patch(f):
-    f = torch._inductor.config.patch(split_cat_fx_passes=True)(f)
+    f = torch._inductor.config.patch(experimental_patterns=True)(f)
     f = torch._dynamo.config.patch(dynamic_shapes=True)(f)
     return f
 
@@ -583,7 +583,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(split_cat_fx_passes=False)
+    @torch._inductor.config.patch(experimental_patterns=False)
     def test_config_flag_is_respected(self):
         def split_with_cat(x):
             fs = torch.split(x, [4, 4, 24], dim=-1)
