@@ -595,15 +595,19 @@ def clone_inputs(example_inputs):
 
 @contextmanager
 def preserve_rng_state():
-    rng = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    # Similarly to torch/_functorch/aot_autograd.py::preserve_rng_state,
+    # we need to disable FakeTensorMode here
+    with torch.utils._python_dispatch._disable_current_modes():
+        rng = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
-        torch.random.set_rng_state(rng)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng)
+        with torch.utils._python_dispatch._disable_current_modes():
+            torch.random.set_rng_state(rng)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng)
 
 
 def is_jit_model(model0):
