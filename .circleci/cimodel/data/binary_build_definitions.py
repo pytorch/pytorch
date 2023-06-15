@@ -26,13 +26,6 @@ class Conf(object):
         return elems
 
     def gen_docker_image(self):
-        if self.gcc_config_variant == 'gcc5.4_cxx11-abi':
-            if self.gpu_version is None:
-                return miniutils.quote("pytorch/libtorch-cxx11-builder:cpu")
-            else:
-                return miniutils.quote(
-                    f"pytorch/libtorch-cxx11-builder:{self.gpu_version}"
-                )
         if self.pydistro == "conda":
             if self.gpu_version is None:
                 return miniutils.quote("pytorch/conda-builder:cpu")
