@@ -8,6 +8,7 @@ import unittest
 import weakref
 
 import torch
+from torch import nn
 
 import torch._dynamo
 from torch._inductor import config
@@ -229,6 +230,40 @@ class OptimizeForInferenceTemplate(TestCase):
         self.assertEqual(eager, compiled)
         self.assertTrue(weight_ref() is None)
 
+    def test_conv_weight_layout_convert(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(
+                    3, 128, kernel_size=3, padding=1, stride=1, bias=False
+                )
+            def forward(self, x):
+                return self.conv(x)
+            def get_example_inputs(self):
+                return torch.rand(2, 3, 5, 5).cuda(),
+
+        from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+        nconv = 0
+        def my_inner_compile(gm, example_inputs, *args, **kwargs):
+            out = compile_fx_inner(gm, example_inputs, *args, **kwargs)
+
+            nonlocal nconv
+            convs = [n for n in gm.graph.nodes if n.target == aten.convolution.default]
+            nconv += len(convs)
+            for conv in convs:
+                weight_node = conv.args[1]
+                weight_const_tensor = getattr(gm, weight_node.target)
+                self.assertTrue(weight_const_tensor.is_contiguous(memory_format=torch.channels_last))
+                self.assertTrue(weight_node.meta['val'].is_contiguous(memory_format=torch.channels_last))
+
+            return out
+
+        mod = torch.compile(Model().cuda(), backend=functools.partial(compile_fx, inner_compile=my_inner_compile))
+        inp = mod.get_example_inputs()
+        with torch.no_grad():
+            mod(*inp)
+
+        self.assertTrue(nconv == 1)
 
 if HAS_CPU and not torch.backends.mps.is_available():
 

@@ -3,8 +3,11 @@ import weakref
 from typing import List, Optional, Tuple
 
 import torch
+from torch import nn
 import torch.utils._pytree as pytree
 from . import config
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.utils._mode_utils import no_dispatch
 
 aten = torch.ops.aten
 
@@ -228,13 +231,9 @@ def discard_traced_gm_params(mod):
         setattr(mod, attr_name, e_t)
 
 
-@torch.utils._python_dispatch._disable_current_modes()
 def convert_conv_weights_to_channels_last(gm):
     """
     Convert 4d convolution weight tensor to channels last format.
-    Need change
-    1. the layout in example_inputs since they are compile time inputs
-    2. and the layout in params_flat since they are runtime inputs
 
     This method assumes the graph is already freezed.
     """
@@ -247,7 +246,16 @@ def convert_conv_weights_to_channels_last(gm):
             if len(param_tensor.shape) != 4:
                 # not a 4d tensor, skip
                 continue
-            cl_param_tensor = param_tensor.to(memory_format=torch.channels_last)
+            with no_dispatch():
+                cl_param_tensor = param_tensor.to(memory_format=torch.channels_last)
+                if isinstance(param_tensor, nn.Parameter):
+                    cl_param_tensor = nn.Parameter(cl_param_tensor)
             if cl_param_tensor is not param_tensor:
                 setattr(gm, weight_node.target, cl_param_tensor)
-            # TODO change meta['val'] as well?
+
+                # Even though inductor does not use meta['val'] or meta['tensor_meta']
+                # for get_attr node, we still update them to be consistent.
+                weight_node.meta['val'] = weight_node.meta['val'].to(memory_format=torch.channels_last)
+                weight_node.meta['tensor_meta'] = _extract_tensor_metadata(
+                    weight_node.meta['val']
+                )
