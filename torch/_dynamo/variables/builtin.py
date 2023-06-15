@@ -12,18 +12,13 @@ from torch import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
-from ..exc import (
-    AttributeMutationError,
-    unimplemented,
-    Unsupported,
-    UserError,
-    UserErrorType,
-)
+from ..exc import unimplemented, Unsupported, UserError, UserErrorType
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     check_constant_args,
+    check_numpy_ndarray_args,
     check_unspec_python_args,
     get_higher_order_op,
     istype,
@@ -521,6 +516,13 @@ class BuiltinVariable(VariableTracker):
                         proxy,
                         raw_value=raw_value,
                         need_unwrap=need_unwrap,
+                        **options,
+                    )
+                elif check_numpy_ndarray_args(args, kwargs):
+                    return wrap_fx_proxy_cls(
+                        variables.NumpyNdarrayVariable,
+                        tx,
+                        proxy,
                         **options,
                     )
                 elif all(isinstance(x, SymNodeVariable) for x in args):
@@ -1104,10 +1106,6 @@ class BuiltinVariable(VariableTracker):
                 f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
-            if not tx.output.is_root_tracer():
-                raise AttributeMutationError(
-                    "Can't inplace modify module params/buffers inside HigherOrderOp"
-                )
             obj.convert_to_unspecialized(tx)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):

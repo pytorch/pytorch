@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import unittest
-from unittest.mock import patch
 
 import torch
 
@@ -292,7 +291,6 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
         "Can't run fused SDPA on this platform",
     )
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @expectedFailureDynamic
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
