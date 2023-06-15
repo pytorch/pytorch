@@ -220,6 +220,30 @@ class TestDeserialize(TestCase):
                 # For expressions like 's0 < 10' can only compare through string
                 self.assertEqual(str(val1), str(val2))
 
+            # Check "stack_trace" metadata
+            if "None" in node1.meta.get("stack_trace"):
+                self.assertTrue(
+                    node2.meta.get("stack_trace") is None
+                    or "None" in node2.meta.get("stack_trace")
+                )
+            else:
+                self.assertEqual(
+                    node1.meta.get("stack_trace", None),
+                    node2.meta.get("stack_trace", None),
+                )
+
+            # Check "nn_module_stack" metadata
+            self.assertEqual(
+                node1.meta.get("nn_module_stack", None),
+                node2.meta.get("nn_module_stack", None),
+            )
+
+            # Check "source_fn" metadata
+            self.assertEqual(
+                node1.meta.get("source_fn", None),
+                node2.meta.get("source_fn", None),
+            )
+
     def test_multi_return(self) -> None:
         """
         Test multiple return from a single node (ex. layer_norm has 2 outputs)
