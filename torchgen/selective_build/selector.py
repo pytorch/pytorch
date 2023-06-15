@@ -255,7 +255,7 @@ class SelectiveBuilder:
                 if "default" not in kernel_key:
                     raise Exception("Missing kernel for the model")
                 else:
-                    return ["default"]
+                    result_set.add("default")
 
         return list(result_set)
 
