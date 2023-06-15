@@ -32,7 +32,6 @@ from torch._dynamo.testing import (
     CompileCounter,
     expectedFailureDynamic,
     requires_numpy_pytorch_interop,
-    requires_static_shapes,
     same,
     skipIfNotPy311,
     unsupported,
@@ -319,7 +318,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 9)
         )
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -355,7 +353,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         else:
             self.assertExpectedInline(counts.op_count, """11""")
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_user_defined_binop(self):
         class MyClass:
             def __init__(self, value):
@@ -439,7 +436,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, lambda a, b: compare_shapes(a, b, to_list=False), 2
         )
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_compare_shapes_with_constant(self):
         def compare_shapes(a):
             x = a.shape
@@ -813,7 +809,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             expected_ops_dynamic=ifdynstaticdefault(5, 8),
         )
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_tensor_item_capture(self):
         def fn(a, b):
@@ -828,7 +823,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_tensor_item_no_capture(self):
         def fn(a, b):
@@ -1201,7 +1195,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
-    @requires_static_shapes
     def test_tensor_build_list_unpack(self):
         def fn(x):
             # seen in fastNLP_Bert
@@ -1284,7 +1277,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_(self):
         def fn(x: torch.Tensor, y: int):
             z = x.detach()
@@ -2346,7 +2338,6 @@ def fn():
         opt_fn(x, Foo.BAR)
         self.assertEqual(cnts.op_count, 1)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_repeat_interleave_graphbreaks(self):
         def fn_no_breaks(x):
             # no breaks on self_int
@@ -2676,7 +2667,6 @@ def fn():
         opt_f(x, n)
         self.assertEqual(cnts.frame_count, 1)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_item(self):
         class MyMod(torch.nn.Module):
@@ -2690,7 +2680,6 @@ def fn():
 
         self.assertEqual(y, 11)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_item_changes(self):
         class MyMod(torch.nn.Module):
@@ -2707,7 +2696,6 @@ def fn():
         self.assertEqual(y, 11)
         self.assertEqual(z, 61)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_item_changes_new_shape(self):
         class MyMod(torch.nn.Module):
@@ -2745,7 +2733,6 @@ def fn():
 
         self.assertTrue(torch.allclose(dynamo_output, output))
 
-    @requires_static_shapes
     def test_cross_entropy_loss_fancy_ctor2(self):
         rand_3_5 = torch.randn(3, 5)
         target = torch.empty(3, dtype=torch.long).random_(5)
@@ -3040,7 +3027,6 @@ def fn():
         result = f(torch.ones(6), 3)
         self.assertEqual(result, 3)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_onnx_shape_as_tensor(self):
         @torch._dynamo.optimize("eager", nopython=True)
         def f(x):
@@ -4121,7 +4107,6 @@ def fn():
         x = torch.rand([4, 4])
         self.assertEqual(opt_fn(x), fn(x))
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_guard_failure_fn(self):
         def fn(x, y, k):
             x = x + 1
@@ -4157,7 +4142,6 @@ def fn():
         else:
             self.assertTrue(guard_failure is not None)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn_shape_control(self):
         def fn(x, y):
             if x.shape[0] < 3:
@@ -4196,7 +4180,6 @@ def fn():
         else:
             self.assertExpectedInline(guard_failure[0], """L['x'].size()[0] < 3""")
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn2(self):
         def fn(x, y):
             x = x + 1
@@ -4449,8 +4432,8 @@ def fn():
         )
 
     def test_int_list(self):
-        # if dynamic_shapes == True: unspec int list
-        # if dynamic_shapes == False: spec int list
+        # if assume_static_by_default == True: spec int list
+        # otherwise: unspec int list
         def fn(x, y):
             return torch.sin(x + y[1] % 2)
 
@@ -5028,7 +5011,6 @@ def fn():
         dis.dis(fn)
         self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -5056,7 +5038,6 @@ def fn():
 
         self.assertEqual(counter.frame_count, 2)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -5070,7 +5051,6 @@ def fn():
         torch._dynamo.reset()
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint_across_break(self):
         y = torch.randn([3, 3, 3])
 
@@ -5090,7 +5070,6 @@ def fn():
 
     # Sadly, this does not throw - we do not prop correctly across the graph break
     @unittest.expectedFailure
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_raise_guard_partial_constraint_across_break(self):
         y = torch.randn([3, 3, 3])
 
@@ -5111,7 +5090,6 @@ def fn():
         ):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_raise_guard_partial_constraint_no_graph_break(self):
         y = torch.randn([3, 3, 3])
 
@@ -5170,7 +5148,6 @@ def fn():
         self.assertEqual(len(w), 1)
         self.assertIn("forward call that caused the error", str(w[0].message))
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_py_guards_mark_dynamic(self):
         def my_dyn_fn(a):
             if a.shape[0] > 2:
@@ -5312,7 +5289,6 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):

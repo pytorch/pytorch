@@ -20,7 +20,7 @@ from torch._dynamo.testing import same
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
 
-@torch._dynamo.config.patch(dynamic_shapes=True, assume_static_by_default=False)
+@torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):

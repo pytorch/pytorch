@@ -95,14 +95,15 @@ test_failures_cuda_wrapper = {
 def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
     test_name = f"{name}_{device}" if device else name
 
+    func = getattr(tests, test_name)
+    assert callable(func), "not a callable"
+    func = slowTest(func) if slow else func
+
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
         try:
-            func = getattr(tests, test_name)
-            assert callable(func), "not a callable"
-            func = slowTest(func) if slow else func
             code = test_torchinductor.run_and_get_cpp_code(
                 func, *func_inputs if func_inputs else []
             )
@@ -112,6 +113,9 @@ def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=
             tests.tearDownClass()
 
     fn.__name__ = test_name
+    import copy
+
+    fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
             CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate,
@@ -212,6 +216,7 @@ if RUN_CPU:
         DynamicShapesCppWrapperCpuTests,
         "cpp_wrapper",
         test_failures_cpp_wrapper,
+        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if RUN_CUDA:
@@ -287,6 +292,7 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
         test_failures_cuda_wrapper,
+        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if __name__ == "__main__":
