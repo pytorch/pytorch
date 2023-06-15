@@ -7,9 +7,7 @@
 
 #if !defined(USE_ROCM)
 #ifdef __GNUC__
-#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic push
-#endif
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif // __GNUC__
 #endif // USE_ROCM
@@ -62,9 +60,7 @@ constexpr int kFp16CUDADevicePropMajor = 3;
 // Re-enable strict aliasing diagnostic if it was disabled.
 #if !defined(USE_ROCM)
 #ifdef __GNUC__
-#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6)
 #pragma GCC diagnostic pop
-#endif
 #endif // __GNUC__
 #endif // USE_ROCM
 
