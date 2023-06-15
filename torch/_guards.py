@@ -188,7 +188,7 @@ class Guard:
 
     def __repr__(self):
         s = f"""
-        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
+        {self.source.name.lower() if self.source else ""} {repr(self.name)}
         {{
             'guard_types': {self.guard_types},
             'code': {self.code_list},
@@ -202,7 +202,7 @@ class Guard:
         output = f"Name: {repr(self.name)}\n"
         source = self.source.name.lower() if self.source else ""
         output += f"    Source: {source}\n"
-        output += f"    Create Function: {self.create_fn.__name__}\n"
+        output += f"    Create Function: {self.create_fn}\n"
         output += f"    Guard Types: {self.guard_types}\n"
         output += f"    Code List: {self.code_list}\n"
         output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"

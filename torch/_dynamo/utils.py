@@ -1692,7 +1692,9 @@ def higher_order_op_converter():
 
 
 def requires_higher_order_op(obj):
-    return obj in higher_order_op_converter()
+    return (
+        isinstance(obj, collections.abc.Hashable) and obj in higher_order_op_converter()
+    )
 
 
 def get_higher_order_op(obj):
