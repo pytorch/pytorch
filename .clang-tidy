@@ -42,6 +42,7 @@ modernize-*,
 -modernize-use-trailing-return-type,
 -modernize-use-nodiscard,
 performance-*,
+-performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
 readability-container-size-empty,
 '

@@ -8,7 +8,6 @@
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/functions/utils.h>
-#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
 
@@ -23,7 +22,7 @@ namespace torch {
 namespace autograd {
 namespace VariableType {
 
-static std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(
+std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(
     at::ArrayRef<at::Backend> backends) {
   std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
@@ -38,16 +37,16 @@ static std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(
   return res;
 }
 
-std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
   return allTypesForBackends({Backend::CPU, Backend::SparseCPU});
 }
 
-std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({Backend::CUDA, Backend::SparseCUDA});
 }
 
-std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
   return allTypesForBackends({Backend::XPU, Backend::SparseXPU});
 }
 
@@ -376,7 +375,7 @@ namespace ADInplaceOrView {
       : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT \
                                     : CreationMeta::NO_GRAD_MODE)
 
-static Tensor& copy_(
+Tensor& copy_(
     c10::DispatchKeySet ks,
     Tensor& self,
     const Tensor& src,
@@ -390,7 +389,7 @@ static Tensor& copy_(
   return self;
 }
 
-static const Tensor& resize_(
+const Tensor& resize_(
     c10::DispatchKeySet ks,
     const Tensor& self,
     SymIntArrayRef size,
@@ -414,7 +413,7 @@ static const Tensor& resize_(
   return self;
 }
 
-static const Tensor& resize_as_(
+const Tensor& resize_as_(
     c10::DispatchKeySet ks,
     const Tensor& self,
     const Tensor& the_template,
@@ -439,7 +438,7 @@ static const Tensor& resize_as_(
   return self;
 }
 
-static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
+Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   auto out = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::_ops::detach::redispatch(
@@ -461,10 +460,7 @@ static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   return result;
 }
 
-static Tensor _fw_primal(
-    c10::DispatchKeySet ks,
-    const Tensor& self,
-    int64_t level) {
+Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
   auto tmp = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(self);
@@ -488,7 +484,7 @@ static Tensor _fw_primal(
 }
 
 // NB: This does not redispatch any further
-static Tensor _make_dual(
+Tensor _make_dual(
     c10::DispatchKeySet ks,
     const Tensor& primal,
     const Tensor& tangent,

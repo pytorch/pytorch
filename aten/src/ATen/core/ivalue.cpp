@@ -64,11 +64,6 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              _fastEqualsForContainer);
 }
 
-std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
-  out << v.qualifiedClassName() << "." << v.name();
-  return out;
-}
-
 bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
   return lhs.name() == rhs.name() && *rhs.type() == *lhs.type();
 }
@@ -766,6 +761,11 @@ IValueComparator getGreaterThanComparator(const IValue& v) {
   return [lt = std::move(lt)](const IValue& a, const IValue& b) {
     return lt(b, a);  // gt(a, b) === lt(b, a)
   };
+}
+
+std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
+  out << v.qualifiedClassName() << "." << v.name();
+  return out;
 }
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {

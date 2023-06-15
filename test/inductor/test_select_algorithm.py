@@ -8,7 +8,6 @@ import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 import torch.nn.functional as F
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.autotune_process import BenchmarkRequest
 
@@ -47,11 +46,10 @@ class TestSelectAlgorithm(TestCase):
     def check_counter(self, counter, expected):
         if not inductor_config.cpp_wrapper:
             self.assertEqual(counter, expected)
-        else:
+        elif not dynamo_config.dynamic_shapes:
             # cpp_wrapper for the CUDA backend runs two passes
             self.assertEqual(counter, 2 * expected)
 
-    @expectedFailureDynamicWrapper
     @patches
     def test_linear_relu(self):
         @torch.compile
@@ -68,7 +66,6 @@ class TestSelectAlgorithm(TestCase):
         # It would be nice to assert this got fused into a single kernel, but that
         # only happens if we select a triton template (and not aten).
 
-    @expectedFailureDynamicWrapper
     @patches
     def test_addmm(self):
         @torch.compile
@@ -192,7 +189,6 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @expectedFailureDynamicWrapper
     @patches
     def test_convolution1(self):
         @torch.compile

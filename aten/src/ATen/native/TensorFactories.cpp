@@ -171,7 +171,7 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
-static Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
+Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
     return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -179,7 +179,7 @@ Tensor& arange_out(const Scalar& end, Tensor& result) {
   return at::arange_out(result, /*start=*/0, end, /*step=*/1);
 }
 
-static Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
+Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
   return at::arange_out(result, start, end, /*step=*/1);
 }
 
@@ -189,14 +189,14 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-static void complex_check_floating(const Tensor& a, const Tensor& b) {
+void complex_check_floating(const Tensor& a, const Tensor& b) {
   TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble || a.scalar_type() == kHalf) &&
               (b.scalar_type() == kFloat || b.scalar_type() == kDouble || b.scalar_type() == kHalf),
               "Expected both inputs to be Half, Float or Double tensors but got ",
               a.scalar_type(), " and ", b.scalar_type());
 }
 
-static void complex_check_dtype(
+void complex_check_dtype(
     const Tensor& result,
     const Tensor& a,
     const Tensor& b) {
@@ -352,12 +352,7 @@ Tensor& empty_out(IntArrayRef size,
     return self.to(ScalarType::n, non_blocking);                 \
   }
 
-// Some scalar types in CAST_OP have no declarations, they may be unused in Pytorch.
-// But we keep them and ignore the warning here until verified in the future.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmissing-prototypes"
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
-#pragma clang diagnostic pop
 
 #undef DEFINE_CAST_OP
 

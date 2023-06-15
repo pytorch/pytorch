@@ -38,6 +38,7 @@ def make_dynamic_cls(cls):
         cls,
         cls_prefix,
         suffix,
+        (config, "dynamic_shapes", True),
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
         xfail_prop="_expected_failure_dynamic",
