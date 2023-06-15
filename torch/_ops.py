@@ -262,8 +262,11 @@ class HigherOrderOperator(OperatorBase):
 
         return wrapper()
 
+    def __str__(self):
+        return f"{self.name()}"
+
     def name(self):
-        return self.name
+        return self._name
 
 
 def _to_flat_tuple(args, kwargs):
