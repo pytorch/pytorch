@@ -33,7 +33,7 @@ maml_omniglot,pass,0
 mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
-moco,pass,77
+moco,pass,11
 nvidia_deeprecommender,pass,0
 opacus_cifar10,pass,45
 phlippe_densenet,pass,0

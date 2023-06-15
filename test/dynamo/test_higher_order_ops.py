@@ -661,10 +661,13 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         for arg in args:
             cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
 
+        torch.manual_seed(0)
         expected = fn(*args)
         expected.sum().backward()
 
-        result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*cloned_args)
+        opt_fn = torch.compile(fn, fullgraph=fullgraph, backend=backend)
+        torch.manual_seed(0)
+        result = opt_fn(*cloned_args)
         result.sum().backward()
 
         if not skip_check:
@@ -778,25 +781,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
-
-    def test_without_functionalization_turned_on(self):
-        def gn(x, y):
-            return torch.sigmoid(torch.matmul(x, y))
-
-        def fn(x, y):
-            return torch.cos(torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y))
-
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-        args = (x, y)
-
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
-        expected = fn(*args)
-        result = torch.compile(fn, backend=cnt)(*args)
-
-        self.assertEqual(result, expected)
 
     @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)

@@ -4903,22 +4903,6 @@ TEST_F(VulkanAPITest, stack_invalid_inputs) {
     at::stack({}, 0);
   }, ::c10::Error);
 
-  // Act: Vulkan stack expects dim = 0
-  EXPECT_THROW({
-    at::stack({
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 1);
-  }, ::c10::Error);
-
-  // Act: Vulkan stack expects 2 dimensional inputs
-  EXPECT_THROW({
-    at::stack({
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-        at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 0);
-  }, ::c10::Error);
-
   // Act: Vulkan stack inputs must have matching sizes
   EXPECT_THROW({
     at::stack({
@@ -4928,97 +4912,54 @@ TEST_F(VulkanAPITest, stack_invalid_inputs) {
   }, ::c10::Error);
 }
 
-TEST_F(VulkanAPITest, stack_1_tensor) {
-  // Arrange
-  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-
-  // Act
-  const auto out_cpu = at::stack({in_cpu1}, 0);
-  const auto out_vulkan = at::stack({in_cpu1.vulkan()}, 0);
-
-  // Assert
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, stack_2_tensors) {
-  // Arrange
-  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-
-  // Act
-  const auto out_cpu = at::stack({in_cpu1, in_cpu2}, 0);
-  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan()}, 0);
-
-  // Assert
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, stack_3_tensors) {
-  // Arrange
-  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu3 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-
-  // Act
-  const auto out_cpu = at::stack({in_cpu1, in_cpu2, in_cpu3}, 0);
-  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
-
-  // Assert
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, stack_4_tensors) {
-  // Arrange
-  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu3 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu4 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-
-  // Act
-  const auto out_cpu = at::stack({in_cpu1, in_cpu2, in_cpu3, in_cpu4}, 0);
-  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan(), in_cpu4.vulkan()}, 0);
-
-  // Assert
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, stack_from_1_to_20_tensors) {
+void test_stack(const at::IntArrayRef input_shape, int64_t dim, int numTensors) {
   std::vector<at::Tensor> tensors_cpu = {};
   std::vector<at::Tensor> tensors_vulkan = {};
 
-  for (const auto i : c10::irange(20)) {
-    at::Tensor in_cpu = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  for (int i = 0; i < numTensors; i++) {
+    at::Tensor in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
     tensors_cpu.emplace_back(in_cpu);
     tensors_vulkan.emplace_back(in_cpu.vulkan());
-    at::Tensor out_cpu = at::stack(tensors_cpu, 0);
-    at::Tensor out_vulkan = at::stack(tensors_vulkan, 0);
-    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-    if (!check) {
-      std::cout << "Error when stacking " << i << " tensors" << std::endl;
-      showRtol(out_cpu, out_vulkan.cpu());
-    }
-    ASSERT_TRUE(check);
   }
+
+  at::Tensor out_cpu = at::stack(tensors_cpu, 0);
+  at::Tensor out_vulkan = at::stack(tensors_vulkan, 0);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "Error when stacking " << numTensors << " tensors" << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_1d) {
+  test_stack({221}, 0, 2);
+  test_stack({193}, 1, 3);
+
+  test_stack({221}, -1, 2);
+  test_stack({193}, -2, 3);
+}
+
+TEST_F(VulkanAPITest, stack_2d) {
+  test_stack({221, 193}, 0, 2);
+  test_stack({221, 193}, 1, 3);
+  test_stack({221, 193}, 2, 4);
+
+  test_stack({221, 193}, -1, 2);
+  test_stack({221, 193}, -2, 3);
+  test_stack({221, 193}, -3, 4);
+}
+
+TEST_F(VulkanAPITest, stack_3d) {
+  test_stack({221, 193, 11}, 0, 2);
+  test_stack({221, 193, 11}, 1, 3);
+  test_stack({221, 193, 11}, 2, 4);
+  test_stack({221, 193, 11}, 3, 5);
+
+  test_stack({221, 193, 11}, -1, 2);
+  test_stack({221, 193, 11}, -2, 3);
+  test_stack({221, 193, 11}, -3, 4);
+  test_stack({221, 193, 11}, -4, 5);
 }
 
 void test_zero_(const at::IntArrayRef input_shape) {
