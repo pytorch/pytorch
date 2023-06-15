@@ -1337,6 +1337,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
         elif self.value is torch._functorch.eager_transforms.grad_impl:
+            if not torch._dynamo.config.capture_func_grad:
+                unimplemented("torch.func.grad capture is disabled")
             # [NOTE] Here we are (roughly) modelling the following
             #
             #   grad_fn = torch.func.grad(fn, argnums=.., has_aux=..)
@@ -1370,7 +1372,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     - pre_side_effects.id_to_variable.keys()
                 )
                 if len(diff) > 0:
-                    unimplemented("NYI - side effects in torch.func.grad")
+                    unimplemented(
+                        "NYI - torch.func.grad(f) where there are side effects in f"
+                    )
 
             grad_proxy_args = (
                 body_node,

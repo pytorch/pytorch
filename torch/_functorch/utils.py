@@ -36,12 +36,3 @@ def exposed_in(module):
         fn.__module__ = module
         return fn
     return wrapper
-
-
-@contextlib.contextmanager
-def disable_functorch():
-    guard = torch._C._DisableFuncTorch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
