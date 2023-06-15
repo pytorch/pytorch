@@ -62,6 +62,9 @@ namespace ops {
 // Below are ProcessGroup's corresponding ops for each backend. Ops are but
 // routed through the dispatcher to be dispatched to the appropriate backend.
 // Currently a no-op as the process group does not have a list of backends.
+
+namespace {
+
 #define IMPL_SEND(DEV)                                                        \
   c10::intrusive_ptr<Work> send##DEV(                                         \
       at::TensorList tensors,                                                 \
@@ -425,6 +428,7 @@ void monitored_barrier_CPU(
           BarrierOptions{device_ids, std::chrono::milliseconds(timeout)},
           wait_all_ranks);
 }
+} // namespace
 
 // register functions to dispatcher
 namespace {
