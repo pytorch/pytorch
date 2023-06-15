@@ -612,6 +612,7 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
 } // namespace
 
 SDPBackend select_sdp_backend(sdp_params kernel_params) {
+  return SDPBackend::math;
   // This function defines the priority order of the different sdp backends
   // 1. Flash Attention
   // 2. Mem Efficient Attention
