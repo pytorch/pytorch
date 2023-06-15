@@ -86,12 +86,6 @@ test_failures_cuda_wrapper = {
     "test_batch_norm_2d_2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
         ("cuda_wrapper",)
     ),
-    "test_fft_real_input_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",)
-    ),
-    "test_fft_real_input_real_output_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",)
-    ),
 }
 
 
