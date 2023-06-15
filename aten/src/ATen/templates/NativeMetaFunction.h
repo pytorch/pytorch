@@ -17,12 +17,12 @@
 namespace at {
 namespace meta {
 
-// Q: How is NativeMetaFunction.h different from NativeMetaFunctions.h?
-struct TORCH_API structured_mul_Tensor : public TensorIteratorBase {
-
-
-    void meta(const at::Tensor & self, const at::Tensor & other);
-};
+// // Q: How is NativeMetaFunction.h different from NativeMetaFunctions.h?
+// struct TORCH_API structured_mul_Tensor : public TensorIteratorBase {
+//
+//
+//     void meta(const at::Tensor & self, const at::Tensor & other);
+// };
 
 ${meta_function_declarations}
 
