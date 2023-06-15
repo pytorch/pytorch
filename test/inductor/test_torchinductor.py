@@ -6393,7 +6393,7 @@ class TestFailure:
     __test__: bool = False
 
 
-def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
+def copy_tests(my_cls, other_cls, suffix, test_failures=None, xfail_prop=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use closures here to
@@ -6408,6 +6408,9 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
 
             # Copy __dict__ which may contain test metadata
             new_test.__dict__ = copy.deepcopy(value.__dict__)
+
+            if xfail_prop is not None and hasattr(value, xfail_prop):
+                new_test = unittest.expectedFailure(new_test)
 
             tf = test_failures and test_failures.get(name)
             if tf is not None and suffix in tf.suffixes:

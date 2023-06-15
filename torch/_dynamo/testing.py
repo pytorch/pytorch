@@ -328,16 +328,26 @@ def skipIfNotPy311(fn):
     return unittest.skip(fn)
 
 
+# Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
+# and test/dynamo/test_dynamic_shapes.py
 def expectedFailureDynamic(fn):
     fn._expected_failure_dynamic = True
     return fn
 
 
+# Controls tests generated in test/dynamo/test_dynamic_shapes.py
 def expectedFailureAutomaticDynamic(fn):
     fn._expected_failure_automatic_dynamic = True
     return fn
 
 
+# Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
 def expectedFailureCodegenDynamic(fn):
     fn._expected_failure_codegen_dynamic = True
+    return fn
+
+
+# Controls test generated in test/inductor/test_cpp_wrapper.py
+def expectedFailureDynamicWrapper(fn):
+    fn._expected_failure_dynamic_wrapper = True
     return fn
