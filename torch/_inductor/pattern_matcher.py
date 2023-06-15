@@ -35,6 +35,10 @@ NodeOrConstant = Union[Constant, torch.fx.Node]
 # Sentinel indicating multiple quantities can be matched
 MULTIPLE = object()
 
+# Preserve these keys while pattern matching. All the nodes in the replacement
+# graph will preserve the key from the first node in the original pattern.
+preserve_meta_keys = {"recompute"}
+
 
 class Match:
     """
@@ -589,6 +593,9 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: torch.fx.Graph,
         args: List[Any],
     ):
+        output_nodes = match.output_nodes()
+        first_node = output_nodes[0]
+
         class Replacer(torch.fx.Interpreter):
             call_method = None
             call_module = None
@@ -601,15 +608,20 @@ class ReplacementPatternEntry(PatternEntry):
                     target = node.target
                     args, kwargs = self.fetch_args_kwargs_from_env(node)
                     result = graph.call_function(target, args, kwargs)
+                    # Retain the meta tags from the first node in the match.
+                    # This is useful for retaining tags like recompute.
+                    for key in first_node.meta.keys():
+                        if key in preserve_meta_keys:
+                            result.meta[key] = first_node.meta[key]
                     if "val" in node.meta and "val" not in result.meta:
                         result.meta["val"] = node.meta["val"]
+                        if isinstance(node.meta["val"], torch.Tensor):
+                            assert "tensor_meta" in node.meta
+                            result.meta["tensor_meta"] = node.meta["tensor_meta"]
                     return result
                 raise NotImplementedError(f"unhandled {node}")
 
-        output_nodes = match.output_nodes()
-        node = output_nodes[0]
-
-        with graph.inserting_before(node):
+        with graph.inserting_before(first_node):
             replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
@@ -771,17 +783,18 @@ def is_start_of_fx_graph(graph, node):
     return node is next(iter(graph.nodes))
 
 
+# match: copy_, relu_, _set_grad_enabled, manual_seed, enter_functional_autocast, etc
+_mutation_op_re = re.compile(r"_$|(\b|_)(set|enter|exit|seed)(\b|_)")
+
+
 def is_mutation_op(node):
     if node.op == "call_function":
-        if node.target.__name__.endswith("_"):
+        if _mutation_op_re.search(node.target.__name__):
             return True
     elif node.op == "call_method":
-        if node.target.endswith("_"):
+        if _mutation_op_re.search(node.target):
             return True
-    if "out" in node.kwargs:
-        if node.kwargs["out"] in node.all_input_nodes:
-            return True
-    return False
+    return node.kwargs.get("out") is not None
 
 
 def get_mutation_region_id(graph, node):

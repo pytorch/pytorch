@@ -86,11 +86,20 @@ runs:
         TMPDIR=$(python -c 'import tempfile; print(tempfile.gettempdir());')
         echo "TMPDIR=${TMPDIR}" >> "${GITHUB_ENV}"
 
-    # Since it's just a defensive command, the workflow should continue even the command fails
+    # Since it's just a defensive command, the workflow should continue even the command fails. This step can be
+    # removed once Windows Defender is removed from the AMI
     - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
+      continue-on-error: true
       shell: powershell
       run: |
         Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TMPDIR,"C:\Jenkins\Miniconda3" -ErrorAction Ignore
         # Let's both exclude the path and disable Windows Defender completely just to be sure
         # that it doesn't interfere
-        Set-MpPreference -DisableRealtimeMonitoring $True
+        Set-MpPreference -DisableRealtimeMonitoring $True -ErrorAction Ignore
+
+    - name: Install sysinternals handle tool
+      continue-on-error: true
+      shell: powershell
+      run: |
+        choco install handle -y
+        handle C:\actions-runner\_work\
