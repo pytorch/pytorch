@@ -890,9 +890,7 @@
     "addmm",
     "log_softmax",
     "mm",
-    "softmax",
-    "SemiStructruedSparseTensor",
-    "to_semi_structured_sparse_tensor"
+    "softmax"
   ],
   "torch.special": [
     "airy_ai",

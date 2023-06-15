@@ -2,8 +2,6 @@
 
 .. currentmodule:: torch
 
-.. math::
-
 .. _sparse-docs:
 
 torch.sparse
@@ -231,10 +229,10 @@ This gives us a simple formula for the compression ratio, which is dependent onl
 
 By using this formula, we find that the compression ratio is 56.25% for ``torch.float16`` and 62.5% for ``torch.int8``.
 
+Constructing Sparse Semi-Structured Tensors
+-------------------------------------------
 
-Construction of Sparse Semi-Structured Tensors
-----------------------------------------------
-You can transform a dense tensor into a sparse semi-structured tensor by using the :func:torch.sparse.to_sparse_semi_structured function.
+You can transform a dense tensor into a sparse semi-structured tensor by using the ``torch.sparse.to_sparse_semi_structured`` function.
 
 .. warning::
     Note that PyTorch must be compiled with cuSPARSELt support for this function to work properly.
@@ -257,65 +255,65 @@ The following datatypes are supported for semi-structured sparsity. Note that ea
 
 To construct a semi-structured sparse tensor, start by creating a regular dense tensor that adheres to a 2:4 (or semi-structured) sparse format.
 To do this we  tile a small 1x4 strip to create a 16x16 dense float16 tensor.
-Afterwards, we can call :func: ``to_sparse_semi_structured`` on this matrix to compress it for accelerated inference.
+Afterwards, we can call ``to_sparse_semi_structured`` on this matrix to compress it for accelerated inference.
 
     >>> from torch.sparse import to_sparse_semi_structured
     >>> a = torch.Tensor([0, 0, 1, 1]).tile((16, 4)).cuda().half()
     tensor([[0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-	    [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.]],
-	   device='cuda:0', dtype=torch.float16)
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
+        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.]],
+       device='cuda:0', dtype=torch.float16)
     >>> a = to_sparse_semi_structured(a)
     SparseSemiStructuredTensor(shape=torch.Size([16, 16])
      metadata=tensor([[-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370],
-	    [-4370]], device='cuda:0', dtype=torch.int16)
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370],
+        [-4370]], device='cuda:0', dtype=torch.int16)
      values=tensor([[1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.],
-	    [1., 1., 1., 1., 1., 1., 1., 1.]], device='cuda:0',
-	   dtype=torch.float16))
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 1., 1., 1.]], device='cuda:0',
+       dtype=torch.float16))
 
-Operations with Semi-Structured Sparse Tensors
-----------------------------------------------
+Sparse Semi-Structured Tensor Operations
+----------------------------------------
 
 Currently, the following operations are supported for semi-structured sparse tensors:
 
