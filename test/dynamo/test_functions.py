@@ -1108,6 +1108,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a = x.numpy()
         return a.max(axis=0), a.all(axis=0)
 
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_builtin_functions(x):
+        a = x.numpy()
+        return a + a, a - a
+
 
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))

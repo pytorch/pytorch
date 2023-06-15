@@ -231,6 +231,11 @@ git submodule update --init --recursive
 #### Install PyTorch
 **On Linux**
 
+If you would like to compile PyTorch with [new C++ ABI](https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html) enabled, then first run this command:
+```bash
+export _GLIBCXX_USE_CXX11_ABI=1
+```
+
 If you're compiling for AMD ROCm then first run this command:
 ```bash
 # Only run this if you're compiling for ROCm
