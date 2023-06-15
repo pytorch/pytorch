@@ -193,7 +193,6 @@
 - func: functional_sym_constrain_range(Scalar size, int? min=None, int? max=None, Tensor? dep_token=None) -> Tensor
   dispatch:
     CPU: functional_sym_constrain_range_cpu
-    CUDA: functional_sym_constrain_range_gpu
 #
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method

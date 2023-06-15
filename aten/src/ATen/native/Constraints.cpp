@@ -12,7 +12,7 @@ void sym_constrain_range_cpu(
     c10::optional<int64_t> min = c10::nullopt,
     c10::optional<int64_t> max = c10::nullopt) {}
 
-Tensor functional_sym_constrain_range(
+Tensor functional_sym_constrain_range_cpu(
     const Scalar& size,
     c10::optional<int64_t> min = c10::nullopt,
     c10::optional<int64_t> max = c10::nullopt,
