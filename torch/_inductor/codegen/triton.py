@@ -25,6 +25,7 @@ from ..utils import (
     get_fused_kernel_name,
     get_kernel_category_by_source_code,
     get_kernel_metadata,
+    get_origin_op_info,
     green_text,
     next_power_of_2,
     sympy_product,
@@ -1707,7 +1708,7 @@ class TritonKernel(Kernel):
                 sizes.append("1")
         return f"[{', '.join(sizes)}]"
 
-    def call_kernel(self, name: str):
+    def call_kernel(self, name: str, node_origins: List=[]):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -1732,6 +1733,17 @@ class TritonKernel(Kernel):
             call_args,
             grid,
             V.graph.scheduler.current_device.index,
+        )
+
+        # Introduce a data structure to hold the marker info
+        # Then pass the new data structure to writeline
+        # This will cause a with record_function to be emitted on the
+        # next line
+        op_info = get_origin_op_info(node_origins)
+        origin_ops = [(op.op_type, op.mod_name, op.torch_op) for op in op_info]
+        wrapper.writeline(op_info)
+        wrapper.writeline(
+            f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name}) ## Add Marker here! node schedule {origin_ops}"
         )
 
     def warn_mix_layout(self, kernel_name):
@@ -2081,7 +2093,7 @@ class TritonScheduling:
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
 
-        kernel.call_kernel(kernel_name)
+        kernel.call_kernel(kernel_name, node_origins=node_schedule)
 
         if config.warn_mix_layout:
             kernel.warn_mix_layout(kernel_name)
@@ -2185,7 +2197,7 @@ class TritonScheduling:
 
         src_code = render()
         kernel_name = self.define_kernel(src_code, [template_node, *epilogue_nodes])
-        kernel.call_kernel(kernel_name)
+        kernel.call_kernel(kernel_name, node_origins=[template_node, *epilogue_nodes])
         self.scheduler.free_buffers()
 
     def codegen_sync(self):

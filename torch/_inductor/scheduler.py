@@ -16,7 +16,7 @@ from torch._dynamo.utils import dynamo_timed
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, free_symbol_has, has_triton
+from .utils import cache_on_self, cmp, free_symbol_has, has_triton, get_origin_op_info
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -346,6 +346,9 @@ class BaseSchedulerNode:
                     .replace("}", "}}")
                     .replace("\n", "\\")
                 )
+                if "seq_id" in o.meta:
+                    seq_id = o.meta["seq_id"]
+                    out_lines.append(f"#pragma CMT Seq ID {seq_id}")
                 out_lines.append("#pragma CMT END ORIGIN")
                 out_lines.append("")
 
@@ -1376,6 +1379,9 @@ class Scheduler:
                 node, *epilogue = node.get_nodes()
                 self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
+                ## Insert marker info
+                op_info = get_origin_op_info([node])
+                V.graph.wrapper_code.writeline(op_info)
                 self.codegen_extern_call(node)
             elif node.is_foreach():
                 self.get_backend(device).codegen_foreach(node)

@@ -17,6 +17,7 @@ from collections import defaultdict
 from io import StringIO
 from typing import Any, Dict, List, NamedTuple, Optional, Union
 from unittest import mock
+from dataclasses import dataclass
 
 import sympy
 
@@ -62,6 +63,13 @@ def do_bench(*args, **kwargs):
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
     return triton_do_bench(*args, **kwargs)[0]
 
+
+@dataclass
+class OriginOpInfo:
+    op_type: str
+    mod_name: str
+    torch_op: str
+    aot_seq_id: int
 
 @functools.lru_cache(None)
 def has_triton():
@@ -289,35 +297,60 @@ def aggregate_origins(node_schedule):
     )
 
 
-def get_fused_kernel_name(node_schedule, descriptive_names):
+def get_origin_op_info(node_schedule, descriptive_names):
     all_origins = aggregate_origins(node_schedule)
+    sources = []
+    # Unique op_names might constrain the origin modules
+    # Possible that multiple ops w/ same name can have different modules
+    unique_op_names = {}
     if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
-        sources = [
-            origin.meta["original_aten"]._overloadpacket.__name__
-            for origin in all_origins
-            if origin.op == "call_function" and "original_aten" in origin.meta
-        ]
-        sources = sorted(set(sources))
+        for origin in all_origins:
+            if origin.op == "call_function" and "original_aten" in origin.meta:
+                mod_name = ""
+                torch_op = ""
+                op_name = origin.meta["original_aten"]._overloadpacket.__name__
+                if "nn_module_stack" in origin.meta:
+                    mod_name, torch_op = list(origin.meta["nn_module_stack"].values())[0]
+                aot_seq_id = origin.meta.get("seq_id", 0)
+                if op_name not in unique_op_names:
+                    sources.append(OriginOpInfo(op_name, mod_name, torch_op, aot_seq_id))
+                    unique_op_names[op_name] = mod_name
     elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
-        sources = []
         for origin in all_origins:
             if origin.op == "call_function" and "source_fn" in origin.meta:
+                op_name = ""
+                mod_name = ""
+                if "nn_module_stack" in origin.meta:
+                    mod_name, torch_op = list(origin.meta["nn_module_stack"].values())[0]
                 if isinstance(origin.meta["source_fn"][1], str):
-                    sources.append(origin.meta["source_fn"][1])
+                    op_name = origin.meta["source_fn"][1]
                 else:
-                    sources.append(origin.meta["source_fn"][1].__name__)
-        sources = sorted(set(sources))
+                    op_name = origin.meta["source_fn"][1].__name__
+                aot_seq_id = origin.meta.get("seq_id", -1)
+                if op_name not in unique_op_names:
+                    sources.append(OriginOpInfo(op_name, mod_name, torch_op, aot_seq_id))
+                    unique_op_names[op_name] = mod_name
     elif descriptive_names == "inductor_node":
         sources = [
             origin.name for origin in all_origins if origin.op == "call_function"
         ]
     else:
         raise NotImplementedError
-    sources = sources
-    return "_".join(["fused"] + sources)
+    # Note that nn_modules needs to be sorted in same order as sources
+    # that means they should probably be a tuple
+    # sources = set(sources)
+    # sources = sorted(sources)[: config.kernel_name_max_ops]
+    return sources
 
+def get_fused_kernel_name(node_schedule):
+    sources = get_origin_op_info(node_schedule)
+    # op_info is a tuple of (op_type, mod_name)
+    op_types = [op_info.op_type for op_info in sources]
+    #op_types = set(op_types)
+    op_types = sorted(op_types)[: config.kernel_name_max_ops]
+    return "_".join(["fused"] + op_types)
 
 def get_kernel_metadata(node_schedule):
     all_origins = aggregate_origins(node_schedule)

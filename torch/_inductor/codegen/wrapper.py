@@ -20,6 +20,7 @@ from ..utils import (
     cache_on_self,
     get_benchmark_name,
     LineContext,
+    OriginOpInfo,
     sympy_dot,
     sympy_product,
 )
@@ -470,8 +471,10 @@ class WrapperCodeGen(CodeGen):
                     self.lines[i] = self.lines[i].plan(planning_state)
 
             device_cm_stack = contextlib.ExitStack()
+            origin_info_list = []
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
+                    self.wrapper_call.writeline(f"# MemPlanning Type {type(line)} : Origin ")
                     line.codegen(self.wrapper_call)
                 elif isinstance(
                     line,
@@ -481,8 +484,20 @@ class WrapperCodeGen(CodeGen):
                     ),
                 ):
                     line.codegen(self.wrapper_call, device_cm_stack)
+                elif isinstance(line, list):
+                    if isinstance(line[0], OriginOpInfo):
+                        origin_info_list = line
                 else:
+                    # Inspect the contents of line to see if
+                    # it is a triton kernel.  If so add the record_func
+                    with contextlib.ExitStack() as k_stack:
+                        if origin_info_list:
+                            marker_string = str(origin_info_list)
+                            self.wrapper_call.writeline(f"with record_function(\"triton_info: {marker_string}\"):")
+                            k_stack.enter_context(self.wrapper_call.indent())
                     self.wrapper_call.writeline(line)
+                    # Reset the list after the marker is written
+                    origin_info_list = []
 
             output_refs = self.get_output_refs()
             self.mark_output_type()
