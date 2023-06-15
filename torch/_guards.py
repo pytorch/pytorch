@@ -2,6 +2,7 @@ import contextlib
 
 import dataclasses
 import enum
+import functools
 import logging
 import traceback
 import unittest.mock
@@ -146,11 +147,15 @@ class Guard:
         return hash((self.name, self.source, id(self.create_fn)))
 
     def sort_key(self):
+        if isinstance(self.create_fn, functools.partial):
+            fn = self.create_fn.func
+        else:
+            fn = self.create_fn
         return (
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
-            self.create_fn.__code__.co_firstlineno,
+            fn.__code__.co_firstlineno,
         )
 
     def __lt__(self, other):
