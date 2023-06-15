@@ -235,6 +235,7 @@ class CommonListMethodsVariable(BaseListVariable):
             # so here we are banning `append` on list within a `subgraph`.
             # Ideally, we shouldn't allow dynamo to inline functions under HigherOrderOperator
             # like `grad`.
+            # Ref: https://github.com/pytorch/pytorch/issues/103613
             if not tx.output.is_root_tracer():
                 unimplemented("list was mutated.")
             tx.replace_all(
