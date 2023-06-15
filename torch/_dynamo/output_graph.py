@@ -894,8 +894,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         torch._dynamo.utils.increment_op_count(tot)
         for pl in placeholders:
             arg = pl.meta["grapharg"]
-            # TODO: Why isn't this stored in meta :think:
-            pl._dynamo_source = arg.source
+            pl.meta["dynamo_source"] = arg.source
 
         gm._param_name_to_source = self.param_name_to_source
 
