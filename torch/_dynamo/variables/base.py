@@ -198,8 +198,15 @@ class VariableTracker(metaclass=HasPostInit):
         # Note - this scope construction is mirrored in guards
         # A subsequent PR will introduce a util.
         scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
-        _input_associated_real_value = eval(self.source.name(), scope)
-
+        try:
+            # We raise in case we get a typerror bug w/ SuperSource.
+            # SuperSource has bugs in it atm, and can produce code like
+            # eval("super(L['mod'].model.model.encoder.embed_positions.forward__class__,
+            # L['mod'].model.model.encoder.embed_positions)", scope)
+            # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
+            _input_associated_real_value = eval(self.source.name(), scope)
+        except TypeError:
+            raise NotImplementedError()
         if _input_associated_real_value is None:
             raise NotImplementedError()
 
