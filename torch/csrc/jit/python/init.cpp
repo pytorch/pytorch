@@ -1336,7 +1336,8 @@ void initJITBindings(PyObject* module) {
           [](PyTorchStreamWriter& self,
              const std::string& name,
              const char* data,
-             size_t size) { return self.writeRecord(name, data, size); })
+             size_t size,
+             int compression = 0) { return self.writeRecord(name, data, size, compression); })
       .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
       .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def(
@@ -1344,9 +1345,10 @@ void initJITBindings(PyObject* module) {
           [](PyTorchStreamWriter& self,
              const std::string& name,
              uintptr_t data,
-             size_t size) {
+             size_t size,
+             int compression = 0) {
             return self.writeRecord(
-                name, reinterpret_cast<const char*>(data), size);
+                name, reinterpret_cast<const char*>(data), size, compression);
           })
       .def("archive_name", &PyTorchStreamWriter::archiveName)
       .def("serialization_id", &PyTorchStreamWriter::serializationId)

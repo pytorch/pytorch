@@ -157,7 +157,7 @@ class TORCH_API PyTorchStreamWriter final {
       const std::string& name,
       const void* data,
       size_t size,
-      bool compress = false);
+      int compression = 0);
   void writeEndOfFile();
 
   const std::unordered_set<std::string>& getAllWrittenRecords();

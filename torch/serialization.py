@@ -454,7 +454,8 @@ def save(
     pickle_module: Any = pickle,
     pickle_protocol: int = DEFAULT_PROTOCOL,
     _use_new_zipfile_serialization: bool = True,
-    _disable_byteorder_record: bool = False
+    _disable_byteorder_record: bool = False,
+    compression=0,
 ) -> None:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
     # The first line of this docstring overrides the one Sphinx generates for the
@@ -502,7 +503,7 @@ def save(
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
-            _save(obj, opened_zipfile, pickle_module, pickle_protocol, _disable_byteorder_record)
+            _save(obj, opened_zipfile, pickle_module, pickle_protocol, _disable_byteorder_record, compression=compression)
             return
     else:
         with _open_file_like(f, 'wb') as opened_file:
@@ -653,7 +654,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
         storage._write_file(f, _should_read_directly(f), True, torch._utils._element_size(dtype))
 
 
-def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_record):
+def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_record, compression=0):
     serialized_storages = {}
     id_map: Dict[int, str] = {}
 
@@ -716,14 +717,14 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
     pickler.persistent_id = persistent_id
     pickler.dump(obj)
     data_value = data_buf.getvalue()
-    zip_file.write_record('data.pkl', data_value, len(data_value))
+    zip_file.write_record('data.pkl', data_value, len(data_value), compression)
 
     # Write byte order marker
     if not _disable_byteorder_record:
         if sys.byteorder not in ['little', 'big']:
             raise ValueError('Unknown endianness type: ' + sys.byteorder)
 
-        zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))
+        zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder), compression)
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
     for key in sorted(serialized_storages.keys()):
@@ -736,7 +737,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
             storage = storage.cpu()
         # Now that it is on the CPU we can directly copy it into the zip file
         num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage.data_ptr(), num_bytes)
+        zip_file.write_record(name, storage.data_ptr(), num_bytes, compression)
 
 
 def load(

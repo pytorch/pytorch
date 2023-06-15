@@ -495,7 +495,7 @@ void PyTorchStreamWriter::writeRecord(
     const std::string& name,
     const void* data,
     size_t size,
-    bool compress) {
+    int compress) {
   AT_ASSERT(!finalized_);
   AT_ASSERT(!archive_name_plus_slash_.empty());
   TORCH_INTERNAL_ASSERT(
@@ -509,7 +509,8 @@ void PyTorchStreamWriter::writeRecord(
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size =
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
-  uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
+  // uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
+  uint32_t flags = compress;
   mz_zip_writer_add_mem_ex_v2(
       ar_.get(),
       full_name.c_str(),
