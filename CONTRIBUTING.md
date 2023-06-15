@@ -1078,7 +1078,7 @@ To run clang-tidy locally, follow these steps:
 1. Install clang-tidy.
 We provide custom built binaries which have additional checks enabled. You can install it by running:
 ```bash
-python3 -m tools.linter.install.clang_tidy
+python3 -m tools.linter.clang_tidy.generate_build_files
 ```
 We currently only support Linux and MacOS (x86).
 

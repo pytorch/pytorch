@@ -1,18 +1,26 @@
+from typing import Callable
+
 import torch
-from torch.fx import Node
-from typing import (
-    Callable,
+from torch.ao.quantization._pt2e.quantizer import (
+    QuantizationAnnotation,
+    SharedQuantizationSpec,
 )
+from torch.fx import Node
+
 
 def _is_share_obs_or_fq_op(op: Callable) -> bool:
+    # TODO: remove some of these ops in qnnpack_quantizer
     return op in [
         torch.ops.aten.hardtanh.default,
         torch.ops.aten.mean.default,
         torch.ops.aten.mean.dim,
+        torch.ops.aten.permute.default,
+        torch.ops.aten.squeeze.dim,
         torch.ops.aten.adaptive_avg_pool2d.default,
         torch.ops.aten.view_copy.default,
         torch.ops.aten.view.default,
     ]
+
 
 def propagate_annotation(model: torch.fx.GraphModule) -> None:
     for n in model.graph.nodes:
@@ -23,22 +31,27 @@ def propagate_annotation(model: torch.fx.GraphModule) -> None:
         if not isinstance(prev_node, Node):
             continue
 
-        target_dtype_info = prev_node.meta.get("target_dtype_info", None)
-        if not target_dtype_info:
+        quantization_annotation = prev_node.meta.get("quantization_annotation", None)
+        if not quantization_annotation:
             continue
 
-        output_act_obs_or_fq_ctr = target_dtype_info.get("output_act_obs_or_fq_ctr", None)
-        if not output_act_obs_or_fq_ctr:
+        output_qspec = quantization_annotation.output_qspec
+        if not output_qspec:
             continue
 
         # make sure current node is not annotated
-        if "target_dtype_info" in n.meta and n.meta["target_dtype_info"].get("_annotated", False):
+        if (
+            "quantization_annotation" in n.meta
+            and n.meta["quantization_annotation"]._annotated
+        ):
             continue
 
-        # propagate the previous output_act_obs_or_fq to the current node
-        n.meta["target_dtype_info"] = {
-            "input_act_obs_or_fq_ctr": output_act_obs_or_fq_ctr,
-            "output_act_obs_or_fq_ctr": output_act_obs_or_fq_ctr,
-            "input_output_share_observers": True,
-            "_annotated": True,
-        }
+        shared_qspec = SharedQuantizationSpec(prev_node)
+        # propagate the previous output_qspec to the current node
+        n.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map={
+                prev_node: shared_qspec,
+            },
+            output_qspec=shared_qspec,
+            _annotated=True,
+        )

@@ -2,6 +2,7 @@
 
 #include <cub/cub.cuh>
 #include "caffe2/utils/cub_namespace.cuh"
+#include <c10/cuda/CUDADeviceAssertion.h>
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/sequence_ops.h"
@@ -24,7 +25,8 @@ __global__ void AddPaddingKernel(
     const T* padding_end_ptr,
     int end_padding_width_blocks,
     T* out,
-    int32_t* lengths_out) {
+    int32_t* lengths_out,
+    TORCH_DSA_KERNEL_ARGS) {
   int element_idx = blockIdx.x;
   int prior_padding =
       element_idx * (start_padding_width_blocks + end_padding_width_blocks);
@@ -39,7 +41,7 @@ __global__ void AddPaddingKernel(
     in_start_idx = lengths_prefix_sum[element_idx] - len_blocks;
   } else {
     // Only one element, use the outer size
-    CUDA_KERNEL_ASSERT(lengths_size == 1);
+    CUDA_KERNEL_ASSERT2(lengths_size == 1);
     len_blocks = outer_size;
     in_start_idx = 0;
   }
@@ -86,7 +88,8 @@ __global__ void RemovePaddingKernel(
     int start_padding_width_blocks,
     int end_padding_width_blocks,
     T* out,
-    int32_t* lengths_out) {
+    int32_t* lengths_out,
+    TORCH_DSA_KERNEL_ARGS) {
   int element_idx = blockIdx.x;
   int prior_padding =
       element_idx * (start_padding_width_blocks + end_padding_width_blocks);
@@ -101,7 +104,7 @@ __global__ void RemovePaddingKernel(
     in_start_idx = lengths_prefix_sum[element_idx] - len_blocks;
   } else {
     // Only one element, use the outer size
-    CUDA_KERNEL_ASSERT(lengths_size == 1);
+    CUDA_KERNEL_ASSERT2(lengths_size == 1);
     len_blocks = outer_size;
     in_start_idx = 0;
   }
@@ -214,8 +217,9 @@ bool AddPaddingOp<CUDAContext>::MakePadding(
   }
 
   // Compute the padding using the accumulated lengths
-  AddPaddingKernel<T>
-      <<<lengths_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+  TORCH_DSA_KERNEL_LAUNCH(
+          AddPaddingKernel<T>,
+          lengths_size, CAFFE_CUDA_NUM_THREADS, 0, context_.stream(),
           in_ptr,
           block_size,
           lengths_size,
@@ -227,7 +231,6 @@ bool AddPaddingOp<CUDAContext>::MakePadding(
           endPaddingWidth_,
           out_ptr,
           lengths_out_ptr);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
@@ -282,8 +285,9 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   }
 
   // Compute the padding using the accumulated lengths
-  RemovePaddingKernel<T>
-      <<<lengths_size, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
+  TORCH_DSA_KERNEL_LAUNCH(
+          RemovePaddingKernel<T>,
+          lengths_size, CAFFE_CUDA_NUM_THREADS, 0, context_.stream(),
           in_ptr,
           block_size,
           lengths_size,
@@ -293,7 +297,6 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
           endPaddingWidth_,
           out_ptr,
           lengths_out_ptr);
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return true;
 }
