@@ -48,6 +48,9 @@ pattern_matcher = True
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# Enable fx passes which group similar ops across the graph
+group_fusion_fx_passes = False
+
 # enable reordering pass
 reordering = True
 

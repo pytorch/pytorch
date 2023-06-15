@@ -19,6 +19,7 @@ from ..fx_utils import matches_module_function_pattern
 from ..mkldnn import mkldnn_fuse_fx
 from ..pattern_matcher import init_once_fakemode, PatternMatcherPass
 from ..utils import is_cpu_device
+from .group_fusion import layer_norm_fusion_pass
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
+    layer_norm_fusion_pass,
     normalization_pass,
     merge_splits_pass,
     split_cat_pass,
