@@ -14,14 +14,13 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
     magic_methods,
     method_to_operator,
     ShapeEnv,
     SymTypes,
 )
 from torch.utils._mode_utils import no_dispatch
-
-from .._dynamo import config as dynamo_config
 
 from . import config, ir, metrics
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
@@ -204,12 +203,6 @@ class GraphLowering(torch.fx.Interpreter):
         if not config.layout_optimization:
             return False
 
-        if dynamo_config.dynamic_shapes:
-            log.debug(
-                "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
-            )
-            return False
-
         gm = self.module
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
@@ -224,6 +217,14 @@ class GraphLowering(torch.fx.Interpreter):
         # volo_d1_224
         if len(list(gm.graph.nodes)) >= 300 * nconv:
             log.debug("Only a few conv, skip layout optimization")
+            return False
+
+        if any(
+            free_symbols(n.args[idx].meta["val"]) for n in conv_nodes for idx in [0, 1]
+        ):
+            log.debug(
+                "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
+            )
             return False
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
@@ -490,14 +491,7 @@ class GraphLowering(torch.fx.Interpreter):
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
         # symbolic shapes.
-        if (
-            config.static_weight_shapes
-            and (
-                len(self.graph_inputs) < self.num_static_inputs
-                or not dynamo_config.dynamic_shapes
-            )
-            and not example._has_symbolic_sizes_strides
-        ):
+        if not example._has_symbolic_sizes_strides:
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
         else:

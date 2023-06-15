@@ -35,7 +35,9 @@ cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
-# inputs
+# inputs.  Note that assume_static_by_default will also cause ints to get
+# specialized, so this is mostly useful for export, where we want inputs
+# to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
 
 # Assume these functions return constants
@@ -104,9 +106,6 @@ replay_record_enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
-
-# Show a warning on every graph break
-print_graph_breaks = False
 
 # Show a warning for every specialization
 print_specializations = False

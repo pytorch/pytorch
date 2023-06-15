@@ -432,6 +432,40 @@ class CPUReproTests(TestCase):
             metrics.reset()
             self.common(fn, (x,))
 
+    def test_slice_scatter_default_end_value(self):
+        # From HF AllenaiLongformerBase.
+        def fn(query, key, window_overlap):
+            batch_size, seq_len, num_heads, head_dim = query.size()
+            assert (
+                seq_len % (window_overlap * 2) == 0
+            ), f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+
+            chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
+            diagonal_chunked_attention_scores = key
+            diagonal_attention_scores = diagonal_chunked_attention_scores.new_zeros(
+                (
+                    batch_size * num_heads,
+                    chunks_count + 1,
+                    window_overlap,
+                    window_overlap * 2 + 1,
+                )
+            )
+            diagonal_attention_scores[
+                :, :3, :, window_overlap:
+            ] = diagonal_chunked_attention_scores[
+                :, :, :window_overlap, : window_overlap + 1
+            ]
+            return diagonal_attention_scores
+
+        self.common(
+            fn,
+            (
+                torch.randn(1, 1024, 12, 64),
+                torch.randn(12, 3, 512, 513),
+                256,
+            ),
+        )
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )

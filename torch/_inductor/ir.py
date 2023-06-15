@@ -114,6 +114,7 @@ def validate_ir(node_or_nodes):
                     sympy.Symbol,
                     sympy.core.relational.Relational,
                     Expr,
+                    torch._inductor.ir.ExpandView,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -2196,9 +2197,7 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self):
-        from torch._inductor.codegen.wrapper import pexpr
-
-        expr = pexpr(V.graph.sizevars.simplify(self.shape))
+        expr = V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
         if V.graph.cpp_wrapper:
             # wrap scalar to 0-d tensor for cpp wrapper
             return f"torch::tensor({expr})"
@@ -3232,7 +3231,7 @@ class FallbackKernel(ExternKernelAlloc):
             self.kernel = (
                 f"at::{op_overload_packet.__name__}"
                 if V.graph.cpp_wrapper
-                else f"aten.{op_overload_packet.__name__}"
+                else f"aten.{kernel.__name__}"
             )
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
@@ -4435,6 +4434,21 @@ class LoopBody:
         self.indirect_vars = []
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
+
+    @cache_on_self
+    def get_nodes(self):
+        all_graphs = itertools.chain(
+            (self.root_block.graph,),
+            (block.graph for block in self.subblocks.values()),
+        )
+        return [node for graph in all_graphs for node in graph.nodes]
+
+    @cache_on_self
+    def bounds(self):
+        # Doing a local import to avoid dumping all the code here
+        from .bounds import BoundVars
+
+        return BoundVars(self)
 
     def debug_str(self):
         lines = [f"var_ranges = {dict(self.var_ranges)}"]
