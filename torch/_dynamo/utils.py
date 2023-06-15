@@ -780,6 +780,15 @@ def check_unspec_python_args(args, kwargs):
     return unspec_count > 0
 
 
+def check_numpy_ndarray_args(args, kwargs):
+    from .variables.tensor import NumpyNdarrayVariable
+
+    return any(
+        isinstance(x, NumpyNdarrayVariable)
+        for x in itertools.chain(args, kwargs.values())
+    )
+
+
 def specialize_args_kwargs(tx, args, kwargs):
     specialized_args = []
     specialized_kwargs = {}
