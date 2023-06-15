@@ -4,7 +4,6 @@ import json
 
 from functools import lru_cache
 from typing import Any, List, Tuple, TYPE_CHECKING, Union
-from urllib.request import Request, urlopen
 
 from github_utils import gh_fetch_url_and_headers, GitHubComment
 
