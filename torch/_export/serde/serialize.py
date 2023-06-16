@@ -959,13 +959,13 @@ class GraphModuleDeserializer:
         returns = fx_node.target._schema.returns
 
         if len(returns) == 0:
-            pass
+            return None
         if _is_single_tensor_return(fx_node.target):
             self.sync_serialized_node(serialized_node.outputs[0].as_tensor.name, fx_node)
         elif len(returns) == 1 and isinstance(serialized_node.outputs[0].value, (SymIntArgument, SymBoolArgument)):
             self.sync_serialized_node(serialized_node.outputs[0].value.as_name, fx_node)
         else:
-            self.deserialize_multiple_outputs(self, serialized_node, fx_node)
+            self.deserialize_multiple_outputs(serialized_node, fx_node)
 
     def deserialize_multiple_outputs(self, serialized_node: Node, fx_node: torch.fx.Node) -> None:
         # Convert multiple return types to FX format.
