@@ -425,7 +425,10 @@ static Tensor add_scalar(
       self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar));
 }
 
-static Tensor& add_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
+static Tensor& add_scalar_(
+    Tensor& self,
+    const Scalar& other,
+    const Scalar& alpha) {
   return arithmetic_scalar_(
       self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_));
 }
@@ -493,7 +496,10 @@ static Tensor sub_scalar(
       VK_KERNEL(add_scalar));
 }
 
-static Tensor& sub_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
+static Tensor& sub_scalar_(
+    Tensor& self,
+    const Scalar& other,
+    const Scalar& alpha) {
   return arithmetic_scalar_(
       self,
       other,
