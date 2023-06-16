@@ -80,6 +80,7 @@
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/verbose.h>
+#include <torch/csrc/cpu/Module.h>
 
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
@@ -1371,6 +1372,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+  torch::cpu::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 

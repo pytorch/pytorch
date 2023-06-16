@@ -1,12 +1,12 @@
-#include <ATen/native/CPUUtils.h>
+#include <ATen/cpu/CPUUtils.h>
 #include <cpuinfo.h>
 
 namespace at {
-namespace native {
+namespace cpu {
 
 bool is_cpu_support_vnni() {
   return cpuinfo_initialize() && cpuinfo_has_x86_avx512vnni();
 }
 
-} // namespace native
+} // namespace cpu
 } // namespace at

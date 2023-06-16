@@ -3,12 +3,12 @@
 #include <c10/macros/Export.h>
 
 namespace at {
-namespace native {
+namespace cpu {
 
 // Detect if CPU support Vector Neural Network Instruction.
 TORCH_API bool is_cpu_support_vnni();
 
-} // namespace native
+} // namespace cpu
 } // namespace at
 
 #endif // CPU_UTILS_H

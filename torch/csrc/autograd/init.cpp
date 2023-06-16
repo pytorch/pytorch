@@ -33,7 +33,6 @@
 #include <torch/csrc/utils/python_raii.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 
-#include <ATen/native/CPUUtils.h>
 #include <set>
 #include <unordered_set>
 #include <utility>
@@ -582,16 +581,6 @@ static PyObject* set_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* is_cpu_support_vnni(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (at::native::is_cpu_support_vnni()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* set_grad_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (!PyBool_Check(arg)) {
@@ -848,7 +837,6 @@ static PyMethodDef methods[] = { // NOLINT
     {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
     {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
     {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
-    {"_is_cpu_support_vnni", is_cpu_support_vnni, METH_NOARGS, nullptr},
     {"autocast_increment_nesting",
      autocast_increment_nesting,
      METH_NOARGS,

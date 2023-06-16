@@ -1010,9 +1010,8 @@ you call the `torch.ao.quantization.get_default_qconfig(backend)` or `torch.ao.q
 ``x86`` or ``qnnpack`` backend
 
 2. If ``onednn`` backend is selected, 8 bits for activation will be used in the default qconfig mapping ``torch.ao.quantization.get_default_qconfig_mapping('onednn')``
-and default qconfig ``torch.ao.quantization.get_default_qconfig('onednn')``. It is recommended to be used on CPUs with Vector Neural Network Instruction
-support. Otherwise, setting ``reduce_range`` to True of the activation's observer to get better accuracy on CPUs without Vector Neural Network Instruction
-support.
+and default qconfig ``torch.ao.quantization.get_default_qconfig('onednn')``. It is recommended to be used on CPUs with Vector Neural Network Instruction (VNNI)
+support. Otherwise, setting ``reduce_range`` to True of the activation's observer to get better accuracy on CPUs without VNNI support.
 
 Frequently Asked Questions
 --------------------------
