@@ -44,7 +44,7 @@ void FindMinMax(const T* data, float* min, float* max, int len) {
   fbgemm::FindMinMax(temp.data(), min, max, len);
 }
 
-float* GetFloatTensorData(TensorCPU* tensor) {
+static float* GetFloatTensorData(TensorCPU* tensor) {
   float* data = nullptr;
   vector<float> data_temp;
   if (tensor->IsType<float>()) {

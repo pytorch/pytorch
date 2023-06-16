@@ -34,7 +34,7 @@ static std::vector<TensorShape> TensorInferenceForConvGradient(
   return out;
 }
 
-OpSchema::Cost CostInferenceForConvGradient(
+static OpSchema::Cost CostInferenceForConvGradient(
     const OperatorDef& def,
     const vector<TensorShape>& inputs) {
   CAFFE_ENFORCE_EQ(inputs.size(), 3U, "ConvGradient requires 3 inputs");

@@ -6,7 +6,7 @@
 
 namespace caffe2 {
 
-void initQNNPACK() {
+static void initQNNPACK() {
   static std::once_flag once;
   static enum qnnp_status qnnpackStatus = qnnp_status_uninitialized;
   std::call_once(once, []() { qnnpackStatus = qnnp_initialize(); });
