@@ -16,11 +16,12 @@ __all__ = [
     "RowwiseParallel",
     "ColwiseParallel",
     "PairwiseParallel",
-    "PairwiseSequenceParallel",
+    "SequenceParallel",
     "make_input_replicate_1d",
     "make_input_reshard_replicate",
     "make_input_shard_1d",
     "make_input_shard_1d_last_dim",
+    "make_sharded_output_tensor",
     "make_output_replicate_1d",
     "make_output_reshard_tensor",
     "make_output_tensor",
@@ -64,40 +65,20 @@ class PairwiseParallel(ParallelStyle):
         super().__init__(_prepare_input, _prepare_output)
 
 
-class PairwiseSequenceParallel(PairwiseParallel):
+class SequenceParallel(PairwiseParallel):
     """
-    PairwiseSequenceParallel concatenate colwise and rowwise styles as a fixed
+    SequenceParallel concatenate colwise and rowwise styles as a fixed
     pair together with sequence parallel like what Megatron-LM Sequence parallel
     (https://arxiv.org/pdf/2205.05198.pdf) is doing.
     We assume both input and output need to be sharded DTensors.
 
     .. warning::
-        PairwiseSequenceParallel only supports ``nn.Multihead Attention``,
+        SequenceParallel only supports ``nn.Multihead Attention``,
         ``nn.Transformer`` or even-number-layer MLP for now.
     """
 
     def __init__(self) -> None:
         super().__init__(make_input_reshard_replicate, make_output_reshard_tensor)
-
-
-class RowwiseParallel(ParallelStyle):
-    """
-    Partitioning the row of a module.
-    We assume the input to be a sharded :class:`DTensor` and output to be a replicated :class:`DTensor`.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(make_input_shard_1d_last_dim, make_output_replicate_1d)
-
-
-class ColwiseParallel(ParallelStyle):
-    """
-    Partitioning the column of a tensor or module.
-    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`DTensor`.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(make_input_replicate_1d, make_output_replicate_1d)
 
 
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
@@ -159,7 +140,7 @@ def make_input_shard_1d_last_dim(
     Returns:
         A :class:`DTensor` sharded on the last dimension over ``device_mesh``.
     """
-    return make_input_shard_1d(input, device_mesh, dim=-1)  # type: ignore[call-arg]
+    return make_input_shard_1d(input, device_mesh, dim=input.dim() - 1)  # type: ignore[call-arg]
 
 
 @_prepare_input_validate  # type: ignore[arg-type] # pyre-ignore[56]
@@ -297,6 +278,27 @@ def make_output_tensor(
 
 
 @_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
+def make_sharded_output_tensor(
+    output: DTensor, _device_mesh: Optional[DeviceMesh] = None
+) -> torch.Tensor:
+    """
+    Convert sharded Output DTensor to torch.Tensor.
+
+    Args:
+        output (:class:`DTensor`):
+            Output of module to be converted.
+
+    Return:
+        A :class:`torch.Tensor` object converted from output DTensor.
+
+    ``_device_mesh`` is not needed and is just kept to match with
+        the signature in its callsite in ``distribute_module``.
+    """
+
+    return output.to_local()  # type: ignore[call-arg]
+
+
+@_prepare_output_validate  # type: ignore[arg-type] # pyre-ignore[56]
 def make_output_reshard_tensor(
     output: DTensor,
     device_mesh: Optional[DeviceMesh] = None,
@@ -318,3 +320,23 @@ def make_output_reshard_tensor(
     """
 
     return make_output_shard_1d(output, device_mesh).to_local()  # type: ignore[call-arg, attr-defined]
+
+
+class RowwiseParallel(ParallelStyle):
+    """
+    Partitioning the row of a module.
+    We assume the input to be a sharded :class:`DTensor` and output to be a :class:`torch.Tensor`.
+    """
+
+    def __init__(self, _prepare_input=make_input_shard_1d_last_dim, _prepare_output=make_output_tensor) -> None:
+        super().__init__(_prepare_input, _prepare_output)
+
+
+class ColwiseParallel(ParallelStyle):
+    """
+    Partitioning the column of a tensor or module.
+    We assume the input to be a replicated :class:`DTensor` and output to be a sharded :class:`torch.Tensor`.
+    """
+
+    def __init__(self, _prepare_input=make_input_replicate_1d, _prepare_output=make_sharded_output_tensor) -> None:
+        super().__init__(_prepare_input, _prepare_output)

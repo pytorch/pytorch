@@ -37,6 +37,14 @@ void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
   engine_.reset_state(seed);
 }
 
+void MPSGeneratorImpl::set_offset(uint64_t offset) {
+  engine_.set_offset(offset);
+}
+
+uint64_t MPSGeneratorImpl::get_offset() const {
+  return engine_.get_offset();
+}
+
 uint64_t MPSGeneratorImpl::current_seed() const {
   return data_.seed;
 }
@@ -82,7 +90,7 @@ void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
 
   uint64_t input_seed = default_rng_seed_val;
-  auto new_rng_state = new_state.data<uint8_t>();
+  auto new_rng_state = new_state.data_dtype_initialized<uint8_t>();
   memcpy(&input_seed, new_rng_state + states_size, seed_size);
   this->set_current_seed(input_seed);
   // state.data must be copied after input_seed to not reset the state in set_current_seed()

@@ -70,7 +70,7 @@ def stop_etcd(subprocess, data_dir: Optional[str] = None):
         subprocess.wait()
 
     if data_dir:
-        log.info(f"deleting etcd data dir: {data_dir}")
+        log.info("deleting etcd data dir: %s", data_dir)
         shutil.rmtree(data_dir, ignore_errors=True)
 
 
@@ -186,7 +186,7 @@ class EtcdServer:
                 curr_retries += 1
                 stop_etcd(self._etcd_proc)
                 log.warning(
-                    f"Failed to start etcd server, got error: {str(e)}, retrying"
+                    "Failed to start etcd server, got error: %s, retrying", str(e)
                 )
                 if curr_retries >= num_retries:
                     shutil.rmtree(self._base_data_dir, ignore_errors=True)
@@ -218,7 +218,7 @@ class EtcdServer:
             )
         )
 
-        log.info(f"Starting etcd server: [{etcd_cmd}]")
+        log.info("Starting etcd server: [%s]", etcd_cmd)
 
         sock.close()
         sock_peer.close()
@@ -249,7 +249,7 @@ class EtcdServer:
                     f"Etcd server process exited with the code: {exitcode}"
                 )
             try:
-                log.info(f"etcd server ready. version: {client.version}")
+                log.info("etcd server ready. version: %s", client.version)
                 return
             except Exception:
                 time.sleep(1)

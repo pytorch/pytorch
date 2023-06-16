@@ -4,7 +4,7 @@ import copy
 import torch.nn as nn
 
 from torch.ao.quantization.fuser_method_mappings import get_fuser_method
-# for backward compatiblity
+# for backward compatibility
 from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn  # noqa: F401
 from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn_relu  # noqa: F401
 from torch.nn.utils.parametrize import type_before_parametrizations
@@ -161,7 +161,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
         is_qat=False,
         inplace=inplace,
         fuser_func=fuser_func,
-        fuse_custom_config_dict=None)
+        fuse_custom_config_dict=fuse_custom_config_dict)
 
 def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     """ QAT version for `fuse_modules`
@@ -172,4 +172,4 @@ def fuse_modules_qat(model, modules_to_fuse, inplace=False, fuser_func=fuse_know
         is_qat=True,
         inplace=inplace,
         fuser_func=fuser_func,
-        fuse_custom_config_dict=None)
+        fuse_custom_config_dict=fuse_custom_config_dict)

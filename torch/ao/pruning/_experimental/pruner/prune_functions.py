@@ -1,6 +1,6 @@
 """
 Collection of conversion functions for linear / conv2d structured pruning
-Also contains utilities for bias propogation
+Also contains utilities for bias propagation
 """
 from typing import cast, Optional, Callable, Tuple
 
@@ -10,7 +10,7 @@ from torch.nn.utils import parametrize
 from torch.nn.utils.parametrize import ParametrizationList
 from .parametrization import FakeStructuredSparsity, BiasHook
 
-# BIAS PROPOGATION
+# BIAS PROPAGATION
 def _remove_bias_handles(module: nn.Module) -> None:
     if hasattr(module, "_forward_hooks"):
         bias_hooks = []
@@ -86,7 +86,7 @@ def _prune_module_bias(module: nn.Module, mask: Tensor) -> None:
 
 def _propogate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
     r"""
-    In the case that we need to propogate biases, this function will return the biases we need
+    In the case that we need to propagate biases, this function will return the biases we need
     """
     # set current module bias
     if module.bias is not None:
@@ -94,7 +94,7 @@ def _propogate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
     elif getattr(module, "_bias", None) is not None:
         module.bias = nn.Parameter(cast(Tensor, module._bias)[mask])
 
-    # get pruned biases to propogate to subsequent layer
+    # get pruned biases to propagate to subsequent layer
     if getattr(module, "_bias", None) is not None:
         pruned_biases = cast(Tensor, module._bias)[~mask]
     else:

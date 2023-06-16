@@ -914,23 +914,41 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
       "can't assign Variable as its own grad");
 
   const auto& grad = THPVariable_Unpack(py_grad);
-  bool gradIsSparse =
-      (var.dtype() == grad.dtype() &&
-       var.device().type() == grad.device().type() && grad.layout() == kSparse);
-  THPUtils_assertRet(
-      -1,
-      grad.options().type_equal(var.options()) || gradIsSparse,
-      "assigned grad has data of a different type");
-  if (var.is_cuda()) {
-    THPUtils_assertRet(
-        -1,
-        grad.get_device() == var.get_device(),
-        "assigned grad has data located on a different device");
+  TORCH_CHECK(
+      var.dtype() == grad.dtype(),
+      "attempting to assign a gradient with dtype '",
+      grad.dtype(),
+      "' to a tensor with dtype '",
+      var.dtype(),
+      "'. Please ensure that the gradient and the tensor have the same dtype");
+  TORCH_CHECK(
+      var.device().type() == grad.device().type(),
+      "attempting to assign a gradient with device type '",
+      grad.device().type(),
+      "' to a tensor with device type '",
+      var.device().type(),
+      "'. Please ensure that the gradient and the tensor are on the same device");
+  if (grad.layout() != kSparse) {
+    TORCH_CHECK(
+        grad.options().type_equal(var.options()),
+        "attempting to assign a gradient to a tensor that has data of a different type");
   }
-  THPUtils_assertRet(
-      -1,
+  if (var.is_cuda()) {
+    TORCH_CHECK(
+        grad.get_device() == var.get_device(),
+        "attempting to assign a gradient located on device with index '",
+        grad.get_device(),
+        "' to a tensor located on device with index '",
+        var.get_device(),
+        "'. Please ensure that the gradient and the tensor are on the same device");
+  }
+  TORCH_CHECK(
       grad.sym_sizes().equals(var.sym_sizes()),
-      "assigned grad has data of a different size");
+      "attempting to assign a gradient of size '",
+      grad.sym_sizes(),
+      "' to a tensor of size '",
+      var.sym_sizes(),
+      "'. Please ensure that the gradient and the tensor are the same size");
 
   var.mutable_grad() = grad;
   return 0;
@@ -1345,6 +1363,24 @@ static PyObject* THPVariable_device(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable_get_nbytes(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "nbytes");
+  }
+  return PyLong_FromSize_t(THPVariable_Unpack(self).nbytes());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPVariable_get_itemsize(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "itemsize");
+  }
+  return PyLong_FromSize_t(THPVariable_Unpack(self).itemsize());
+  END_HANDLE_TH_ERRORS
+}
+
 int THPVariable_set_real(PyObject* self, PyObject* real, void* unused) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
@@ -1463,6 +1499,8 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
     {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
     {"ndim", (getter)THPVariable_get_ndim, nullptr, nullptr, nullptr},
+    {"nbytes", (getter)THPVariable_get_nbytes, nullptr, nullptr, nullptr},
+    {"itemsize", (getter)THPVariable_get_itemsize, nullptr, nullptr, nullptr},
     {"names",
      (getter)THPVariable_get_names,
      (setter)THPVariable_set_names,

@@ -1,5 +1,8 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import hint_int, magic_methods, method_to_operator
+from torch.fx.experimental.symbolic_shapes import (
+    hint_int, magic_methods, method_to_operator, free_symbols,
+    is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
+)
 import torch
 import torch.fx as fx
 import operator
@@ -7,6 +10,8 @@ import math
 import torch.utils._pytree as pytree
 import copy
 import os
+import itertools
+import sympy
 from collections import defaultdict
 from torch.fx.passes import graph_drawer
 from typing import Tuple
@@ -84,11 +89,22 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
 
 
 def _is_primal(node):
-    return node.op == "placeholder" and "tangents" not in node.target
-
+    return (
+        node.op == "placeholder"
+        and "tangents" not in node.target
+        and not _is_bwd_seed_offset(node)
+        and not _is_fwd_seed_offset(node)
+    )
 
 def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
+
+
+def _is_bwd_seed_offset(node):
+    return node.op == "placeholder" and ("bwd_seed" in node.target or "bwd_base_offset" in node.target)
+
+def _is_fwd_seed_offset(node):
+    return node.op == "placeholder" and ("fwd_seed" in node.target or "fwd_base_offset" in node.target)
 
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
@@ -102,10 +118,21 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
+    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
+    bwd_seed_offset_inputs = list(filter(_is_bwd_seed_offset, joint_module.graph.nodes))
+
     # Construct the forward module
     # Keep symints separate from tensors, passed between fwd/bwd graphs, and in the right order.
-    fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values + saved_sym_nodes)
-    bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_sym_nodes + saved_values + tangent_inputs, bwd_outputs)
+    fwd_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph,
+        primal_inputs + fwd_seed_offset_inputs,
+        fwd_outputs + saved_values + saved_sym_nodes
+    )
+    bwd_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph,
+        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        bwd_outputs
+    )
 
     # This is to filter out saved values that don't actually end up being used by the backwards pass
     for node in bwd_graph.nodes:
@@ -120,10 +147,58 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
                     saved_sym_nodes.remove(saved_sym)
                     break
 
+    # Now that we have the finalized list of saved values, we need to ensure
+    # we propagate all symbols which are referenced by backwards inputs.
+    # These are not directly used in the graph but are required for downstream
+    # sizevar assignment
+    saved_symbols: Set[sympy.Symbol] = set()
+    saved_sym_nodes_binding = []
+    saved_sym_nodes_derived = []
+
+    # Some symbols may already be bound in the directly saved_sym_nodes,
+    # keep track of them so we don't re-bind them
+    for node in saved_sym_nodes:
+        symbol = is_symbol_binding_fx_node(node)
+        if symbol:
+            saved_symbols.add(symbol)
+            saved_sym_nodes_binding.append(node)
+        else:
+            saved_sym_nodes_derived.append(node)
+
+    # Now go through all of the prospective backward inputs and track any
+    # other symbols we need to bind
+    symbol_bindings = find_symbol_binding_fx_nodes(joint_module.graph)
+    for node in itertools.chain(saved_sym_nodes_derived, saved_values, tangent_inputs):
+        if "val" not in node.meta:
+            continue
+        new_symbols = free_symbols(node.meta["val"]) - saved_symbols
+        # NB: Deterministic order please!
+        for s in sorted(new_symbols, key=lambda s: s.name):
+            # NB: For well formed graphs, the symbol should always be present,
+            # but we also have ways to produce ill-formed graphs, e.g., direct
+            # make_fx usages, so don't choke in this case
+            if s not in symbol_bindings:
+                continue
+            saved_sym_nodes_binding.append(symbol_bindings[s])
+        saved_symbols |= new_symbols
+
+
+    # Update saved_sym_nodes that are now reordered to have all bindings
+    # at front
+    saved_sym_nodes = saved_sym_nodes_binding + saved_sym_nodes_derived
+
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
-    fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values + saved_sym_nodes)
-    bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_sym_nodes + saved_values + tangent_inputs, bwd_outputs)
+    fwd_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph,
+        primal_inputs + fwd_seed_offset_inputs,
+        fwd_outputs + saved_values + saved_sym_nodes
+    )
+    bwd_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph,
+        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        bwd_outputs
+    )
 
     fwd_module = fx.GraphModule(joint_module, fwd_graph)
     bwd_module = fx.GraphModule(joint_module, bwd_graph)
@@ -157,8 +232,10 @@ def default_partition(
         Returns the generated forward and backward Fx graph modules.
     """
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
+    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
+    inputs = primal_inputs + fwd_seed_offset_inputs
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-    forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
+    forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, inputs, fwd_outputs)
     forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
     saved_values = []
     saved_sym_nodes = []
@@ -194,8 +271,8 @@ def default_partition(
                     saved_sym_nodes.append(user)
             else:
                 saved_values.append(node)
-    saved_values = list(set(saved_values))
-    saved_sym_nodes = list(set(saved_sym_nodes))
+    saved_values = list({k: None for k in saved_values}.keys())
+    saved_sym_nodes = list({k: None for k in saved_sym_nodes}.keys())
 
     return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
 
@@ -340,9 +417,11 @@ def min_cut_rematerialization_partition(
                     required_bw_nodes.add(user)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
+        fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
+        inputs = primal_inputs + fwd_seed_offset_inputs
         fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
         required_bw_nodes.update(o for o in bwd_outputs if o is not None)
-        forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
+        forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
         unclaimed_nodes = {node for node in joint_module.graph.nodes
@@ -350,14 +429,6 @@ def min_cut_rematerialization_partition(
         return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes
 
     orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
-
-    def is_tensor_node(x):
-        # When dynamic shapes are not enabled, fw outputs can be raw ints and not fx nodes
-        if not isinstance(x, fx.Node):
-            return False
-        # It would be nice if we could guarantee that all fx nodes from make_fx get a 'val'
-        # key in their meta dict, but that isn't always true today (see proxy_tensor.py)
-        return 'tensor_meta' in x.meta or ('val' in x.meta and isinstance(x.meta['val'], torch.Tensor))
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
@@ -493,7 +564,7 @@ def min_cut_rematerialization_partition(
             nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
             continue
 
-        if node.op == 'placeholder' and "primals" in node.target:
+        if _is_primal(node) or _is_fwd_seed_offset(node):
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
         # If a node can't be recomputed (too expensive or involves randomness),

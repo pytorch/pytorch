@@ -1,12 +1,17 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * All rights reserved.
+ *
+ * This source code is licensed under the BSD-style license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
 #pragma once
-
 
 #include <ATen/native/transformers/cuda/mem_eff_attention/gemm/custom_mma_multistage.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/gemm/custom_mma_pipelined.h>
 
 #include <cutlass/gemm/threadblock/mma_multistage.h>
 #include <cutlass/gemm/threadblock/mma_pipelined.h>
-
 template <typename Mma, int kMaxK>
 struct MakeCustomMma;
 
@@ -40,9 +45,12 @@ struct MakeCustomMma<
         SharedMemoryClear>,
     kMaxK> {
   // Reduce the number of stages if we don't need that many
-  static int constexpr kStages = kMaxK == std::numeric_limits<int>::max()
+  static int constexpr kStages =
+      kMaxK == cutlass::platform::numeric_limits<int>::max()
       ? Stages
-      : std::min(Stages, (kMaxK + int(Shape::kK) - 1) / int(Shape::kK));
+      : cutlass::const_min(
+            Stages,
+            (kMaxK + int(Shape::kK) - 1) / int(Shape::kK));
   using Mma = cutlass::gemm::threadblock::CustomMmaMultistage<
       Shape,
       IteratorA,

@@ -23,7 +23,7 @@ at::Tensor wrap_vector(T& vec, c10::ScalarType dtype) {
   at::Tensor t = at::empty(
       {static_cast<long>(vec.size())}, at::device(c10::kCPU).dtype(dtype));
   std::copy(
-      vec.data(), vec.data() + vec.size(), t.data_ptr<UNDERLYING_DTYPE>());
+      vec.data(), vec.data() + vec.size(), t.mutable_data_ptr<UNDERLYING_DTYPE>());
   return t;
 }
 
@@ -129,7 +129,7 @@ BCSRSerializationType PackedLinearWeight::serialize() {
   std::transform(
       packed_weight_values.begin(),
       packed_weight_values.end(),
-      weight_values.data_ptr<uint8_t>(),
+      weight_values.mutable_data_ptr<uint8_t>(),
       [](int8_t v) {
         return static_cast<uint8_t>(static_cast<int16_t>(v) + 128);
       });
@@ -170,8 +170,8 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
     w_zero_points_compact =
         at::empty({1}, at::device(c10::kCPU).dtype(c10::kChar));
 
-    w_scales_compact.data_ptr<float>()[0] = w_scales_data_ptr[0];
-    w_zero_points_compact.data_ptr<int8_t>()[0] =
+    w_scales_compact.mutable_data_ptr<float>()[0] = w_scales_data_ptr[0];
+    w_zero_points_compact.mutable_data_ptr<int8_t>()[0] =
         static_cast<int8_t>(static_cast<int16_t>(w_zero_points_[0]) - 128);
   } else if (q_scheme_ == at::kPerChannelAffine) {
     w_scales_compact =
@@ -183,7 +183,7 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
         w_scales_data_ptr,
         w_scales_data_ptr +
             output_channels_, // Don't go to the end because of padding
-        w_scales_compact.data_ptr<float>());
+        w_scales_compact.mutable_data_ptr<float>());
 
     // Subtract 128 from each zero point, to reverse addition done during
     // prepacking
@@ -191,7 +191,7 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
         w_zero_points_.begin(),
         w_zero_points_.begin() +
             output_channels_, // Don't go to the end because of padding
-        w_zero_points_compact.data_ptr<int8_t>(),
+        w_zero_points_compact.mutable_data_ptr<int8_t>(),
         std::move(subtract_128));
   } else {
     TORCH_CHECK(false, "Unsupported quantization scheme.");

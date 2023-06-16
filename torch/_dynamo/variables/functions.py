@@ -3,7 +3,6 @@ import enum
 import functools
 import inspect
 import itertools
-import sys
 import types
 from typing import Dict, List
 
@@ -11,7 +10,7 @@ import torch
 
 from .. import variables
 from ..allowed_functions import is_allowed, is_builtin_callable
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import istensor, istype, make_cell
@@ -61,9 +60,12 @@ def wrap_bound_arg(tx, val, options, source=None):
         from torch._dynamo.variables.builder import VariableBuilder
 
         return VariableBuilder(tx, source=source, **options)(val)
-    else:
-        assert isinstance(val, VariableTracker), typestr(val)
+    elif isinstance(val, VariableTracker):
         return val
+    else:
+        from torch._dynamo.variables.builder import VariableBuilder
+
+        return VariableBuilder(tx, source=source, **options)(val)
 
 
 def wrap_args_kwargs(tx, result, options):
@@ -83,6 +85,26 @@ def init_cellvars(parent, result, code):
             side_effects.store_cell(closure_cells[name], result.pop(name))
 
     return closure_cells
+
+
+def _create_nested_fn(
+    code, f_globals, name, defaults, closure, kwdefaults, annotations
+):
+    from types import FunctionType
+
+    func = FunctionType(code, f_globals, name, defaults, closure)
+    func.__kwdefaults__ = kwdefaults
+
+    if isinstance(annotations, tuple):
+        from itertools import pairwise
+
+        annotations = dict(pairwise(annotations))
+
+    # TypeError: __annotations__ must be set to a dict object
+    assert annotations is None or isinstance(annotations, dict)
+    func.__annotations__ = annotations
+
+    return func
 
 
 class BaseUserFunctionVariable(VariableTracker):
@@ -284,7 +306,21 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if isinstance(self.obj, variables.NNModuleVariable):
+        # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
+        # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
+        # since we ensure `forward` of allowed modules can be traced by AOT safely.
+        # Note this is not only for allowed modules, as user customized modules can extend from
+        # allowed modules but using parent's `forward` method, which is also covered by this branch.
+
+        # If we are tracing the higher order op, we want Dynamo to step inside
+        # the module call so that Dynamo can see the underlying parameters and
+        # buffers and raise them as inputs to the graph. The is_root_tracer
+        # check bypasses the if condition for non-root tracers and directly
+        # calls the super().call_function at the end, which is basically
+        # equivalent of inlining the method.
+        if tx.output.is_root_tracer() and isinstance(
+            self.obj, variables.NNModuleVariable
+        ):
             module_attr = getattr(self.fn, "__module__", "")
             if (
                 module_attr is not None
@@ -362,6 +398,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         annotations,
         closure,
         closure_scope,
+        wraps_source=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -378,6 +415,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if closure is None:
             closure_scope = None
         self.closure_scope = closure_scope
+        self.wraps_source = wraps_source
 
     def self_args(self):
         return []
@@ -429,7 +467,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         )
         if self.kwdefaults:
             func.__kwdefaults__ = self.kwdefaults.items
-
         bound = inspect.signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         result = dict(bound.arguments.items())
@@ -450,17 +487,27 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 parent.symbolic_locals[var] = child.symbolic_locals[var]
 
     def reconstruct(self, codegen):
-        flags = 0x00
+        codegen.load_import_from(__name__, "_create_nested_fn")
+        codegen(self.code)
+        codegen.extend_output([codegen._create_load_const(self.f_globals)])
+        codegen(self.fn_name)
+
         if self.defaults:
-            flags |= 0x01
             codegen(self.defaults)
+        else:
+            codegen.extend_output([codegen.create_load_const(None)])
+
+        if self.closure:
+            codegen(self.closure)
+        else:
+            codegen.extend_output([codegen.create_load_const(None)])
+
         if self.kwdefaults:
-            flags |= 0x02
             codegen(self.kwdefaults)
-        if isinstance(
-            self.annotations, (variables.ConstDictVariable, variables.TupleVariable)
-        ):
-            flags |= 0x04
+        else:
+            codegen.extend_output([codegen.create_load_const(None)])
+
+        if self.annotations:
             try:
                 if isinstance(self.annotations, variables.ConstDictVariable):
                     annotations = {
@@ -474,10 +521,68 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 codegen.extend_output([codegen._create_load_const(annotations)])
             except NotImplementedError:
                 codegen(self.annotations)
-        if self.closure:
-            flags |= 0x08
-            codegen(self.closure)
-        codegen(self.code)
-        if sys.version_info < (3, 11):
-            codegen(self.fn_name)
-        return [create_instruction("MAKE_FUNCTION", arg=flags)]
+        else:
+            codegen.extend_output([codegen.create_load_const(None)])
+
+        codegen.extend_output(create_call_function(7, push_null=True))
+
+        if self.wraps_source:
+            codegen.load_import_from("functools", "wraps")
+            codegen(self.wraps_source)
+            codegen.extend_output(create_call_function(1, True))
+            codegen.extend_output(create_rot_n(2))
+            codegen.extend_output(create_call_function(1, True))
+
+        return []
+
+
+def _traceable_collective_remaps():
+    # We can't rely on importing from distributed, since its not always built
+    if torch.distributed.is_available():
+        from torch.distributed._functional_collectives import (
+            traceable_collective_remaps,
+        )
+
+        return traceable_collective_remaps
+    return {}
+
+
+class CollectiveFunctionRewriteVariable(UserFunctionVariable):
+    """
+    Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
+
+    This class provides both a way to check if a function is remappable, and perform the remapping.
+
+    In the case that a function is 'remappable' but only for some combinations of call-time arguments,
+    we check the args at `call_function` time and fall back to graph-breaking if needed.  This is no worse
+    than status-quo as we currently graph-break on all distributed.* collectives.
+    """
+
+    def __init__(self, fn, *, orig_fn, **kwargs):
+        # orig_fn lets us implement any fn-specific args/kwargs restrictions inside call_function
+        self.orig_fn = orig_fn
+
+        # remapped_fn gets stuffed in self.fn and used in super().call_function
+        super().__init__(fn, **kwargs)
+
+    @staticmethod
+    def can_rewrite(variable):
+        return (
+            inspect.isfunction(variable) and variable in _traceable_collective_remaps()
+        )
+
+    @staticmethod
+    def rewrite(fn):
+        return _traceable_collective_remaps()[fn]
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        # call_function must check any unsupported arguments and graph-break.
+        # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
+        # since that's the contract for putting a mapping in `traceable_collective_remaps`
+        if kwargs.get("async_op", False):
+            unimplemented(
+                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
+            )
+        return super().call_function(tx, args, kwargs)

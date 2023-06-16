@@ -278,6 +278,14 @@ def sample_inputs_numpy_sort(opinfo, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(3, 5), args=(1,))
 
 
+def sample_inputs_numpy_take(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    tensor = make_arg(3, 5)
+    dim = 1
+    _, ind, ind_inv = NumpySort.apply(tensor, 1)
+    yield SampleInput(tensor, args=(ind, ind_inv, dim))
+
+
 class NumpyTake(torch.autograd.Function):
     @staticmethod
     def forward(x, ind, ind_inv, dim):
@@ -502,6 +510,15 @@ autograd_function_db = [
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
         gradcheck_wrapper=lambda y, ind: y,
+    ),
+    OpInfo(
+        'NumpyTakeAutogradFunction',
+        op=NumpyTake.apply,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        sample_inputs_func=sample_inputs_numpy_take,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
     ),
     OpInfo(
         'SelectAutogradFunction',

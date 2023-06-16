@@ -3,7 +3,7 @@
 import io
 import itertools
 import sys
-from contextlib import suppress
+from contextlib import nullcontext
 from copy import deepcopy
 from functools import partial
 from typing import Any, Dict
@@ -134,7 +134,7 @@ class TestFSDPStateDict(FSDPTest):
                 self._state_compare(model, model_new, assert_fn)
                 if check_buffers:
                     has_buffers = any(
-                        [len(list(m.buffers())) for m in (model, model_new)]
+                        len(list(m.buffers())) for m in (model, model_new)
                     )
                     if has_buffers:
                         self._state_compare(
@@ -899,7 +899,7 @@ class TestFSDPStateDict(FSDPTest):
 
         def _create_module(wrap_fsdp=True):
             LINEAR_SKIP = "linear_skip"
-            ctx = enable_wrap(wrapper_cls=FSDP) if wrap_fsdp else suppress()
+            ctx = enable_wrap(wrapper_cls=FSDP) if wrap_fsdp else nullcontext()
             with ctx:
                 module = SkipModel(double_nest=double_nest)
                 # Full name of linear_skip param tensors in SkipModel, as would be
@@ -1102,6 +1102,33 @@ class TestFSDPStateDict(FSDPTest):
                     )
                 else:
                     self.assertEqual(v, state_dict[k])
+
+    @skip_if_lt_x_gpu(2)
+    def test_shared_module_and_shared_parameter(self):
+        class TestDummyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                torch.manual_seed(0)
+                self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
+                self.net2 = nn.Sequential(nn.Linear(16, 16), nn.ReLU())
+                self.net3 = self.net2
+                self.random_parameter = nn.Parameter(torch.Tensor(10))
+                self.shared_parameter = self.random_parameter
+
+            def forward(self, x):
+                return self.net3(self.net2(self.net1(x)))
+
+            def get_input(self):
+                return torch.rand(8, 8, device="cuda")
+
+        model = FSDP(TestDummyModel().cuda())
+        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
+            state_dict = model.state_dict()
+            self.assertEqual(
+                state_dict["random_parameter"], state_dict["shared_parameter"]
+            )
+            self.assertEqual(state_dict["net2.0.bias"], state_dict["net3.0.bias"])
+            self.assertEqual(state_dict["net2.0.weight"], state_dict["net3.0.weight"])
 
 
 instantiate_parametrized_tests(TestFSDPStateDict)

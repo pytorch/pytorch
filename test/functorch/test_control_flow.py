@@ -1,13 +1,25 @@
 # Owner(s): ["module: functorch"]
+import functools
 import unittest
 
 import torch
+import torch.utils._pytree as pytree
+from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond
 from functorch.experimental.control_flow import UnsupportedAliasMutationException
 from torch.fx.experimental.proxy_tensor import make_fx
-
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch._dynamo.exc import CondOpArgsMismatchError
+
+def _fake_map(f, x, *args):
+    from functorch.experimental._map import _stack_pytree, _unstack_pytree
+    x_pytrees = _unstack_pytree(x)
+    zs = []
+    for xp in x_pytrees:
+        zs.append(f(xp, *args))
+    return _stack_pytree(zs)
+
 
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
@@ -31,7 +43,7 @@ class TestControlFlow(TestCase):
 
         x = torch.randn(4, device="cuda")
         pred = torch.tensor(False, device="cuda")
-        result = cond(False, true_fn, false_fn, [x])
+        result = cond(pred, true_fn, false_fn, [x])
         self.assertEqual(result, torch.cos(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
@@ -42,8 +54,138 @@ class TestControlFlow(TestCase):
         xs = torch.ones(3, 2, 2, device="cuda")
         y = torch.ones(2, device="cuda")
         res = control_flow.map(f, xs, y)
+        expected = _fake_map(f, xs, y)
+        self.assertEqual(expected, res)
 
-        self.assertEqual(res, control_flow.map(f, torch.ones(3, 2, 2), torch.ones(2)))
+    def test_map_illegal_inputs(self):
+        def f(x, y):
+            return x[0] + x[1] + y
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Mapped xs can only consist of tensors\. Got xs \[3, tensor\(\[1\., 1\.\]\)\]\."):
+            _ = control_flow.map(f, (3, torch.ones(2)), torch.ones(2))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Leading dimensions of mapped xs cannot be 0\."):
+            _ = control_flow.map(f, (torch.ones(0, 1, 2), torch.ones(0, 1, 2)), torch.ones(2))
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Leading dimensions of mapped xs must be consistent\. "
+                                    r"Got shapes \[torch\.Size\(\[3, 4, 5\]\), torch\.Size\(\[4, 4, 5\]\)\]\."):
+            _ = control_flow.map(f, (torch.ones(3, 4, 5), torch.ones(4, 4, 5)), torch.ones(5))
+
+    def test_map_illegal_outputs(self):
+        def f(x, y):
+            return x.item()
+
+        def f1(x, y):
+            return y.size()
+
+        def f2(x, y):
+            return None
+
+        x = torch.ones([3])
+        y = torch.ones([1, 2, 3])
+        with self.assertRaisesRegex(RuntimeError, r"Expect outputs of map only contains tensors or None\."):
+            _ = control_flow.map(f, x, y)
+
+        with self.assertRaisesRegex(RuntimeError, r"Expect outputs of map only contains tensors or None\."):
+            out = control_flow.map(f1, x, y)
+
+        # return None is OK
+        _ = control_flow.map(f2, x, y)
+
+
+    def test_map_list_in_out(self):
+        def f(x, y):
+            return [[x[0][0] + y]]
+
+        xs = [[torch.ones(3, 2, 2)]]
+        y = torch.ones(2)
+        res = control_flow.map(f, xs, y)
+        expected = _fake_map(f, xs, y)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(len(res[0]), 1)
+        self.assertEqual(expected, res)
+
+    def test_map_dict_in_out(self):
+        def f(x, y):
+            return {"c": x["a"]["b"] + y}
+
+        xs = {"a": {"b": torch.ones(3, 2, 2)}}
+        y = torch.ones(2)
+        res = control_flow.map(f, xs, y)
+        expected = _fake_map(f, xs, y)
+        self.assertEqual(len(res), 1)
+        self.assertTrue("c" in res)
+        self.assertEqual(expected, res)
+
+    def test_map_autograd_simple(self):
+        def f(x, y):
+            return x.sin().cos() * y.cos().sin()
+
+        xs = torch.ones(3, 2, 2, requires_grad=True)
+        y = torch.ones(2, requires_grad=True)
+        res = control_flow.map(f, xs, y)
+        expected_res = _fake_map(f, xs, y)
+        grad_out = torch.ones_like(res)
+        grads = torch.autograd.grad(res, (xs, y), grad_out)
+        expected_grads = torch.autograd.grad(expected_res, (xs, y), grad_out)
+        self.assertEqual(expected_res, res)
+        self.assertEqual(expected_grads, grads)
+
+    def test_map_autograd_simple_partial_grad(self):
+        def f(x, y):
+            return x.sin().cos() * y.cos().sin()
+
+        xs = torch.ones(3, 2, 2, requires_grad=True)
+        # Disable the gradient computation for y
+        y = torch.ones(2, requires_grad=False)
+        res = control_flow.map(f, xs, y)
+        expected_res = _fake_map(f, xs, y)
+        grad_out = torch.ones_like(res)
+        grads = torch.autograd.grad(res, (xs,), grad_out)
+        expected_grads = torch.autograd.grad(expected_res, (xs,), grad_out)
+        self.assertEqual(expected_res, res)
+        self.assertEqual(expected_grads, grads)
+
+    def test_map_autograd_no_grad_output(self):
+        def f(x, y):
+            return x[0].sin().cos() + y, y.cos().sin()
+
+        xs = [torch.ones(3, 2, 2, requires_grad=True), torch.ones(3, 3)]
+        # Disable the gradient computation for y
+        y = torch.ones(2, requires_grad=False)
+        res = control_flow.map(f, xs, y)
+        expected_res = _fake_map(f, xs, y)
+        grad_out = torch.ones_like(res[0])
+        grads = torch.autograd.grad(res[0], (xs[0],), grad_out)
+        expected_grads = torch.autograd.grad(expected_res[0], (xs[0],), grad_out)
+        self.assertEqual(expected_res, res)
+        self.assertEqual(expected_grads, grads)
+
+
+    def test_map_autograd_nested_list(self):
+        import torch.utils._pytree as pytree
+
+        def f(x, y):
+            a, b = x
+            c, d = a
+            return [[b.sin() * c.cos()], d.sin() * y.cos()]
+
+        def fwbw(map_op, f, x, y):
+            z = map_op(f, x, y)
+            flat_x, _ = pytree.tree_flatten(x)
+            flat_z, _ = pytree.tree_flatten(z)
+            grads = torch.autograd.grad(flat_z, flat_x, [torch.ones_like(z) for z in flat_z])
+            return z, grads
+
+        x = [[torch.randn(3, 2, 2, requires_grad=True), torch.randn(3, 2, 1, requires_grad=True)],
+             torch.ones(3, 1, 2, requires_grad=True)]
+        y = torch.ones(1, requires_grad=True)
+        true_outs = fwbw(control_flow.map, f, x, y)
+        fake_outs = fwbw(_fake_map, f, x, y)
+        self.assertEqual(true_outs, fake_outs)
 
 
 class TestControlFlowTraced(TestCase):
@@ -131,7 +273,7 @@ class TestControlFlowTraced(TestCase):
             if node.op == "call_function":
                 all_ops_in_true_branch.append(node.target)
 
-        self.assertFalse(any([op._schema.is_mutable for op in all_ops_in_true_branch]))
+        self.assertFalse(any(op._schema.is_mutable for op in all_ops_in_true_branch))
 
         graph_module = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
@@ -188,7 +330,7 @@ class TestControlFlowTraced(TestCase):
             if node.op == "call_function":
                 all_ops.append(node.target)
 
-        self.assertFalse(any([op._schema.is_mutable for op in all_ops]))
+        self.assertFalse(any(op._schema.is_mutable for op in all_ops))
 
     def test_cond_functionalized_data_dependent_pred(self):
         def true_fn(x):
@@ -298,6 +440,125 @@ class TestControlFlowTraced(TestCase):
         with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
+    def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
+        def true_true_fn(x):
+            x.add_(4)
+            return x.sin().max()
+
+        def true_false_fn(x):
+            return x.cos().min()
+
+        def true_fn(x):
+            pred = x.shape[0] == 1
+            return cond(pred, true_true_fn, true_false_fn, [x])
+
+        def false_fn(x):
+            return x.sum()
+
+        def f(x):
+            pred = x.shape[0] == 1
+            return cond(pred, true_fn, false_fn, [x])
+
+        example_input = torch.ones(4, 5)
+        example_input_func = to_fun(example_input)
+        torch._enable_functionalization(reapply_views=False)
+        try:
+            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+                f(example_input_func)
+
+            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+                make_fx(f)(example_input_func)
+        finally:
+            torch._disable_functionalization()
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    return func(*args, **kwargs)
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
+            make_fx(f_wrapper(f))(example_input_func)
+
+    def test_cond_functionalized_input_aliasing_with_aot_func(self):
+        def true_fn(x):
+            return x
+
+        def false_fn(x):
+            view_x = x.view(x.shape)
+            return view_x
+
+        def f(x):
+            pred = x.shape[0] == 4
+            return cond(pred, true_fn, false_fn, [x])
+
+        example_input = torch.ones(5, 5)
+        example_input_func = to_fun(example_input)
+        torch._enable_functionalization(reapply_views=False)
+        try:
+            with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
+                f(example_input_func)
+        finally:
+            torch._disable_functionalization()
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    func_args = pytree.tree_map(to_fun, args)
+                    func_kwargs = pytree.tree_map(to_fun, kwargs)
+                    return func(*func_args, **func_kwargs)
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
+            make_fx(f_wrapper(f))(example_input)
+
+    def test_cond_functionalized_aot_func_check_functional(self):
+        def true_fn(x):
+            return x.cos()
+
+        def false_fn(x):
+            y = x.sin()
+            y.add_(5)
+            return y
+
+        def f(x):
+            pred = x.shape[0] == 4
+            return cond(pred, true_fn, false_fn, [x])
+
+        example_input = torch.ones(5, 5)
+        example_input_func = to_fun(example_input)
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    func_args = pytree.tree_map(to_fun, args)
+                    func_kwargs = pytree.tree_map(to_fun, kwargs)
+                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        result_gm = make_fx(f_wrapper(f))(example_input)
+        for node in result_gm.true_graph_0.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(not node.target._schema.is_mutable)
+
+        for node in result_gm.false_graph_0.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(not node.target._schema.is_mutable)
+
+        self.assertEqual(result_gm(torch.ones(5, 5)), f(torch.ones(5, 5)))
+
     def test_cond_nested_traced_other_inputs(self):
         def true_nested(y):
             return y * y
@@ -378,7 +639,7 @@ class TestControlFlowTraced(TestCase):
         out = "".join(out.split())
         self.assertEqual(code, out)
 
-    def test_assert_on_mismatch_type_size(self):
+    def test_raise_error_on_mismatch_type_size(self):
         def true_fn(x):
             return x.sin()
 
@@ -389,11 +650,13 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            CondOpArgsMismatchError,
+            "Expected to return same number of outputs but got",
+        ):
             make_fx(f)(x, torch.tensor(False))
 
-
-    def test_assert_on_mismatch_tensor_size(self):
+    def test_raise_error_on_mismatch_tensor_size(self):
         def true_fn(x):
             return x.sin()
 
@@ -404,7 +667,10 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            CondOpArgsMismatchError,
+            "Expected each tensor to have same metadata but got",
+        ):
             make_fx(f)(x, torch.tensor(False))
 
     def test_cond_traced_not_nested_fake_tensor(self):
@@ -540,7 +806,7 @@ class TestControlFlowTraced(TestCase):
         out = "".join(out.split())
         self.assertEqual(code, out)
 
-    def test_assert_on_mismatch_type_size_fake_tensor(self):
+    def test_raise_error_on_mismatch_type_size_fake_tensor(self):
         def true_fn(x):
             return x.sin()
 
@@ -551,11 +817,14 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            CondOpArgsMismatchError,
+            "Expected to return same number of outputs but got",
+        ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
 
-    def test_assert_on_mismatch_tensor_size_fake_tensor(self):
+    def test_raise_error_on_mismatch_tensor_size_fake_tensor(self):
         def true_fn(x):
             return x.sin()
 
@@ -566,20 +835,21 @@ class TestControlFlowTraced(TestCase):
             return cond(y, true_fn, false_fn, [x])
 
         x = torch.randn(4)
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(
+            CondOpArgsMismatchError,
+            "Expected each tensor to have same metadata but got",
+        ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
-    def check_map_graph(self, gm, key):
+    def check_map_count(self, gm, op_count):
         i = 0
-        for node in gm.graph.nodes:
-            if node.op == "call_function" and node.target == torch.ops.map:
-                i += 1
-                self.assertEqual(
-                    node.meta[key].shape[0], node.args[1].meta[key].shape[0]
-                )
-        self.assertEqual(i, 1)
+        for m in gm.modules():
+            for node in m.graph.nodes:
+                if node.op == "call_function" and node.target == torch.ops.map_impl:
+                    i += 1
+        self.assertEqual(i, op_count)
 
-    def test_map_real(self):
+    def test_tracing_map_real(self):
         def f(x, y):
             return x + y
 
@@ -591,9 +861,9 @@ class TestControlFlowTraced(TestCase):
         y = torch.randn(2)
         res = gm(x, y)
         self.assertEqual(res, g(x, y))
-        self.check_map_graph(gm, "tensor_meta")
+        self.check_map_count(gm, 1)
 
-    def test_map_symbolic(self):
+    def test_tracing_map_symbolic_simple(self):
         def f(x, y):
             return x + y
 
@@ -605,7 +875,140 @@ class TestControlFlowTraced(TestCase):
         y = torch.randn(2)
         res = gm(x, y)
         self.assertEqual(res, g(x, y))
-        self.check_map_graph(gm, "val")
+        self.check_map_count(gm, 1)
+
+    def test_tracing_map_symbolic_list(self):
+        def f(x, y):
+            return [x[0][0] + y, x[1] * y]
+
+        def g(xs, y, z):
+            out = control_flow.map(f, xs, y)
+            return out[0] + z, out[1] * z
+
+        example_x = [[torch.ones(3, 4, 5)], torch.ones(3, 4, 5)]
+        gm = make_fx(g, tracing_mode="symbolic")(example_x, torch.ones(5), torch.ones(5))
+        x = [[torch.randn(4, 5, 6)], torch.ones(4, 5, 6)]
+        y = torch.randn(6)
+        z = torch.ones(6)
+        res = gm(x, y, z)
+        self.assertEqual(res, g(x, y, z))
+        self.check_map_count(gm, 1)
+
+    def test_tracing_map_symbolic_dict(self):
+        def f(x, y):
+            return {"d": x["b"]["a"] + y, "e": x["c"] * y}
+
+        def g(xs, y, z):
+            out = control_flow.map(f, xs, y)
+            return {"f": out["d"] + z, "g": out["e"] * z}
+
+        example_x = {"b": {"a": torch.ones(3, 4, 5)}, "c": torch.ones(3, 4, 5)}
+        gm = make_fx(g, tracing_mode="symbolic")(example_x, torch.ones(5), torch.ones(5))
+        x = {"b": {"a": torch.randn(4, 5, 6)}, "c": torch.ones(4, 5, 6)}
+        y = torch.randn(6)
+        z = torch.ones(6)
+        res = gm(x, y, z)
+        self.assertEqual(res, g(x, y, z))
+        self.check_map_count(gm, 1)
+
+    def test_tracing_map_autograd_symbolic_simple(self):
+        def f(x, y):
+            return x + y
+
+        def g(xs, y):
+            out = control_flow.map(f, xs, y)
+            return torch.autograd.grad(out, (xs, y), torch.ones_like(out))
+
+        gm = make_fx(g, tracing_mode="symbolic")(torch.ones(3, 4, 5, requires_grad=True), torch.ones(5, requires_grad=True))
+        x = torch.randn(4, 5, 6, requires_grad=True)
+        y = torch.randn(6, requires_grad=True)
+        res = gm(x, y)
+        self.assertEqual(res, g(x, y))
+        self.check_map_count(gm, 2)
+
+
+    def test_tracing_map_autograd_symbolic_list(self):
+        import torch.utils._pytree as pytree
+
+        def f(x, y):
+            return [x[0].cos() + y.sin(), x[1].sin() * y.cos()]
+
+        def g(xs, y):
+            out = control_flow.map(f, xs, y)
+            flat_out, _ = pytree.tree_flatten(out)
+            flat_inp, _ = pytree.tree_flatten((xs, y))
+            requires_grad_inp = [inp for inp in flat_inp if inp.requires_grad]
+            return torch.autograd.grad(flat_out, requires_grad_inp, [torch.ones_like(out) for out in flat_out])
+
+        gm = make_fx(g, tracing_mode="symbolic")(
+            [torch.ones(3, 4, 5), torch.ones(3, 4, 5, requires_grad=True)],
+            torch.ones(5, requires_grad=True))
+        x = [torch.randn(4, 5, 6), torch.ones(4, 5, 6, requires_grad=True)]
+        y = torch.randn(6, requires_grad=True)
+        res = gm(x, y)
+        self.assertEqual(res, g(x, y))
+        self.check_map_count(gm, 2)
+
+    def test_tracing_map_autograd_symbolic_dict(self):
+        def f(x, y):
+            return [x["a"] + y, x["b"] * y]
+
+        def g(xs, y):
+            out = control_flow.map(f, xs, y)
+            flat_out, _ = pytree.tree_flatten(out)
+            flat_inp, _ = pytree.tree_flatten((xs, y))
+            requires_grad_inp = [inp for inp in flat_inp if inp.requires_grad]
+            return torch.autograd.grad(flat_out, requires_grad_inp, [torch.ones_like(out) for out in flat_out])
+
+        traced_x = {"a": torch.ones(3, 4, 5, requires_grad=True), "b": torch.ones(3, 4, 5, requires_grad=True)}
+        gm = make_fx(g, tracing_mode="symbolic")(traced_x, torch.ones(5, requires_grad=True))
+        x = {"a": torch.randn(4, 5, 6, requires_grad=True), "b": torch.ones(4, 5, 6, requires_grad=True)}
+        y = torch.randn(6, requires_grad=True)
+        res = gm(x, y)
+        self.assertEqual(res, g(x, y))
+        self.check_map_count(gm, 2)
+
+    def test_tracing_map_autograd_aot_functionalized(self):
+        def inner(x, y):
+            z = x - 1
+            z.add_(1)
+            return z * y
+
+        def f(xs, y):
+            res = control_flow.map(inner, xs, y)
+            grads = torch.autograd.grad(res, (xs, y), torch.ones_like(res))
+            return grads
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        example_inputs = (torch.ones(3, 2, 4, requires_grad=True), torch.ones(2, 4, requires_grad=True))
+        gm = make_fx(f, tracing_mode="symbolic")(*example_inputs)
+        fgm = make_fx(f_wrapper(f), tracing_mode="symbolic")(*example_inputs)
+        xs = torch.ones(3, 4, 5, requires_grad=True)
+        y = torch.ones(4, 5, requires_grad=True)
+
+        self.assertEqual(gm(xs, y), f(xs, y))
+
+        def count_mutable(gm):
+            c = 0
+            for node in gm.graph.nodes:
+                if node.op == "call_function":
+                    if node.target == torch.ops.map_impl:
+                        c += count_mutable(getattr(gm, str(node.args[0])))
+                    elif schema := getattr(node.target, "_schema", None):
+                        c += int(schema.is_mutable)
+            return c
+        self.assertEqual(count_mutable(fgm), 0)
+        # One for forward, one for recompuation logic in backward
+        self.assertEqual(count_mutable(gm), 2)
 
     def test_map_functionalized(self):
         def map_fn(x, y):
@@ -629,6 +1032,36 @@ class TestControlFlowTraced(TestCase):
         for node in gm.body_graph_0.graph.nodes:
             if node.op == "call_function":
                 self.assertTrue(not node.target._schema.is_mutable)
+        self.check_map_count(gm, 1)
+
+    def test_map_functionalized_aot_func(self):
+        def map_fn(x, y):
+            z = x + y
+            z.add_(4)
+            return z
+
+        def f(xs, y):
+            return control_flow.map(map_fn, xs, y)
+
+        def f_wrapper(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                torch._enable_functionalization(reapply_views=False)
+                try:
+                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                finally:
+                    torch._disable_functionalization()
+            return wrapper
+
+        example_inputs = (torch.ones(3, 2, 4), torch.ones(4))
+
+        gm = make_fx(f_wrapper(f))(*example_inputs)
+
+        for node in gm.body_graph_0.graph.nodes:
+            if node.op == "call_function":
+                self.assertTrue(not node.target._schema.is_mutable)
+
+        self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
     def test_map_functionalized_arg_mutation(self):
         def map_fn(x, y):
@@ -686,11 +1119,11 @@ class TestControlFlowTraced(TestCase):
             torch.tensor(True), torch.ones(3, 2, 4), torch.ones(4)
         )
         pred = torch.tensor(False)
-        x = torch.randn(3, 2, 2)
-        y = torch.randn(2)
+        x = torch.randn(3, 2, 4)
+        y = torch.randn(4)
         res = gm(pred, x, y)
         self.assertEqual(res, g(pred, x, y))
-        self.check_map_graph(gm, "tensor_meta")
+        self.check_map_count(gm, 1)
 
     def test_nested_map_cond_symbolic(self):
         def true_fn(x, y):
@@ -713,7 +1146,7 @@ class TestControlFlowTraced(TestCase):
         y = torch.randn(2)
         res = gm(pred, x, y)
         self.assertEqual(res, g(pred, x, y))
-        self.check_map_graph(gm, "val")
+        self.check_map_count(gm, 1)
 
     def test_nested_cond_map_cond_symbolic(self):
 
@@ -747,6 +1180,7 @@ class TestControlFlowTraced(TestCase):
         y = torch.randn(2)
         res = gm(p, pred, xs, y)
         self.assertEqual(res, main(p, pred, xs, y))
+        self.check_map_count(gm, 2)
 
     def test_cond_with_sym_pred(self):
         def true_fn(x):

@@ -254,7 +254,7 @@ def type_inference_rule(n: Node, symbols, constraints, counter):
 @register_inference_rule("masked_fill_")
 def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
     """
-    Similar to addition. For now we implemenent the constraints when
+    Similar to addition. For now we implement the constraints when
     the argument is a boolean tensor. There is also a case for when
     it is a condition. We will leave this out for now.
     """
@@ -475,7 +475,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
         get_item_output, counter = gen_dvar(counter)
         symbols[n] = get_item_output
 
-        # retreive arg variables
+        # retrieve arg variables
         get_item_arg = symbols[n.args[0]]
         assert isinstance(get_item_arg, TVar)
 
@@ -494,7 +494,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
 
 
         # since the output is a dimension, we make sure it's a natural number
-        # added as a conjunction to the disjuction of c2
+        # added as a conjunction to the disjunction of c2
         c3 = BinConstraintD(0, get_item_output, op_leq)
         return [Disj([c1, Conj([Disj(c2), c3])])], counter
 
@@ -504,7 +504,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
         get_item_output, counter = gen_tvar(counter)
         symbols[n] = get_item_output
 
-        # retreive arg variables
+        # retrieve arg variables
         if n.args[0] in symbols:
             get_item_arg = symbols[n.args[0]]
             assert isinstance(get_item_arg, TVar)

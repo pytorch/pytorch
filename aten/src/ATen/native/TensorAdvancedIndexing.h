@@ -69,6 +69,14 @@ static inline bool can_use_expanded_index_path(
     return false;
   }
 
+  // allow only different size on dim 0 for src and index
+  // https://github.com/pytorch/pytorch/issues/99595
+  for (const auto dim : c10::irange(1, index.dim())) {
+    if (src.size(dim) != index.size(dim)) {
+      return false;
+    }
+  }
+
   if (is_scatter_like) {
     // using `spmm` for scatter would require sorting on index,
     // this is only perf beneficial when the inner dimension, aka, `channels`

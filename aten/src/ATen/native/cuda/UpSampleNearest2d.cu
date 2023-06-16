@@ -248,8 +248,8 @@ static void upsample_nearest2d_out_cuda_template(
     const int64_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
 
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_nhwc_out_frame", [&] {
-      const scalar_t* idata = input.data_ptr<scalar_t>();
-      scalar_t* odata = output.data_ptr<scalar_t>();
+      const scalar_t* idata = input.const_data_ptr<scalar_t>();
+      scalar_t* odata = output.mutable_data_ptr<scalar_t>();
 
       upsample_nearest2d_nhwc_out_frame<scalar_t, nn_compute_source_index_fn>
         <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -308,8 +308,8 @@ static void upsample_nearest2d_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, input.scalar_type(), "upsample_nearest2d_out_frame", [&] {
           using accscalar_t = at::acc_type<scalar_t, true>;
 
-          auto idata = input.data_ptr<scalar_t>();
-          auto odata = output_c.data_ptr<scalar_t>();
+          auto idata = input.const_data_ptr<scalar_t>();
+          auto odata = output_c.mutable_data_ptr<scalar_t>();
 
           upsample_nearest2d_out_frame<scalar_t, nn_compute_source_index_fn>
               <<<grid, block, 0, stream>>>(
@@ -380,8 +380,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_nhwc_out_frame", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
-      const scalar_t* go = grad_output.data_ptr<scalar_t>();
-      scalar_t* gi = grad_input.data_ptr<scalar_t>();
+      const scalar_t* go = grad_output.const_data_ptr<scalar_t>();
+      scalar_t* gi = grad_input.mutable_data_ptr<scalar_t>();
 
       upsample_nearest2d_backward_nhwc_out_frame<scalar_t, accscalar_t, nn_bw_compute_source_index_fn>
         <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -415,8 +415,8 @@ static void upsample_nearest2d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Byte, grad_output.scalar_type(), "upsample_nearest2d_backward_out_frame", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
 
-      auto idata = grad_input_c.data_ptr<scalar_t>();
-      auto odata = grad_output.data_ptr<scalar_t>();
+      auto idata = grad_input_c.mutable_data_ptr<scalar_t>();
+      auto odata = grad_output.const_data_ptr<scalar_t>();
 
 
       upsample_nearest2d_backward_out_frame<scalar_t, accscalar_t, nn_bw_compute_source_index_fn>

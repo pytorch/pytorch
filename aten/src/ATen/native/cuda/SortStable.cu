@@ -231,7 +231,7 @@ void launch_stable_sort_kernel(
   int64_t nsort = self.size(dim);
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
   TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
-  int64_t* indices_ptr = indices.data_ptr<int64_t>();
+  int64_t* indices_ptr = indices.mutable_data_ptr<int64_t>();
 
 #if (defined(USE_ROCM) && ROCM_VERSION < 40500)
   constexpr bool is_rocm_bf16_sort_unsupported = true;
@@ -239,59 +239,57 @@ void launch_stable_sort_kernel(
   constexpr bool is_rocm_bf16_sort_unsupported = false;
 #endif
 
+  if constexpr (is_rocm_bf16_sort_unsupported) {
+    if (self.scalar_type() == kBFloat16) {
+      TORCH_CHECK(false, "BFloat16 is not supported on ROCm < 4.5");
+    }
+  }
+
   AT_DISPATCH_ALL_TYPES_AND3(
       kBool, kHalf, kBFloat16, self.scalar_type(), "sort", [&] {
-        c10::guts::if_constexpr<!(
-            is_rocm_bf16_sort_unsupported &&
-            std::is_same<scalar_t, c10::BFloat16>::value)>(
-            [&](auto _) {
-              const scalar_t* self_ptr = self.data_ptr<scalar_t>();
-              scalar_t* values_ptr = values.data_ptr<scalar_t>();
-              int64_t remaining = _(numel);
-              while (remaining > 0) {
-                int64_t n = std::min(remaining, nbatch);
-                int64_t nsegments = n / nsort;
+        const scalar_t* self_ptr = self.const_data_ptr<scalar_t>();
+        scalar_t* values_ptr = values.mutable_data_ptr<scalar_t>();
+        int64_t remaining = numel;
+        while (remaining > 0) {
+          int64_t n = std::min(remaining, nbatch);
+          int64_t nsegments = n / nsort;
 
-                if (nsegments == 1 ||
-                    nsort >= 1000000) { // rough heuristics where even a single
-                                        // sort occupies GPU
-                  segmented_sort_large_segments(
-                      nsegments,
-                      nsort,
-                      n,
-                      descending,
-                      self_ptr,
-                      values_ptr,
-                      indices_ptr);
-                } else if (nsegments < 128) {
-                  segmented_sort_pairs_by_full_sort(
-                      nsegments,
-                      nsort,
-                      n,
-                      descending,
-                      self_ptr,
-                      values_ptr,
-                      indices_ptr);
-                } else {
-                  segmented_sort_pairs(
-                      nsegments,
-                      nsort,
-                      n,
-                      descending,
-                      self_ptr,
-                      values_ptr,
-                      indices_ptr);
-                }
+          if (nsegments == 1 ||
+              nsort >= 1000000) { // rough heuristics where even a single
+                                  // sort occupies GPU
+            segmented_sort_large_segments(
+                nsegments,
+                nsort,
+                n,
+                descending,
+                self_ptr,
+                values_ptr,
+                indices_ptr);
+          } else if (nsegments < 128) {
+            segmented_sort_pairs_by_full_sort(
+                nsegments,
+                nsort,
+                n,
+                descending,
+                self_ptr,
+                values_ptr,
+                indices_ptr);
+          } else {
+            segmented_sort_pairs(
+                nsegments,
+                nsort,
+                n,
+                descending,
+                self_ptr,
+                values_ptr,
+                indices_ptr);
+          }
 
-                remaining -= n;
-                self_ptr += n;
-                values_ptr += n;
-                indices_ptr += n;
-              }
-            },
-            [&](auto _) {
-              TORCH_CHECK(_(false), "BFloat16 is not supported on ROCm < 4.5");
-            });
+          remaining -= n;
+          self_ptr += n;
+          values_ptr += n;
+          indices_ptr += n;
+        }
       });
 }
 
