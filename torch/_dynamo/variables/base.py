@@ -3,8 +3,15 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
 from ..exc import unimplemented
-from ..source import AttrSource, is_from_local_source, Source
-from ..utils import dict_values, identity, istype, odict_values
+from ..source import AttrSource, Source
+from ..utils import (
+    dict_values,
+    get_custom_getattr,
+    identity,
+    istype,
+    object_has_getattribute,
+    odict_values,
+)
 
 
 class MutableLocal:
@@ -207,10 +214,15 @@ class VariableTracker(metaclass=HasPostInit):
             _input_associated_real_value = eval(self.source.name(), scope)
         except TypeError:
             raise NotImplementedError()
+
         if _input_associated_real_value is None:
             raise NotImplementedError()
 
-        from .builder import VariableBuilder
+        if object_has_getattribute(_input_associated_real_value):
+            raise NotImplementedError()
+
+        if get_custom_getattr(_input_associated_real_value):
+            raise NotImplementedError()
 
         real_value = getattr(_input_associated_real_value, name)
         if callable(real_value):
@@ -219,9 +231,15 @@ class VariableTracker(metaclass=HasPostInit):
             # Note - at a certain point we may want to handle
             raise NotImplementedError()
 
-        return VariableBuilder(tx, AttrSource(self.source, name))(
-            real_value
-        ).add_options(self)
+        from .builder import VariableBuilder
+
+        attr_source = AttrSource(self.source, name)
+        has_attr_guard = attr_source.source.make_guard(GuardBuilder.HASATTR)
+        return (
+            VariableBuilder(tx, attr_source)(real_value)
+            .add_options(self)
+            .add_guard(has_attr_guard)
+        )
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""

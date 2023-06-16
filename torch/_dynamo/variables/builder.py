@@ -199,33 +199,11 @@ class VariableBuilder:
     def __call__(self, value):
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
-            # Note - we may end up in a situation where we invoke something like
-            # def fn(x, y)
-            # with fn(x, x)
-            # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
-            # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
-            # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
-            # In the the fn(x, x) example call above look like a graph with a single input.
-            # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
-
-            # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
-            # leave unsourced - like a local list created and discharged entirely within a local scope.
-            if side_effect_result.source and side_effect_result.source != self.source:
-                ser_source_is_local = is_from_local_source(side_effect_result.source)
-                source_is_local = is_from_local_source(self.source)
-                # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
-                # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
-                # so maybe we should do this refactor before we land this...
-                # TODO(voz): Combine local and global guard builders.
-                if ser_source_is_local == source_is_local:
-                    # Note - this is a little agressive - these being duplicate input does not always matter.
-                    # However, this should always be a sound guard to add here.
-                    dup_guard = functools.partial(
-                        GuardBuilder.DUPLICATE_INPUT, source_b=side_effect_result.source
-                    )
-                    side_effect_result = side_effect_result.add_guards(
-                        self.make_guards(dup_guard)
-                    )
+            dup_guard = _make_dupe_guard(side_effect_result)
+            if dup_guard:
+                side_effect_result = side_effect_result.add_guards(
+                    self.make_guards(dup_guard)
+                )
             return side_effect_result
         vt = self._wrap(value).clone(**self.options())
         if self._can_lift_attrs_to_inputs(vt):
@@ -234,9 +212,35 @@ class VariableBuilder:
             )
         return vt
 
+    def _make_dupe_guard(self, deduped_object):
+        # Note - we may end up in a situation where we invoke something like
+        # def fn(x, y)
+        # with fn(x, x)
+        # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
+        # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
+        # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
+        # In the the fn(x, x) example call above look like a graph with a single input.
+        # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
+
+        # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
+        # leave unsourced - like a local list created and discharged entirely within a local scope.
+        if side_effect_result.source and side_effect_result.source != self.source:
+            ser_source_is_local = is_from_local_source(side_effect_result.source)
+            source_is_local = is_from_local_source(self.source)
+            # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
+            # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
+            # so maybe we should do this refactor before we land this...
+            # TODO(voz): Combine local and global guard builders.
+            if ser_source_is_local == source_is_local:
+                # Note - this is a little agressive - these being duplicate input does not always matter.
+                # However, this should always be a sound guard to add here.
+                dup_guard = functools.partial(
+                    GuardBuilder.DUPLICATE_INPUT, source_b=side_effect_result.source
+                )
+            return dup_guard
+        return None
+
     def _can_lift_attrs_to_inputs(self, vt):
-        if not is_from_local_source(self.source):
-            return False
         if type(vt) in [TensorVariable, UserDefinedObjectVariable]:
             return True
         return False
@@ -1114,6 +1118,7 @@ def wrap_fx_proxy(tx, proxy, example_value=None, **options):
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, ignore_subclass=False, **options
 ):
+    import torch._export.constraints
     from ..symbolic_convert import InstructionTranslatorBase
 
     assert isinstance(tx, InstructionTranslatorBase)
@@ -1204,28 +1209,17 @@ def wrap_fx_proxy_cls(
         from . import UserDefinedObjectVariable
 
         return UserDefinedObjectVariable(example_value)
-    elif istype(example_value, (int, bool, float)) and config.dynamic_shapes:
-        proxy.node.meta["example_value"] = example_value
-        return SymNodeVariable.create(tx, proxy, example_value, **options)
-    elif istype(example_value, torch.Size) and config.dynamic_shapes:
-        proxy.node.meta["example_value"] = example_value
-        sizes = []
-        for i, v in enumerate(example_value):
-            proxy_i = proxy[i]
-            sizes.append(SymNodeVariable.create(tx, proxy_i, v, **options))
-        return SizeVariable(sizes, proxy, **options)
     elif istype(example_value, int) and proxy.node.target in (
         torch.seed,
         operator.mod,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
+        # This always wants to be in the graph, even if the constraint
+        # results in a constant int
+        torch._export.constraints.constrain_as_value,
     ):
-        if config.dynamic_shapes:
-            proxy.node.meta["example_value"] = example_value
-            return SymNodeVariable.create(tx, proxy, example_value, **options)
-        else:
-            return ConstantVariable(example_value, **options)
+        return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
     ):
@@ -1252,7 +1246,11 @@ def wrap_fx_proxy_cls(
                         **options,
                     )
                 )
-        if istype(example_value, tuple):
+        if isinstance(example_value, torch.Size):
+            # NB: Keep the old proxy around.  See SizeVariable for an
+            # explanation why
+            return SizeVariable(unpacked, proxy, **options)
+        elif istype(example_value, tuple):
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
@@ -1275,21 +1273,6 @@ def wrap_fx_proxy_cls(
     elif proxy.node.target in [torch.cuda.streams.Stream, torch.cuda.current_stream]:
         proxy.node.meta["example_value"] = example_value
         return CUDAStreamVariable(proxy, example_value, **options)
-    elif (
-        isinstance(example_value, int)
-        and config.numpy_ndarray_as_tensor
-        and not config.dynamic_shapes
-    ):
-        proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
-    elif (
-        istype(example_value, torch.Size)
-        and all(isinstance(x, int) for x in example_value)
-        and target_cls is TupleVariable
-    ):  # convert torch.Size to tuple
-        return TupleVariable(
-            [ConstantVariable(x, **options) for x in example_value], **options
-        )
     elif isinstance(example_value, int) and proxy.node.target in [
         getattr,
         operator.getitem,

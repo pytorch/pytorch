@@ -305,7 +305,7 @@ def _multi_tensor_adamax(
         return
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_infs, state_steps])
-    for ((grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps), _) in grouped_tensors.values():
+    for grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps in grouped_tensors.values():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
