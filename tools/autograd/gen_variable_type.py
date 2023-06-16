@@ -1247,6 +1247,7 @@ def emit_body(
                 )
                 return f"{wrap_opt_if_condition}"
 
+            # Figure out the offset of the edge that uses this variable
             derivative_var_name = derivative.var_names[0]
             for edge_off, a in enumerate(args_with_derivatives):
                 if a.name == derivative_var_name:
