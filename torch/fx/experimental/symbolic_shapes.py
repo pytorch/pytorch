@@ -1479,7 +1479,7 @@ class ShapeGuardPrinter(StrPrinter):
                 for symbol, sources in self.symbol_to_source.items()
             })
 
-        assert expr in self.symbol_to_source, (
+        assert self.symbol_to_source.get(expr), (
             f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
             f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
             "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
@@ -2460,7 +2460,7 @@ class ShapeEnv:
                 # Small optimization
                 if (
                     isinstance(expr, sympy.Symbol) and
-                    expr in symbol_to_source and
+                    symbol_to_source.get(expr) and
                     source == symbol_to_source[expr][0]
                 ):
                     continue

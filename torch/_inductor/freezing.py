@@ -203,7 +203,8 @@ def invalidate_eager_modules():
                 mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
             )
         ):
-            e_t = ErasedTensor(tensor, attr_name, mod)
+            with torch._dispatch.python.no_python_dispatcher():
+                e_t = ErasedTensor(tensor, attr_name, mod)
             if isinstance(tensor, torch.nn.Parameter):
                 e_t.requires_grad_(True)
                 e_t._is_param = True
@@ -217,7 +218,8 @@ def discard_traced_gm_params(mod):
             mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
         )
     ):
-        e_t = ErasedTensor(tensor, attr_name, mod)
+        with torch._dispatch.python.no_python_dispatcher():
+            e_t = ErasedTensor(tensor, attr_name, mod)
         if isinstance(tensor, torch.nn.Parameter):
             e_t.requires_grad_(True)
             e_t._is_param = True
