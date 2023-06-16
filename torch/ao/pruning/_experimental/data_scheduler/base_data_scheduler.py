@@ -149,7 +149,7 @@ class BaseDataScheduler:
             elif self.data_sparsifier._step_count < 1:  # type: ignore[attr-defined]
                 warnings.warn("Detected call of `scheduler.step()` before `data_sparsifier.step()`. "
                               "You have to make sure you run the data_sparsifier.step() BEFORE any "
-                              "calls to the scheduer.step().", UserWarning)
+                              "calls to the scheduler.step().", UserWarning)
         self._step_count += 1
 
         class _enable_get_sp_call:

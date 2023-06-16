@@ -80,7 +80,8 @@ class ExecutionRecorder:
             self.name_to_modrec[mod.__name__].accessed_attrs[name] = self._add_mod(val)
             return
 
-        self.name_to_modrec[mod.__name__].accessed_attrs[name] = val
+        if mod.__name__ in self.name_to_modrec:
+            self.name_to_modrec[mod.__name__].accessed_attrs[name] = val
 
     def get_record(self):
         return ExecutionRecord(
@@ -99,7 +100,7 @@ class ExecutionRecorder:
 
     @classmethod
     def _is_excl(cls, mod):
-        return any([mod.__name__ == excl for excl in cls.MOD_EXCLUDES])
+        return any(mod.__name__ == excl for excl in cls.MOD_EXCLUDES)
 
     # Convert ModuleRecords -> DummyModule tree
     @classmethod

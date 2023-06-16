@@ -552,7 +552,7 @@ bool ConvTransposeMobileOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   Tensor* Y = Output(0, sizes, at::dtype<T>());
 
   if (X.numel() == 0) {
-    VLOG(2) << "Number of elements is 0 in ConvTrasposeOp";
+    VLOG(2) << "Number of elements is 0 in ConvTransposeOp";
     return true;
   }
 

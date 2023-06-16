@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace torch {

@@ -7,7 +7,7 @@ import sys
 import tempfile
 import threading
 import time
-from contextlib import suppress
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
@@ -34,6 +34,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    retry_on_connect_failures,
     TestCase,
     load_tests,
     run_tests,
@@ -128,6 +129,55 @@ class AbstractTimeoutTest:
             else:
                 raise RuntimeError("Unexpected type {}".format(type(c2p[0])))
 
+
+class TimeoutTest(TestCase):
+    @retry_on_connect_failures
+    def test_store_based_barrier(self):
+        f = tempfile.NamedTemporaryFile()
+        port = common.find_free_port()
+
+        def thread_work(timeout, init_type, world_size, rank, error_list):
+            # we need to create a seperate store just for the store barrier test
+            if init_type == "file":
+                barrier_store = dist.FileStore(f.name)
+            elif init_type == "tcp":
+                barrier_store = dist.TCPStore("localhost", port, world_size, is_master=rank == 0, wait_for_workers=False)
+            elif init_type == "hash":
+                barrier_store = dist.HashStore()
+            try:
+                # 1 missing worker will cause it to timeout
+                if rank != world_size - 1:
+                    c10d._store_based_barrier(
+                        rank=rank,
+                        store=barrier_store,
+                        group_name="_",
+                        rendezvous_count=world_size,
+                        timeout=timeout,
+                        logging_interval=timeout / 2
+                    )
+            except RuntimeError as e:
+                error_list.append(e)
+
+        world_size = 4
+        error_list = []
+        threads = []
+        for init_type in ["file", "tcp", "hash"]:
+            for rank in range(world_size):
+                t = threading.Thread(
+                    target=thread_work, args=(timedelta(seconds=3), init_type, world_size, rank, error_list,)
+                )
+                threads.append(t)
+                t.start()
+
+            for i, thread in enumerate(threads):
+                thread.join()
+
+            # we expect the world_size-1 threads to have failed
+            self.assertEqual(len(error_list), world_size - 1)
+            for error in error_list:
+                self.assertTrue("Timed out initializing process group in store based barrier" in error.args[0])
+            error_list = []
+            threads = []
 
 class Net(nn.Module):
     def __init__(self):
@@ -495,7 +545,7 @@ class CommonDistributedDataParallelTest:
         process_group = self._get_process_group()
         for use_bucket_view in (True, False):
             err_ctx = (
-                suppress() if not use_reentrant else
+                nullcontext() if not use_reentrant else
                 self.assertRaisesRegex(
                     RuntimeError,
                     "Expected to mark a variable ready only once."
@@ -527,7 +577,7 @@ class CommonDistributedDataParallelTest:
         process_group = self._get_process_group()
         for use_bucket_view in (True, False):
             err_ctx = (
-                suppress() if not use_reentrant else
+                nullcontext() if not use_reentrant else
                 self.assertRaisesRegex(
                     RuntimeError,
                     "Expected to mark a variable ready only once."
@@ -628,7 +678,7 @@ class CommonDistributedDataParallelTest:
                 self.assertRaisesRegex(
                     RuntimeError,
                     "Your training graph has changed in this iteration"
-                ) if static_graph and not use_reentrant else suppress()
+                ) if static_graph and not use_reentrant else nullcontext()
             )
             with err_ctx:
                 self._test_ddp_checkpointing(
@@ -1298,6 +1348,113 @@ class AbstractCommTest:
         dist.all_gather(tensor_list_c, tensor)
         dist.all_gather(tensor_list_c, tensor_c)
 
+
+# Variant of AbstractCommTest that expects world size of 4
+class AbstractLargeCommTest(object):
+    @property
+    def op_timeout_sec(self):
+        return 1
+
+    @property
+    def world_size(self):
+        return 4
+
+    @property
+    def device(self):
+        raise RuntimeError("Implement me")
+
+    def _test_new_group_local_sync(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+        ranks_in = [rank, (rank + 2) % self.world_size]
+        ranks_out = [i for i in range(self.world_size) if i not in ranks_in]
+        self.assertIn(rank, ranks_in)
+        self.assertNotIn(rank, ranks_out)
+
+        self.assertIsNone(dist.new_group(ranks=ranks_out, use_local_synchronization=True))
+
+        new_pg = dist.new_group(ranks=ranks_in, use_local_synchronization=True)
+        self.assertIsInstance(new_pg, dist.ProcessGroup)
+
+        # PTD sorts ranks before creating the PG, so [3, 1] actually gets assigned ranks [1, 0]
+        ranks_in.sort()
+        self.assertEqual(dist.get_group_rank(new_pg, rank), ranks_in.index(rank))
+        self.assertEqual(
+            ranks_in,
+            dist.get_process_group_ranks(new_pg),
+            f"expecting {ranks_in} but got {dist.get_process_group_ranks(new_pg)}"
+        )
+
+    def _test_new_group_local_sync_sanity_check(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+
+        # split the world in 2 PGs
+        rank = dist.get_rank()
+        pg_idx = rank // 2
+        ranks_in = [pg_idx * 2, pg_idx * 2 + 1]
+        new_pg = dist.new_group(ranks=ranks_in, use_local_synchronization=True)
+
+        input_tensor = torch.tensor([pg_idx, rank], device=self.device)
+        output_tensor_list = [torch.tensor([-1, -1], device=self.device,) for _ in range(new_pg.size())]
+        dist.all_gather(output_tensor_list, input_tensor, group=new_pg)
+
+        expected = [
+            torch.tensor([pg_idx, ranks_in[0]], device=self.device),
+            torch.tensor([pg_idx, ranks_in[1]], device=self.device)
+        ]
+        self.assertEqual(output_tensor_list, expected)
+
+    def _test_new_group_local_sync_duplicate_pg(self, backend):
+        """
+        We should support users create multiple PGs with the same set of
+        members, and no conflict in group name
+        """
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        rank = dist.get_rank()
+
+        # split the world in 2 PGs
+        rank = dist.get_rank()
+        pg_idx = rank // 2
+        ranks_in = [pg_idx * 2, pg_idx * 2 + 1]
+        new_pgs = []
+        for _ in range(2):
+            new_pgs.append(
+                dist.new_group(ranks=ranks_in, use_local_synchronization=True)
+            )
+
+        input_tensor = torch.tensor([pg_idx, rank], device=self.device)
+        for new_pg in new_pgs:
+            output_tensor_list = [
+                torch.tensor([-1, -1], device=self.device,) for _ in range(new_pg.size())
+            ]
+            dist.all_gather(output_tensor_list, input_tensor, group=new_pg)
+
+            expected = [
+                torch.tensor([pg_idx, ranks_in[0]], device=self.device),
+                torch.tensor([pg_idx, ranks_in[1]], device=self.device)
+            ]
+            self.assertEqual(output_tensor_list, expected)
+
+
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -1438,11 +1595,20 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             "dummy",
             PythonProcessGroupExtensionTest.create_dummy
         )
-        self.assertEqual(dist.Backend.DUMMY, "DUMMY")
+        self.assertEqual(dist.Backend.DUMMY, "dummy")
         self.assertEqual(
             dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
+
+    def test_is_backend_available(self):
+        self.assertEqual(dist.is_ucc_available(), dist.is_backend_available("ucc"))
+        self.assertFalse(dist.is_backend_available("dummy"))
+        dist.Backend.register_backend(
+            "dummy",
+            PythonProcessGroupExtensionTest.create_dummy
+        )
+        self.assertTrue(dist.is_backend_available("dummy"))
 
     def test_backend_config(self):
         dist.Backend.register_backend(
@@ -1453,8 +1619,8 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config can be created with the following arguments
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
-            (dist.Backend.NCCL, "cpu:nccl,cuda:nccl"),
-            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
+            (dist.Backend.NCCL, "cuda:nccl"),
+            (dist.Backend.MPI, "cpu:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
             (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
             ("DUMMY", "cpu:dummy,cuda:dummy"),
@@ -1463,7 +1629,6 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
             ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
             ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
-            ("cPu:gLoO,cuDa:NcCl", "cpu:gloo,cuda:nccl")
         ]
 
         for config_str, expected_value in backend_config_strings_and_expected_values:
@@ -1623,6 +1788,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                     world_size=self.world_size,
                     store=store
                 )
+                pg = c10d._get_default_group()
+                self.assertEqual(pg.rank(), self.rank)
+                self.assertEqual(pg.size(), self.world_size)
+                self.assertEqual(pg.name(), str(backend))
+
                 dist.destroy_process_group()
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):

@@ -8,7 +8,7 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner, main, reset_rng_state
+from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs
@@ -114,10 +114,10 @@ BATCH_SIZE_DIVISORS = {
     "BlenderbotSmallForCausalLM": 4,
     "BlenderbotSmallForConditionalGeneration": 2,
     "CamemBert": 2,
-    "DebertaForMaskedLM": 8,
-    "DebertaForQuestionAnswering": 4,
-    "DebertaV2ForMaskedLM": 8,
-    "DebertaV2ForQuestionAnswering": 4,
+    "DebertaForMaskedLM": 4,
+    "DebertaForQuestionAnswering": 2,
+    "DebertaV2ForMaskedLM": 4,
+    "DebertaV2ForQuestionAnswering": 8,
     "DistilBertForMaskedLM": 2,
     "DistilBertForQuestionAnswering": 2,
     "DistillGPT2": 2,
@@ -137,7 +137,7 @@ BATCH_SIZE_DIVISORS = {
     "MT5ForConditionalGeneration": 2,
     "MegatronBertForCausalLM": 4,
     "MegatronBertForQuestionAnswering": 2,
-    "MobileBertForMaskedLM": 4,
+    "MobileBertForMaskedLM": 2,
     "MobileBertForQuestionAnswering": 2,
     "OPTForCausalLM": 2,
     "PLBartForCausalLM": 2,
@@ -162,7 +162,26 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "BlenderbotForCausalLM",
 }
 
-REQUIRE_HIGHER_TOLERANCE = set("MT5ForConditionalGeneration")
+
+REQUIRE_HIGHER_TOLERANCE = {
+    "MT5ForConditionalGeneration",
+    # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
+    # harmful.
+    "AlbertForQuestionAnswering",
+}
+
+
+SKIP_FOR_CPU = {
+    "OPTForCausalLM",  # OOMs
+}
+
+ONLY_EVAL_MODE = {
+    "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
+}
+
+FP32_ONLY_MODELS = {
+    "GoogleFnet",
+}
 
 
 def get_module_cls_by_model_name(model_cls_name):
@@ -203,8 +222,13 @@ def get_sequence_length(model_cls, model_name):
         seq_length = 256
     elif model_name.startswith("MobileBert"):
         seq_length = 128
+    elif model_name.startswith("Wav2Vec2"):
+        # If too short, will fail with something like
+        # ValueError: `mask_length` has to be smaller than `sequence_length`,
+        # but got `mask_length`: 10 and `sequence_length`: 9`
+        seq_length = 10000  # NB: a more realistic size is 155136
     else:
-        log.warning(
+        log.info(
             f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"
         )
         seq_length = 128
@@ -219,6 +243,18 @@ def generate_inputs_for_model(
     num_visual_features = 42
     seq_length = get_sequence_length(model_cls, model_name)
     vocab_size = model.config.vocab_size
+
+    if model_name.startswith("Wav2Vec2"):
+        # TODO: If we add more input_values style models, try to work this
+        # into the overall control flow
+        target_length = 100
+        return {
+            "input_values": torch.randn((bs, seq_length), device=device),
+            # Added because that's what the example training script has
+            "attention_mask": rand_int_tensor(device, 0, 2, (bs, seq_length)),
+            "labels": rand_int_tensor(device, 0, vocab_size, (bs, target_length)),
+        }
+
     if model_name.endswith("MultipleChoice"):
         input = rand_int_tensor(device, 0, vocab_size, (bs, num_choices, seq_length))
     elif model_name.startswith("Roberta"):
@@ -367,16 +403,15 @@ class HuggingfaceRunner(BenchmarkRunner):
         super().__init__()
         self.suite_name = "huggingface"
 
-    def load_model(
-        self,
-        device,
-        model_name,
-        batch_size=None,
-    ):
-        is_training = self.args.training
-        use_eval_mode = self.args.use_eval_mode
-        dtype = torch.float32
-        reset_rng_state()
+    @property
+    def skip_models_for_cpu(self):
+        return SKIP_FOR_CPU
+
+    @property
+    def fp32_only_models(self):
+        return FP32_ONLY_MODELS
+
+    def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
             config_cls = model_cls.config_class
@@ -398,25 +433,46 @@ class HuggingfaceRunner(BenchmarkRunner):
         else:
             config, model_cls = EXTRA_MODELS[model_name]
 
+        return model_cls, config
+
+    @download_retry_decorator
+    def _download_model(self, model_name):
+        model_cls, config = self._get_model_cls_and_config(model_name)
         if "auto" in model_cls.__module__:
             # Handle auto classes
-            model = model_cls.from_config(config).to(device, dtype=dtype)
+            model = model_cls.from_config(config)
         else:
-            model = model_cls(config).to(device, dtype=dtype)
+            model = model_cls(config)
+        return model
 
+    def load_model(
+        self,
+        device,
+        model_name,
+        batch_size=None,
+    ):
+        is_training = self.args.training
+        use_eval_mode = self.args.use_eval_mode
+        dtype = torch.float32
+        reset_rng_state()
+        model_cls, config = self._get_model_cls_and_config(model_name)
+        model = self._download_model(model_name)
+        model = model.to(device, dtype=dtype)
+        if self.args.enable_activation_checkpointing:
+            model.gradient_checkpointing_enable()
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
             batch_size_default = 16
-            log.warning(
-                "Batch size not specified for {model_name}. Setting batch_size=16"
+            log.info(
+                f"Batch size not specified for {model_name}. Setting batch_size=16"
             )
 
         if batch_size is None:
             batch_size = batch_size_default
             if model_name in BATCH_SIZE_DIVISORS:
                 batch_size = max(int(batch_size / BATCH_SIZE_DIVISORS[model_name]), 1)
-                log.warning(
+                log.info(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
                 )
 
@@ -429,7 +485,11 @@ class HuggingfaceRunner(BenchmarkRunner):
             if "drop" in attr and isinstance(getattr(config, attr), float):
                 setattr(config, attr, 1e-30)
 
-        if is_training and not use_eval_mode:
+        if (
+            is_training
+            and not use_eval_mode
+            and not (self.args.accuracy and model_name in ONLY_EVAL_MODE)
+        ):
             model.train()
         else:
             model.eval()

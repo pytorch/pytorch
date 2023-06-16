@@ -134,7 +134,7 @@ class PythonStore : public ::c10d::Store {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn =
         pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "set");
-    TORCH_INTERNAL_ASSERT(fn);
+    TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Call function with a py::bytes object for the value.
     fn(key,
        py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
@@ -148,7 +148,7 @@ class PythonStore : public ::c10d::Store {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn =
         pybind11::get_overload(static_cast<const ::c10d::Store*>(this), "get");
-    TORCH_INTERNAL_ASSERT(fn);
+    TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Cast return value from Python to py::bytes, then implicitly
     // convert that to a std::string, so that we can construct a
     // std::vector<uint8_t>. There is no API for directly accessing
@@ -168,13 +168,19 @@ class PythonStore : public ::c10d::Store {
     pybind11::gil_scoped_acquire gil;
     pybind11::function fn = pybind11::get_overload(
         static_cast<const ::c10d::Store*>(this), "compare_set");
-    TORCH_INTERNAL_ASSERT(fn);
+    TORCH_INTERNAL_ASSERT(fn, "Not implemented.");
     // Cast return value from Python to py::bytes, then implicitly
     // convert that to a std::string, so that we can construct a
     // std::vector<uint8_t>. There is no API for directly accessing
     // the contents of the py::bytes object.
-    std::string str =
-        pybind11::cast<py::bytes>(fn(key, expectedValue, desiredValue));
+    std::string str = pybind11::cast<py::bytes>(
+        fn(key,
+           py::bytes(
+               reinterpret_cast<const char*>(expectedValue.data()),
+               expectedValue.size()),
+           py::bytes(
+               reinterpret_cast<const char*>(desiredValue.data()),
+               desiredValue.size())));
     return std::vector<uint8_t>(str.begin(), str.end());
   }
 
@@ -202,6 +208,66 @@ class PythonStore : public ::c10d::Store {
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override {
     PYBIND11_OVERLOAD_PURE(void, ::c10d::Store, wait, keys, timeout);
+  }
+
+  // Note: this function manually calls the Python-side overload
+  // for this function instead of using the PYBIND11_OVERLOAD_XYZ
+  // macros. This is done so that we can call the Python-side
+  // function with a std::string instead of a std::vector<uint8_t>.
+  void append(const std::string& key, const std::vector<uint8_t>& value)
+      override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function fn = pybind11::get_overload(
+        static_cast<const ::c10d::Store*>(this), "append");
+    if (!fn) {
+      return Store::append(key, value);
+    }
+    // Call function with a py::bytes object for the value.
+    fn(key,
+       py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
+  }
+
+  virtual std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function fn = pybind11::get_overload(
+        static_cast<const ::c10d::Store*>(this), "multi_get");
+    if (!fn) {
+      return Store::multiGet(keys);
+    }
+    std::vector<std::string> py_list =
+        pybind11::cast<std::vector<std::string>>(fn(keys));
+    std::vector<std::vector<uint8_t>> res;
+
+    for (auto& str : py_list) {
+      res.emplace_back(std::vector<uint8_t>(str.begin(), str.end()));
+    }
+
+    return res;
+  }
+
+  virtual void multiSet(
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values) override {
+    pybind11::gil_scoped_acquire gil;
+    pybind11::function fn = pybind11::get_overload(
+        static_cast<const ::c10d::Store*>(this), "multi_set");
+    if (!fn) {
+      return Store::multiSet(keys, values);
+    }
+
+    std::vector<py::bytes> bytes;
+    for (auto& value : values) {
+      bytes.emplace_back(
+          py::bytes(reinterpret_cast<const char*>(value.data()), value.size()));
+    }
+
+    fn(keys, bytes);
+  }
+
+  bool hasExtendedApi() const override {
+    PYBIND11_OVERLOAD_NAME(
+        bool, ::c10d::Store, "has_extended_api", hasExtendedApi);
   }
 };
 
@@ -449,8 +515,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_set_grads_to_none",
-          [](::c10d::Reducer& reducer) { reducer.set_grads_to_none(true); },
+          "_set_optimizer_in_backward",
+          [](::c10d::Reducer& reducer) { reducer.set_optimizer_in_backward(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_mixed_precision_param_dtype",
@@ -521,6 +587,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "_remove_autograd_hooks",
           [](::c10d::Reducer& reducer) { reducer.remove_autograd_hooks(); },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_check_reducer_finalized",
+          [](::c10d::Reducer& reducer) { return reducer.check_finalized(); },
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -772,7 +842,8 @@ This class does not support ``__members__`` property.)");
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
       .def_readwrite("device_ids", &::c10d::BarrierOptions::device_ids)
-      .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
+      .def_readwrite("timeout", &::c10d::BarrierOptions::timeout)
+      .def_readwrite("device", &::c10d::BarrierOptions::device);
 
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
@@ -1046,7 +1117,97 @@ Example::
           .def_property_readonly(
               "timeout",
               &::c10d::Store::getTimeout,
-              R"(Gets the timeout of the store.)");
+              R"(Gets the timeout of the store.)")
+          .def(
+              "append",
+              [](::c10d::Store& store,
+                 const std::string& key,
+                 const std::string& value) {
+                std::vector<uint8_t> value_(value.begin(), value.end());
+                store.append(key, value_);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Append the key-value pair into the store based on the supplied ``key`` and
+``value``. If ``key`` does not exists in the store, it will be created.
+
+Arguments:
+    key (str): The key to be appended to the store.
+    value (str): The value associated with ``key`` to be added to the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.append("first_key", "po")
+    >>> store.append("first_key", "tato")
+    >>> # Should return "potato"
+    >>> store.get("first_key")
+)")
+          .def(
+              "multi_get",
+              [](::c10d::Store& store, const std::vector<std::string>& keys) {
+                auto values = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.multiGet(keys);
+                }();
+                std::vector<py::bytes> res;
+                for (auto& value : values) {
+                  auto bytes = py::bytes(
+                      reinterpret_cast<const char*>(value.data()),
+                      value.size());
+                  res.push_back(bytes);
+                }
+                return res;
+              },
+              R"(
+Retrieve all values in ``keys``. If any key in ``keys`` is not
+present in the store, the function will wait for ``timeout``
+
+Arguments:
+    keys (List[str]): The keys to be retrieved from the store.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.set("first_key", "po")
+    >>> store.set("second_key", "tato")
+    >>> # Should return [b"po", b"tato"]
+    >>> store.multi_get(["first_key", "second_key"])
+)")
+          .def(
+              "multi_set",
+              [](::c10d::Store& store,
+                 const std::vector<std::string>& keys,
+                 const std::vector<std::string>& values) {
+                std::vector<std::vector<uint8_t>> vals;
+                for (auto& value : values) {
+                  vals.push_back(
+                      std::vector<uint8_t>(value.begin(), value.end()));
+                }
+                store.multiSet(keys, vals);
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Inserts a list key-value pair into the store based on the supplied ``keys`` and ``values``
+
+Arguments:
+    keys (List[str]): The keys to insert.
+    values (List[str]): The values to insert.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.multi_set(["first_key", "second_key"], ["po", "tato"])
+    >>> # Should return b"po"
+    >>> store.get("first_key")
+)")
+          .def(
+              "has_extended_api",
+              &::c10d::Store::hasExtendedApi,
+              R"(Returns true if the store supports extended operations.)");
 
   intrusive_ptr_class_<::c10d::FileStore>(
       module,
@@ -1154,7 +1315,8 @@ Example::
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout),
           py::arg("wait_for_workers") = true,
-          py::arg("multi_tenant") = false)
+          py::arg("multi_tenant") = false,
+          py::call_guard<py::gil_scoped_release>())
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
@@ -1317,6 +1479,13 @@ Arguments:
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "allgather_into_tensor_coalesced",
+              &::c10d::ProcessGroup::allgather_into_tensor_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "gather",
               &::c10d::ProcessGroup::gather,
               py::arg("output_tensors"),
@@ -1452,6 +1621,8 @@ Arguments:
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
               py::call_guard<py::gil_scoped_release>())
+          .def_property_readonly(
+              "_device_types", &::c10d::ProcessGroup::getDeviceTypes)
           .def(
               "_get_backend_name",
               &::c10d::ProcessGroup::getBackendName,
@@ -1467,12 +1638,10 @@ Arguments:
           .def(
               "_end_coalescing",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const c10::Device& device,
-                 std::vector<c10::intrusive_ptr<::c10d::Work>>& reqs) {
-                self->endCoalescing(device.type(), reqs);
+                 const c10::Device& device) {
+                return self->endCoalescing(device.type());
               },
               py::arg("device_type"),
-              py::arg("reqs"),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_register_backend",
@@ -1832,7 +2001,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "_end_coalescing",
               &::c10d::Backend::endCoalescing,
-              py::arg("reqs"),
               py::call_guard<py::gil_scoped_release>());
 
 #ifdef USE_C10D_GLOO
@@ -1970,10 +2138,29 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               },
               py::arg("abort_reason") = py::none(),
               py::call_guard<py::gil_scoped_release>())
+          .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
+          .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly(
               "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
+
+#ifdef NCCL_HAS_COMM_CTA_CGA
+  py::class_<ncclConfig_t>(
+      processGroupNCCL,
+      "NCCLConfig",
+      R"(
+ncclConfig_t data type for configuring NCCL communicators.
+See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+for details.
+)")
+      .def(py::init<>())
+      .def_readwrite("blocking", &ncclConfig_t::blocking)
+      .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
+      .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
+      .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
+      .def_readwrite("net_name", &ncclConfig_t::netName);
+#endif
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,
@@ -1988,21 +2175,37 @@ Arguments:
             to prioritize NCCL kernels when there are compute kernels waiting.
             Default is False.
 
+Attributes:
+    config (NCCLConfig): configures NCCL communicators (only avaiable for
+            builds using NCCL 2.17+). This can be used to improve
+            communication-computation overlap for NCCL kernels by tuning
+            available parameters in the config. See
+            https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+            for details.
+
 Example::
     >>> import torch.distributed as dist
     >>>
     >>> nccl_options = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+    >>> # For builds using NCCL 2.17+, configure communicators
+    >>> nccl_options.config.cga_cluster_size = 2
+    >>> nccl_options.config.max_ctas = 4
+    >>> nccl_options.config.min_ctas = 2
     >>> # initialize a nccl process group with the options just created
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
+#ifdef NCCL_HAS_COMM_CTA_CGA
+      .def_readwrite(
+          "is_high_priority_stream",
+          &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
+      .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config);
+#else
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
-  processGroupNCCL.def_static(
-      "_group_start", []() { ::c10d::ProcessGroupNCCL::groupStart(); });
-  processGroupNCCL.def_static(
-      "_group_end", []() { ::c10d::ProcessGroupNCCL::groupEnd(); });
+#endif
+
 #endif
 
 #ifdef USE_C10D_MPI

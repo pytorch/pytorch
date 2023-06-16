@@ -25,7 +25,7 @@ from ..fuser_method_mappings import (
 
 __all__: List[str] = []
 
-# TODO: rename to be more explict, e.g. qat_conv_relu
+# TODO: rename to be more explicit, e.g. qat_conv_relu
 _ConvMetadata = namedtuple(
     "_ConvMetadata",
     ["root", "transpose", "bn", "reference", "transpose_reference",
@@ -498,6 +498,8 @@ def _get_share_qparams_op_configs(dtype_configs):
         torch.nn.MaxPool1d,
         torch.nn.MaxPool2d,
         torch.nn.MaxPool3d,
+        torch.nn.PixelShuffle,
+        torch.nn.PixelUnshuffle,
         torch.nn.ReLU,
         torch.nn.ReLU6,
         torch.adaptive_avg_pool1d,

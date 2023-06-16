@@ -8,7 +8,10 @@ from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.ir import ModularIndexing
 from torch._inductor.sizevars import SizeVarAllocator
 from torch.fx.experimental.symbolic_shapes import FloorDiv
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ROCM,
+    TestCase as TorchTestCase,
+)
 
 
 class TestIndexingSimplification(TorchTestCase):
@@ -163,46 +166,85 @@ class ExprPrinterTests(TorchTestCase):
         s2 = sympy.Symbol("bar", integer=True)
         s3 = sympy.Symbol("baz", integer=True)
 
-        cases = (
+        common_cases = [
             # expr, result
             # Test exprs.
             (
                 s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c: f"((-1)*({c}/((-1) + (2*foo)))) + (foo*({c}/((-1) + (2*foo))))",
+                lambda c, L: f"((-1{L})*({c}/((-1{L}) + (2{L}*foo)))) + (foo*({c}/((-1{L}) + (2{L}*foo))))",
             ),
-            (s1 / (s2 - s3), lambda c: f"foo*({c}/(bar + ((-1)*baz)))"),
+            (s1 / (s2 - s3), lambda c, L: f"foo*({c}/(bar + ((-1{L})*baz)))"),
             # Test Pow directly.
             (
                 sympy.Pow(s1 + s2, 0),
-                lambda _: "1",
+                lambda _, L: f"1{L}",
             ),  # note: simplified before _print_Pow
             (
                 sympy.Pow(s1 + s2, -3),
-                lambda c: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
+                lambda c, _: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
             ),
-            (sympy.Pow(s1 + s2, 2), lambda _: "(bar + foo)*(bar + foo)"),
-        )
+        ]
 
-        for expr, result in cases:
-            self.assertEqual(cexpr(expr), result(1.0))  # 1.0 for FP div
-            self.assertEqual(texpr(expr), result(1))
-            self.assertEqual(pexpr(expr), result(1))
+        gpu_cases = common_cases + [
+            (sympy.Pow(s1 + s2, 2), lambda c, L: "(bar + foo)*(bar + foo)")
+        ]
+        cpu_cases = common_cases + [
+            (
+                sympy.Pow(s1 + s2, 2),
+                lambda c, L: "static_cast<long>((bar + foo)*(bar + foo))",
+            )
+        ]
+        for expr, result in gpu_cases:
+            self.assertEqual(texpr(expr), result(1, ""))
+            self.assertEqual(pexpr(expr), result(1, ""))
+        for expr, result in cpu_cases:
+            self.assertEqual(cexpr(expr), result(1.0, "L"))  # 1.0 for FP div
 
     def test_print_floor(self):
-        s1 = sympy.Symbol("s1", integer=False)
-        expr = sympy.floor(s1)
-        self.assertEqual(texpr(expr), "tl.math.floor(s1)")
-        self.assertEqual(pexpr(expr), "math.floor(s1)")
+        for integer in [True, False]:
+            s1 = sympy.Symbol("s1", integer=integer)
+            expr = sympy.floor(s1 / 2)
+            if integer:
+                self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
+                self.assertEqual(
+                    cexpr(expr), "static_cast<long>(std::floor((1.0/2.0)*s1))"
+                )
+            else:
+                self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
+                self.assertEqual(texpr(expr), "tl.math.floor(((1/2)*s1))")
+                self.assertEqual(cexpr(expr), "std::floor((1.0/2.0)*s1)")
 
     def test_print_ceil(self):
-        s1 = sympy.Symbol("s1", integer=False)
-        expr = sympy.ceiling(s1)
-        self.assertEqual(pexpr(expr), "math.ceil(s1)")
+        for integer in [True, False]:
+            s1 = sympy.Symbol("s1", integer=integer)
+            expr = sympy.ceiling(s1 / 2)
+            if integer:
+                self.assertEqual(pexpr(expr), "math.ceil((1/2)*s1)")
+                self.assertEqual(
+                    cexpr(expr), "static_cast<long>(std::ceil((1.0/2.0)*s1))"
+                )
+            else:
+                self.assertEqual(pexpr(expr), "math.ceil((1/2)*s1)")
+                self.assertEqual(cexpr(expr), "std::ceil((1.0/2.0)*s1)")
+
+    def test_print_floor_div(self):
+        for integer in [True, False]:
+            s1 = sympy.Symbol("s1", integer=integer)
+            s2 = sympy.Symbol("s2", integer=integer)
+            expr = FloorDiv(s1, s2)
+            self.assertEqual(pexpr(expr), "(s1 // s2)")
+            if integer:
+                self.assertEqual(cexpr(expr), "at::native::div_floor_integer(s1, s2)")
+            else:
+                self.assertEqual(
+                    cexpr(expr),
+                    "at::native::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
+                )
 
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_CUDA and not TEST_WITH_ROCM:
         run_tests("sympy")

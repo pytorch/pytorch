@@ -556,6 +556,29 @@ class TestFXExperimental(JitTestCase):
         )
         self.assertEqual(fused(inp), model(inp))
 
+    def test_conv_bn_fusion_mixed_dtype(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False, dtype=torch.bfloat16)
+                self.bn = torch.nn.BatchNorm2d(16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        model = M().eval()
+
+        traced = symbolic_trace(model)
+        fused = optimization.fuse(traced)
+        inp = torch.randn(1, 3, 64, 64, dtype=torch.bfloat16)
+
+        self.assertTrue(
+            all(not isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules())
+        )
+        self.assertEqual(fused(inp), model(inp))
+
     def test_call_to_assert_no_msg(self):
         class M(torch.nn.Module):
             def forward(self, a, b):

@@ -101,7 +101,11 @@ int intraop_default_num_threads() {
   size_t nthreads = get_env_num_threads("OMP_NUM_THREADS", 0);
   nthreads = get_env_num_threads("MKL_NUM_THREADS", nthreads);
   if (nthreads == 0) {
+#if defined(FBCODE_CAFFE2) && defined(__aarch64__)
+    nthreads = 1;
+#else
     nthreads = TaskThreadPoolBase::defaultNumThreads();
+#endif
   }
   return nthreads;
 #endif

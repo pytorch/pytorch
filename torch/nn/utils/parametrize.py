@@ -115,7 +115,7 @@ class ParametrizationList(ModuleList):
         #    Y = param.right_inverse(X)
         #    assert isinstance(Y, Tensor) or
         #           (isinstance(Y, collections.abc.Sequence) and all(isinstance(t, Tensor) for t in Y))
-        #    Z = param(Y) if isisntance(Y, Tensor) else param(*Y)
+        #    Z = param(Y) if isinstance(Y, Tensor) else param(*Y)
         #    # Consistency checks
         #    assert X.dtype == Z.dtype and X.shape == Z.shape
         #    # If it has one input, this allows to be able to use set_ to be able to
@@ -725,7 +725,7 @@ def transfer_parametrizations_and_params(
         assert hasattr(parameters_to_transfer, "__iter__")  # for mypy
         for parameter_name in parameters_to_transfer:
 
-            # initialize the to-be-transfered param in to_module if it doesn't exist already
+            # initialize the to-be-transferred param in to_module if it doesn't exist already
             if not hasattr(to_module, parameter_name):
                 setattr(
                     to_module,

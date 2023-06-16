@@ -98,9 +98,10 @@ class TORCH_API Reducer {
   // Cannot combine with the call of `register_comm_hook`.
   void register_builtin_comm_hook(c10d::BuiltinCommHookType comm_hook_type);
 
-  // If set_to_none=True, reducer will set gradients to None in
-  // finalize_backward callback.
-  void set_grads_to_none(bool set_to_none);
+  // Informs reducer that optimizer is running in backward, so gradients
+  // don't need to be copied from buckets as the optimizer would've already
+  // been applied.
+  void set_optimizer_in_backward() { optim_in_backward_ = true; };
 
   // Runs allreduce or installed communication hook given GradBucket instance.
   c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(
@@ -177,7 +178,11 @@ class TORCH_API Reducer {
   // current iteration, which means unused params set has not changed.
   bool ddp_graph_static();
 
+  // Removes autograd hooks registered by the Reducer on the model parameters.
   void remove_autograd_hooks();
+
+  // Checks whether or not the reducer has finalized the current backward iteration.
+  void check_finalized();
 
  protected:
   // Forward declaration.
@@ -524,7 +529,7 @@ class TORCH_API Reducer {
   // are rebuilt after which this mapping is static.
   mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
 
-  bool set_grads_to_none_{false};
+  bool optim_in_backward_{false};
   friend class Logger;
 };
 

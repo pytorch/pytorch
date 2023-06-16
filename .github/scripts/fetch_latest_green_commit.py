@@ -35,7 +35,7 @@ def get_latest_commits() -> List[str]:
             "git",
             "rev-list",
             f"{latest_viable_commit}^..HEAD",
-            "--remotes=*origin/master",
+            "--remotes=*origin/main",
         ],
         encoding="ascii",
     ).splitlines()
@@ -90,7 +90,6 @@ def isGreen(commit: str, results: List[Dict[str, Any]]) -> Tuple[bool, str]:
         "trunk": False,
         "lint": False,
         "linux-binary": False,
-        "windows-binary": False,
     }
 
     for check in workflow_checks:

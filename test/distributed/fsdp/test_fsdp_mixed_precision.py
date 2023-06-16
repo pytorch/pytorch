@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import itertools
 import sys
 from functools import partial
 from itertools import product
@@ -11,6 +12,7 @@ import torch.cuda.nccl as nccl
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
+from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import (
     BackwardPrefetch,
     CPUOffload,
@@ -19,7 +21,8 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy, size_based_auto_wrap_policy
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.testing._internal.common_distributed import (
     SaveForwardInputsModel,
@@ -156,7 +159,7 @@ class LinearMixedPrecision(nn.Module):
     A linear module with extra checks for mixed precision training.
     """
 
-    def __init__(self, param_dtype, buffer_name="buffer"):
+    def __init__(self, param_dtype, buffer_name="buffer", run_checks=True):
         super().__init__()
         self.lin = nn.Linear(10, 10, bias=False).to(param_dtype)
         # Use a configurable buffer name to avoid all submodules sharing the
@@ -165,67 +168,69 @@ class LinearMixedPrecision(nn.Module):
         self.register_buffer(buffer_name, torch.randn((1, 2), dtype=_BUFFER_ORIG_DTYPE))
         self._orig_param_type = param_dtype
         self._orig_buffer_dtype = _BUFFER_ORIG_DTYPE
+        self.run_checks = run_checks
 
     def forward(self, tup):
-        # Param and input should be the mixed precision type
         inp, cls, fsdp, mp_config, full_precision_param_dtype = tup
-        expected_param_type = (
-            mp_config.param_dtype
-            if mp_config.param_dtype is not None
-            else self._orig_param_type
-        )
-        expected_buffer_type = (
-            mp_config.buffer_dtype
-            if mp_config.buffer_dtype is not None
-            else self._orig_buffer_dtype
-        )
-        cls.assertEqual(inp.dtype, expected_param_type)
-        # Buffer should be in specified precision as well.
-        cls.assertEqual(getattr(self, self.buffer_name).dtype, expected_buffer_type)
+        if self.run_checks:
+            # Param and input should be the mixed precision type
+            expected_param_type = (
+                mp_config.param_dtype
+                if mp_config.param_dtype is not None
+                else self._orig_param_type
+            )
+            expected_buffer_type = (
+                mp_config.buffer_dtype
+                if mp_config.buffer_dtype is not None
+                else self._orig_buffer_dtype
+            )
+            cls.assertEqual(inp.dtype, expected_param_type)
+            # Buffer should be in specified precision as well.
+            cls.assertEqual(getattr(self, self.buffer_name).dtype, expected_buffer_type)
 
-        # In FSDP, self.params should point to the right type.
-        num_active_fsdp = 0
-        for fsdp_module in FSDP.fsdp_modules(fsdp):
-            fsdp_managed_params = fsdp_module.params
-            # Single param assumption
-            cls.assertEqual(1, len(fsdp_managed_params))
-            for param in fsdp_managed_params:
-                # FSDP unit is currently active if it is not using the param
-                # local shard. This supports both FULL_SHARD and SHARD_GRAD_OP
-                # cases. In FULL_SHARD, we have the additional property that
-                # param._full_param_padded has not been freed.
-                param_is_sharded = (
-                    fsdp_module.sharding_strategy != ShardingStrategy.NO_SHARD
-                    and fsdp_module.world_size > 1
-                )
-                is_fsdp_unit_active = (
-                    param_is_sharded
-                    and param.data.data_ptr() != param._local_shard.data_ptr()
-                )
-                if is_fsdp_unit_active:
-                    num_active_fsdp += 1
-                    # This FSDP unit is active, verify param points to mixed
-                    cls.assertEqual(param.dtype, expected_param_type)
-                    # _rebuild_full_param should have also freed the fp16 shard.
-                    # Shard is never allocated if param_dtype mixed precision is not
-                    # enabled.
-                    if mp_config.param_dtype is not None:
-                        cls.assertEqual(0, param._mp_shard.untyped_storage().size())
-                    else:
-                        cls.assertFalse(hasattr(param, "_mp_shard"))
-                elif param_is_sharded:
-                    # This FSDP unit is not active as full param has been
-                    # freed or not yet allocated. Ensure param points to full
-                    # precision param.
-                    cls.assertEqual(param.dtype, full_precision_param_dtype)
-        # We should have gotten at least one active FSDP unit for sharded
-        # (world size > 1) cases. For cases where param is not sharded
-        # (ie world_size == 1) it is a bit hard to check if FSDP unit is active
-        # as we'd always point to the local shard, so we rely on the forward
-        # pass self.lin(inp) working well and inp being reduced precision to
-        # implicitly validate that the param is indeed in the reduced precision.
-        if cls.world_size > 1:
-            cls.assertGreater(num_active_fsdp, 0)
+            # In FSDP, self.params should point to the right type.
+            num_active_fsdp = 0
+            for fsdp_module in FSDP.fsdp_modules(fsdp):
+                fsdp_managed_params = fsdp_module.params
+                # Single param assumption
+                cls.assertEqual(1, len(fsdp_managed_params))
+                for param in fsdp_managed_params:
+                    # FSDP unit is currently active if it is not using the param
+                    # local shard. This supports both FULL_SHARD and SHARD_GRAD_OP
+                    # cases. In FULL_SHARD, we have the additional property that
+                    # param._full_param_padded has not been freed.
+                    param_is_sharded = (
+                        fsdp_module.sharding_strategy != ShardingStrategy.NO_SHARD
+                        and fsdp_module.world_size > 1
+                    )
+                    is_fsdp_unit_active = (
+                        param_is_sharded
+                        and param.data.data_ptr() != param._local_shard.data_ptr()
+                    )
+                    if is_fsdp_unit_active:
+                        num_active_fsdp += 1
+                        # This FSDP unit is active, verify param points to mixed
+                        cls.assertEqual(param.dtype, expected_param_type)
+                        # _unshard should have also freed the fp16 shard.
+                        # Shard is never allocated if param_dtype mixed precision is not
+                        # enabled.
+                        if mp_config.param_dtype is not None:
+                            cls.assertEqual(0, param._mp_shard.untyped_storage().size())
+                        else:
+                            cls.assertFalse(hasattr(param, "_mp_shard"))
+                    elif param_is_sharded:
+                        # This FSDP unit is not active as full param has been
+                        # freed or not yet allocated. Ensure param points to full
+                        # precision param.
+                        cls.assertEqual(param.dtype, full_precision_param_dtype)
+            # We should have gotten at least one active FSDP unit for sharded
+            # (world size > 1) cases. For cases where param is not sharded
+            # (ie world_size == 1) it is a bit hard to check if FSDP unit is active
+            # as we'd always point to the local shard, so we rely on the forward
+            # pass self.lin(inp) working well and inp being reduced precision to
+            # implicitly validate that the param is indeed in the reduced precision.
+            if cls.world_size > 1:
+                cls.assertGreater(num_active_fsdp, 0)
 
         return (self.lin(inp), cls, fsdp, mp_config, full_precision_param_dtype)
 
@@ -235,19 +240,40 @@ class TestFSDPMixedPrecision(FSDPTest):
     def world_size(self):
         raise ValueError("To be implemented by child classes")
 
-    def _get_simple_nested_model(self, param_dtype, *fsdp_args, **fsdp_kwargs):
+    def _get_simple_nested_model(
+        self, param_dtype, run_checks, *fsdp_args, **fsdp_kwargs
+    ):
         model = FSDP(
             nn.Sequential(
                 FSDP(
-                    LinearMixedPrecision(param_dtype, buffer_name="buffer0").cuda(),
+                    LinearMixedPrecision(
+                        param_dtype, buffer_name="buffer0", run_checks=run_checks
+                    ).cuda(),
                     *fsdp_args,
                     **fsdp_kwargs,
                 ),
-                LinearMixedPrecision(param_dtype, buffer_name="buffer1").cuda(),
+                LinearMixedPrecision(
+                    param_dtype, buffer_name="buffer1", run_checks=run_checks
+                ).cuda(),
             ),
             *fsdp_args,
             **fsdp_kwargs,
         )
+        return model
+
+    def _get_simple_nested_model_composable(
+        self, param_dtype, run_checks, *fsdp_args, **fsdp_kwargs
+    ):
+        model = nn.Sequential(
+            LinearMixedPrecision(
+                param_dtype, buffer_name="buffer0", run_checks=run_checks
+            ).cuda(),
+            LinearMixedPrecision(
+                param_dtype, buffer_name="buffer1", run_checks=run_checks
+            ).cuda(),
+        )
+        fully_shard(model[0], *fsdp_args, **fsdp_kwargs)
+        fully_shard(model, *fsdp_args, **fsdp_kwargs)
         return model
 
     def _get_simple_model(self, param_dtype, *fsdp_args, **fsdp_kwargs):
@@ -276,7 +302,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 self.assertEqual(0, param._mp_shard.untyped_storage().size())
 
     def _reduce_scatter_validate_mp(
-        self, orig_reduce_scatter, mp_config, *args, **kwargs
+        self, orig_reduce_scatter, mp_config, should_run_low_prec, *args, **kwargs
     ):
         """
         Runs reduce-scatter but verifies mixed precision settings before. This
@@ -298,15 +324,18 @@ class TestFSDPMixedPrecision(FSDPTest):
         # this tests that gradients are in the expected precision as well.
         # If reduce_dtype is not specified (is None) we comm. in the param_dtype
         # if that is specified, otherwise full precision dtype.
-        expected_dtype = (
-            mp_config.reduce_dtype
-            if mp_config.reduce_dtype is not None
-            else (
-                mp_config.param_dtype
-                if mp_config.param_dtype is not None
-                else _CURRENT_FULL_PRECISION_PARAM_DTYPE
+        if should_run_low_prec:
+            expected_dtype = (
+                mp_config.reduce_dtype
+                if mp_config.reduce_dtype is not None
+                else (
+                    mp_config.param_dtype
+                    if mp_config.param_dtype is not None
+                    else _CURRENT_FULL_PRECISION_PARAM_DTYPE
+                )
             )
-        )
+        else:
+            expected_dtype = _CURRENT_FULL_PRECISION_PARAM_DTYPE
 
         for t in tensors:
             self.assertEqual(expected_dtype, t.dtype)
@@ -370,6 +399,7 @@ class TestFSDPMixedPrecision(FSDPTest):
             ),
             self._get_simple_nested_model(
                 param_dtype=full_precision_param_dtype,
+                run_checks=True,
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
                 mixed_precision=mp_config,
@@ -387,6 +417,7 @@ class TestFSDPMixedPrecision(FSDPTest):
                 self._reduce_scatter_validate_mp,
                 orig_reduce_scatter,
                 mp_config,
+                True,
             )
             with patch_reduce_scatter(test_reduce_scatter, full_precision_param_dtype):
                 scaler = ShardedGradScaler(enabled=enable_sharded_grad_scaler)
@@ -555,6 +586,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             self._reduce_scatter_validate_mp,
             orig_reduce_scatter,
             mp_config,
+            True,
         )
         with patch_reduce_scatter(test_reduce_scatter, param_dtype):
             # TODO: `test_mp_embedding_reduce()` fails if we do not wrap the
@@ -670,12 +702,16 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 self.fc1 = nn.Linear(2, 40, bias=False)
                 self.bn = nn.BatchNorm1d(4, affine=affine)
                 self.fc2 = nn.Linear(40, 4, bias=False)
+                self.ln = nn.LayerNorm(4)
+                self.fc3 = nn.Linear(4, 4, bias=False)
 
             def forward(self, x):
                 x = torch.reshape(self.fc1(x), (-1, 4, 10))
                 x = self.bn(x)
                 x = torch.reshape(x, (-1, 40))
                 x = self.fc2(x)
+                x = self.ln(x)
+                x = self.fc3(x)
                 return F.softmax(x, dim=1)
 
         def never_wrap_policy(*args, **kwargs):
@@ -691,6 +727,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             param_dtype=torch.float16,
             reduce_dtype=torch.float16,
             buffer_dtype=torch.float16,
+            _module_classes_to_ignore=[_BatchNorm, nn.LayerNorm],
         )
         with self.assertWarnsRegex(
             expected_warning=UserWarning,
@@ -702,20 +739,148 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 auto_wrap_policy=never_wrap_policy,
             )
 
-        bn = model.bn
-        self.assertTrue(isinstance(bn, FSDP))
+        no_mp = MixedPrecision()
+        for mod in [model.ln, model.bn]:
+            self.assertTrue(isinstance(mod, FSDP))
+            self.assertEqual(no_mp, mod.mixed_precision)
         # policy should not have wrapped any other submodules
-        self.assertFalse(isinstance(model.fc1, FSDP))
-        self.assertFalse(isinstance(model.fc2, FSDP))
-        no_mixed_precision = MixedPrecision()
-        self.assertEqual(no_mixed_precision, bn.mixed_precision)
-        self.assertNotEqual(no_mixed_precision, model.mixed_precision)
+        for mod in [model.fc1, model.fc2, model.fc3]:
+            self.assertFalse(isinstance(mod, FSDP))
+
+        # Overall mixed precision is still enabled
+        self.assertEqual(mp_config, model.mixed_precision)
 
         inp = torch.randn((1, 2), device="cuda")
         # Without FSDP BN mixed precision fix, this would result in
         # RuntimeError: Expected counts to have type Half but got Float
         # for syncBN
         model(inp).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_full_precision_in_eval(self):
+        for use_composable, cast_forward_inputs in itertools.product(
+            [True, False], [True, False]
+        ):
+            mp_config = MixedPrecision(
+                param_dtype=torch.float16,
+                reduce_dtype=torch.float16,
+                buffer_dtype=torch.float16,
+                cast_forward_inputs=cast_forward_inputs,
+            )
+            model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_BEFORE,
+                {"mixed_precision": mp_config},
+            )
+            if use_composable:
+                auto_wrap_policy = ModuleWrapPolicy(
+                    {
+                        TransformerEncoderLayer,
+                        TransformerDecoderLayer,
+                    }
+                )
+                fully_shard(model, policy=auto_wrap_policy, mixed_precision=mp_config)
+            module_accessor = model if use_composable else model
+            inp = module_accessor.get_input(torch.device("cuda"))
+            output = model(*inp)
+            loss = module_accessor.get_loss(inp, output).cuda()
+            # Loss should be in fp16
+            self.assertEqual(torch.float16, loss.dtype)
+            module_accessor.run_backward(loss)
+
+            # Now in eval mode, loss should be fp32
+            model.eval()
+            inp = module_accessor.get_input(torch.device("cuda"))
+            output = model(*inp)
+            loss = module_accessor.get_loss(inp, output).cuda()
+            self.assertEqual(torch.float32, loss.dtype)
+            module_accessor.run_backward(loss)
+            # gradients generated should be in fp32
+            for p in model.parameters():
+                if p.grad is not None:
+                    self.assertEqual(torch.float32, p.grad.dtype)
+
+    @skip_if_lt_x_gpu(2)
+    def test_full_precision_in_eval_buffers(self):
+        for use_composable, cast_forward_inputs in itertools.product(
+            [True, False], [True, False]
+        ):
+            mp_config = MixedPrecision(
+                param_dtype=torch.float16,
+                reduce_dtype=torch.float16,
+                buffer_dtype=torch.float16,
+                cast_forward_inputs=cast_forward_inputs,
+            )
+            model_getter = (
+                self._get_simple_nested_model_composable
+                if use_composable
+                else self._get_simple_nested_model
+            )
+            fsdp_model = model_getter(
+                param_dtype=torch.float32,
+                run_checks=False,
+                mixed_precision=mp_config,
+            )
+
+            inp = torch.randn(3, 10, device="cuda")
+            fsdp_model((inp, self, fsdp_model, mp_config, torch.float32))
+
+            for buf in fsdp_model.buffers():
+                self.assertEqual(torch.float16, buf.dtype)
+            # model.eval() + forward pass should make the buffers in full prec again
+            fsdp_model.eval()
+            fsdp_model((inp, self, fsdp_model, mp_config, torch.float32))
+
+            for buf in fsdp_model.buffers():
+                self.assertEqual(_BUFFER_ORIG_DTYPE, buf.dtype)
+
+            # model.train() + forward again should make buffers in fp16
+            fsdp_model.train()
+            fsdp_model((inp, self, fsdp_model, mp_config, torch.float32))
+            for buf in fsdp_model.buffers():
+                self.assertEqual(torch.float16, buf.dtype)
+
+    @skip_if_lt_x_gpu(2)
+    def test_full_precision_in_eval_comm(self):
+        for use_composable, cast_forward_inputs in itertools.product(
+            [True, False], [True, False]
+        ):
+            mp_config = MixedPrecision(
+                param_dtype=torch.float32,
+                reduce_dtype=torch.float16,
+                buffer_dtype=torch.float32,
+                cast_forward_inputs=cast_forward_inputs,
+            )
+            model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_BEFORE,
+                {"mixed_precision": mp_config},
+            )
+            if use_composable:
+                auto_wrap_policy = ModuleWrapPolicy(
+                    {
+                        TransformerEncoderLayer,
+                        TransformerDecoderLayer,
+                    }
+                )
+                fully_shard(model, policy=auto_wrap_policy, mixed_precision=mp_config)
+            model_accessor = model if use_composable else model.module
+            # Patch reduce_scatter to add validation for mixed precision types.
+            orig_reduce_scatter = dist.reduce_scatter_tensor
+            test_reduce_scatter = partial(
+                self._reduce_scatter_validate_mp,
+                orig_reduce_scatter,
+                mp_config,
+                False,
+            )
+            model.eval()
+            with patch_reduce_scatter(test_reduce_scatter, torch.float32):
+                inp = model_accessor.get_input(torch.device("cuda"))
+                output = model(*inp)
+                loss = model_accessor.get_loss(inp, output).cuda()
+                model_accessor.run_backward(loss)
 
     @skip_if_lt_x_gpu(2)
     def test_input_grads_with_param_mixed_precision(self):

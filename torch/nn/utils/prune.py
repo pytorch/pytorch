@@ -17,9 +17,6 @@ class BasePruningMethod(ABC):
     """
     _tensor_name: str
 
-    def __init__(self):
-        pass
-
     def __call__(self, module, inputs):
         r"""Multiplies the mask (stored in ``module[name + '_mask']``)
         into the original tensor (stored in ``module[name + '_orig']``)
@@ -189,7 +186,7 @@ class BasePruningMethod(ABC):
         try:
             # get the final mask, computed according to the specific method
             mask = method.compute_mask(importance_scores, default_mask=default_mask)
-            # reparametrize by saving mask to `module[name + '_mask']`...
+            # reparameterize by saving mask to `module[name + '_mask']`...
             module.register_buffer(name + "_mask", mask)
             # ... and the new pruned tensor to `module[name]`
             setattr(module, name, method.apply_mask(module))

@@ -168,13 +168,13 @@ public:
     // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
     return _mm512_cmpeq_epi16_mask(values, _mm512_set1_epi16(0));
   }
-  static Vectorized<T> loadu(const void* ptr) {
-    return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
-  }
-  static Vectorized<T> loadu(const void* ptr, int16_t count) {
+  static Vectorized<T> loadu(const void* ptr, int16_t count = size()) {
+    if (count == size())
+      return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
+
     __at_align__ int16_t tmp_values[size()];
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
-    return loadu(tmp_values);
+    return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(tmp_values));
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -357,20 +357,16 @@ public:
     cvt_to_fp32<T>(values, lo, hi);
     __mmask16 lo_mask, hi_mask;
     __m512 zero = _mm512_set1_ps(0.0);
+    __m512i zeroi = _mm512_castps_si512(zero);
     lo_mask = _mm512_cmp_ps_mask(lo, zero, _CMP_UNORD_Q);
-    lo = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero, lo_mask, 0xFFFF'FFFF));
+    lo = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zeroi, lo_mask, 0xFFFF'FFFF));
     hi_mask = _mm512_cmp_ps_mask(hi, zero, _CMP_UNORD_Q);
-    hi = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero, hi_mask, 0xFFFF'FFFF));
+    hi = _mm512_castsi512_ps(_mm512_mask_set1_epi32(zeroi, hi_mask, 0xFFFF'FFFF));
     return merge_compare_result(lo, hi);
   }
   #pragma clang diagnostic pop
   Vectorized<T> abs() const {
-    __m512 lo, hi;
-    cvt_to_fp32<T>(values, lo, hi);
-    const auto mask = _mm512_set1_ps(-0.f);
-    const auto o1 = _mm512_andnot_ps(mask, lo);
-    const auto o2 = _mm512_andnot_ps(mask, hi);
-    return cvt_from_fp32<T>(o1, o2);
+    return _mm512_andnot_si512(_mm512_set1_epi16(0x8000), values);
   }
   Vectorized<T> angle() const {
     __m512 lo, hi;
@@ -585,12 +581,7 @@ public:
     return cvt_from_fp32<T>(o1, o2);
   }
   Vectorized<T> neg() const {
-    __m512 lo, hi;
-    cvt_to_fp32<T>(values, lo, hi);
-    auto mask = _mm512_set1_ps(-0.f);
-    auto o1 = _mm512_xor_ps(mask, lo);
-    auto o2 = _mm512_xor_ps(mask, hi);
-    return cvt_from_fp32<T>(o1, o2);
+    return _mm512_xor_si512(values, _mm512_set1_epi16(0x8000));
   }
   Vectorized<T> round() const {
     __m512 lo, hi;
