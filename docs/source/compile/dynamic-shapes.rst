@@ -30,11 +30,12 @@ Unbacked integers for eager mode:
 
 What we have currently:
 
-- You must explicitly opt into dynamic shapes with ``torch._dynamo.config.dynamic_shapes = True`` or ``torch.compile(dynamic=True)``
-- ``torch.compile(dynamic=True)`` is broken and doesn't actually make everything dynamic; see `PR <https://github.com/pytorch/pytorch/pull/99469>`_
-- ``torch._dynamo.config.assume_static_by_default`` defaults to ``True``; set it to ``False`` to YOLO everything dynamic
+- You must explicitly opt into dynamic shapes with ``torch._dynamo.config.automatic_dynamic_shapes = True`` or ``torch.compile(dynamic=True)``
+- ``torch.compile(dynamic=True)`` proactively attempts to make everything dynamic
+- ``torch._dynamo.config.automatic_dynamic_shapes`` will assume everything is
+  static, but if we recompile because a size varied, the next time we will try
+  to compile it dynamically
 - ``torch._dynamo.mark_dynamic`` works
-- Automatic dynamic is enabled by default
 
 Use ``TORCH_LOGS=dynamic`` to view more information about what is going on with dynamic shapes.
 

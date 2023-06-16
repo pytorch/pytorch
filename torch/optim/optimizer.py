@@ -240,7 +240,7 @@ class Optimizer:
         # One caveat here is that if we are compiling, we *permit* step/param tensors to be on CPU
         # so we do not explicitly enable the capturable flag. Inductor will decide whether cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
-        if not is_compiling() and torch.has_cuda and torch.cuda.is_available():
+        if not is_compiling() and torch.backends.cuda.is_built() and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
 
             if capturing and not all(group['capturable'] for group in self.param_groups):
