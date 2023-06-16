@@ -316,6 +316,11 @@ def sym_constrain_range(size, min, max):
     constrain_range(size, min=min, max=max)
 
 
+@register_meta(aten.functional_sym_constrain_range.default)
+def functional_sym_constrain_range(size, min, max, dep_token):
+    return dep_token
+
+
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def squareCheckInputs(self: Tensor, f_name: str):
     assert (
