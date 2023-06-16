@@ -210,6 +210,13 @@ MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "pytorch_unet": 2,
 }
 
+FORCE_AMP_FOR_FP16_BF16_MODELS = {
+    "doctr_det_predictor",
+    "doctr_reco_predictor",
+    "Super_SloMo",
+    "tts_angular",
+}
+
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
@@ -248,6 +255,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def failing_fx2trt_models(self):
         return TRT_NOT_YET_WORKING
+
+    @property
+    def force_amp_for_fp16_bf16_models(self):
+        return FORCE_AMP_FOR_FP16_BF16_MODELS
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
