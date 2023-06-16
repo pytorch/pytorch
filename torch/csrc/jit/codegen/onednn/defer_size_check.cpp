@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/onednn/defer_size_check.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 
@@ -77,7 +78,7 @@ class SizeCheckMover {
   }
 };
 
-static void DeferSizeCheck(std::shared_ptr<Graph>& graph) {
+void DeferSizeCheck(std::shared_ptr<Graph>& graph) {
   SizeCheckMover(graph->block(), graph).run();
 }
 

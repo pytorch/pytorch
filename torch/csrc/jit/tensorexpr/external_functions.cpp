@@ -1399,7 +1399,7 @@ void nnc_aten_triangular_solve(
 
 #if AT_MKLDNN_ENABLED()
 
-static void nnc_mkldnn_prepacked_conv_run(
+void nnc_mkldnn_prepacked_conv_run(
     int64_t bufs_num,
     void** buf_data,
     int64_t* buf_ranks,
