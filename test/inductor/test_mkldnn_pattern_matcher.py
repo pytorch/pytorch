@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import itertools
-import unittest
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
