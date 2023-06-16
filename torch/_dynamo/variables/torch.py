@@ -235,12 +235,11 @@ class TorchVariable(VariableTracker):
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if self.value is torch.func.vmap:
+        if self.value is torch._functorch.vmap.vmap_impl:
             return TorchHigherOrderOperatorVariable(
                 self.value,
                 source=self.source,
-                value_metadata={"args": args, "kwargs": kwargs},
-            )
+            ).call_function(tx, args, kwargs)
         elif self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
@@ -1269,18 +1268,26 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 lambda a: a.node.meta["example_value"],
                 body_r.as_proxy(),
             )
-        elif self.value is torch.func.vmap:
+        elif self.value is torch._functorch.vmap.vmap_impl:
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph
-            vmap_args = self.value_metadata["args"]
-            vmap_kwargs = self.value_metadata["kwargs"]
-            # first vmap arg is function
-            fn = vmap_args[0]
+
+            # unpack args
+            fn = args[0]
+            in_dims = args[1]
+            out_dims = args[2]
+            randomness = args[3]
+            chunk_size = args[4]
+            batch_input_args = args[5:]
+
+            # chunk_size is a keyword only args which is currently not supported.
+            if chunk_size.value is not None:
+                unimplemented("NYI - torch.func.vmap is not implemented when chunk_size is passed")
 
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
                 fn,
-                args,
+                batch_input_args,
                 graph_checkpoint,
                 checkpoint,
             )
@@ -1289,34 +1296,41 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 "vmap_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
             )
             body_node = make_attr(body_name)
+
+            # body_lifted_variable should not be treated as batched.
+            # So here we update `in_dims` to reflect that.
+            _, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
+            broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(in_dims, arg_spec)
+            # NOTE: updated_in_dims is flat list, it is ok for now
+            #       as speculate_subgraph does not supports functions with non-Tenosr args.
+            #       (so we graph-break above)
+            updated_in_dims = TupleVariable(broadcasted_in_dims + [ConstantVariable(None),] * len(body_lifted_freevars))
+
             vmap_proxy_args = (
                 body_node,
-                *(arg.as_proxy() for arg in vmap_args[1:]),
-                *(arg for arg in body_lifted_freevars),
+                *(arg.as_proxy() for arg in (updated_in_dims, out_dims, randomness)),
             )
             r = body_r.as_proxy().node.meta["example_value"]
-            vmap_proxy_kwargs = {k: v.as_proxy() for k, v in vmap_kwargs.items()}
+            # vmap_proxy_kwargs = {k: v.as_proxy() for k, v in vmap_kwargs.items()}
             example_value = r
             # vmap_proxy corresponds to `vmap_proxy = vmap(fn, *vmap_args, **vmap_kwargs)`
             vmap_proxy = tx.output.create_proxy(
                 "call_function",
-                self.value,
+                torch.func.vmap,
                 args=tuple(vmap_proxy_args),
-                kwargs=vmap_proxy_kwargs,
+                kwargs={},
                 name="vmap_proxy",
             )
 
-            batched_fn_args = tuple(arg.as_proxy() for arg in args)
-            batched_fn_kwargs = {k: v.as_proxy() for k, v in kwargs.items()}
+            batched_fn_args = tuple(arg.as_proxy() for arg in batch_input_args) + tuple(body_lifted_freevars)
 
             # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
-            proxy = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)
-            fx_proxy = wrap_fx_proxy(
+            proxy = vmap_proxy(*batched_fn_args)
+            return wrap_fx_proxy(
                 tx=tx,
                 proxy=proxy,
                 example_value=example_value,
             )
-            return fx_proxy
         elif self.value.__name__ in (
             "trampoline_autograd_fwd",
             "trampoline_autograd_bwd",

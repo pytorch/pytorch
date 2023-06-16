@@ -14,7 +14,8 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 
-from .vmap import vmap, doesnt_support_saved_tensors_hooks, get_chunk_sizes
+from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
+from .apis import vmap
 
 from torch._C._functorch import (
     _wrap_for_grad,
