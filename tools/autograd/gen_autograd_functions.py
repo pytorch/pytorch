@@ -109,7 +109,11 @@ if (task_should_compute_output({ ${name}_ix })) {
   std::vector<Tensor> grad_result;
   grad_result.reserve(grads.size());
   for (const auto & i : c10::irange(grads.size())) {
-    grad_result.emplace_back(${derivative});
+    if (grads[i].defined()) {
+      grad_result.emplace_back(${derivative});
+    } else {
+      grad_result.emplace_back(Tensor());
+    }
   }
   copy_range(grad_inputs, ${name}_ix, grad_result);
 }
@@ -308,11 +312,11 @@ GETTER_BODY_ARRAYREF_SYMINT = """\
 PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
 for (auto i : c10::irange(prop.size())) {
     auto si = prop[i];
-    if (si.is_symbolic()) {
+    if (auto m = si.maybe_as_int()) {
+      PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(*m));
+    } else {
       auto py_symint = py::cast(si).release().ptr();
       PyTuple_SetItem(tup, (Py_ssize_t) i, py_symint);
-    } else {
-       PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromUnsignedLong(si.as_int_unchecked()));
     }
 }
 return tup;
@@ -331,7 +335,11 @@ return PyLong_FromUnsignedLong((int64_t) prop);
 """
 
 GETTER_BODY_SYMINT = """\
-return prop.is_symbolic() ? py::cast(prop).release().ptr() : PyLong_FromUnsignedLong(prop.as_int_unchecked());
+if (auto m = prop.maybe_as_int()) {
+  return PyLong_FromUnsignedLong(*m);
+} else {
+  return py::cast(prop).release().ptr();
+}
 """
 
 GETTER_BODY_DOUBLE = """\
@@ -737,9 +745,9 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                 PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
             )
 
-    for var in info.all_saved_inputs:
+    for var in sorted(info.all_saved_inputs, key=lambda sa: str(sa.nctype.name)):
         save_var(var, is_output=False)
-    for var in info.all_saved_outputs:
+    for var in sorted(info.all_saved_outputs, key=lambda sa: str(sa.nctype.name)):
         save_var(var, is_output=True)
 
     # lock the mutex when we release variables and in Node::apply to protect thread safety
@@ -762,7 +770,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         # Generate aliases for gradients named for returned values.
         body.extend(
             f"const auto& {name} = grads[{info.available_named_gradients.index(name)}];"
-            for name in info.used_named_gradients
+            for name in sorted(info.used_named_gradients)
         )
 
     def emit_derivative(

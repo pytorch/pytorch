@@ -121,4 +121,59 @@ bool HashStore::check(const std::vector<std::string>& keys) {
   return true;
 }
 
+void HashStore::append(
+    const std::string& key,
+    const std::vector<uint8_t>& value) {
+  std::unique_lock<std::mutex> lock(m_);
+  auto it = map_.find(key);
+  if (it == map_.end()) {
+    map_[key] = value;
+  } else {
+    it->second.insert(it->second.end(), value.begin(), value.end());
+  }
+  cv_.notify_all();
+}
+
+std::vector<std::vector<uint8_t>> HashStore::multiGet(
+    const std::vector<std::string>& keys) {
+  std::unique_lock<std::mutex> lock(m_);
+  auto deadline = std::chrono::steady_clock::now() + timeout_;
+  std::vector<std::vector<uint8_t>> res;
+  res.reserve(keys.size());
+
+  for (auto& key : keys) {
+    auto it = map_.find(key);
+    if (it != map_.end()) {
+      res.emplace_back(it->second);
+    } else {
+      auto pred = [&]() { return map_.find(key) != map_.end(); };
+      if (timeout_ == kNoTimeout) {
+        cv_.wait(lock, pred);
+      } else {
+        if (!cv_.wait_until(lock, deadline, pred)) {
+          throw std::system_error(
+              ETIMEDOUT, std::system_category(), "Wait timeout");
+        }
+      }
+      res.emplace_back(map_[key]);
+    }
+  }
+  return res;
+}
+
+void HashStore::multiSet(
+    const std::vector<std::string>& keys,
+    const std::vector<std::vector<uint8_t>>& values) {
+  std::unique_lock<std::mutex> lock(m_);
+
+  for (auto i : ::c10::irange(keys.size())) {
+    map_[keys[i]] = values[i];
+  }
+  cv_.notify_all();
+}
+
+bool HashStore::hasExtendedApi() const {
+  return true;
+}
+
 } // namespace c10d

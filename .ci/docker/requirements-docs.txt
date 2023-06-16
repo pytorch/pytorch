@@ -1,0 +1,49 @@
+sphinx==5.3.0
+#Description: This is used to generate PyTorch docs
+#Pinned versions: 5.3.0
+-e git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
+
+# TODO: sphinxcontrib.katex 0.9.0 adds a local KaTeX server to speed up pre-rendering
+# but it doesn't seem to work and hangs around idly. The initial thought is probably
+# something related to Docker setup. We can investigate this later
+sphinxcontrib.katex==0.8.6
+#Description: This is used to generate PyTorch docs
+#Pinned versions: 0.8.6
+
+matplotlib==3.5.3
+#Description: This is used to generate PyTorch docs
+#Pinned versions: 3.5.3
+
+tensorboard==2.13.0
+#Description: This is used to generate PyTorch docs
+#Pinned versions: 2.13.0
+
+breathe==4.34.0
+#Description: This is used to generate PyTorch C++ docs
+#Pinned versions: 4.34.0
+
+exhale==0.2.3
+#Description: This is used to generate PyTorch C++ docs
+#Pinned versions: 0.2.3
+
+docutils==0.16
+#Description: This is used to generate PyTorch C++ docs
+#Pinned versions: 0.16
+
+bs4==0.0.1
+#Description: This is used to generate PyTorch C++ docs
+#Pinned versions: 0.0.1
+
+IPython==8.12.0
+#Description: This is used to generate PyTorch functorch docs
+#Pinned versions: 8.12.0
+
+myst-nb==0.17.2
+#Description: This is used to generate PyTorch functorch docs
+#Pinned versions: 0.13.2
+
+# The following are required to build torch.distributed.elastic.rendezvous.etcd* docs
+python-etcd==0.4.5
+sphinx-copybutton==0.5.0
+sphinx-panels==0.4.1
+myst-parser==0.18.1

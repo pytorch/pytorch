@@ -6,8 +6,11 @@ import textwrap
 import pandas as pd
 
 
-def get_field(csv, model_name: str, field: str, typ=float):
-    return typ(csv.loc[csv["name"] == model_name][field])
+def get_field(csv, model_name: str, field: str):
+    try:
+        return csv.loc[csv["name"] == model_name][field].item()
+    except Exception as e:
+        return None
 
 
 def check_graph_breaks(actual_csv, expected_csv, expected_filename):
@@ -15,8 +18,8 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
     improved = []
 
     for model in actual_csv["name"]:
-        graph_breaks = get_field(actual_csv, model, "graph_breaks", typ=int)
-        expected_graph_breaks = get_field(expected_csv, model, "graph_breaks", typ=int)
+        graph_breaks = get_field(actual_csv, model, "graph_breaks")
+        expected_graph_breaks = get_field(expected_csv, model, "graph_breaks")
 
         if graph_breaks == expected_graph_breaks:
             status = "PASS"
@@ -57,7 +60,7 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         If this change is expected, you can update `{expected_filename}` to reflect the new baseline.
         from pytorch/pytorch root, run
         `python benchmarks/dynamo/ci_expected_accuracy/update_expected.py {sha}`
-        and then `git add` the resulting local changes to expected graph break CSVs to your commit.
+        and then `git add` the resulting local changes to expected CSVs to your commit.
         """
         )
     return failed or improved, msg

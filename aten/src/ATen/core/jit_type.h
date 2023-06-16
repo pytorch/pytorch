@@ -10,6 +10,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymBool.h>
 
 #include <array>
 #include <memory>
@@ -1378,6 +1379,26 @@ struct TORCH_API SymFloatType : public Type {
   SymFloatType() : Type(TypeKind::SymFloatType) {}
 };
 
+struct SymBoolType;
+using SymBoolTypePtr = SingletonTypePtr<SymBoolType>;
+struct TORCH_API SymBoolType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymBool";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "bool";
+  }
+  static const TypeKind Kind = TypeKind::SymBoolType;
+  // global singleton
+  static SymBoolTypePtr get();
+
+ private:
+  SymBoolType() : Type(TypeKind::SymBoolType) {}
+};
+
 struct IntType;
 using IntTypePtr = SingletonTypePtr<IntType>;
 // This type represents a Python int number
@@ -1870,6 +1891,19 @@ template <>
 struct getMaybeFakeTypePtr_<SymFloat, true> final {
   static decltype(auto) call() {
     return FloatType::get();
+  }
+};
+
+template <>
+struct getMaybeFakeTypePtr_<SymBool, false> final {
+  static decltype(auto) call() {
+    return SymBoolType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<SymBool, true> final {
+  static decltype(auto) call() {
+    return BoolType::get();
   }
 };
 

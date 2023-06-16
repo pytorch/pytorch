@@ -96,6 +96,7 @@ def _disallowed_function_ids():
         torch.autograd.grad,
         torch.clear_autocast_cache,
         torch.cuda.current_device,
+        torch.cuda.set_device,
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
         torch.inference_mode,
@@ -108,6 +109,11 @@ def _disallowed_function_ids():
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
     ]
+    if torch.distributed.is_available():
+        from torch.distributed import _functional_collectives
+
+        config.skipfiles_inline_module_allowlist.add(_functional_collectives)
+
     # extract all dtypes from torch
     dtypes = [
         obj for obj in torch.__dict__.values() if isinstance(obj, type(torch.float32))
@@ -119,6 +125,13 @@ def _disallowed_function_ids():
         if isinstance(obj, type(torch.FloatStorage))
     ]
     remove += storage
+
+    # Distributed APIs don't work well with torch.compile.
+    if torch.distributed.is_available():
+        remove.extend(
+            torch.distributed.distributed_c10d.dynamo_unsupported_distributed_c10d_ops
+        )
+
     return {id(x) for x in remove}
 
 
@@ -139,6 +152,7 @@ def _allowed_function_ids():
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = (
             "torch.optim.",
+            "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
@@ -168,6 +182,16 @@ def _allowed_function_ids():
         torch_object_ids[id(module)] = module.__name__
         for name, obj in list(module.__dict__.items()):
             if id(obj) not in torch_object_ids:
+                # Dynamo allows all builtins into the graph and does not attempt
+                # to introspect into them. We don't want to allow instances of
+                # HigherOrderOperator into the graph all the time (Dynamo needs
+                # to introspect the body functions of these HigherOrderOperator
+                # first, decide they are safe, and then allow them into the graph).
+                # So we exclude HigherOrderOperator from being a builtin.
+                import torch._ops
+
+                if isinstance(obj, torch._ops.HigherOrderOperator):
+                    continue
                 if isinstance(obj, types.ModuleType):
                     if obj.__name__.startswith("torch.") and _is_allowed_module_prefix(
                         obj
@@ -253,6 +277,9 @@ def is_allowed(obj):
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead
     # in those cases
+    if id(obj) in _disallowed_function_ids:
+        return False
+
     return id(obj) in _allowed_function_ids or isinstance(
         obj,
         (torch._ops.OpOverloadPacket, torch._ops.OpOverload, torch._ops._OpNamespace),

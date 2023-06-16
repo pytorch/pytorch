@@ -154,7 +154,7 @@ def to_underlying_dtype(qdtype):
 def get_qparam_dict(observer_or_fake_quant):
     from torch.ao.quantization.observer import PlaceholderObserver
 
-    qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
+    qscheme = getattr(observer_or_fake_quant, "qscheme", None)
     dtype = observer_or_fake_quant.dtype
     qparams = {"qscheme": qscheme, "dtype": dtype}
 
@@ -276,7 +276,7 @@ def get_qconfig_dtypes(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    act_is_dynamic = activation.is_dynamic if hasattr(activation, 'is_dynamic') else False
+    act_is_dynamic = getattr(activation, "is_dynamic", False)
     return (activation.dtype, weight.dtype, act_is_dynamic)
 
 def get_quant_type(qconfig):
@@ -533,7 +533,7 @@ def determine_qparams(
     max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
     device = min_val_neg.device
-    scale = torch.ones(min_val_neg.size(), dtype=torch.float32, device=device)
+    scale = torch.ones(min_val_neg.size(), dtype=torch.double, device=device)
     zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
 
     if (
@@ -580,7 +580,7 @@ def determine_qparams(
                 [float(zero_point)], dtype=zero_point.dtype, device=device
             )
 
-    return scale, zero_point
+    return scale.to(torch.double), zero_point.to(torch.int64)
 
 def _get_num_pos_args(f: Callable) -> int:
     """ Get number of positional args for a function
@@ -603,7 +603,7 @@ def get_fqn_to_example_inputs(
     e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
           "sub.linear1": (tensor4,), ...}
 
-    Used to make quantizing submodules easier now that FX Graph Mode Quantization requries
+    Used to make quantizing submodules easier now that FX Graph Mode Quantization requires
     example inputs.
 
     Also works for keyword arguments with default values, we would flatten keyword

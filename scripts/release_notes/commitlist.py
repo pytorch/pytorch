@@ -265,7 +265,7 @@ class CommitList:
         else:
             # Below are some extra quick checks that aren't necessarily file-path related,
             # but I found that to catch a decent number of extra commits.
-            if len(files_changed) > 0 and all([f_name.endswith(('.cu', '.cuh')) for f_name in files_changed]):
+            if len(files_changed) > 0 and all(f_name.endswith(('.cu', '.cuh')) for f_name in files_changed):
                 category = 'cuda'
             elif '[PyTorch Edge]' in title:
                 category = 'mobile'

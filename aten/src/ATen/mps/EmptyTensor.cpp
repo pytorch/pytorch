@@ -33,6 +33,9 @@ TensorBase empty_mps(
     TORCH_CHECK_NOT_IMPLEMENTED(
         layout_or_default(layout_opt) == Layout::Strided,
         "strided tensors not supported yet");
+
+    TORCH_CHECK(size.size() <= 16, "MPS supports tensors with dimensions <= 16, but got ", size.size(), ".");
+
     check_size_nonnegative(size);
 
     auto* allocator = at::mps::GetMPSAllocator();

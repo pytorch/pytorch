@@ -13,22 +13,6 @@ def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
     return string[:idx] + new_char + string[idx + 1 :]
 
 
-def _inplace_rewrap_schema_suggestion(
-    suggestion: OpSchema, input_schema: OpSchema
-) -> None:
-    suggestion_args_spec = suggestion.args_spec
-    new_arg_schema: List[object] = []
-    idx_of_args_spec = 0
-    for arg in input_schema.args_schema:
-        if isinstance(arg, DTensorSpec):
-            new_arg_schema.append(suggestion_args_spec[idx_of_args_spec])
-            idx_of_args_spec += 1
-        else:
-            new_arg_schema.append(arg)
-    suggestion.args_schema = tuple(new_arg_schema)
-    suggestion.kwargs_schema = input_schema.kwargs_schema
-
-
 def _gen_reshard_suggestions(
     op_schema: OpSchema,
     input_dims: List[str],
@@ -48,7 +32,7 @@ def _gen_reshard_suggestions(
             )
         )
     suggested_schema = OpSchema(op_schema.func_schema, tuple(suggested_arg_specs), {})
-    _inplace_rewrap_schema_suggestion(suggested_schema, op_schema)
+    suggested_schema._inplace_rewrap_schema_suggestion(op_schema)
     return OutputSharding(
         None,
         schema_suggestions=[suggested_schema],
@@ -121,7 +105,7 @@ def einop_rule(
             if sum_dim not in pending_sums_counter:
                 seen_shardings[sum_dim] = "+"
             # update pending sum counter for pending sum mesh
-            # dimension with the occurance from each input
+            # dimension with the occurrence from each input
             pending_sums_counter[sum_dim] = pending_sums_counter.get(sum_dim, 0) + 1
 
         for idx, (dim, mesh_dim) in enumerate(zip(input_dim, input_spec.dim_map)):
@@ -350,7 +334,7 @@ def reduction_rule(
                 input_spec.mesh, reshard_dim_map, [], tensor_meta=input_spec.tensor_meta
             )
             schema_suggestion = OpSchema(op_schema.func_schema, (no_partial_spec,), {})
-            _inplace_rewrap_schema_suggestion(schema_suggestion, op_schema)
+            schema_suggestion._inplace_rewrap_schema_suggestion(op_schema)
             return OutputSharding(
                 output_spec=None, schema_suggestions=[schema_suggestion]
             )

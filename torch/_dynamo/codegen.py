@@ -6,6 +6,7 @@ import types
 from typing import List
 
 import torch.nn
+from . import utils
 
 from .bytecode_transformation import (
     create_call_function,
@@ -21,6 +22,7 @@ from .utils import is_safe_constant, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
+    NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
     TensorWithTFOverrideVariable,
@@ -109,6 +111,7 @@ class PyCodegen:
                 SymNodeVariable,
                 TensorWithTFOverrideVariable,
                 UnspecializedPythonVariable,
+                NumpyNdarrayVariable,
             ),
         ):
             if isinstance(value, TensorWithTFOverrideVariable):
@@ -121,14 +124,16 @@ class PyCodegen:
                 )
             else:
                 graph_outputs[graph_outputs_key].merge(value)
-
+            if isinstance(value, NumpyNdarrayVariable):
+                self.load_import_from(utils.__name__, "to_numpy_helper")
             output.append(self.create_load(self.graph_output_var))
             output.append(
                 self._create_load_const(graph_outputs[graph_outputs_key].index)
             )
             output.append(create_instruction("BINARY_SUBSCR"))
-
-            if isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
+            if isinstance(value, NumpyNdarrayVariable):
+                output.extend(create_call_function(1, False))
+            elif isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)
                 )
@@ -311,7 +316,7 @@ class PyCodegen:
                 self.extend_output(
                     [
                         self.create_load_python_module(torch, True),
-                        self.create_load_attr("tensor"),
+                        self.create_load_attr("as_tensor"),
                     ]
                 )
                 self.extend_output(arg.load(self))

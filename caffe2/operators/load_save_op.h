@@ -394,7 +394,7 @@ class CheckpointOp final : public Operator<Context> {
     CAFFE_ENFORCE_GT(every_, 0, "Checkpoint interval should be positive.");
     if (every_ == 1) {
       // Just issue a warning, but it's totally legal so we don't do anything.
-      LOG(WARNING) << "It seems that we are checkpointting every iteration. "
+      LOG(WARNING) << "It seems that we are checkpointing every iteration. "
                    << "Is that intended?";
     }
     save_op_def_.set_type("Save");

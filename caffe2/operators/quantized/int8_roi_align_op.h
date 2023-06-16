@@ -110,7 +110,7 @@ void pre_calc_for_bilinear_interpolate(
           uint8_t w3 = static_cast<uint8_t>(Round(ly * hx * w_multiplier));
           uint8_t w4 = static_cast<uint8_t>(Round(ly * lx * w_multiplier));
 
-          // save weights and indeces
+          // save weights and indices
           PreCalc pc;
           pc.pos1 = y_low * width + x_low;
           pc.pos2 = y_low * width + x_high;
@@ -203,8 +203,8 @@ void ROIAlignForward(
     int Y_shift;
     QuantizeMultiplierSmallerThanOne(real_multiplier, &Y_multiplier, &Y_shift);
 
-    // we want to precalculate indeces and weights shared by all chanels,
-    // this is the key point of optimiation
+    // we want to precalculate indices and weights shared by all channels,
+    // this is the key point of optimization
     std::vector<PreCalc> pre_calc(
         roi_bin_grid_h * roi_bin_grid_w * pooled_width * pooled_height);
     pre_calc_for_bilinear_interpolate(

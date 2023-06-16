@@ -2,6 +2,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import inspect
 import itertools
 import logging
 import math
@@ -14,7 +15,7 @@ import textwrap
 import time
 from collections import defaultdict
 from io import StringIO
-from typing import Any, Dict, List, NamedTuple, Optional, Union
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -24,19 +25,42 @@ from torch.autograd import DeviceType
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config
-from .cuda_properties import get_device_capability
+from .cuda_properties import current_device, get_device_capability
 
 log = logging.getLogger(__name__)
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
-try:
-    from triton.testing import do_bench
-except ImportError:
+def do_bench(*args, **kwargs):
+    @functools.lru_cache(None)
+    def load_triton():
+        try:
+            # NB: Lazily load triton, as importing triton is slow
+            # see https://github.com/openai/triton/issues/1599
+            from triton.testing import do_bench as triton_do_bench
+        except ImportError:
+            raise NotImplementedError("requires Triton")
 
-    def do_bench(*args, **kwargs):
-        raise NotImplementedError("requires Triton")
+        # triton PR https://github.com/openai/triton/pull/1513 change the
+        # quantile fields name from 'percentiles' to 'quantiles'
+        # and change the default value from (0.5, 0.2, 0.8) to None.
+        # This may break inductor since a caller expects a tuple may get a item.
+        #
+        # Add a wrapper to maintain the same behavior for inductor.
+        # Maybe we should have own implementation of this function?
+        return triton_do_bench, (
+            "quantiles"
+            if inspect.signature(triton_do_bench).parameters.get("quantiles")
+            is not None
+            else "percentiles"
+        )
+
+    triton_do_bench, quantile_field_name = load_triton()
+
+    if quantile_field_name not in kwargs:
+        kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
+    return triton_do_bench(*args, **kwargs)[0]
 
 
 @functools.lru_cache(None)
@@ -65,6 +89,16 @@ def has_torchvision_roi_align():
 
 def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
+
+
+def decode_device(device):
+    if device is None:
+        return torch.tensor(0.0).device  # default device
+    if isinstance(device, str):
+        device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        return torch.device("cuda", index=current_device())
+    return device
 
 
 def sympy_product(it):
@@ -224,9 +258,9 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
-def pad_list(x):
+def pad_listlike(x, size):
     if len(x) == 1:
-        return [x[0], x[0]]
+        return type(x)([x[0]]) * size
     else:
         return x
 
@@ -243,12 +277,21 @@ def cache_on_self(fn):
     return wrapper
 
 
-def get_fused_kernel_name(node_schedule):
-    all_origins = functools.reduce(
+def aggregate_origins(node_schedule):
+    return functools.reduce(
         operator.or_,
-        [node.node.origins for node in node_schedule if hasattr(node, "node")],
+        [
+            node.node.origins
+            for node in node_schedule
+            if hasattr(node, "node") and node.node
+        ],
+        set(),
     )
-    if config.triton.descriptive_names == "original_aten":
+
+
+def get_fused_kernel_name(node_schedule, descriptive_names):
+    all_origins = aggregate_origins(node_schedule)
+    if descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
@@ -256,17 +299,17 @@ def get_fused_kernel_name(node_schedule):
             if origin.op == "call_function" and "original_aten" in origin.meta
         ]
         sources = sorted(set(sources))
-    elif config.triton.descriptive_names == "torch":
+    elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
         for origin in all_origins:
             if origin.op == "call_function" and "source_fn" in origin.meta:
-                if isinstance(origin.meta["source_fn"], str):
-                    sources.append(origin.meta["source_fn"])
+                if isinstance(origin.meta["source_fn"][1], str):
+                    sources.append(origin.meta["source_fn"][1])
                 else:
-                    sources.append(origin.meta["source_fn"].__name__)
+                    sources.append(origin.meta["source_fn"][1].__name__)
         sources = sorted(set(sources))
-    elif config.triton.descriptive_names == "inductor_node":
+    elif descriptive_names == "inductor_node":
         sources = [
             origin.name for origin in all_origins if origin.op == "call_function"
         ]
@@ -277,10 +320,7 @@ def get_fused_kernel_name(node_schedule):
 
 
 def get_kernel_metadata(node_schedule):
-    all_origins = functools.reduce(
-        operator.or_,
-        [node.node.origins for node in node_schedule if hasattr(node, "node")],
-    )
+    all_origins = aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
     original_aten_dict = collections.defaultdict(list)
     for node in inductor_nodes:
@@ -294,6 +334,23 @@ def get_kernel_metadata(node_schedule):
     for original_aten, nodes in sorted(original_aten_dict.items()):
         metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
     return "\n".join(metadata)
+
+
+def dominated_nodes(initial_queue: Iterable[torch.fx.Node], skip_filter=None):
+    """Returns the set of nodes whose values depend on those within initial_queue"""
+    initial_queue = list(initial_queue)
+    dominated_set = set(initial_queue)
+
+    while initial_queue:
+        node = initial_queue.pop()
+        for user in node.users:
+            if skip_filter and skip_filter(user):
+                continue
+            if user not in dominated_set:
+                dominated_set.add(user)
+                initial_queue.append(user)
+
+    return dominated_set
 
 
 def gather_origins(args, kwargs):
@@ -333,14 +390,14 @@ def sympy_str(expr: sympy.Expr):
     return str(expr)
 
 
-def sympy_symbol(name):
+def sympy_symbol(name) -> sympy.Symbol:
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
     return sympy.Symbol(name, integer=True, positive=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
+def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
     """
     xreplace is faster than subs, but is way more picky
     """
@@ -369,9 +426,25 @@ def has_incompatible_cudagraph_ops(gm):
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
+        "run_with_rng_state",
+        "run_and_save_rng_state",
     }
     if torch.are_deterministic_algorithms_enabled():
-        forbidden_set.update({"aten.index_put.default", "aten.index_put_.default"})
+        forbidden_set.update(
+            {
+                "aten._unsafe_index_put.default",
+                "aten.index_put.default",
+                "aten.index_put_.default",
+                "aten.scatter.src",
+                "aten.scatter.reduce",
+                "aten.scatter.value_reduce",
+                "aten.scatter_add_",
+                "aten.scatter_add.default",
+                "aten.scatter_reduce.two",
+                "aten.scatter_reduce_.two",
+                "aten.scatter_reduce.two_out",
+            }
+        )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return True
@@ -411,7 +484,7 @@ def fresh_inductor_cache(cache_entries=None):
                         )
 
 
-def argsort(seq):
+def argsort(seq) -> List[int]:
     # preserve original order for equal strides
     getter = seq.__getitem__
     a_r = range(len(seq))
@@ -622,12 +695,12 @@ def run_and_get_code(fn, *args, **kwargs):
         GraphLowering, "compile_to_module", patched_compile_to_module
     ):
         torch._dynamo.reset()
-        fn(*args, **kwargs)
-    return source_codes
+        result = fn(*args, **kwargs)
+    return result, source_codes
 
 
 def run_and_get_triton_code(fn, *args, **kwargs):
-    source_codes = run_and_get_code(fn, *args, **kwargs)
+    _, source_codes = run_and_get_code(fn, *args, **kwargs)
     assert (
         len(source_codes) == 1
     ), f"expected exactly one code output got {len(source_codes)}"
@@ -721,7 +794,7 @@ def get_kernel_category(kernel_mod):
     - reduction
     - persistent_reduction
 
-    Currently we simply decide the cateory depending on what decorator is imported
+    Currently we simply decide the category depending on what decorator is imported
     by the kernel.
     """
     choices = [ch for ch in _kernel_category_choices if ch in kernel_mod.__dict__]
@@ -809,7 +882,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)
             assert (
                 len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"
@@ -845,6 +918,16 @@ def is_cpu_device(inputs):
         for item in inputs
         if isinstance(item, torch.Tensor)
     )
+
+
+def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
+    assert isinstance(
+        val, sympy.Expr
+    ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
+    if val.is_integer:
+        return torch.int64
+    else:
+        return torch.float64
 
 
 @contextlib.contextmanager
@@ -1017,3 +1100,44 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
         parse_profile_event_list(
             benchmark_name, event_list, wall_time_ms, times * repeat
         )
+
+
+def triton_config_to_hashable(cfg):
+    """
+    Convert triton config to a tuple that can uniquely identify it. We can use
+    the return value as a dictionary key.
+    """
+    items = sorted(cfg.kwargs.items())
+    items.append(("num_warps", cfg.num_warps))
+    items.append(("num_stages", cfg.num_stages))
+    return tuple(items)
+
+
+HAS_COLORAMA = True
+try:
+    import colorama
+except ImportError:
+    HAS_COLORAMA = False
+
+
+def _color_text(msg, color):
+    if not HAS_COLORAMA:
+        return msg
+
+    return getattr(colorama.Fore, color.upper()) + msg + colorama.Fore.RESET
+
+
+def green_text(msg):
+    return _color_text(msg, "green")
+
+
+def yellow_text(msg):
+    return _color_text(msg, "yellow")
+
+
+def red_text(msg):
+    return _color_text(msg, "red")
+
+
+def blue_text(msg):
+    return _color_text(msg, "blue")

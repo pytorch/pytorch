@@ -1,11 +1,8 @@
 //  Copyright © 2022 Apple Inc.
-
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/detail/FunctionTraits.h>
-#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <cmath>
 #include <limits>
@@ -59,7 +56,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     auto xstep = step.to<accscalar_t>();
 
     double size_d;
-    if (std::is_same<scalar_t, int64_t>::value) {
+    if constexpr (std::is_same_v<scalar_t, int64_t>) {
       size_d = std::ceil(static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>()) / step.to<accscalar_t>());
     } else {
       size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>()) / step.to<double>());
@@ -107,13 +104,12 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     auto mpsDataType = getMPSDataType(result);
     @autoreleasepool {
       string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + to_string(size);
-      auto cachedGraph = static_cast<RangeCachedGraph*>(cache_->LookUp(key));
+      auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
       if (!cachedGraph) {
-        auto* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        cachedGraph = cache_->CreateCachedGraphAs<RangeCachedGraph>(key, ^MPSCachedGraph*() {
           auto mpsGraph = make_mps_graph();
           return new RangeCachedGraph(mpsGraph, mpsDataType, size);
         });
-        cachedGraph = static_cast<RangeCachedGraph*>(tmpCachedGraph);
       }
       Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
       NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
@@ -144,7 +140,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
 
     // double size_d = ((xend - xstart) / xstep) + 1;
     double size_d;
-    if (std::is_same<scalar_t, int64_t>::value) {
+    if constexpr (std::is_same_v<scalar_t, int64_t>) {
       size_d = static_cast<double>(end.to<accscalar_t>() - start.to<accscalar_t>()) / step.to<accscalar_t>() + 1;
     } else {
       size_d = static_cast<double>(end.to<double>() - start.to<double>()) / step.to<double>() + 1;
@@ -177,13 +173,12 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
     auto mpsDataType = getMPSDataType(result);
     @autoreleasepool {
       string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + to_string(size);
-      auto cachedGraph = static_cast<RangeCachedGraph*>(cache_->LookUp(key));
+      auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
       if (!cachedGraph) {
-        auto* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        cachedGraph = cache_->CreateCachedGraphAs<RangeCachedGraph>(key, ^MPSCachedGraph*() {
           auto mpsGraph = make_mps_graph();
           return new RangeCachedGraph(mpsGraph, mpsDataType, size);
         });
-        cachedGraph = static_cast<RangeCachedGraph*>(tmpCachedGraph);
       }
       Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, r);
       NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
@@ -229,10 +224,10 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
     @autoreleasepool {
       string key =
           "linspace_out_mps:" + getTensorsStringKey({result}) + ":" + to_string(steps) + to_string(start_less_end);
-      RangeCachedGraph* cachedGraph = static_cast<RangeCachedGraph*>(cache_->LookUp(key));
+      auto cachedGraph = cache_->LookUpAs<RangeCachedGraph>(key);
 
       if (!cachedGraph) {
-        MPSCachedGraph* tmpCachedGraph = cache_->CreateCachedGraph(key, ^MPSCachedGraph*() {
+        cachedGraph = cache_->CreateCachedGraphAs<RangeCachedGraph>(key, ^MPSCachedGraph*() {
           RangeCachedGraph* newCachedGraph = nil;
 
           @autoreleasepool {
@@ -247,7 +242,6 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
           }
           return newCachedGraph;
         });
-        cachedGraph = static_cast<RangeCachedGraph*>(tmpCachedGraph);
       }
 
       NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];

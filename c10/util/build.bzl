@@ -33,6 +33,7 @@ def define_targets(rules):
         local_defines = ["C10_BUILD_MAIN_LIB"],
         visibility = ["//visibility:public"],
         deps = [
+            ":bit_cast",
             "//c10/macros",
             "@fmt",
         ] + rules.select({
@@ -45,6 +46,12 @@ def define_targets(rules):
         # This library uses flags and registration. Do not let the
         # linker remove them.
         alwayslink = True,
+    )
+
+    rules.cc_library(
+        name = "bit_cast",
+        hdrs = ["bit_cast.h"],
+        visibility = ["//:__subpackages__"],
     )
 
     rules.cc_library(
@@ -74,6 +81,7 @@ def define_targets(rules):
         srcs = rules.glob(
             ["*.h"],
             exclude = [
+                "bit_cast.h",
                 "ssize.h",
             ],
         ),
