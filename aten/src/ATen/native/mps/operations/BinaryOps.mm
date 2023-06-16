@@ -82,7 +82,7 @@ void binaryOpTensor(const Tensor& self,
 
   // determine if this is an in-place operation
   if (self.is_alias_of(output_) || other.is_alias_of(output_)) {
-    output = at::native::empty_mps(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS);
+    output = at::empty(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
     needsCopyToOutput = true;
   } else if (!output_.is_contiguous()) {
     output_.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
