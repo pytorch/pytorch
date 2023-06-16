@@ -575,7 +575,7 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
         )
 
 
-def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
+def triton_config(size_hints, x, y=None, z=None, num_stages=1, num_elements_per_warp=256) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -623,7 +623,7 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1) -> Config:
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
-    num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // 64, 1), 8))
+    num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // num_elements_per_warp, 1), 8))
     # we are going to arrive at 2 warps only if bs was too small due to
     # numel being too small. However to workaround some ptx bugs we still
     # want at least 4 warps if there's enough elements per thread
@@ -703,8 +703,11 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     bs = max(256, min(numel // 128, 1024))
 
     if len(size_hints) == 1:
-        if disable_pointwise_autotuning():
+        if disable_pointwise_autotuning() and not (
+            config.max_autotune or config.max_autotune_pointwise
+        ):
             return cached_autotune(
+                size_hints,
                 [triton_config(size_hints, bs)],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
@@ -712,9 +715,10 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             )
         else:
             return cached_autotune(
+                size_hints,
                 [
-                    triton_config(size_hints, bs),
-                    triton_config(size_hints, bs // 2),
+                    triton_config(size_hints, bs, num_elements_per_warp=256),
+                    triton_config(size_hints, bs // 2, num_elements_per_warp=64),
                 ],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
