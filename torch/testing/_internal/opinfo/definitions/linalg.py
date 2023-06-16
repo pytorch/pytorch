@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfNoCusolver,
     skipCUDAIfNoMagma,
     skipCUDAIfNoMagmaAndNoCusolver,
+    skipCUDAIfNoMagmaAndNoLinalgsolver,
     skipCUDAIfRocm,
     tol,
     toleranceOverride,
@@ -1560,7 +1561,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types(),
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+        decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
     ),
     OpInfo(
         "linalg.ldl_factor_ex",
@@ -1568,7 +1569,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_and_complex_types(),
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_factor,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
+        decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
     ),
     OpInfo(
         "linalg.ldl_solve",

@@ -374,8 +374,8 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
-static bool use_mkldnn(const Tensor& input) {
 #if AT_MKLDNN_ENABLED()
+static bool use_mkldnn(const Tensor& input) {
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }
@@ -386,17 +386,15 @@ static bool use_mkldnn(const Tensor& input) {
     (input.device().is_cpu() &&
     (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
     (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
-#endif
-  return false;
 }
+#endif
 
 TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, c10::string_view approximate, const Tensor& result
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
-  // TODO: oneDNN's gelu fails to provide enough accuracy. Disable for now.
-  if (0 && use_mkldnn(self) && (approximate_type == GeluType::None)) {
+  if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
     const ideep::tensor& x = itensor_from_tensor(self);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(

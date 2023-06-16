@@ -107,6 +107,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "full",
         "full_like",
         "index_put",
+        "logit",
         # "new_empty",  non-deterministic
         # "new_empty_strided",  non-deterministic
         "new_full",
@@ -124,8 +125,13 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.dropout",
         "nn.functional.elu",
         "nn.functional.embedding",
+        "nn.functional.max_pool1d",
+        "nn.functional.max_pool2d",
+        "nn.functional.max_pool3d",
         "nn.functional.nll_loss",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
+        "scatter_add",
+        "scatter_reduce",
         "unflatten",
     ]
 )
@@ -392,11 +398,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Floor", "bool, int"),
     ),
     xfail(
-        "full_like",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + (torch.float16,),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Floor", "bool, int and float16"),
-    ),
-    xfail(
         "index_put",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("index_put", "bool"),
@@ -407,31 +408,21 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
-        "new_full",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_full", "ORT 1.15 will support"),
-    ),
-    xfail(
-        "new_ones",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_ones", "ORT 1.15 will support"),
-    ),
-    xfail(
-        "new_zeros",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("new_zeros", "ORT 1.15 will support"),
+        "logit",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Log", "bool, int"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool1d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool2d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool3d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
     ),
     xfail(
         "nn.functional.conv1d",
@@ -450,6 +441,40 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.embedding",
         reason=onnx_test_common.reason_onnx_script_does_not_support("aten.embedding_renorm.default"),
+    ),
+    xfail(
+        "scatter_add",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=sum", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="sum",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=sum", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="prod",
+        dtypes=(torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=prod", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="amin",
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=amin", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="amax",
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.float16,),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("ScatterElements reduction=amax", "float16"),
+    ),
+    xfail(
+        "scatter_reduce",
+        variant_name="mean",
+        reason="ONNX doesn't support reduce='mean' option",
     ),
     xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
@@ -501,6 +526,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Celu", "non-float32"),
     ),
     skip(
+        "nn.functional.elu",  # see https://github.com/pytorch/pytorch/issues/101947
+        matcher=lambda sample: sample.input.dtype != torch.float32,
+        reason=onnx_test_common.reason_onnx_does_not_support("elu", "non-float32"),
+    ),
+    skip(
         "nn.functional.conv1d",
         matcher=lambda sample: isinstance(sample.kwargs.get("padding"), str),
         reason="String padding is not accepted by aten::conv1d",
@@ -515,12 +545,29 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
     ),
+    skip(
+        "nn.functional.max_pool3d",
+        matcher=lambda sample: sample.kwargs.get("ceil_mode") is True
+        and sample.kwargs.get("padding") == 1,
+        reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
+    ),
     xfail(
         "nn.functional.nll_loss",
         matcher=lambda sample: isinstance(sample.kwargs.get("reduction"), str),
         reason=onnx_test_common.reason_onnx_script_does_not_support(
             "string in reduction kwarg: https://github.com/microsoft/onnxscript/issues/726"
         ),
+    ),
+    xfail(
+        "scatter_add",
+        matcher=lambda sample: len(sample.input.shape) == 0,
+        reason="fixme: Rank(0) input will lead ORT failed due to different rank(result) in if-else branch",
+    ),
+    skip(
+        "scatter_reduce",
+        # ONNX has not include_self parameter and default is include_self=True mode
+        matcher=lambda sample: sample.kwargs.get("include_self") is False,
+        reason="ONNX does't support include_self=False option",
     ),
     xfail(
         "unflatten",
