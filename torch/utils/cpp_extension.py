@@ -1506,18 +1506,29 @@ def _jit_compile(name,
                             hipified_sources.add(hipify_result[s_abs]["hipified_path"] if s_abs in hipify_result else s_abs)
 
                         sources = list(hipified_sources)
-
-                _write_ninja_file_and_build_library(
-                    name=name,
-                    sources=sources,
-                    extra_cflags=extra_cflags or [],
-                    extra_cuda_cflags=extra_cuda_cflags or [],
-                    extra_ldflags=extra_ldflags or [],
-                    extra_include_paths=extra_include_paths or [],
-                    build_directory=build_directory,
-                    verbose=verbose,
-                    with_cuda=with_cuda,
-                    is_standalone=is_standalone)
+                        _write_ninja_file_and_build_library(
+                            name=name,
+                            sources=sources,
+                            extra_cflags=extra_cflags or [],
+                            extra_cuda_cflags=extra_cuda_cflags or [],
+                            extra_ldflags=extra_ldflags or [],
+                            extra_include_paths=extra_include_paths or [],
+                            build_directory=build_directory,
+                            verbose=verbose,
+                            with_cuda=with_cuda,
+                            is_standalone=is_standalone)
+                else:
+                    _write_ninja_file_and_build_library(
+                        name=name,
+                        sources=sources,
+                        extra_cflags=extra_cflags or [],
+                        extra_cuda_cflags=extra_cuda_cflags or [],
+                        extra_ldflags=extra_ldflags or [],
+                        extra_include_paths=extra_include_paths or [],
+                        build_directory=build_directory,
+                        verbose=verbose,
+                        with_cuda=with_cuda,
+                        is_standalone=is_standalone)
             finally:
                 baton.release()
         else:

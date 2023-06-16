@@ -2168,6 +2168,8 @@ class TestImports(TestCase):
             ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
             ignored_modules.append("torch.testing._internal.common_fsdp")
             ignored_modules.append("torch.testing._internal.common_distributed")
+        if torch.version.hip is None:
+            ignored_modules.append("torch.utils.hipify")  # required only on ROCm
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, folders, files in os.walk(torch_dir):
