@@ -6,7 +6,9 @@ from torch._ops import OpOverload
 aten = torch.ops.aten
 
 _NON_FUNCTION_TO_FUNCTIONAL_ASSERTION_FUNCS: Dict[OpOverload, OpOverload] = {
-    aten.sym_constrain_range.default: aten.functional_sym_constrain_range
+    aten.sym_constrain_range.default: aten.functional_sym_constrain_range,
+    aten._assert_async.default: aten._functional_assert_async.default,
+    aten._assert_async.msg: aten._functional_assert_async.msg,
 }
 
 
@@ -28,14 +30,14 @@ def functionalize(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     next_dep_token_index = 2
     for n in none_functional_assertions:
         with graph.inserting_after(n):
-            args = n.args[1:]
             kwargs = {**n.kwargs, "dep_token": dep_token}
             dep_token = graph.call_function(
                 _NON_FUNCTION_TO_FUNCTIONAL_ASSERTION_FUNCS[n.target],
-                args=args,
+                args=n.args,
                 kwargs=kwargs,
             )
             dep_token.name = f"dep_token_{next_dep_token_index}"
+            next_dep_token_index += 1
             n.replace_all_uses_with(dep_token)
 
     for n in none_functional_assertions:

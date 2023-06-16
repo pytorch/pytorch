@@ -58,25 +58,30 @@ class TestFunctionalization(TestCase):
 
         gm = functionalize(gm)
 
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+        ) as cm:
+            gm(torch.tensor([20]))
+
         res, dep_token = gm((torch.tensor([5])))
         self.assertEqual(res.shape, torch.Size([5, 4]))
         self.assertEqual(dep_token.shape, torch.Size([0]))
 
         FileCheck().check_count(
             "torch.ops.aten.functional_sym_constrain_range", 1, exactly=True
-        )
+        ).run(gm.code)
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        )
+        ).run(gm.code)
 
-        dep_token_node = next(n for n in gm.graph.nodes if n.name == "dep_token")
+        dep_token_node = next(n for n in gm.graph.nodes if n.name == "dep_token_4")
         constrain_node = next(
             n
             for n in gm.graph.nodes
             if n.target == torch.ops.aten.functional_sym_constrain_range
         )
         self.assertEqual(constrain_node.kwargs["dep_token"], dep_token_node)
-
 
 if __name__ == "__main__":
     run_tests()

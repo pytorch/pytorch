@@ -321,6 +321,16 @@ def functional_sym_constrain_range(size, min, max, dep_token):
     return dep_token
 
 
+@register_meta(aten._functional_assert_async.default)
+def functional_assert_async(val, dep_token):
+    return dep_token
+
+
+@register_meta(aten._functional_assert_async.msg)
+def functional_assert_async_meta(val, assert_msg, dep_token):
+    return dep_token
+
+
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def squareCheckInputs(self: Tensor, f_name: str):
     assert (
