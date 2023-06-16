@@ -70,7 +70,14 @@ class CachingAutotuner(KernelInterface):
     """
 
     def __init__(
-        self, fn, meta, configs, save_cache_hook, mutated_arg_names, heuristic_type
+        self,
+        fn,
+        meta,
+        configs,
+        save_cache_hook,
+        mutated_arg_names,
+        heuristic_type,
+        size_hints=None,
     ):
         super().__init__()
         self.fn = fn
@@ -94,7 +101,9 @@ class CachingAutotuner(KernelInterface):
                 str(self.meta.get("device", 0)),
             )
 
-        self.coordesc_tuner = CoordescTuner(is_mm=False, name=self.fn.__name__)
+        self.coordesc_tuner = CoordescTuner(
+            is_mm=False, name=self.fn.__name__, size_hints=size_hints
+        )
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
@@ -196,8 +205,10 @@ class CachingAutotuner(KernelInterface):
                 launcher.config.pre_hook(
                     {**zip(self.arg_names, args), **launcher.config.kwargs}
                 )
+
+            cloned_args = self.clone_args(*args)
             launcher(
-                *args,
+                *cloned_args,
                 grid=grid,
                 stream=stream,
             )
@@ -222,9 +233,8 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        cloned_args = self.clone_args(*args)
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)
+            launcher: self.bench(launcher, *args, **kwargs)
             for launcher in self.launchers
         }
 
@@ -466,6 +476,7 @@ def load_cached_autotuning(
 
 
 def cached_autotune(
+    size_hints: List[int],
     configs: List[Config],
     meta,
     heuristic_type,
@@ -518,6 +529,7 @@ def cached_autotune(
                 save_cache_hook=save_cache_hook,
                 mutated_arg_names=mutated_arg_names,
                 heuristic_type=heuristic_type,
+                size_hints=size_hints,
             )
         return CachingAutotuner(
             fn,
@@ -526,6 +538,7 @@ def cached_autotune(
             save_cache_hook=save_cache_hook,
             mutated_arg_names=mutated_arg_names,
             heuristic_type=heuristic_type,
+            size_hints=size_hints,
         )
 
     return decorator
@@ -691,6 +704,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
 
     if len(size_hints) == 1:
         return cached_autotune(
+            size_hints,
             [triton_config(size_hints, bs)],
             meta=meta,
             heuristic_type=HeuristicType.POINTWISE,
@@ -701,12 +715,14 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             config.max_autotune or config.max_autotune_pointwise
         ):
             return cached_autotune(
+                size_hints,
                 [triton_config(size_hints, 32, 32)],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
             )
         return cached_autotune(
+            size_hints,
             [
                 triton_config(size_hints, 32, 32),
                 triton_config(size_hints, 64, 64),  # ~8% better for fp16
@@ -722,12 +738,14 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     if len(size_hints) == 3:
         if disable_pointwise_autotuning():
             return cached_autotune(
+                size_hints,
                 [triton_config(size_hints, 16, 16, 16)],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
             )
         return cached_autotune(
+            size_hints,
             [
                 triton_config(size_hints, 16, 16, 16),
                 triton_config(size_hints, 64, 8, 8),
@@ -760,6 +778,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
             return cached_autotune(
+                size_hints,
                 [contiguous_config],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
@@ -767,6 +786,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             )
         elif reduction_hint == ReductionHint.OUTER:
             return cached_autotune(
+                size_hints,
                 [outer_config],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
@@ -774,6 +794,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             )
         elif reduction_hint == ReductionHint.OUTER_TINY:
             return cached_autotune(
+                size_hints,
                 [tiny_config],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
@@ -781,12 +802,14 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
             )
         if disable_pointwise_autotuning():
             return cached_autotune(
+                size_hints,
                 [triton_config_reduction(size_hints, 32, 128)],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
             )
         return cached_autotune(
+            size_hints,
             [
                 contiguous_config,
                 outer_config,
@@ -829,6 +852,7 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
         configs = configs[:1]
 
     return cached_autotune(
+        size_hints,
         configs,
         meta=meta,
         filename=filename,
@@ -841,6 +865,7 @@ def template(num_stages, num_warps, meta, filename=None):
     Compile a triton template
     """
     return cached_autotune(
+        None,
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)],
         meta=meta,
         heuristic_type=HeuristicType.TEMPLATE,
@@ -853,6 +878,7 @@ def foreach(meta, num_warps, filename=None):
     Compile a triton foreach kernel
     """
     return cached_autotune(
+        None,
         [triton.Config({}, num_stages=1, num_warps=num_warps)],
         meta=meta,
         heuristic_type=HeuristicType.TEMPLATE,
