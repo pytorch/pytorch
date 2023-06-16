@@ -2,6 +2,7 @@ import torch
 import torch.fx
 import traceback
 
+from torch._dispatch.python import enable_python_dispatcher
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
 from torch.fx._compatibility import compatibility
@@ -144,7 +145,7 @@ class ShapeProp(torch.fx.Interpreter):
                 self.module = self.fake_module
             try:
                 if self.fake_mode is not None:
-                    with self.fake_mode:
+                    with self.fake_mode, enable_python_dispatcher():
                         result = super().run_node(n)
                 else:
                     result = super().run_node(n)
@@ -186,7 +187,7 @@ class ShapeProp(torch.fx.Interpreter):
             Any: The value returned from executing the Module
         """
         if self.fake_mode is not None:
-            fake_args = [self.fake_mode.from_tensor(t) for t in args]
+            fake_args = [self.fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args]
         else:
             fake_args = args
         return super().run(*fake_args)
