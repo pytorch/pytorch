@@ -160,8 +160,8 @@ If you are installing from source, you will need:
 
 We highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment. You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
-If you want to compile with CUDA support, install the following (note that CUDA is not supported on macOS)
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 11.0 or above
+If you want to compile with CUDA support, [select a supported version of CUDA from our support matrix](https://pytorch.org/get-started/locally/), then install the following:
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads)
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 
