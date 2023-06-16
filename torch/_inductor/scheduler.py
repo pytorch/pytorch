@@ -1111,7 +1111,13 @@ class Scheduler:
             or not config.epilogue_fusion
         ):
             return False
-
+        proximity_score = max(
+            abs(node1.min_order - node2.max_order),
+            abs(node2.min_order - node1.max_order),
+        )
+        if proximity_score > 32:
+            return False
+ 
         node1_is_foreach = isinstance(node1, ForeachKernelSchedulerNode)
         node2_is_foreach = isinstance(node2, ForeachKernelSchedulerNode)
         if node1_is_foreach is not node2_is_foreach:
