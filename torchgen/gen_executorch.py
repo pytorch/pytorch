@@ -168,16 +168,8 @@ class ComputeCodegenUnboxedKernels:
         kernel_key: Union[ETKernelKey, List[ETKernelKey]] = unbox_kernel_entry[1][0]
         kernel_meta: BackendMetadata = unbox_kernel_entry[1][1]
 
-        op_name = f.namespace + "::" + str(f.func.name)
-        if not self.selector.is_root_operator(op_name):
-            return ""
-
-        if not isinstance(kernel_key, list):
-            kernel_key = [kernel_key]
-        used_kernel_keys = self.selector.et_get_selected_kernels(
-            op_name, [k.to_native_string() for k in kernel_key]
-        )
-        if not used_kernel_keys:
+        # TODO: Update to use Kernel Selector
+        if not self.selector.is_root_operator(f"{f.namespace}::{f.func.name}"):
             return ""
         sig: Union[CppSignature, ExecutorchCppSignature]
         argument_type_gen: Callable[..., NamedCType]
@@ -225,12 +217,15 @@ class ComputeCodegenUnboxedKernels:
                 return_assignment = ""
                 ret_prefix = ""
 
+        if not isinstance(kernel_key, list):
+            kernel_key = [kernel_key]
+
         newline = "\n    "
         return "\n".join(
             [
                 f"""
 Kernel(
-    "{f.namespace}::{f.func.name}",{newline + '"' + (k + '",') if k != 'default' else ''}
+    "{f.namespace}::{f.func.name}",{newline + '"' + (k.to_native_string() + '",') if k.to_native_string() != 'default' else ''}
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 
@@ -241,7 +236,7 @@ Kernel(
     }}
 ),
 """
-                for k in used_kernel_keys
+                for k in kernel_key
             ]
         )
 
