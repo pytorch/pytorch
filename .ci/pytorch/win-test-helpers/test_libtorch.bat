@@ -18,14 +18,14 @@ python test\run_test.py --cpp --verbose -i cpp/test_api
 if errorlevel 1 exit /b 1
 if not errorlevel 0 exit /b 1
 
-:: DEBUG
-echo "FAILING LIKE A STONE"
-exit /b 1
-
 cd %TMP_DIR_WIN%\build\torch\test
 for /r "." %%a in (*.exe) do (
     call :libtorch_check "%%~na" "%%~fa"
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 (
+      echo "PIKACHU"
+      exit /b 1
+    )
+    echo "SQUIRTLE"
 )
 
 goto :eof
@@ -60,11 +60,15 @@ if "%~1" == "c10_intrusive_ptr_benchmark" (
 python test\run_test.py --cpp --verbose -i "cpp/%~1"
 if errorlevel 1 (
   echo %1 failed with exit code %errorlevel%
+  echo "CHARMANDER"
   exit /b 1
 )
 if not errorlevel 0 (
   echo %1 failed with exit code %errorlevel%
+  echo "BULBASAUR"
   exit /b 1
 )
+
+echo "MEWTWO"
 
 goto :eof
