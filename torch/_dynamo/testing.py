@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset, utils
 from .bytecode_transformation import (
@@ -158,8 +159,18 @@ def debug_insert_nops(frame, cache_size, hooks, _):
 
     debug_checks(frame.f_code)
     code = transform_code_object(frame.f_code, insert_nops)
+    graph = OutputGraph(
+        code_options={},
+        compiler_fn=None,
+        root_tx=None,
+        export=False,
+        export_constraints=None,
+        frame_state={"_id": 0},
+        local_scope=locals(),
+        global_scope=globals(),
+    )
 
-    return GuardedCode(code, CheckFunctionManager().check_fn)
+    return GuardedCode(code, CheckFunctionManager(graph).check_fn)
 
 
 class CompileCounter:
@@ -196,7 +207,7 @@ class CompileCounterWithBackend:
 
 
 def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
-    if config.dynamic_shapes and expected_ops_dynamic is not None:
+    if not config.assume_static_by_default and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
 
     actual = CompileCounter()
@@ -241,16 +252,6 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
     if pvalue > pvalue_threshold:
         return f"{speedup:.3f}x SAME"
     return f"{speedup:.3f}x p={pvalue:.2f}"
-
-
-def requires_static_shapes(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        if config.dynamic_shapes:
-            raise unittest.SkipTest("requires static shapes")
-        return fn(*args, **kwargs)
-
-    return _fn
 
 
 @contextlib.contextmanager
@@ -338,6 +339,26 @@ def skipIfNotPy311(fn):
     return unittest.skip(fn)
 
 
+# Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
+# and test/dynamo/test_dynamic_shapes.py
 def expectedFailureDynamic(fn):
     fn._expected_failure_dynamic = True
+    return fn
+
+
+# Controls tests generated in test/dynamo/test_dynamic_shapes.py
+def expectedFailureAutomaticDynamic(fn):
+    fn._expected_failure_automatic_dynamic = True
+    return fn
+
+
+# Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
+def expectedFailureCodegenDynamic(fn):
+    fn._expected_failure_codegen_dynamic = True
+    return fn
+
+
+# Controls test generated in test/inductor/test_cpp_wrapper.py
+def expectedFailureDynamicWrapper(fn):
+    fn._expected_failure_dynamic_wrapper = True
     return fn
