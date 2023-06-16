@@ -213,7 +213,7 @@ is_non_overlapping_and_dense
  * backend.
  **/
 struct C10_API BackendMeta : intrusive_ptr_target {
-  virtual ~BackendMeta(){};
+  ~BackendMeta() override = default;
   virtual intrusive_ptr<BackendMeta> clone(
       const intrusive_ptr<BackendMeta>& ptr) const {
     return ptr;
@@ -263,7 +263,7 @@ struct C10_API ExtraMeta {
       c10::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
-        backend_meta_(backend_meta) {}
+        backend_meta_(std::move(backend_meta)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(*this);

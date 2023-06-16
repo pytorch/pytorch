@@ -194,6 +194,11 @@ class TimmRunnner(BenchmarkRunner):
         model_name,
         batch_size=None,
     ):
+        if self.args.enable_activation_checkpointing:
+            raise NotImplementedError(
+                "Activation checkpointing not implemented for Timm models"
+            )
+
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
 

@@ -31,7 +31,7 @@ gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 types = [torch.float, torch.bfloat16]
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
-@unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+@unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
     def test_conversion(self):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
@@ -85,6 +85,38 @@ class TestMkldnn(TestCase):
                     self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_bf16.element_size())
                 else:
                     self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_bf16.element_size() * 2)
+                self.assertRaisesRegex(RuntimeError,
+                                       "Cannot access data pointer of Tensor that doesn't have storage",
+                                       lambda: mkldnn_tensor.data_ptr() != 0)
+
+    def test_conversion_byte_char(self):
+        int8_types = [torch.int8, torch.uint8]
+        for int8_type in int8_types:
+            low = -100 if int8_type is torch.int8 else 0
+            high = 100
+            for cpu_tensor in [torch.randint(
+                               low=low,
+                               high=high,
+                               size=(1, 2, 3, 4),
+                               dtype=torch.int64,
+                               device=torch.device('cpu')),
+                               torch.randint(
+                               low=low,
+                               high=high,
+                               size=(1, 2, 3, 4, 5),
+                               dtype=torch.int64,
+                               device=torch.device('cpu'))[:, :, :, :, :]]:
+
+                cpu_tensor = cpu_tensor.to(dtype=int8_type)
+                mkldnn_tensor = cpu_tensor.to_mkldnn(int8_type)
+                self.assertEqual(mkldnn_tensor.dtype, int8_type)
+                cpu_tensor_1 = mkldnn_tensor.to_dense()
+                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                self.assertEqual(cpu_tensor, cpu_tensor_1)
+                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
+                self.assertEqual(mkldnn_tensor.size(), cpu_tensor.size())
+                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
                 self.assertRaisesRegex(RuntimeError,
                                        "Cannot access data pointer of Tensor that doesn't have storage",
                                        lambda: mkldnn_tensor.data_ptr() != 0)
@@ -497,19 +529,19 @@ class TestMkldnn(TestCase):
     def test_relu_inplace_bf16(self):
         self._test_relu_bf16_base("relu_")
 
-    # def test_gelu(self):
-    #     m = torch.nn.GELU()
-    #     x = torch.randn((4, 5), dtype=torch.float32) * 10
-    #     x1 = x.clone().requires_grad_()
-    #     x2 = x.clone().to_mkldnn().requires_grad_()
-    #     y1 = m(x1)
-    #     y2 = m(x2).to_dense()
-    #     loss1 = y1.sum()
-    #     loss2 = y2.sum()
-    #     loss1.backward()
-    #     loss2.backward()
-    #     self.assertEqual(y1, y2)
-    #     self.assertEqual(x1.grad, x2.grad.to_dense())
+    def test_gelu(self):
+        m = torch.nn.GELU()
+        x = torch.randn((4, 5), dtype=torch.float32) * 10
+        x1 = x.clone().requires_grad_()
+        x2 = x.clone().to_mkldnn().requires_grad_()
+        y1 = m(x1)
+        y2 = m(x2).to_dense()
+        loss1 = y1.sum()
+        loss2 = y2.sum()
+        loss1.backward()
+        loss2.backward()
+        self.assertEqual(y1, y2)
+        self.assertEqual(x1.grad, x2.grad.to_dense())
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_gelu_bf16(self):

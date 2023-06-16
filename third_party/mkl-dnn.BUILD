@@ -13,6 +13,7 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_ENABLE_STACK_CHECKER": "#undef DNNL_ENABLE_STACK_CHECKER",
     "#cmakedefine DNNL_EXPERIMENTAL": "#undef DNNL_EXPERIMENTAL",
     "#cmakedefine DNNL_EXPERIMENTAL_SPARSE": "#undef DNNL_EXPERIMENTAL_SPARSE",
+    "#cmakedefine ONEDNN_BUILD_GRAPH": "#undef ONEDNN_BUILD_GRAPH",
     "#cmakedefine01 BUILD_TRAINING": "#define BUILD_TRAINING 1",
     "#cmakedefine01 BUILD_INFERENCE": "#define BUILD_INFERENCE 0",
     "#cmakedefine01 BUILD_PRIMITIVE_ALL": "#define BUILD_PRIMITIVE_ALL 1",
@@ -56,8 +57,8 @@ template_rule(
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "3",
         "@DNNL_VERSION_MINOR@": "1",
-        "@DNNL_VERSION_PATCH@": "0",
-        "@DNNL_VERSION_HASH@": "928065bd62372d2824900a86c5438bba407c98d1",
+        "@DNNL_VERSION_PATCH@": "1",
+        "@DNNL_VERSION_HASH@": "64f6bcbcbab628e96f33a62c3e975f8535a7bde4",
     },
 )
 
@@ -128,5 +129,9 @@ cc_library(
     }),
     defines = [
         "DNNL_ENABLE_MAX_CPU_ISA",
+        "DNNL_ENABLE_CONCURRENT_EXEC",
+        "DNNL_ENABLE_PRIMITIVE_CACHE",
+        "DNNL_ENABLE_CPU_ISA_HINTS",
+        "ONEDNN_BUILD_GRAPH",
     ],
 )

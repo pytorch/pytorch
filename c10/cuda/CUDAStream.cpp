@@ -257,6 +257,8 @@ cudaStream_t CUDAStream::stream() const {
         "Unrecognized stream ",
         stream_,
         " (I didn't recognize the stream type, ",
+        st,
+        " with the value ",
         streamType,
         ")");
     return streams[st.getStreamType() - 1][device_index][si];
@@ -289,6 +291,7 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
 }
 
 CUDAStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
+  initCUDAStreamsOnce();
   int priority = isHighPriority ? -max_stream_priorities + 1 : 0;
   return getStreamFromPool(priority, device);
 }

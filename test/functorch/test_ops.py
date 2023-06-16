@@ -11,11 +11,11 @@ import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
     IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
 import torch
 from torch import Tensor
 import functools
-from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_cuda import with_tf32_off, SM90OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import \
@@ -405,6 +405,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
         tol1('linalg.tensorsolve',
              {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
+        tol1('nn.functional.multi_head_attention_forward',
+             {torch.float32: tol(atol=8e-04, rtol=1e-03)}),
         tol1('__rmatmul__',
              {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
         tol1('matmul',
@@ -511,6 +513,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
         tol1('pca_lowrank',
              {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
+        tol1('nn.functional.multi_head_attention_forward',
+             {torch.float32: tol(atol=6e-05, rtol=2e-05)}),
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: get rid of vjp_decomp when we add decomposition support to
@@ -600,7 +604,8 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         # RuntimeError: query: last dimension must be contiguous
         # The fused attention kernels require the last dim to be contiguous
-        xfail('nn.functional.scaled_dot_product_attention', device_type="cuda"),
+        decorate('nn.functional.scaled_dot_product_attention', device_type="cuda",
+                 decorator=expectedFailureIf(not SM90OrLater)),
         # BUG
         # AssertionError: Tensor-likes are not close!
         xfail('as_strided'),
@@ -613,6 +618,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+        tol1('nn.functional.multi_head_attention_forward',
+             {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
         tol1('__rmatmul__',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('matmul',
@@ -756,7 +763,7 @@ class TestOperators(TestCase):
         # (2) attempting to use a Tensor in some data-dependent control flow or
         # (3) encountering this error in PyTorch internals.
         xfail("index_reduce"),
-        xfail("linalg.householder_product"),  # vmap: inplace into a regular tensor
+        decorate("linalg.householder_product", decorator=runOnRocm),  # works on ROCm
         xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
         xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
         # got a batched tensor as input while the running_mean or running_var,
@@ -772,6 +779,7 @@ class TestOperators(TestCase):
         skip("nn.functional.fractional_max_pool2d"),  # calls random op
         skip("nn.functional.fractional_max_pool3d"),  # calls random op
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.multi_head_attention_forward'),  # randomness
         # It looks like you're either (1) calling .item() on a Tensor or
         # (2) attempting to use a Tensor in some data-dependent control flow or
         # (3) encountering this error in PyTorch internals.
@@ -885,6 +893,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout3d', ''),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.scaled_dot_product_attention'),  # randomness
+        skip('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
         xfail('masked_scatter'),  # dynamic
@@ -979,6 +988,7 @@ class TestOperators(TestCase):
         skip('nn.functional.dropout2d', ''),
         skip('nn.functional.dropout3d', ''),
         skip('nn.functional.scaled_dot_product_attention'),  # randomness
+        skip('nn.functional.multi_head_attention_forward'),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
@@ -1112,6 +1122,7 @@ class TestOperators(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
         xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
+        xfail("renorm"),  # hit vmap fallback, which is disabled
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1255,6 +1266,7 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'with_train'),  # randomness
         skip('nn.functional.feature_alpha_dropout', 'without_train'),  # randomness
         skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
+        skip('nn.functional.multi_head_attention_forward'),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         skip('to_sparse', ''),  # non-dense output
@@ -1372,7 +1384,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.hardsigmoid', ''),  # NYI: forward AD for hardsigmoid_backward
         xfail('nn.functional.huber_loss', ''),  # NYI: forward AD for huber_loss_backward
         xfail('NumpyCubeNotComposableAutogradFunction'),  # not composable
-        xfail('renorm', ''),  # NYI: forward AD for renorm
         xfail('ormqr', ''),  # NYI: forward AD for ormqr
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for soft_margin_loss_backward
@@ -1503,6 +1514,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d'),  # calls random op
         xfail('nn.functional.dropout'),  # calls random op
         xfail('nn.functional.scaled_dot_product_attention'),  # randomness
+        xfail('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('nn.functional.embedding_bag'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.alpha_dropout'),  # calls randomn op
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # calls random op
@@ -1531,7 +1543,6 @@ class TestOperators(TestCase):
         xfail('normal', 'number_mean'),  # calls random op
         xfail('pca_lowrank'),  # calls random op
         xfail('quantile'),  # Batching rule not implemented for aten::equal
-        xfail('renorm'),  # Forward AD not implemented and no decomposition
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
