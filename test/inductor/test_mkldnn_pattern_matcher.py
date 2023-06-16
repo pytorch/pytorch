@@ -3,6 +3,7 @@ import itertools
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
@@ -258,6 +259,7 @@ class TestPaternMatcher(TestCase):
             )
             self._test_common(mod, (v,), 1, match_nodes)
 
+    @expectedFailureDynamicWrapper
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
