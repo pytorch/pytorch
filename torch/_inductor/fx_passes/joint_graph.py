@@ -119,7 +119,11 @@ def constant_fold_uniform_value(gm):
     constant_data_ptrs = Counter()
 
     for constant in node_replacements.values():
-        if constant.numel() != 0:
+        if (
+            constant.numel() != 0
+            and torch._C._has_storage(constant)
+            and constant.layout == torch.strided
+        ):
             constant_data_ptrs[constant.untyped_storage().data_ptr()] += 1
 
     for node, constant in node_replacements.items():
@@ -132,10 +136,16 @@ def constant_fold_uniform_value(gm):
 
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
         # hasn't shown up to be important yet
-        if not constant.is_contiguous(memory_format=torch.contiguous_format):
+        if (
+            not constant.is_contiguous(memory_format=torch.contiguous_format)
+            or not constant.layout == torch.strided
+        ):
             continue
 
-        if constant_data_ptrs[constant.untyped_storage().data_ptr()] != 1:
+        if (
+            torch._C._has_storage(constant)
+            and constant_data_ptrs[constant.untyped_storage().data_ptr()] != 1
+        ):
             continue
 
         value = constant.flatten()[0].item()

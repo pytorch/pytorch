@@ -76,6 +76,7 @@ class ConstantFolder(torch.fx.Interpreter):
         self.skip_constructors = skip_constructors
 
     def run_node(self, node):
+        aten = torch.ops.aten
         args, kwargs = self.fetch_args_kwargs_from_env(node)
 
         if node.target == "output":
@@ -83,6 +84,13 @@ class ConstantFolder(torch.fx.Interpreter):
 
         flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
         if self.unknown_value in flattened_inputs:
+            return self.unknown_value
+
+        # TODO - fix errors with this
+        if (
+            node.op == "call_function"
+            and node.target == aten._efficientzerotensor.default
+        ):
             return self.unknown_value
 
         # skip constructors, since inductor generates optimal code for them already
