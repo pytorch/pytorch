@@ -9,7 +9,7 @@ void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   auto cpu = m.def_submodule("_cpu", "cpu related pybind.");
-  cpu.def("is_cpu_support_vnni", at::cpu::is_cpu_support_vnni);
+  cpu.def("_is_cpu_support_vnni", at::cpu::is_cpu_support_vnni);
 }
 
 } // namespace cpu
