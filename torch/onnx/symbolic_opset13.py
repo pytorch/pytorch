@@ -7,6 +7,7 @@ import functools
 import torch
 import torch._C._onnx as _C_onnx
 from torch.onnx import (
+    _constants,
     _type_utils,
     errors,
     symbolic_helper,
@@ -436,30 +437,91 @@ def _reduce_with_dtype(onnx_op, name):
         @symbolic_helper.parse_args("v", "none")
         @_beartype.beartype
         def reduce_nodim(g, self, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self)
+            result = symbolic(g, self)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         @symbolic_helper.parse_args("v", "v", "i", "none")
         @_beartype.beartype
         def reduce_dim(g, self, dim, keepdim, dtype):
+            dtype_onnx = None
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
-                self = g.op(
-                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
-                )
+                dtype_onnx = _type_utils.JitScalarType(dtype).onnx_type()
+                self = g.op("Cast", self, to_i=dtype_onnx)
             elif dtype.node().kind() != "prim::Constant":
                 return symbolic_helper._unimplemented(name, "dtype", dtype)
-            return symbolic(g, self, dim, keepdim)
+            result = symbolic(g, self, dim, keepdim)
+            if dtype_onnx is not None:
+                result_dtype_onnx = _type_utils.JitScalarType.from_value(
+                    result
+                ).onnx_type()
+                if result_dtype_onnx != dtype_onnx:
+                    result = g.op("Cast", result, to_i=dtype_onnx)
+            return result
 
         return reduce_nodim, reduce_dim
 
     return reduce
+
+
+# Ported from
+# https://github.com/microsoft/onnxscript/blob/6b1b81700b4523f31d8c6d3321e5d8ef5d42b764/onnxscript/function_libs/torch_aten/ops/core.py#L6097
+# NOTE: Supporting aten::unflatten before opset13 needs helper function to adjust ONNX op changes in Concat, Slice, ...
+@_onnx_symbolic("aten::unflatten")
+@_beartype.beartype
+def unflatten(g: jit_utils.GraphContext, input, dim, unflattened_size):
+    input_dim = symbolic_helper._get_tensor_rank(input)
+    if input_dim is None:
+        return symbolic_helper._unimplemented(
+            "dim",
+            "ONNX and PyTorch use different strategies to split the input. "
+            "Input rank must be known at export time.",
+        )
+
+    # dim could be negative
+    input_dim = g.op("Constant", value_t=torch.tensor([input_dim], dtype=torch.int64))
+    dim = g.op("Add", input_dim, dim)
+    dim = g.op("Mod", dim, input_dim)
+
+    input_size = g.op("Shape", input)
+
+    head_start_idx = g.op("Constant", value_t=torch.tensor([0], dtype=torch.int64))
+    head_end_idx = g.op(
+        "Reshape", dim, g.op("Constant", value_t=torch.tensor([1], dtype=torch.int64))
+    )
+    head_part_rank = g.op("Slice", input_size, head_start_idx, head_end_idx)
+
+    dim_plus_one = g.op(
+        "Add", dim, g.op("Constant", value_t=torch.tensor([1], dtype=torch.int64))
+    )
+    tail_start_idx = g.op(
+        "Reshape",
+        dim_plus_one,
+        g.op("Constant", value_t=torch.tensor([1], dtype=torch.int64)),
+    )
+    tail_end_idx = g.op(
+        "Constant", value_t=torch.tensor([_constants.INT64_MAX], dtype=torch.int64)
+    )
+    tail_part_rank = g.op("Slice", input_size, tail_start_idx, tail_end_idx)
+
+    final_shape = g.op(
+        "Concat", head_part_rank, unflattened_size, tail_part_rank, axis_i=0
+    )
+
+    return symbolic_helper._reshape_helper(g, input, final_shape)
 
 
 @_onnx_symbolic("aten::unsafe_chunk")
@@ -491,6 +553,62 @@ def unsafe_chunk(g: jit_utils.GraphContext, self, chunks, dim, _outputs=None):
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
+@_onnx_symbolic("aten::tile")
+@_beartype.beartype
+def tile(g: jit_utils.GraphContext, self, dims):
+    self_shape = g.op("Shape", self)
+    self_rank = g.op("Size", self_shape)
+    dims_rank = g.op("Size", dims)
+    diff = g.op("Sub", self_rank, dims_rank)
+    const_zero = g.op("Constant", value_t=torch.tensor([0]))
+
+    # 1. If dims is shorter than self.shape pad dims with 1
+    dims_shorter_than_self_shape = g.op("Greater", diff, const_zero)
+    (
+        if_op_greater,
+        (if_context_greater, else_context_greater),
+        _,
+    ) = jit_utils.add_op_with_blocks(
+        g, "If", dims_shorter_than_self_shape, n_blocks=2, outputs=1
+    )
+    const_one = if_context_greater.op("Constant", value_t=torch.LongTensor([1]))
+    diff_1d_greater = if_context_greater.op("Reshape", diff, const_one)
+    exapnd_ones_greater = if_context_greater.op("Expand", const_one, diff_1d_greater)
+    dims_ = if_context_greater.op("Concat", exapnd_ones_greater, dims, axis_i=0)
+    utils._add_output_to_block(if_context_greater.block, dims_)
+    identity_dim = else_context_greater.op("Identity", dims)
+    utils._add_output_to_block(else_context_greater.block, identity_dim)
+    dims_final = if_op_greater.node().output()
+
+    # 2. If dims is longer than self.shape pad self.shape with 1
+    dims_longer_than_self_shape = g.op("Less", diff, const_zero)
+    (
+        if_op_less,
+        (if_context_less, else_context_less),
+        _,
+    ) = jit_utils.add_op_with_blocks(
+        g, "If", dims_longer_than_self_shape, n_blocks=2, outputs=1
+    )
+    const_one = if_context_less.op("Constant", value_t=torch.LongTensor([1]))
+    diff_1d_less = if_context_less.op(
+        "Reshape",
+        if_context_less.op("Abs", diff),
+        const_one,
+    )
+    exapnd_ones_less = if_context_less.op("Expand", const_one, diff_1d_less)
+    self_final_shape = if_context_less.op(
+        "Concat", exapnd_ones_less, self_shape, axis_i=0
+    )
+    self_ = if_context_less.op("Reshape", self, self_final_shape)
+    utils._add_output_to_block(if_context_less.block, self_)
+    identity_self = else_context_less.op("Identity", self)
+    utils._add_output_to_block(else_context_less.block, identity_self)
+    self_final = if_op_less.node().output()
+
+    dims_final = g.op("Cast", dims_final, to_i=_C_onnx.TensorProtoDataType.INT64)
+    return g.op("Tile", self_final, dims_final)
+
+
 @_onnx_symbolic("aten::repeat_interleave")
 @_beartype.beartype
 def repeat_interleave(
@@ -504,7 +622,7 @@ def repeat_interleave(
         input = symbolic_helper._reshape_helper(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
-        dim = 0
+        dim = torch.tensor(0, dtype=torch.int64)
     else:
         dim = symbolic_helper._maybe_get_scalar(dim)
 
@@ -535,21 +653,22 @@ def repeat_interleave(
         if input_size is None:
             output_sizes[idx], input_sizes[idx] = 0, -1
 
+    # Check if all indices should be repeated the same number of times.
+    if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
+        return symbolic_helper._repeat_interleave_single_value_repeat_helper(
+            g, self, repeats, dim
+        )
+
     cond_dynamic_repeats = repeats_dim == 1 and repeats_sizes[0] is None
     # If input size is dynamic or repeats vector is dynamic
     if output_sizes[dim] == 0 or cond_dynamic_repeats:
         reps = symbolic_helper._size_helper(g, input, dim)
         reps = opset11.unsqueeze(g, reps, 0)
-        # Check if repeats vector is a single integer value
-        # or a single dimension tensor with non-dynamic values
-        if repeats_dim == 0 or (repeats_dim == 1 and repeats_sizes[0] == 1):
-            if not symbolic_helper._is_tensor(repeats):
-                repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
-            repeats = g.op("Expand", repeats, reps)
+
         # Check if repeats is dynamic
         # As repeats is dynamic, we use a where node as a substitute for the if statement
         # If repests_dim = 1, expand repeats otherwise use original tensor
-        elif cond_dynamic_repeats:
+        if cond_dynamic_repeats:
             repeat_dim = symbolic_helper._size_helper(
                 g, repeats, g.op("Constant", value_t=torch.LongTensor([0]))
             )

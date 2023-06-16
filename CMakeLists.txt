@@ -178,6 +178,7 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
 option(BUILD_TENSOREXPR_BENCHMARK "Build C++ binaries for tensorexpr benchmarks (need gbenchmark)" OFF)
 option(BUILD_MOBILE_BENCHMARK "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
@@ -546,11 +547,6 @@ endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
-if(NOT MSVC)
-  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -g -lineinfo --source-in-ptx")
-  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -g -lineinfo --source-in-ptx")
-endif(NOT MSVC)
-
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
 # Setting `BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN` environment variable can
@@ -714,6 +710,17 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
+if(NOT MSVC)
+  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
+  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -lineinfo")
+  # CUDA-12.1 crashes when trying to compile with --source-in-ptx
+  # See https://github.com/pytorch/pytorch/issues/102372#issuecomment-1572526893
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.1)
+    string(APPEND CMAKE_CUDA_FLAGS_DEBUG " --source-in-ptx")
+    string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " --source-in-ptx")
+  endif()
+endif(NOT MSVC)
+
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
@@ -809,6 +816,7 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wnewline-eof" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
@@ -862,8 +870,15 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
 
   if(${USE_COLORIZE_OUTPUT})
-    append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
+    # Why compiler checks are necessary even when `try_compile` is used
+    # Because of the bug in ccache that can incorrectly identify `-fcolor-diagnostics`
+    # As supported by GCC, see https://github.com/ccache/ccache/issues/740 (for older ccache)
+    # and https://github.com/ccache/ccache/issues/1275 (for newer ones)
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+      append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
+    else()
+      append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
+    endif()
   endif()
 
   append_cxx_flag_if_supported("-faligned-new" CMAKE_CXX_FLAGS)
@@ -962,10 +977,11 @@ endif()
 
 if(APPLE)
     if(USE_MPS)
-      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_OBJCXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS")
       string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
       # To suppress MPSGraph availability warnings
-      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_CXX_FLAGS)
+      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_OBJCXX_FLAGS)
     endif()
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)

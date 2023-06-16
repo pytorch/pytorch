@@ -54,12 +54,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual void startCoalescing() {
-    // no-op for backends that have not implemented startCoalescing
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not implement startCoalescing"));
   }
 
-  virtual void endCoalescing(
-      std::vector<c10::intrusive_ptr<Work>>& /* reqs */) {
-    // no-op for backends that have not implemented endCoalescing
+  virtual c10::intrusive_ptr<Work> endCoalescing() {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not implement endCoalescing"));
   }
 
   // Subclasses must override this method to return the backend name
@@ -72,7 +75,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const BroadcastOptions& /* opts */ = BroadcastOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support broadcast"));
+        c10::str("Backend ", getBackendName(), " does not support broadcast"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce(
@@ -80,7 +83,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const AllreduceOptions& /* opts */ = AllreduceOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support allreduce"));
+        c10::str("Backend ", getBackendName(), " does not support allreduce"));
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
@@ -92,7 +95,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str(
             "Backend ",
             getBackendName(),
-            "does not support allreduce_coalesced"));
+            " does not support allreduce_coalesced"));
   }
 
   virtual c10::intrusive_ptr<Work> reduce(
@@ -100,7 +103,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const ReduceOptions& /* opts */ = ReduceOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support reduce"));
+        c10::str("Backend ", getBackendName(), " does not support reduce"));
   }
 
   virtual c10::intrusive_ptr<Work> allgather(
@@ -109,7 +112,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const AllgatherOptions& /* opts */ = AllgatherOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support allgather"));
+        c10::str("Backend ", getBackendName(), " does not support allgather"));
   }
 
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
@@ -123,7 +126,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "Backend ", getBackendName(), "does not support _allgather_base"));
+            "Backend ", getBackendName(), " does not support _allgather_base"));
   }
 
   // This function is deprecated and will be moved out of Backend to comms:
@@ -139,7 +142,22 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str(
             "Backend ",
             getBackendName(),
-            "does not support allgather_coalesced"));
+            " does not support allgather_coalesced"));
+  }
+
+  // This function is a coalesced version of `allgather_into_tensor` (currently
+  // still named as `_allgather_base`). Each tensor in the vector corresponds to
+  // an input/output of one `allgather_into_tensor` operation.
+  virtual c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+      std::vector<at::Tensor>& /* outputs */,
+      std::vector<at::Tensor>& /* inputs */,
+      const AllgatherOptions& /* opts */ = AllgatherOptions()) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not support allgather_into_tensor_coalesced"));
   }
 
   virtual c10::intrusive_ptr<Work> gather(
@@ -148,7 +166,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const GatherOptions& /* opts */ = GatherOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support gather"));
+        c10::str("Backend ", getBackendName(), " does not support gather"));
   }
 
   virtual c10::intrusive_ptr<Work> scatter(
@@ -157,7 +175,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const ScatterOptions& /* opts */ = ScatterOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support scatter"));
+        c10::str("Backend ", getBackendName(), " does not support scatter"));
   }
 
   virtual c10::intrusive_ptr<Work> reduce_scatter(
@@ -167,7 +185,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "Backend ", getBackendName(), "does not support reduce_scatter"));
+            "Backend ", getBackendName(), " does not support reduce_scatter"));
   }
 
   virtual c10::intrusive_ptr<Work> _reduce_scatter_base(
@@ -179,7 +197,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str(
             "Backend ",
             getBackendName(),
-            "does not support _reduce_scatter_base"));
+            " does not support _reduce_scatter_base"));
   }
 
   virtual c10::intrusive_ptr<Work> alltoall_base(
@@ -191,7 +209,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "Backend ", getBackendName(), "does not support alltoall_base"));
+            "Backend ", getBackendName(), " does not support alltoall_base"));
   }
 
   virtual c10::intrusive_ptr<Work> alltoall(
@@ -200,7 +218,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       const AllToAllOptions& opts = AllToAllOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support alltoall"));
+        c10::str("Backend ", getBackendName(), " does not support alltoall"));
   }
 
   virtual void monitoredBarrier(
@@ -246,7 +264,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       int /* dstRank */,
       int /* tag */) {
     TORCH_CHECK(
-        false, c10::str("Backend ", getBackendName(), "does not support send"));
+        false, c10::str("Backend ", getBackendName(), " does not support send"));
   }
 
   virtual c10::intrusive_ptr<Work> recv(
@@ -254,7 +272,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
       int /* srcRank */,
       int /* tag */) {
     TORCH_CHECK(
-        false, c10::str("Backend ", getBackendName(), "does not support recv"));
+        false, c10::str("Backend ", getBackendName(), " does not support recv"));
   }
 
   virtual c10::intrusive_ptr<Work> recvAnysource(
@@ -263,14 +281,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     TORCH_CHECK(
         false,
         c10::str(
-            "Backend ", getBackendName(), "does not support recvAnysource"));
+            "Backend ", getBackendName(), " does not support recvAnysource"));
   }
 
   virtual c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& /* opts */ = BarrierOptions()) {
     TORCH_CHECK(
         false,
-        c10::str("Backend ", getBackendName(), "does not support barrier"));
+        c10::str("Backend ", getBackendName(), " does not support barrier"));
   }
 
  protected:

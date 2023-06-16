@@ -189,7 +189,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
                 # then the first argument is being written to. Introspection please save us!
                 mutated_argument = args[0]
                 if not isinstance(mutated_argument, CompositeCompliantTensor) and \
-                        any([isinstance(a, CompositeCompliantTensor) for a in args[1:]]):
+                        any(isinstance(a, CompositeCompliantTensor) for a in args[1:]):
                     raise RuntimeError(
                         'Not composite compliant: performing in-place operation '
                         f'{func.__name__} where the Tensor being written to is '
@@ -249,10 +249,10 @@ def is_tensorlist(lst):
         return False
     if len(lst) == 0:
         return False
-    all_tensors = all([isinstance(elt, torch.Tensor) for elt in lst])
+    all_tensors = all(isinstance(elt, torch.Tensor) for elt in lst)
     if all_tensors:
         return True
-    exists_one_tensor = all([isinstance(elt, torch.Tensor) for elt in lst])
+    exists_one_tensor = all(isinstance(elt, torch.Tensor) for elt in lst)
     if exists_one_tensor:
         raise RuntimeError('This test assumes that PyTorch APIs cannot take '
                            'mixed lists of Tensor and other things')

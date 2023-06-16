@@ -550,13 +550,13 @@ void Reducer::delay_all_reduce() {
   // unused_parameters_ will not change after 1st iteration.
   unused_parameters_.clear();
 
+  require_finalize_ = true;
   // copy all gradients to buckets
   for (const auto variable_index : c10::irange(params_.size())) {
     // set unused_parameters_
     if (numGradHooksTriggeredMap_[variable_index] == 0) {
       unused_parameters_.push_back(variable_index);
     }
-    require_finalize_ = true;
     set_divide_factor();
     if (expect_sparse_gradients_[variable_index]) {
       mark_variable_ready_sparse(variable_index);
@@ -1464,11 +1464,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
-      if (set_grads_to_none_) {
-        runGradCallbackForVariable(variable, [&](auto& grad) {
-          grad.reset();
-          return true;
-        });
+      if (optim_in_backward_) {
+        // Return early if optimizer has already run.
+        runGradCallbackForVariable(variable, [&](auto& grad) { return true; });
       } else {
         RECORD_FUNCTION(
             "torch.distributed.ddp.reducer::copy_bucket_to_grad",
@@ -1486,8 +1484,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         bucket_view_in.copy_(bucket_view_out);
       }
       runGradCallbackForVariable(variable, [&](auto& grad) {
-        if (set_grads_to_none_) {
-          grad.reset();
+        if (optim_in_backward_) {
+          // Return early if optimizer has already run.
           return true;
         }
         // If a parameter is globally unused, we keep its grad untouched.
@@ -1804,10 +1802,6 @@ void Reducer::register_builtin_comm_hook(
       TORCH_WARN_ONCE(
           "Unknown built-in DDP comm hook type is provided. No comm hook will be used.");
   }
-}
-
-void Reducer::set_grads_to_none(bool set_to_none) {
-  set_grads_to_none_ = set_to_none;
 }
 
 void Reducer::ensure_prior_reduction_finished() {
@@ -2243,6 +2237,11 @@ void Reducer::remove_autograd_hooks() {
         "Reducer attempts to delete a non-existing hook.");
   }
   hooks_.clear();
+}
+
+void Reducer::check_finalized() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  ensure_prior_reduction_finished();
 }
 
 } // namespace c10d

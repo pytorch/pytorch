@@ -90,7 +90,7 @@ pw_cast_for_int_to_real = partial(
 
 
 # This expands x until x.dim() == dim. Might be useful as an operator
-def _unsqueeze_to_dim(x: Tensor, dim: int):
+def _unsqueeze_to_dim(x: Tensor, dim: int) -> Tensor:
     for _ in range(dim - x.dim()):
         x = x.unsqueeze(-1)
     return x
@@ -132,7 +132,7 @@ def elu_backward(
         return torch.where(
             self_or_result <= 0,
             grad_output * negiptcoef * (self_or_result + negcoef),
-            self_or_result * poscoef,
+            grad_output * poscoef,
         )
     else:
         return torch.where(
@@ -360,6 +360,50 @@ def mse_loss_backward(
 ):
     norm = 2.0 / input.numel() if reduction == Reduction.MEAN.value else 2.0
     return norm * (input - target) * grad_output
+
+
+@register_decomposition(aten.smooth_l1_loss)
+@pw_cast_for_opmath
+def smooth_l1_loss(
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+    beta: float = 1.0,
+):
+    loss = (self - target).abs()
+    loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
+    return apply_loss_reduction(loss, reduction)
+
+
+@register_decomposition(aten.smooth_l1_loss_backward.default)
+@pw_cast_for_opmath
+def smooth_l1_loss_backward(
+    grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, beta: float
+):
+    norm = 1.0 / self.numel() if reduction == Reduction.MEAN.value else 1.0
+    x = self - target
+    abs_x = torch.abs(x)
+    norm_grad = norm * grad_output
+    return torch.where(
+        abs_x < beta,
+        norm_grad * x / beta,
+        norm_grad * torch.sign(x),
+    )
+
+
+@register_decomposition(aten.smooth_l1_loss_backward.grad_input)
+@pw_cast_for_opmath
+def smooth_l1_loss_backward_out(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int,
+    beta: float,
+    grad_input: Tensor,
+):
+    result = smooth_l1_loss_backward(grad_output, self, target, reduction, beta)
+    _maybe_resize_out(grad_input, result.shape)
+    return _safe_copy_out(copy_from=result, copy_to=grad_input, exact_dtype=True)
 
 
 @register_decomposition(aten.huber_loss_backward.default)
@@ -905,7 +949,7 @@ def col2im(
         [shape[0], shape[1] // prod(kernel_size)] + output_padded_size
     )
     idx = (None, None, indices_row, indices_col)
-    output = aten.index_put(output, idx, input, accumulate=True)
+    output = aten._unsafe_index_put(output, idx, input, accumulate=True)
     output = F.pad(output, (-padding_w, -padding_w, -padding_h, -padding_h))
 
     if not batched_input:
@@ -941,7 +985,8 @@ def unfold_backward(
     # It could potentially be fused into one call to scatter_reduce,
     # in the case step <= size provided scatter_reduce generates 1 kernel
     grad_input = grad.new_zeros(input_size)
-    return torch.index_add(grad_input, dim, idx, grad)
+    index = (None,) * dim + (idx,)
+    return aten._unsafe_index_put(grad_input, index, grad, accumulate=True).contiguous()
 
 
 @register_decomposition(aten.logit_backward.default)
@@ -967,7 +1012,9 @@ def logit_backward(
 
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
-    if train:
+    if train and p != 0:
+        if p == 1:
+            return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
         bool_mask = torch.rand_like(input) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
@@ -1068,7 +1115,7 @@ def embedding_dense_backward(
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
-        counts = counts.index_put([indices], ones, accumulate=True)
+        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
         grad_weights_scale = counts[indices]
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
@@ -1077,7 +1124,9 @@ def embedding_dense_backward(
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return grad_weight.index_put([indices], grad, accumulate=True).to(result_dtype)
+    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
+        result_dtype
+    )
 
 
 def prod(x: List[int]):
@@ -1091,6 +1140,10 @@ def prod(x: List[int]):
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
+    if sum(split_sizes) != self.shape[dim]:
+        raise ValueError(
+            "Split sizes don't add up to the tensor's size in the given dimension"
+        )
     num_splits = len(split_sizes)
     splits = []
     start_idx = 0
@@ -1102,12 +1155,12 @@ def split_with_sizes(
 
 
 @register_decomposition([aten.split.Tensor, aten.unsafe_split.Tensor])
-def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
+def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
     if split_size == 0:
         assert dim_size == 0
-        return [self]
+        return (self,)
     chunks = (dim_size + split_size - 1) // split_size
     chunks = guard_int(chunks)
     split_sizes = [split_size for i in range(chunks)]
@@ -1383,9 +1436,13 @@ def native_batch_norm_helper(
 
     if weight is None:
         weight = input.new_ones(())
+    else:
+        weight = weight.flatten()
 
     if bias is None:
         bias = input.new_zeros(())
+    else:
+        bias = bias.flatten()
 
     weight = _unsqueeze_to_dim(weight, input.dim() - 1)
     bias = _unsqueeze_to_dim(bias, input.dim() - 1)
@@ -1996,7 +2053,7 @@ def uniform(
 @register_decomposition(aten.uniform_)
 def uniform_(self, low=0, high=1, generator=None):
     assert generator is None
-    return self.copy_((high - low) * torch.rand_like(self) + low)
+    return self.copy_(uniform(self, low, high))
 
 
 # aten/src/ATen/native/UpSample.cpp compute_output_size
@@ -2098,8 +2155,7 @@ def upsample_nearest1d(
     scales: Optional[float] = None,
 ) -> Tensor:
     (l_indices,) = _compute_upsample_nearest_indices(input, output_size, (scales,))
-    result = input[:, :, l_indices]
-    return result
+    return aten._unsafe_index(input, (None, None, l_indices))
 
 
 @register_decomposition(aten.upsample_nearest2d.default)
@@ -2114,7 +2170,7 @@ def upsample_nearest2d(
     h_indices, w_indices = _compute_upsample_nearest_indices(
         input, output_size, (scales_h, scales_w)
     )
-    result = input[:, :, h_indices, w_indices]
+    result = aten._unsafe_index(input, (None, None, h_indices, w_indices))
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
@@ -2142,7 +2198,7 @@ def upsample_nearest3d(
     d_indices, h_indices, w_indices = _compute_upsample_nearest_indices(
         input, output_size, (scales_d, scales_h, scales_w)
     )
-    result = input[:, :, d_indices, h_indices, w_indices]
+    result = aten._unsafe_index(input, (None, None, d_indices, h_indices, w_indices))
 
     return result
 
@@ -2742,9 +2798,7 @@ def upsample_bilinear2d(
         if align_corners:
             h_scale_factor = (in_h - 1) / (out_h - 1)
         else:
-            h_scale_factor = (
-                in_h / (in_h * scales_h) if scales_h is not None else in_h / out_h
-            )
+            h_scale_factor = 1.0 / scales_h if scales_h is not None else in_h / out_h
     else:
         h_scale_factor = 0.0
 
@@ -2752,9 +2806,7 @@ def upsample_bilinear2d(
         if align_corners:
             w_scale_factor = (in_w - 1) / (out_w - 1)
         else:
-            w_scale_factor = (
-                in_w / (in_w * scales_w) if scales_w is not None else in_w / out_w
-            )
+            w_scale_factor = 1.0 / scales_w if scales_w is not None else in_w / out_w
     else:
         w_scale_factor = 0.0
 
@@ -2777,10 +2829,10 @@ def upsample_bilinear2d(
     x_floor_view = x_floor.unsqueeze(1)
     x_ceil_view = x_ceil.unsqueeze(1)
 
-    v1 = input[:, :, x_floor_view, y_floor]
-    v2 = input[:, :, x_ceil_view, y_floor]
-    v3 = input[:, :, x_floor_view, y_ceil]
-    v4 = input[:, :, x_ceil_view, y_ceil]
+    v1 = aten._unsafe_index(input, [None, None, x_floor_view, y_floor])
+    v2 = aten._unsafe_index(input, [None, None, x_ceil_view, y_floor])
+    v3 = aten._unsafe_index(input, [None, None, x_floor_view, y_ceil])
+    v4 = aten._unsafe_index(input, [None, None, x_ceil_view, y_ceil])
 
     xscale2 = x_view - x_floor_view
     xscale1 = 1.0 - xscale2
@@ -3295,7 +3347,7 @@ def upsample_bicubic2d_default(
     def load_bounded(ys, xs):
         y_idx = torch.clamp(ys, 0, iH - 1)
         x_idx = torch.clamp(xs, 0, iW - 1)
-        return a[N_idx, C_idx, y_idx, x_idx]
+        return aten._unsafe_index(a, [N_idx, C_idx, y_idx, x_idx])
 
     def get_x_interp(y):
         coeffs_x = tuple((load_bounded(y, x_ofs) for x_ofs in ixs_ofs))
@@ -3352,6 +3404,36 @@ def nansum(self, dim=None, keepdim=False, *, dtype=None):
     return aten.sum(torch.where(torch.isnan(self), 0, self), dim, keepdim, dtype=dtype)
 
 
+@register_decomposition([aten.arange.default, aten.arange.out])
+@out_wrapper()
+def arange_default(
+    end: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+):
+    return aten.arange.start_step(
+        0, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
+@register_decomposition([aten.arange.start])
+def arange_start(
+    start: NumberType,
+    end: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+):
+    return aten.arange.start_step(
+        start, end, 1, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    )
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
@@ -3365,14 +3447,18 @@ register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
 register_inplace(aten.baddbmm_, aten.baddbmm)
-register_inplace(aten.cumprod_, aten.cumprod)
 register_inplace(aten.fill_, aten.fill)
 register_inplace(aten.gelu_, aten.gelu)
 register_inplace(aten.hardswish_, aten.hardswish)
 register_inplace(aten.hardtanh_, aten.hardtanh)
 register_inplace(aten.hardsigmoid_, aten.hardsigmoid)
+register_inplace(aten.__iand__, aten.__and__)
+register_inplace(aten.__ilshift__, aten.__lshift__)
 register_inplace(aten.index_put_, aten.index_put)
 register_inplace(aten.index_reduce_, aten.index_reduce)
+register_inplace(aten.__ior__, aten.__or__)
+register_inplace(aten.__irshift__, aten.__rshift__)
+register_inplace(aten.__ixor__, aten.__xor__)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.logit_, aten.logit)
 register_inplace(aten.relu_, aten.relu)

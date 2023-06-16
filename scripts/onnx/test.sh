@@ -41,45 +41,11 @@ args+=("--cov-report")
 args+=("xml:test/coverage.xml")
 args+=("--cov-append")
 
-args_parallel=()
-if [[ $PARALLEL == 1 ]]; then
-  args_parallel+=("-n")
-  args_parallel+=("auto")
-fi
+time python "${top_dir}/test/run_test.py" --onnx --shard "$SHARD_NUMBER" 2 --verbose
 
-# onnxruntime only support py3
-# "Python.h" not found in py2, needed by TorchScript custom op compilation.
-if [[ "${SHARD_NUMBER}" == "1" ]]; then
-  # These exclusions are for tests that take a long time / a lot of GPU
-  # memory to run; they should be passing (and you will test them if you
-  # run them locally
-  pytest "${args[@]}" "${args_parallel[@]}" \
-    --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
-    --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
-    --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime_cuda.py" \
-    --ignore "$top_dir/test/onnx/test_custom_ops.py" \
-    --ignore "$top_dir/test/onnx/test_utility_funs.py" \
-    --ignore "$top_dir/test/onnx/test_models.py" \
-    --ignore "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
-    "${test_paths[@]}"
-
-  # Heavy memory usage tests that cannot run in parallel.
-  pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_custom_ops.py" \
-    "$top_dir/test/onnx/test_utility_funs.py" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "not TestModelsONNXRuntime"
-fi
-
-if [[ "${SHARD_NUMBER}" == "2" ]]; then
-  # Heavy memory usage tests that cannot run in parallel.
-  # TODO(#79802): Parameterize test_models.py
-  pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_models.py" \
-    "$top_dir/test/onnx/test_models_quantized_onnxruntime.py" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "TestModelsONNXRuntime"
-
-  pytest "${args[@]}" "${args_parallel[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py"
+if [[ "$SHARD_NUMBER" == "2" ]]; then
+  # xdoctests on onnx
+  xdoctest torch.onnx --style=google --options="+IGNORE_WHITESPACE"
 fi
 
 # Our CI expects both coverage.xml and .coverage to be within test/

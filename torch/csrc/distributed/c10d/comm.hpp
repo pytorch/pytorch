@@ -107,7 +107,7 @@ class TORCH_API CommHookInterface {
 namespace detail {
 // This helper function is called both by CppCommHookInterface below and inside
 // reducer.
- at::Tensor parseCppCommHookResult(const c10::IValue& result);
+TORCH_API at::Tensor parseCppCommHookResult(const c10::IValue& result);
 } // namespace detail
 
 // This CppCommHook interface only requires implementing runHook method that

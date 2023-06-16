@@ -280,11 +280,11 @@ def get_op_node_and_weight_eq_obs(
     """ Gets the following weight equalization observer. There should always
     exist a weight equalization observer after an input equalization observer.
 
-    Returns the operation node that follows the input equalizatoin observer node
+    Returns the operation node that follows the input equalization observer node
     and the weight equalization observer
     """
 
-    # Find the op node that comes directly after the input equaliation observer
+    # Find the op node that comes directly after the input equalization observer
     op_node = None
     for user in input_eq_obs_node.users.keys():
         if node_supports_equalization(user, modules):

@@ -42,7 +42,7 @@ def check_file(filename: str) -> Optional[LintMessage]:
         if CONSTEXPR in line:
             original = "".join(lines)
             replacement = original.replace(CONSTEXPR, CONSTEXPR_MACRO)
-            logging.debug(f"replacement: {replacement}")
+            logging.debug("replacement: %s", replacement)
             return LintMessage(
                 path=filename,
                 line=idx,

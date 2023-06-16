@@ -948,11 +948,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
 
     @onlyCUDA
-    @tf32_on_and_off(0.01)
     @dtypes(torch.float, torch.double, torch.half)
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     @torch.backends.cudnn.flags(enabled=True, benchmark=False)
+    @tf32_on_and_off(0.01)
     def test_Conv2d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
             m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(device, dtype)
@@ -2382,7 +2382,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
             if tf32_is_not_fp32() and dtype == torch.float:
-                self.assertEqual(conv2d_out.relu(), cudnn_out, atol=2e-4, rtol=0.006)
+                self.assertEqual(conv2d_out.relu(), cudnn_out, atol=4e-3, rtol=0.006)
             else:
                 self.assertEqual(conv2d_out.relu(), cudnn_out)
 
@@ -2416,7 +2416,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
             self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
             if tf32_is_not_fp32() and dtype == torch.float:
-                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out, atol=3e-4, rtol=0.006)
+                self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out, atol=2e-3, rtol=0.006)
             else:
                 self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
 

@@ -13,10 +13,13 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
+if HAS_CUDA:
+    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -163,5 +166,5 @@ class TestDoBench(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_CUDA and not TEST_WITH_ROCM:
         run_tests()

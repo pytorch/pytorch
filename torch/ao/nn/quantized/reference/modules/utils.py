@@ -165,7 +165,8 @@ def _quantize_weight_decomposed(
         # TODO: torch.quint4x2 is not supported
         if weight_dtype in [torch.quint8, torch.qint8, torch.qint32]:
             weight_dtype_ = _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE[weight_dtype]
-            weight_quant_min, weight_quant_max = _DTYPE_TO_QVALUE_BOUNDS[weight_dtype_]
+            if weight_quant_min is None or weight_quant_max is None:
+                weight_quant_min, weight_quant_max = _DTYPE_TO_QVALUE_BOUNDS[weight_dtype_]
             weight = torch.ops.quantized_decomposed.quantize_per_channel(
                 weight,
                 weight_scale,

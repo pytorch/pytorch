@@ -16,6 +16,7 @@ Arch = Literal["windows", "linux", "macos"]
 GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 LABEL_CIFLOW_TRUNK = "ciflow/trunk"
+LABEL_CIFLOW_UNSTABLE = "ciflow/unstable"
 LABEL_CIFLOW_BINARIES = "ciflow/binaries"
 LABEL_CIFLOW_PERIODIC = "ciflow/periodic"
 LABEL_CIFLOW_BINARIES_LIBTORCH = "ciflow/binaries_libtorch"
@@ -30,11 +31,14 @@ class CIFlowConfig:
     labels: Set[str] = field(default_factory=set)
     # Certain jobs might not want to be part of the ciflow/[all,trunk] workflow
     isolated_workflow: bool = False
+    unstable: bool = False
 
     def __post_init__(self) -> None:
         if not self.isolated_workflow:
             if LABEL_CIFLOW_PERIODIC not in self.labels:
-                self.labels.add(LABEL_CIFLOW_TRUNK)
+                self.labels.add(
+                    LABEL_CIFLOW_TRUNK if not self.unstable else LABEL_CIFLOW_UNSTABLE
+                )
 
 
 class Config(TypedDict):
@@ -146,17 +150,12 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         os=OperatingSystem.LINUX,
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX, arches=["11.8"], python_versions=["3.8"]
+            OperatingSystem.LINUX,
+            arches=["11.8", "12.1"],
+            python_versions=["3.8"],
+            gen_special_an_non_special_wheel=False,
         ),
-        branches="master",
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX,
-        package_type="manywheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.LINUX, arches=["11.7"], python_versions=["3.8"]
-        ),
-        branches="master",
+        branches="main",
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -168,7 +167,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
-        branches="master",
+        branches="main",
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.LINUX,
@@ -180,7 +179,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
-        branches="master",
+        branches="main",
     ),
 ]
 
@@ -243,7 +242,10 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
-        branches="master",
+        branches="main",
+        ciflow_config=CIFlowConfig(
+            isolated_workflow=True,
+        ),
     ),
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
@@ -255,7 +257,10 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
             arches=["cpu"],
             libtorch_variants=["shared-with-deps"],
         ),
-        branches="master",
+        branches="main",
+        ciflow_config=CIFlowConfig(
+            isolated_workflow=True,
+        ),
     ),
 ]
 

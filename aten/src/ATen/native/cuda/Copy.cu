@@ -93,25 +93,12 @@ void copy_device_to_device(TensorIterator& iter,
       // Due to bizarre cuda driver intricacies, copies of
       // cudaMallocAsynced memory between devices that aren't
       // peer-to-peer-capable need "cudaMemcpyPeerAsync".
-#ifdef USE_ROCM
-      bool needs_pool_specific_peer_access = false;
-#else
-      bool needs_pool_specific_peer_access = CUDACachingAllocator::get()->needsPoolSpecificPeerAccess();
-#endif
-      bool needs_MemcpyPeer = (src_device != dst_device &&
-                               needs_pool_specific_peer_access &&
-                               !p2p_enabled);
-      if (needs_MemcpyPeer) {
-        AT_CUDA_CHECK(cudaMemcpyPeerAsync(
-            dst, dst_device.index(),
-            src, src_device.index(),
-            size, copy_stream));
-      } else {
-        AT_CUDA_CHECK(cudaMemcpyAsync(
-            dst, src, size,
-            cudaMemcpyDeviceToDevice,
-            copy_stream));
-      }
+      // So we let the allocator implement the correct call
+      // (either cudaMemcpyAsync or cudaMemcpyPeerAsync)
+      AT_CUDA_CHECK(CUDACachingAllocator::memcpyAsync(
+        dst, dst_device.index(),
+        src, src_device.index(),
+        size, copy_stream, p2p_enabled));
     }
   } else {
     if (same_neg) {

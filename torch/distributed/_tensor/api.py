@@ -7,9 +7,9 @@ import torch
 
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.nn as nn
-from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
+from torch.distributed._tensor._utils import compute_global_tensor_info
+from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
     Placement,
     Replicate,
@@ -58,6 +58,9 @@ class _ToTorchTensor(torch.autograd.Function):
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
         dtensor_spec = ctx.dtensor_spec
         dtensor_meta = dtensor_spec.tensor_meta
+        _, tensor_stride = compute_global_tensor_info(
+            grad_output, dtensor_spec.mesh, dtensor_spec.placements
+        )
         return DTensor(
             grad_output,
             dtensor_spec.mesh,
@@ -65,7 +68,7 @@ class _ToTorchTensor(torch.autograd.Function):
             shape=dtensor_meta.shape,
             dtype=dtensor_meta.dtype,
             requires_grad=grad_output.requires_grad,
-            stride=dtensor_meta.stride,
+            stride=tuple(tensor_stride),
         )
 
 
@@ -84,22 +87,9 @@ class _FromTorchTensor(torch.autograd.Function):
         # if it's not by default run_check, we assume user is certain that each
         # rank has the same tensor shape, and we just use that to calculate the
         # global shape
-        tensor_shape = list(input.size())
-        tensor_stride = list(input.stride())
-        for idx, placement in enumerate(placements):
-            if placement.is_shard():
-                shard_dim = cast(Shard, placement).dim
-                local_dim_size = tensor_shape[shard_dim]
-                tensor_shape[shard_dim] = local_dim_size * device_mesh.size(idx)
-
-                # recover tensor stride by modifying the stride that larger than
-                # the current stride on the shard_dim
-                for i in range(len(tensor_stride)):
-                    if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
-                        # rescale the stride by the shard size
-                        tensor_stride[i] = tensor_stride[i] * device_mesh.size(idx)
-            elif not isinstance(placement, (Replicate, _Partial)):
-                raise RuntimeError(f"placement type {type(placement)} not supported!")
+        tensor_shape, tensor_stride = compute_global_tensor_info(
+            input, device_mesh, placements
+        )
 
         if device_mesh.get_coordinate() is None:
             # if the global rank is not participating in the device mesh, we
@@ -198,8 +188,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
         # TODO: populate all tensor meta fields properly
+        # NOTE: memory_format is non-pickable so we intentionally skip it
         tensor_meta = TensorMetadata(
-            shape, dtype, requires_grad, stride, torch.contiguous_format, False, {}
+            shape, dtype, requires_grad, stride, None, False, {}
         )
         # deepcopy and set spec
         r._spec = DTensorSpec(
@@ -245,6 +236,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         local_tensor: torch.Tensor,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
+        *,
         run_check: bool = True,
     ) -> "DTensor":
         """
@@ -261,6 +253,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 have the same number of elements as `device_mesh.ndim`. If not
                 specified, we will by default replicate the tensor across the
                 `device_mesh` from the first rank of each dimension of the `device_mesh`.
+
+        Keyword args:
             run_check (bool, optional): indicate whether to run check across ranks
                 to check meta information and data. if have :class:`Replicate` in
                 `placements`, the data on first rank of the device mesh dimension
@@ -277,7 +271,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # There should be no data communication unless there's replication
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
-        device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
+        device_mesh = device_mesh or mesh_resources.get_current_mesh()
 
         # convert the local tensor to desired device base on device mesh's device_type
         if not local_tensor.is_meta:
@@ -332,13 +326,12 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
         .. note:: `redistribute` is differentiable.
         """
-        # This API perform necessary transformations and get
-        # a new DTensor with the new spec. i.e. for
-        # sharding it's a reshard behavior.
-        # Note that redistribute currently only supports out
+        # NOTE: This redistribute API currently only supports out
         # of place redistribution, i.e. it always create a new
         # DTensor object and leave the original one unchanged.
-        device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
+
+        # if device_mesh is not specified, use the current device_mesh
+        device_mesh = device_mesh or self.device_mesh
         # raise error if new placements not specified
         if placements is None:
             raise RuntimeError("placements is needed for redistribute!")
@@ -398,8 +391,11 @@ def distribute_tensor(
     Returns:
         A :class:`DTensor` object
     """
+
+    torch._C._log_api_usage_once("torch.dtensor.distribute_tensor")
+
     # get default device mesh if there's nothing specified
-    device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
+    device_mesh = device_mesh or mesh_resources.get_current_mesh()
     # convert tensor to the corresponding device type if it's not in that device type
     if not tensor.is_meta:
         tensor = tensor.to(device_mesh.device_type)
@@ -490,8 +486,9 @@ def distribute_module(
         A module that contains parameters/buffers that are all `DTensor`s.
     """
 
-    if device_mesh is None:
-        device_mesh = get_global_device_mesh()
+    torch._C._log_api_usage_once("torch.dtensor.distribute_module")
+
+    device_mesh = device_mesh or mesh_resources.get_current_mesh()
 
     def replicate_module_params_buffers(m: nn.Module, mesh: DeviceMesh) -> None:
         # This function loop over the immediate module parameters and

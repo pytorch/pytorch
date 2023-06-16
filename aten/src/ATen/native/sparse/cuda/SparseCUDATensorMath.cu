@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
@@ -33,6 +34,7 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 #include <thrust/device_ptr.h>
@@ -314,7 +316,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     const dim3 block = cuda::getApplyBlock();
     dim3 grid;
     int curDevice = -1;
-    cudaGetDevice(&curDevice);
+    c10::cuda::GetDevice(&curDevice);
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     if (sparse.dense_dim() == 0) {
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
@@ -541,6 +543,11 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   TORCH_CHECK(grad_.is_cuda(), "_sparse_sum_backward_cuda: expected 'grad_' to be CUDA tensor, but got CPU tensor");
   TORCH_CHECK(input_.is_cuda(), "_sparse_sum_backward_cuda: expected 'input_' to be CUDA tensor, but got CPU tensor");
 
+  // Short circuit if grad is either zero or empty
+  if (((grad_.is_sparse() || at::sparse_csr::is_sparse_compressed(grad_)) && !grad_._nnz()) || !grad_.numel()) {
+    return at::zeros_like(input_);
+  }
+
   auto input = input_.coalesce();
   const int64_t input_dim = input.dim();
   auto dims_to_sum_b = dim_list_to_bitset(dims_to_sum, input_dim);
@@ -606,7 +613,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
     }
     else {
       int curDevice = -1;
-      cudaGetDevice(&curDevice);
+      c10::cuda::GetDevice(&curDevice);
       cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
       at::cuda::ThrustAllocator allocator;
       auto policy = thrust::cuda::par(allocator).on(stream);
@@ -711,7 +718,7 @@ __global__ void search_end_matrix_indices_cuda_kernel(
 // indices to find the end index for each matrix
 void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices, const Tensor& indices_1D) {
   int curDevice = -1;
-  cudaGetDevice(&curDevice);
+  c10::cuda::GetDevice(&curDevice);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
 
   auto indices_1D_ti = getTensorInfo<int64_t, int64_t>(indices_1D);

@@ -285,7 +285,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     continue
 
                 first_module = modules.get(node.target)
-                # check if first module exists and has apropriate parameterization, otherwise skip
+                # check if first module exists and has appropriate parameterization, otherwise skip
                 if (
                     first_module is not None
                     and parametrize.is_parametrized(first_module)

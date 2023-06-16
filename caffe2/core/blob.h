@@ -68,16 +68,13 @@ BlobGetMutableTensor(Blob* blob, at::IntArrayRef dims, at::TensorOptions options
     if (*tensor) {
       // We only compare device_type if the index is not set since there are Tensors
       // TODO: remove the extra check when all the Tensors are properly initialized
-      if (tensor->GetDevice() == options.device() || (!tensor->GetDevice().has_index() && tensor->GetDeviceType() == options.device().type())) {
+      const auto tensorDevice = tensor->GetDevice();
+      if (tensorDevice == options.device() || (!tensorDevice.has_index() && tensor->GetDeviceType() == options.device().type())) {
         if (tensor->sizes() != dims) {
           // Resize when the dims doesn't match
           tensor->Resize(dims);
         }
-        if (tensor->dtype() == options.dtype()) {
-          tensor->raw_mutable_data();
-        } else {
-          tensor->raw_mutable_data(options.dtype());
-        }
+        tensor->raw_mutable_data(options.dtype());
         return tensor;
       }
       // create a new Tensor when device doesn't match

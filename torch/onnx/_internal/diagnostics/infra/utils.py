@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import functools
+
 import inspect
 import traceback
-from typing import Any, Callable, Dict, Mapping, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics.infra import _infra, formatter
@@ -41,13 +43,24 @@ def python_call_stack(frames_to_skip: int = 0, frames_to_log: int = 16) -> _infr
     return stack
 
 
+@functools.lru_cache()
+def _function_source_info(fn: Callable) -> Tuple[Sequence[str], int, Optional[str]]:
+    """Returns the source lines, line number, and source file path for the given function.
+
+    Essentially, inspect.getsourcelines() and inspect.getsourcefile() combined.
+    Caching is applied to reduce the performance impact of this function.
+    """
+    source_lines, lineno = inspect.getsourcelines(fn)
+    return source_lines, lineno, inspect.getsourcefile(fn)
+
+
 @_beartype.beartype
 def function_location(fn: Callable) -> _infra.Location:
     """Returns a Location for the given function."""
-    source_lines, lineno = inspect.getsourcelines(fn)
+    source_lines, lineno, uri = _function_source_info(fn)
     snippet = source_lines[0].strip() if len(source_lines) > 0 else "<unknown>"
     return _infra.Location(
-        uri=inspect.getsourcefile(fn),
+        uri=uri,
         line=lineno,
         snippet=snippet,
         message=formatter.display_name(fn),
