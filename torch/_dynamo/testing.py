@@ -346,11 +346,6 @@ def expectedFailureDynamic(fn):
     return fn
 
 
-# Controls tests generated in test/dynamo/test_dynamic_shapes.py
-def expectedFailureAutomaticDynamic(fn):
-    return unittest.expectedFailure(fn)
-
-
 # Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
 def expectedFailureCodegenDynamic(fn):
     fn._expected_failure_codegen_dynamic = True

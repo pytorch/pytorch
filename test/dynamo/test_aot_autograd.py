@@ -652,7 +652,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(failure_reason, """L['c'] is L['d']""")
 
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
-    @unittest.expectedFailure
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.debug_assert", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         # this is just dealing with the fact that

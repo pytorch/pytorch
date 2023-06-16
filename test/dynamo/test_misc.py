@@ -1973,7 +1973,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     # NotImplementedError: SymNodeVariable() is not a constant
     # https://github.com/pytorch/pytorch/issues/103618
     @expectedFailureDynamic
-    @unittest.expectedFailure
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -5294,6 +5294,8 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
+    @expectedFailureDynamic
+    @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
@@ -5323,6 +5325,17 @@ def fn():
                 ).run(prof.report())
             else:
                 base_checker().check("No recompilation detected.").run(prof.report())
+
+            new_shape_input = torch.rand((4, 3, 4))
+            _ = compiled(new_shape_input)
+
+            base_checker().check("Recompile Reasons").check("'forward'").check(
+                "tensor 'L['input']' size mismatch at index 0. expected 2, actual 3"
+            ).check(
+                "tensor 'L['input']' size mismatch at index 0. expected 3, actual 4"
+            ).run(
+                prof.report()
+            )
 
     def test_guards_strip_function_call(self):
         from torch._dynamo.guards import strip_function_call
