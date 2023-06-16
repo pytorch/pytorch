@@ -247,8 +247,8 @@ def get_default_qconfig(backend='x86', version=0):
         elif backend == 'onednn':
             if not torch._C._is_cpu_support_vnni():
                 warnings.warn(
-                    "Detecting running on CPU without Vector Neural Network Instruction support. "
-                    "Using default qconfig of oneDNN backend with reduce_range of False may cause accuracy issue.")
+                    "Default qconfig of oneDNN backend with reduce_range of false may have accuracy issues "
+                    "on CPU without Vector Neural Network Instruction support.")
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
         elif backend == 'x86':
