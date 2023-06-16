@@ -237,8 +237,10 @@ class TensorVariable(VariableTracker):
             result = try_generic_attr_handling()
 
         if result is None:
-            result = super().var_getattr(tx, name)
+            result = variables.user_defined.dynamic_getattr(self, tx, name)
 
+        if result is None:
+            raise NotImplementedError()
         return result
 
     def has_unpack_var_sequence(self, tx):

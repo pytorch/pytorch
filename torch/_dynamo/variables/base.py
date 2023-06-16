@@ -4,14 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from .. import variables
 from ..exc import unimplemented
 from ..source import AttrSource, Source
-from ..utils import (
-    dict_values,
-    get_custom_getattr,
-    identity,
-    istype,
-    object_has_getattribute,
-    odict_values,
-)
+from ..utils import dict_values, identity, istype, odict_values
 
 
 class MutableLocal:
@@ -192,63 +185,9 @@ class VariableTracker(metaclass=HasPostInit):
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError()
 
-    def dynamic_getattr(self, tx, name):
-        if not self.source:
-            raise NotImplementedError()
-
-        # For local source, we associate the real value. We use this real value
-        # for implementing getattr fallthrough on the variable tracker base class.
-
-        # Note - this scope construction is mirrored in guards
-        # A subsequent PR will introduce a util.
-        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
-        try:
-            # We raise in case we get a typerror bug w/ SuperSource.
-            # SuperSource has bugs in it atm, and can produce code like
-            # eval("super(L['mod'].model.model.encoder.embed_positions.forward__class__,
-            # L['mod'].model.model.encoder.embed_positions)", scope)
-            # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
-            _input_associated_real_value = eval(self.source.name(), scope)
-        except Exception:
-            raise NotImplementedError()
-
-        if _input_associated_real_value is None:
-            raise NotImplementedError()
-
-        if object_has_getattribute(_input_associated_real_value):
-            raise NotImplementedError()
-
-        if get_custom_getattr(_input_associated_real_value):
-            raise NotImplementedError()
-
-        real_value = getattr(_input_associated_real_value, name)
-        if callable(real_value):
-            # Callables have more nuanced handling, and we should let the existing system delegate here.
-            # Raising was past behavior and so should always be sound to fall back.
-            # Note - at a certain point we may want to handle
-            raise NotImplementedError()
-
-        from .builder import VariableBuilder
-        from ..guards import GuardBuilder
-
-        attr_source = AttrSource(self.source, name)
-        has_attr_guard = attr_source.make_guard(GuardBuilder.HASATTR)
-        return (
-            VariableBuilder(tx, attr_source)(real_value)
-            .add_options(self)
-            .add_guard(has_attr_guard)
-        )
-
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)
-        try:
-            value = self.dynamic_getattr(tx, name)
-        except NotImplementedError:
-            # Don't reraise - there are classes that can check const_getattr here.
-            value = None
-        if value:
-            return value
 
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):

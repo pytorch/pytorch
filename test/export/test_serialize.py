@@ -330,5 +330,9 @@ class TestDeserialize(TestCase):
 instantiate_parametrized_tests(TestDeserialize)
 
 
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_tensor_setattr
+)
+
 if __name__ == '__main__':
     run_tests()
