@@ -395,6 +395,77 @@ class FxOnnxInterpreter:
         # DO NOT add other class-level attributes.
         self.diagnostic_context = diagnostic_context
 
+    @diagnostics.diagnose_call(diagnostics.rules.fx_node_to_onnx)
+    def run_node(
+        self,
+        node,
+        fx_graph_module: torch.fx.GraphModule,
+        onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
+        op_level_debug: bool,
+        onnxscript_graph: onnxscript_graph_building.TorchScriptGraph,
+        torchscript_tracer: onnxscript_graph_building.TorchScriptTracingEvaluator,
+        fx_name_to_onnxscript_value: Dict[
+            str,
+            Union[
+                onnxscript_graph_building.TorchScriptTensor,
+                Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
+            ],
+        ],
+    ):
+        """Execute a single FX node to produce its ONNX counterpart.
+
+        Args:
+            node: The FX node to be translated.
+            fx_graph_module: The FX graph module containing the node.
+            onnxfunction_dispatcher: The dispatcher to find the best matched ONNX op.
+            op_level_debug (bool): Whether to enable op level debug.
+            onnxscript_graph: The ONNX graph to be populated.
+            torchscript_tracer: The tracer to trace the ONNX graph.
+            fx_name_to_onnxscript_value: The mapping from FX node name to ONNX Script value.
+
+        Raises:
+            RuntimeError: _description_
+        """
+        # Record stack trace of node in diagnostic.
+        node_stack_trace = node.stack_trace
+        if node_stack_trace:
+            diagnostic = self.diagnostic_context.inflight_diagnostic(
+                rule=diagnostics.rules.fx_node_to_onnx
+            )
+            diagnostic.with_additional_message(
+                f"### PyTorch source information\n```\n{node_stack_trace}\n```"
+            )
+            location = _location_from_fx_stack_trace(node_stack_trace)
+            if location is not None:
+                diagnostic.with_location(location)
+
+        if node.op == "placeholder":
+            self.placeholder(node, onnxscript_graph, fx_name_to_onnxscript_value)
+        elif node.op == "get_attr":
+            self.get_attr(
+                node,
+                onnxscript_graph,
+                fx_name_to_onnxscript_value,
+                fx_graph_module,
+            )
+        elif node.op == "call_function":
+            self.call_function(
+                node,
+                torchscript_tracer,
+                fx_name_to_onnxscript_value,
+                onnxfunction_dispatcher,
+                op_level_debug,
+            )
+        elif node.op == "call_method":
+            self.call_method(node)
+        elif node.op == "call_module":
+            self.call_module(node)
+        elif node.op == "output":
+            self.output(node, onnxscript_graph, fx_name_to_onnxscript_value)
+        else:
+            raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
+
+    @diagnostics.diagnose_call(diagnostics.rules.atenlib_fx_to_onnx)
     @_beartype.beartype
     def run(
         self,
@@ -405,13 +476,16 @@ class FxOnnxInterpreter:
         """Analyze all FX nodes and trigger their ONNX translation.
 
         Args:
-            context: Context each FX node method can use during ONNX translation
+            fx_graph_module: FX graph module to be translated.
+            onnxfunction_dispatcher: ONNX function dispatcher.
+            op_level_debug: Whether to enable op-level debug.
         """
         onnxscript_graph = onnxscript_graph_building.TorchScriptGraph()
         torchscript_tracer = onnxscript_graph_building.TorchScriptTracingEvaluator(
             onnxscript_graph
         )
         fx_name_to_onnxscript_value = {}
+
         # TODO: Fix FakeTensorMode limitation asap
         # We want to pass list of ints and floats to TorchScript graph correctly
         # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
@@ -421,54 +495,16 @@ class FxOnnxInterpreter:
         with torch.utils._mode_utils.no_dispatch():
             # node_fixed_shape is only used on op_level_debug purpose.
             for node in fx_graph_module.graph.nodes:
-                # Dispatch to ONNX op through OpSchema. The input argument dtypes are compared to
-                # function signature in OpSchema, and find the best matched overload.
-                # TODO(titaiwang): diagnostic rules.
+                self.run_node(
+                    node,
+                    fx_graph_module,
+                    onnxfunction_dispatcher,
+                    op_level_debug,
+                    onnxscript_graph,
+                    torchscript_tracer,
+                    fx_name_to_onnxscript_value,
+                )
 
-                if node.op == "placeholder":
-                    self.placeholder(
-                        node, onnxscript_graph, fx_name_to_onnxscript_value
-                    )
-                elif node.op == "get_attr":
-                    self.get_attr(
-                        node,
-                        onnxscript_graph,
-                        fx_name_to_onnxscript_value,
-                        fx_graph_module,
-                    )
-                elif node.op == "call_function":
-                    self.call_function(
-                        node,
-                        torchscript_tracer,
-                        fx_name_to_onnxscript_value,
-                        onnxfunction_dispatcher,
-                        op_level_debug,
-                    )
-                elif node.op == "call_method":
-                    self.call_method(node)
-                elif node.op == "call_module":
-                    self.call_module(node)
-                elif node.op == "output":
-                    self.output(node, onnxscript_graph, fx_name_to_onnxscript_value)
-                else:
-                    raise RuntimeError(
-                        f"Found node type not defined in torch.fx: {node.op}"
-                    )
-
-        # TODO (thiagofc) Not sure what to do with this
-        # Previous implementation reassigns `diagnostic` before using, so it looks dead code
-        # # Record stack trace of node in diagnostic.
-        # node_stack_trace = node.stack_trace
-        # if node_stack_trace:
-        #     diagnostic = self.diagnostic_context.inflight_diagnostic(
-        #         rule=diagnostics.rules.fx_node_to_onnx
-        #     )
-        #     diagnostic.with_additional_message(
-        #         f"### PyTorch source information\n```\n{node_stack_trace}\n```"
-        #     )
-        #     location = _location_from_fx_stack_trace(node_stack_trace)
-        #     if location is not None:
-        #         diagnostic.with_location(location)
         return onnxscript_graph
 
     @diagnostics.diagnose_call(
@@ -530,6 +566,9 @@ class FxOnnxInterpreter:
         onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
         op_level_debug: bool,
     ):
+        # Dispatch to ONNX op through OpSchema. The input argument dtypes are compared to
+        # function signature in OpSchema, and find the best matched overload.
+        # TODO(titaiwang): diagnostic rules.
         # aten ops and other stateless functions.
         if node.target == operator.getitem and isinstance(
             fx_name_to_onnxscript_value[node.args[0].name], tuple  # type: ignore[union-attr,index]
