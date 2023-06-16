@@ -15,9 +15,8 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
 
-from typing import Any, List, NamedTuple, Set
+from typing import Any, NamedTuple
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -273,6 +272,12 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     "sebotnet33ts_256",  # Flaky accuracy failed
 ]
 
+CI_SKIP[CI("inductor", training=False, dynamic=True, device="cpu")] = [
+    *CI_SKIP[CI("inductor", training=False, device="cpu")],
+    "pyhpc_isoneutral_mixing",
+    "dpn107",
+]
+
 CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
@@ -285,42 +290,6 @@ CI_SKIP_OPTIMIZER = {
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
 }
-
-
-# Model Groups
-@dataclass(frozen=True)
-class ModelGroup:
-    name: str
-    models: Set[str]
-
-
-BLUEBERRY_MODELS = ModelGroup("Blueberries", {"llama", "nanogpt_generate"})
-
-
-@dataclass(frozen=True)
-class GroupMap:
-    groups: List[ModelGroup]
-
-    def model_group(self, model_name):
-        for group in self.groups:
-            if model_name in group.models:
-                return group.name
-        return None
-
-    @classmethod
-    def assert_single_group(cls, groups: List[ModelGroup]):
-        model_to_group = {}
-        for group in groups:
-            for model in group.models:
-                if model in model_to_group:
-                    raise ValueError(
-                        f"Model {model} appears in multiple groups, {model_to_group[model]} and {group.name}"
-                    )
-                model_to_group[model] = group.name
-        return cls(groups)
-
-
-ALL_MODEL_GROUPS = GroupMap.assert_single_group([BLUEBERRY_MODELS])
 
 
 def model_specified_by_path(path_and_class_str):
@@ -725,9 +694,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    current_group = ALL_MODEL_GROUPS.model_group(current_name)
-    first_headers = ["dev", "name", "group", "batch_size"]
-    first_fields = [current_device, current_name, current_group, current_batch_size]
+    first_headers = ["dev", "name", "batch_size"]
+    first_fields = [current_device, current_name, current_batch_size]
     if "tag" in kwargs:
         first_headers.append("tag")
         first_fields.append(kwargs["tag"])
@@ -1269,10 +1237,6 @@ class BenchmarkRunner:
 
     @property
     def failing_fx2trt_models(self):
-        return set()
-
-    @property
-    def failing_dynamic_shape_models(self):
         return set()
 
     @property
@@ -2166,7 +2130,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--timeout",
         type=int,
-        default=1800,
+        default=2000,
         help="timeout (second) for benchmarking.",
     )
 
@@ -2335,7 +2299,6 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.assume_static_by_default = True
         torch._dynamo.config.automatic_dynamic_shapes = True
     if args.dynamic_shapes:
-        torch._dynamo.config.dynamic_shapes = True
         torch._dynamo.config.automatic_dynamic_shapes = True
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
@@ -2410,13 +2373,7 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
-            # See https://github.com/pytorch/pytorch/issues/102814
-            if torch._dynamo.config.dynamic_shapes:
-                torch._dynamo.config.assume_static_by_default = False
-            if not torch._dynamo.config.automatic_dynamic_shapes:
-                log.warning(
-                    "hf_T5_generate compiles extremely slowly without dynamic shapes; consider lowering cache_size_limit"
-                )
+            torch._dynamo.config.automatic_dynamic_shapes = True
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -2470,10 +2427,6 @@ def run(runner, args, original_dir=None):
         )
         if args.training:
             runner.skip_models.add("hf_T5")
-
-    if torch._dynamo.config.dynamic_shapes:
-        # TODO(jansel): fix bugs in these
-        runner.skip_models.update(runner.failing_dynamic_shape_models)
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)
