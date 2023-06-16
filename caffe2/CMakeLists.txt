@@ -838,7 +838,6 @@ foreach(source_file IN LISTS Caffe2_CPU_SRCS)
     set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
   endif()
 endforeach()
-set_property(DIRECTORY "${CMAKE_BINARY_DIR}" PROPERTY COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
     PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
