@@ -464,6 +464,8 @@ aten::_sparse_log_softmax
 aten::_sparse_log_softmax.out
 aten::_sparse_log_softmax_backward_data
 aten::_sparse_log_softmax_backward_data.out
+aten::_sparse_mask_projection
+aten::_sparse_mask_projection.out
 aten::_sparse_mm_reduce_impl
 aten::_sparse_mm_reduce_impl_backward
 aten::_sparse_softmax
@@ -1314,6 +1316,7 @@ aten::values_copy
 aten::values_copy.out
 aten::vdot
 aten::vdot.out
+aten::view.dtype
 aten::view_as_complex
 aten::view_as_complex_copy
 aten::view_as_complex_copy.out
