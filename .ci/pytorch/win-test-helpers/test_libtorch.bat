@@ -28,11 +28,7 @@ for /r "." %%a in (*.exe) do (
     echo "SQUIRTLE"
 )
 
-if errorlevel 1 (
-  echo "JIGGLYPUFF"
-  exit /b 1
-)
-
+echo JIGGLYPUFF %errorlevel%
 goto :eof
 
 :libtorch_check
