@@ -30,7 +30,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes
-
+from torch.fx.experimental.symbolic_shapes import constrain_range
 from torch.utils._pytree import tree_map
 
 
@@ -309,6 +309,11 @@ def assert_async(val):
 @register_meta(aten._assert_async.msg)
 def assert_async_meta(val, assert_msg):
     return
+
+
+@register_meta(aten.sym_constrain_range.default)
+def sym_constrain_range(size, min, max):
+    constrain_range(size, min=min, max=max)
 
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
@@ -2526,6 +2531,51 @@ def meta_round(self, **kwargs):
     return _elementwise_meta(
         self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
+
+
+def shift_dtype_check(fn_name, self, val):
+    check(
+        utils.is_integer_dtype(self.dtype),
+        lambda: f"{fn_name}: Expected input tensor to have an integral dtype. Got {self.dtype}",
+    )
+    if isinstance(val, torch.Tensor):
+        check(
+            utils.is_integer_dtype(val.dtype),
+            lambda: f"{fn_name}: Expected shift value to have an integral dtype. Got {val.dtype}",
+        )
+    else:
+        check(
+            isinstance(val, IntLike),
+            lambda: f"{fn_name}: Expected shift value to be an int. Got {val}",
+        )
+
+
+@register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
+def meta_rshifts(self, other):
+    shift_dtype_check("rshift", self, other)
+    element_wise = _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    # Annoying edgecase
+    if self.dim() == 0 and isinstance(other, torch.Tensor):
+        return torch.empty(
+            other.shape, device=element_wise.device, dtype=element_wise.dtype
+        )
+    return element_wise
+
+
+@register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
+def meta_lshifts(self, other):
+    shift_dtype_check("lshift", self, other)
+    element_wise = _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    # Annoying edgecase
+    if self.dim() == 0 and isinstance(other, torch.Tensor):
+        return torch.empty(
+            other.shape, device=element_wise.device, dtype=element_wise.dtype
+        )
+    return element_wise
 
 
 @register_meta(aten.zero.default)
