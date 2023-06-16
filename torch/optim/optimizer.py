@@ -38,8 +38,7 @@ def _use_grad_for_differentiable(func):
         finally:
             torch.set_grad_enabled(prev_grad)
         return ret
-    _use_grad.__doc__ = func.__doc__
-    _use_grad.__signature__ = inspect.signature(func)
+    functools.update_wrapper(_use_grad, func)
     return _use_grad
 
 def _get_value(x):
