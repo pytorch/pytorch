@@ -7,6 +7,7 @@ from typing import Dict, Iterable, Union
 import sympy
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
 from .utils import sympy_subs, sympy_symbol
@@ -65,8 +66,8 @@ def range_expressable_in_32_bits(range):
 
 
 def get_expr_range(expr, vars_ranges: dict):
-    symbols = list(expr.free_symbols)
-    if len(symbols) == 0:
+    fs = list(expr.free_symbols)
+    if len(fs) == 0:
         return ValueRanges(expr, expr)
 
     vars_ranges = vars_ranges.copy()
@@ -78,11 +79,12 @@ def get_expr_range(expr, vars_ranges: dict):
         def mod_indexing_rep(x, y, z):
             if z.is_constant():
                 new_var = sympy_symbol("mod_index" + f"{next(cnt)}")
+                # TODO: check if x / y has a range <= z and return x / y.
                 if z > 0:
                     vars_ranges[new_var] = ValueRanges(0, z - 1)
                 else:
                     vars_ranges[new_var] = ValueRanges(z + 1, 0)
-                symbols.append(new_var)
+                fs.append(new_var)
                 return new_var
 
             # never really happens, we'll bail on optimizing
@@ -100,7 +102,7 @@ def get_expr_range(expr, vars_ranges: dict):
     other_symbols = []
 
     expr_for_deriv = replace_symbols_for_deriv(expr)
-    for symbol in symbols:
+    for symbol in fs:
         diff = sympy.diff(expr_for_deriv, symbol)
         if diff.is_positive:
             monotonic_increasing.append(symbol)
@@ -114,6 +116,7 @@ def get_expr_range(expr, vars_ranges: dict):
             if (
                 len(diff_free_symbols) == 1
                 and symbol in diff_free_symbols
+                and symbol in vars_ranges
                 and vars_ranges[symbol].lower == vars_ranges[symbol].upper
             ):
                 monotonic_increasing.append(symbol)
@@ -135,6 +138,10 @@ def get_expr_range(expr, vars_ranges: dict):
                 for k, v in vars_ranges.items()
             },
         )
+        if free_symbols(min_val):
+            min_val = -math.inf
+        if free_symbols(max_val):
+            max_val = math.inf
         return ValueRanges(min_val, max_val)
     else:
         # bail on optimizing, have not run into this yet
@@ -171,6 +178,8 @@ class OptimizeIndexing:
         ]
 
         for k, v in indices_ranges.items():
+            if free_symbols(v):
+                v = math.inf
             self.replace_indirect(k, ValueRanges(0, v))
 
         # avoid computing these values, pessimistically assume that they are unbounded
