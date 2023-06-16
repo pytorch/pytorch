@@ -1841,33 +1841,36 @@ dynamo_inlining_module_failures = set({
     # TODO: this just documents the first graph break, there may be more!
     #       currently "torch._dynamo.explain" doesn't work for some reason
     #       maybe it makes some assumptions that we are breaking with this hack
-    # TODO: there needs to be a way to separate out train/eval
 
-    # Fail even if we don't trace through:
-
+    # [ Fail even if we don't trace through ]
+    #
     # Still fail due to data dependent operator
     torch.nn.GaussianNLLLoss,  # data dependent operator: aten._local_scalar_dense.default
+    torch.nn.TransformerEncoder,  # comparison TensorVariable() <built-in function is_not> TensorVariable()
+                                  # 'data dependent operator: aten.equal.default
+    torch.nn.Transformer,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10c44b040>
+                           # data dependent operator: aten.equal.default
+    # Purposely graph break when wrapping into VariableTracker
+    torch.nn.GRU,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
+    torch.nn.LSTM,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
+    torch.nn.RNN,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
+
+    # TODO: create an issue to track the ones that used to fail before we fell back
+    #
+    # torch.nn.TransformerDecoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
+    # torch.nn.TransformerEncoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
+    # torch.nn.MultiheadAttention,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10ecf5dc0>
+})
+
+# The following only fail if we are train=True
+skip_if_train = set({
+    # The following fail whether we trace or not
     torch.nn.BatchNorm1d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
                            # data dependent operator: aten._local_scalar_dense.default
     torch.nn.BatchNorm2d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
                            # data dependent operator: aten._local_scalar_dense.default
     torch.nn.BatchNorm3d,  # call_function BuiltinVariable(float) [TensorVariable()] {}
                            # data dependent operator: aten._local_scalar_dense.default
-    torch.nn.TransformerEncoder,  # comparison TensorVariable() <built-in function is_not> TensorVariable()
-                                  # 'data dependent operator: aten.equal.default
-    torch.nn.Transformer,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10c44b040>
-                           # data dependent operator: aten.equal.default
-
-    # Purposely graph break when wrapping into VariableTracker
-    torch.nn.GRU,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
-    torch.nn.LSTM,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
-    torch.nn.RNN,  # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs
-
-    # No longer fail if we don't trace through:
-
-    torch.nn.TransformerDecoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
-    torch.nn.TransformerEncoderLayer,  # TensorVariable() <built-in function is_not> TensorVariable()
-    torch.nn.MultiheadAttention,  # torch.* op returned non-Tensor dtype call_function <function _none_or_dtype at 0x10ecf5dc0>
 })
 
 # Copy from test/functorch/common_utils.py
@@ -1904,7 +1907,11 @@ class TestTemp(torch._dynamo.test_case.TestCase):
             # Always inlined I think, but we want to test anyway?
             return self.skipTest("skipping lazy module")
 
-        for module_input in module_inputs:
+        if module_info.module_cls in skip_if_train:
+            # Would be cool to make this an xfail and do it in a smarter way
+            return self.skipTest("skipping lazy module")
+
+        for i, module_input in enumerate(module_inputs):
             if module_input.forward_input is None:
                 continue
 

@@ -287,9 +287,9 @@ class TransformerEncoder(Module):
                 first_layer.linear2.bias,
             )
 
-            if torch.overrides.has_torch_function(tensor_args):
-                why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif not (src.is_cuda or 'cpu' in str(src.device)):
+            # if torch.overrides.has_torch_function(tensor_args):
+            #     why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
+            if not (src.is_cuda or 'cpu' in str(src.device)):
                 why_not_sparsity_fast_path = "src is neither CUDA nor CPU"
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
@@ -576,9 +576,9 @@ class TransformerEncoderLayer(Module):
 
             # We have to use list comprehensions below because TorchScript does not support
             # generator expressions.
-            if torch.overrides.has_torch_function(tensor_args):
-                why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif not all((x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args):
+            # if torch.overrides.has_torch_function(tensor_args):
+            #     why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
+            if not all((x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument is neither CUDA nor CPU"
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "

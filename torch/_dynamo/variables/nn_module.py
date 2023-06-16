@@ -287,27 +287,7 @@ class NNModuleVariable(VariableTracker):
                 # is_allowed or other variations.
                 initialize_lazy_module(tx, mod, args, kwargs)
 
-            if False:
-                if nnmodule_has_hooks(
-                    mod, check_forward_hooks=True, check_backward_hooks=True
-                ):
-                    unimplemented(
-                        f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
-                        "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
-                    )
-
-                from .builder import wrap_fx_proxy
-
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_module",
-                        self.module_key,
-                        *proxy_args_kwargs(args, kwargs),
-                    ),
-                    **options,
-                )
-            else:
+            def inline(args):
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
                     "since inlined function may have default args which must be guarded."
@@ -332,6 +312,32 @@ class NNModuleVariable(VariableTracker):
                     args,
                     kwargs,
                 )
+
+            if is_allowed(mod.__class__):
+                try:
+                    return inline(args)
+                except Unsupported:
+                    if nnmodule_has_hooks(
+                        mod, check_forward_hooks=True, check_backward_hooks=True
+                    ):
+                        unimplemented(
+                            f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
+                            "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
+                        )
+
+                    from .builder import wrap_fx_proxy
+
+                    return wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_module",
+                            self.module_key,
+                            *proxy_args_kwargs(args, kwargs),
+                        ),
+                        **options,
+                    )
+            else:
+                return inline(args)
 
     def call_method(
         self,
