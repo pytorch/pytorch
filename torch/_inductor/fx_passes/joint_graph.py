@@ -163,7 +163,8 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     lazy_init()
     count = 0
 
-    constant_fold_uniform_value(graph)
+    if config.joint_graph_constant_folding:
+        constant_fold_uniform_value(graph)
 
     if config.pattern_matcher:
         count += patterns.apply(graph.graph)

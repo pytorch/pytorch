@@ -6683,6 +6683,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         # Disable constant propagation, so we isolate value range analysis
         @patch.object(config, "constant_and_index_propagation", False)
+        @patch.object(config, "joint_graph_constant_folding", False)
         def test_cant_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
