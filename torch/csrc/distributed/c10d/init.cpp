@@ -1563,6 +1563,13 @@ Arguments:
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "reduce_scatter_tensor_coalesced",
+              &::c10d::ProcessGroup::reduce_scatter_tensor_coalesced,
+              py::arg("outputs"),
+              py::arg("inputs"),
+              py::arg("opts") = ::c10d::ReduceScatterOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "alltoall_base",
               &::c10d::ProcessGroup::alltoall_base,
               py::arg("output"),

@@ -62,7 +62,7 @@ def parse_from_yaml(ei: Dict[str, object]) -> Dict[ETKernelKey, BackendMetadata]
         kernel_keys = (
             [ETKernelKey((), default=True)]
             if arg_meta is None
-            else ETKernelKey.gen_from_yaml(arg_meta, type_alias, dim_order_alias)
+            else ETKernelKey.gen_from_yaml(arg_meta, type_alias, dim_order_alias)  # type: ignore[arg-type]
         )
 
         for kernel_key in kernel_keys:

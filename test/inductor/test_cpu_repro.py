@@ -660,7 +660,6 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_vec_dynamic_shapes(self):
         def fn(x):
             return torch.softmax(x, -1)
@@ -1575,6 +1574,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.max_horizontal_fusion_size": 0}):
             metrics.reset()
+            torch._dynamo.reset()
             a = torch.randn(size=(4, 16), dtype=torch.bfloat16)
             b = torch.randn(size=(4, 16), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 16), dtype=torch.bfloat16)
@@ -1586,6 +1586,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.max_horizontal_fusion_size": 1}):
             metrics.reset()
+            torch._dynamo.reset()
             a = torch.randn(size=(4, 32), dtype=torch.bfloat16)
             b = torch.randn(size=(4, 32), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 32), dtype=torch.bfloat16)
@@ -1597,6 +1598,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.max_horizontal_fusion_size": 2}):
             metrics.reset()
+            torch._dynamo.reset()
             a = torch.randn(size=(4, 64), dtype=torch.bfloat16)
             b = torch.randn(size=(4, 64), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 64), dtype=torch.bfloat16)
@@ -1609,6 +1611,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.max_horizontal_fusion_size": 3}):
             metrics.reset()
+            torch._dynamo.reset()
             a = torch.randn(size=(4, 128), dtype=torch.bfloat16)
             b = torch.randn(size=(4, 128), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 128), dtype=torch.bfloat16)

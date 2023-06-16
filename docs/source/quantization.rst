@@ -1009,8 +1009,10 @@ if ``dtype`` is ``torch.qint8``, make sure to set a custom ``quant_min`` to be `
 you call the `torch.ao.quantization.get_default_qconfig(backend)` or `torch.ao.quantization.get_default_qat_qconfig(backend)` function to get the default ``qconfig`` for
 ``x86`` or ``qnnpack`` backend
 
-2. If ``onednn`` backend is selected, 8 bits for activation in the default qconfig mapping ``torch.ao.quantization.get_default_qconfig_mapping('onednn')`` will be used.
-and qconfig ``torch.ao.quantization.get_default_qconfig('onednn')``. The ``onednn`` quantization backend is recommended to be used on CPUs with Vector Neural Network Instruction support.
+2. If ``onednn`` backend is selected, 8 bits for activation will be used in the default qconfig mapping ``torch.ao.quantization.get_default_qconfig_mapping('onednn')``
+and default qconfig ``torch.ao.quantization.get_default_qconfig('onednn')``. It is recommended to be used on CPUs with Vector Neural Network Instruction
+support. Otherwise, setting ``reduce_range`` to True of the activation's observer to get better accuracy on CPUs without Vector Neural Network Instruction
+support.
 
 Frequently Asked Questions
 --------------------------
