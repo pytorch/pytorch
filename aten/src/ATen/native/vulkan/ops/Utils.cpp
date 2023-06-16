@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/impl/Packing.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Utils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -42,7 +43,7 @@ namespace utils {
  * 7. Finally, return a contiguous version of the tensor. The final shape of the
  *    tensor would be {NC_aligned/4, H, W, 4}
  */
-static Tensor nchw_to_nc4hw(const Tensor& src) {
+Tensor nchw_to_nc4hw(const Tensor& src) {
   uint32_t N = get_dim<Dim4D::Batch>(src.sizes());
   uint32_t C = get_dim<Dim4D::Channel>(src.sizes());
   uint32_t H = get_dim<Dim4D::Height>(src.sizes());
@@ -67,7 +68,7 @@ static Tensor nchw_to_nc4hw(const Tensor& src) {
  * format, can be copied directly. The shape of the staging tensor will be the
  * same as the tensor produced by a call to format_src_tensor().
  */
-static Tensor create_staging_tensor(const vTensor& v_in) {
+Tensor create_staging_tensor(const vTensor& v_in) {
   uint32_t N = get_dim<Dim4D::Batch>(v_in.sizes());
   uint32_t C = get_dim<Dim4D::Channel>(v_in.sizes());
   uint32_t H = get_dim<Dim4D::Height>(v_in.sizes());
@@ -92,7 +93,7 @@ static Tensor create_staging_tensor(const vTensor& v_in) {
  * Note that the sizes of the original tensor must be passed in to fully restore
  * the properties of the original tensor.
  */
-static Tensor nc4hw_to_nchw(const Tensor& t_in, IntArrayRef sizes) {
+Tensor nc4hw_to_nchw(const Tensor& t_in, IntArrayRef sizes) {
   uint32_t N = get_dim<Dim4D::Batch>(sizes);
   uint32_t C = get_dim<Dim4D::Channel>(sizes);
   uint32_t H = get_dim<Dim4D::Height>(sizes);
@@ -110,7 +111,7 @@ static Tensor nc4hw_to_nchw(const Tensor& t_in, IntArrayRef sizes) {
   return t_in_shaved.reshape(sizes).contiguous();
 }
 
-static void copy_buffer_to_vtensor(
+void copy_buffer_to_vtensor(
     api::VulkanBuffer& src_buffer,
     vTensor& v_dst,
     api::PipelineBarrier& pipeline_barrier) {
@@ -138,7 +139,7 @@ static void copy_buffer_to_vtensor(
       VK_NULL_HANDLE);
 }
 
-static void copy_buffer_to_buffer(
+void copy_buffer_to_buffer(
     api::Context* const context,
     api::StorageBuffer& src,
     api::StorageBuffer& dst,
@@ -159,7 +160,7 @@ static void copy_buffer_to_buffer(
       fence_handle);
 }
 
-static void copy_vtensor_to_buffer(
+void copy_vtensor_to_buffer(
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,
     api::PipelineBarrier& pipeline_barrier,
@@ -188,7 +189,7 @@ static void copy_vtensor_to_buffer(
       fence_handle);
 }
 
-static void pack_buffer_to_vtensor(
+void pack_buffer_to_vtensor(
     api::VulkanBuffer& buffer,
     vTensor& v_self,
     api::PipelineBarrier& pipeline_barrier) {
@@ -209,12 +210,12 @@ static void pack_buffer_to_vtensor(
   }
 }
 
-static void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
+void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
   api::PipelineBarrier pipeline_barrier{};
   pack_buffer_to_vtensor(staging, v_self, pipeline_barrier);
 }
 
-static void pack_vtensor_to_staging(
+void pack_vtensor_to_staging(
     vTensor& v_self,
     api::VulkanBuffer& staging,
     const VkFence fence_handle) {
