@@ -373,7 +373,7 @@ Tensor mkldnn_reorder_conv3d_weight(
 #if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
 #include <mkl.h>
 
-Tensor mkl_reorder_linear_weight(
+static Tensor mkl_reorder_linear_weight(
     const Tensor& weight,
     const int64_t batch_size) {
   TORCH_CHECK(
