@@ -454,23 +454,14 @@ class Exporter:
         # TODO: Design the passes API
         graph_module = pre_export_passes(self.options, graph_module, updated_model_args)
 
-        from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
-            graph_building as onnxscript_graph_building,
-        )
-
-        onnxscript_graph = onnxscript_graph_building.TorchScriptGraph()
-
+        # TODO: Defer `import onnxscript` out of `import torch` path
+        # https://github.com/pytorch/pytorch/issues/103764
         from torch.onnx._internal.fx import fx_onnx_interpreter
 
         fx_interpreter = fx_onnx_interpreter.FxOnnxInterpreter(
             diagnostic_context=self.options.diagnostic_context
         )
-        fx_interpreter.run(
-            torchscript_tracer=onnxscript_graph_building.TorchScriptTracingEvaluator(
-                onnxscript_graph
-            ),
-            onnxscript_graph=onnxscript_graph,
-            fx_name_to_onnxscript_value={},
+        onnxscript_graph = fx_interpreter.run(
             fx_graph_module=graph_module,
             onnxfunction_dispatcher=self.options.onnxfunction_dispatcher,
             op_level_debug=self.options.op_level_debug,

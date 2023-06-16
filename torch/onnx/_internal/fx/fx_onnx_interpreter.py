@@ -390,30 +390,28 @@ class FxOnnxInterpreter:
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
+        # THIS SHOULD BE THE ONLY STATE IN THIS CLASS (constraint from diagnosticS API)
+        # TODO: Diagnostics API should be revised to get rid of this attribute.
+        # DO NOT add other class-level attributes.
         self.diagnostic_context = diagnostic_context
 
     @_beartype.beartype
     def run(
         self,
-        torchscript_tracer: onnxscript_graph_building.TorchScriptTracingEvaluator,
-        onnxscript_graph: onnxscript_graph_building.TorchScriptGraph,
-        fx_name_to_onnxscript_value: Dict[
-            str,
-            Union[
-                onnxscript_graph_building.TorchScriptTensor,
-                Tuple[onnxscript_graph_building.TorchScriptTensor, ...],
-            ],
-        ],
         fx_graph_module: torch.fx.GraphModule,
         onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
         op_level_debug: bool,
-    ):
+    ) -> onnxscript_graph_building.TorchScriptGraph:
         """Analyze all FX nodes and trigger their ONNX translation.
 
         Args:
             context: Context each FX node method can use during ONNX translation
         """
-
+        onnxscript_graph = onnxscript_graph_building.TorchScriptGraph()
+        torchscript_tracer = onnxscript_graph_building.TorchScriptTracingEvaluator(
+            onnxscript_graph
+        )
+        fx_name_to_onnxscript_value = {}
         # TODO: Fix FakeTensorMode limitation asap
         # We want to pass list of ints and floats to TorchScript graph correctly
         # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
@@ -471,6 +469,7 @@ class FxOnnxInterpreter:
         #     location = _location_from_fx_stack_trace(node_stack_trace)
         #     if location is not None:
         #         diagnostic.with_location(location)
+        return onnxscript_graph
 
     @diagnostics.diagnose_call(
         diagnostics.rules.fx_node_to_onnx,
