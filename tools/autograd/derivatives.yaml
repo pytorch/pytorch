@@ -2443,8 +2443,9 @@
 - name: sparse_sampled_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self, mat1, mat2: "sparse_sampled_addmm_backward(grad,
                                                    self,
-                                                   grad_input_mask[2] ? c10::optional<Tensor>(mat1) : c10::nullopt,
-                                                   grad_input_mask[1] ? c10::optional<Tensor>(mat2) : c10::nullopt, alpha, beta, grad_input_mask)"
+                                                   wrap_opt_if(mat1, grad_input_mask[2]),
+                                                   wrap_opt_if(mat2, grad_input_mask[1]),
+                                                   alpha, beta, grad_input_mask)"
 
 - name: _sparse_mm_reduce_impl(Tensor self, Tensor other, str reduce) -> (Tensor, Tensor)
   output_differentiability: [True, False]

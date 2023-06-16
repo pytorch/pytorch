@@ -25,6 +25,7 @@
 #     which will in turn dispatch back to VariableType for its
 #     differentiable subcomponents.
 #
+import re
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from torchgen.api import cpp
@@ -1201,17 +1202,57 @@ def emit_body(
             if len(used_in) != 1:
                 return None
             derivative = used_in[0]
-            if len(derivative.var_names) != 1:
-                return None
-            derivative_var_name = derivative.var_names[0]
 
-            # Figure out the offset of the edge that uses this variable
+            # Case with multioutput formulas
+            # TODO: process all derivative formulas!!!
+            if len(derivative.var_names) != 1:
+                wrap_opt_if_name = "wrap_opt_if"
+                formula = derivative.formula
+                wrap_opt_if_start = formula.find(
+                    f"{wrap_opt_if_name}({arg.nctype.name}"
+                )
+                if wrap_opt_if_start == -1:
+                    return None
+
+                # Conditions in wrap_opt_if could be riddled with parantheses,
+                # so we want to find the last ')' in 'wrap_opt_if(...)'.
+                parantheses_stack = []
+                for right_paranthesis_idx in range(
+                    wrap_opt_if_start + len(wrap_opt_if_name), len(formula)
+                ):
+                    if formula[right_paranthesis_idx] == "(":
+                        parantheses_stack.append("(")
+                    elif formula[right_paranthesis_idx] == ")":
+                        parantheses_stack.pop()
+                        # Stop if the very first '(' got it's ')' pair.
+                        if not parantheses_stack:
+                            break
+                # Error if there are unmatched parantheses, it should be empty!
+                assert not parantheses_stack
+
+                wrap_opt_if_args = formula[
+                    wrap_opt_if_start
+                    + len(wrap_opt_if_name)
+                    + 1 : right_paranthesis_idx
+                ].split(",")
+                # wrap_opt_if is a 2-arg function
+                assert len(wrap_opt_if_args) == 2
+
+                wrap_opt_if_condition = wrap_opt_if_args[-1].strip()
+                # replace 'grad_input_mask[num]' with 'grad_fn->should_compute_output(num)'
+                wrap_opt_if_condition = re.sub(
+                    r"grad_input_mask\[(\d+)\]",
+                    r"grad_fn->should_compute_output(\1)",
+                    wrap_opt_if_condition,
+                )
+                return f"{wrap_opt_if_condition}"
+
+            derivative_var_name = derivative.var_names[0]
             for edge_off, a in enumerate(args_with_derivatives):
                 if a.name == derivative_var_name:
                     break
             else:
                 raise AssertionError()
-
             return f"grad_fn->should_compute_output({edge_off})"
 
         if is_inplace_foreach:

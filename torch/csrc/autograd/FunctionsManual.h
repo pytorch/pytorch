@@ -38,6 +38,11 @@ Tensor toNonOptFwGrad(const c10::optional<Tensor>& t);
 Tensor toNonOptPrimal(const c10::optional<Tensor>& t);
 Tensor toNonOptTensor(const c10::optional<Tensor>& t);
 
+inline c10::optional<Tensor> wrap_opt_if(const Tensor& t, const bool cond) {
+  using OptTensor = c10::optional<Tensor>;
+  return cond ? OptTensor(t) : static_cast<OptTensor>(c10::nullopt);
+}
+
 Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction);
 bool any_variable_defined(const variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor& t);
