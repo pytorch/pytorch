@@ -1471,6 +1471,26 @@ def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
         return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
 
+@_make_elementwise_binary_reference(
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+def logaddexp2(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        not (utils.is_complex_dtype(a.dtype) or utils.is_complex_dtype(b.dtype)),
+        lambda: "logaddexp2 doesn't support complex dtypes",
+    )
+    # Nb. this implementation does not distribute the gradients evenly when a == b
+    mask = a >= b
+    max_ = torch.where(mask, a, b)
+    min_ = torch.where(mask, b, a)
+    inf_mask = torch.logical_and(torch.isinf(a), a == b)
+    inv_log_2 = 1.0 / math.log(2)
+    result = max_ + torch.log1p(torch.exp2(min_ - max_)) * inv_log_2
+    return torch.where(inf_mask, a, result)
+
+
 # TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -3777,12 +3797,36 @@ def diag(
         return torch.diagonal_copy(self, offset)
 
 
-def _diagonal_as_strided_args(
+@register_decomposition(aten.diagonal_scatter)
+@out_wrapper()
+def diagonal_scatter(
+    input: TensorLikeType,
+    src: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    out = utils.clone_preserve_strides(input)
+    diag = out.diagonal(offset, dim1, dim2)
+    check(
+        diag.shape == src.shape,
+        lambda: "expected src to have a size equal to the diagonal of the input."
+        f"Got {src.shape} for a diagonal of shape {diag.shape}",
+    )
+    copy_to(diag, src)
+    return out
+
+
+@register_decomposition(aten.diagonal)
+def diagonal(
     self: TensorLikeType,
     offset: int = 0,
     dim1: int = 0,
     dim2: int = 1,
 ) -> TensorLikeType:
+    """
+    Reference implementation of torch.diagonal
+    """
     num_dims = self.dim()
     dim1 = utils.canonicalize_dim(idx=dim1, rank=num_dims)
     dim2 = utils.canonicalize_dim(idx=dim2, rank=num_dims)
@@ -3810,62 +3854,12 @@ def _diagonal_as_strided_args(
     strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
     strides.append(self.stride()[dim1] + self.stride()[dim2])
 
-    return sizes, strides, storage_offset
-
-
-@register_decomposition(aten.diagonal_scatter)
-@out_wrapper()
-def diagonal_scatter(
-    input: TensorLikeType,
-    src: TensorLikeType,
-    offset: int = 0,
-    dim1: int = 0,
-    dim2: int = 1,
-) -> TensorLikeType:
-    out = utils.clone_preserve_strides(input)
-    diag = out.diagonal(offset, dim1, dim2)
-    check(
-        diag.shape == src.shape,
-        lambda: "expected src to have a size equal to the diagonal of the input."
-        f"Got {src.shape} for a diagonal of shape {diag.shape}",
-    )
-    sizes, strides, storage_offset = _diagonal_as_strided_args(
-        input, offset, dim1, dim2
-    )
-    return aten.as_strided_scatter(
-        input, src, size=sizes, stride=strides, storage_offset=storage_offset
-    )
-
-
-@register_decomposition(aten.diagonal)
-def diagonal(
-    self: TensorLikeType,
-    offset: int = 0,
-    dim1: int = 0,
-    dim2: int = 1,
-) -> TensorLikeType:
-    """
-    Reference implementation of torch.diagonal
-    """
-    sizes, strides, storage_offset = _diagonal_as_strided_args(
-        self, offset, dim1, dim2
-    )
     result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
 
     return result
 
 
-@register_decomposition(aten.diagonal_copy)
-def diagonal_copy(
-    self: TensorLikeType,
-    offset: int = 0,
-    dim1: int = 0,
-    dim2: int = 1,
-) -> TensorLikeType:
-    sizes, strides, storage_offset = _diagonal_as_strided_args(
-        self, offset, dim1, dim2
-    )
-    return aten.as_strided_copy(self, size=sizes, stride=strides, storage_offset=storage_offset)
+diagonal_copy = _make_copy_from_view(diagonal)
 
 
 @register_decomposition(aten.diag_embed)

@@ -13,7 +13,9 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
+    canonicalize_dim,
     canonicalize_dims,
+    check,
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -924,6 +926,63 @@ def cat(inputs, dim=0):
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
 
+@register_lowering(aten.diagonal, type_promotion_kind=None)
+def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    original_shape = input.get_size()
+    num_dims = len(original_shape)
+    dim1 = canonicalize_dim(idx=dim1, rank=num_dims)
+    dim2 = canonicalize_dim(idx=dim2, rank=num_dims)
+
+    check(
+        dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
+    )
+
+    if offset >= 0:
+        diag_size = max(min(original_shape[dim1], original_shape[dim2] - offset), 0)
+    else:
+        diag_size = max(min(original_shape[dim1] + offset, original_shape[dim2]), 0)
+
+    base_idx = (0, 0)
+    if offset >= 0:
+        base_idx = (0, offset)
+    else:
+        base_idx = (-offset, 0)
+
+    sizes = [s for i, s in enumerate(original_shape) if i not in (dim1, dim2)]
+    sizes.append(diag_size)
+
+    def reindexer(idx):
+        diag_idx = idx[-1]
+        original_idx = [0] * len(original_shape)
+        cur_dim = 0
+        for d in range(num_dims):
+            if d == dim1:
+                original_idx[d] = diag_idx + base_idx[0]
+            elif d == dim2:
+                original_idx[d] = diag_idx + base_idx[1]
+            else:
+                original_idx[d] = idx[cur_dim]
+                cur_dim += 1
+
+        assert cur_dim == len(original_shape) - 2
+        return original_idx
+
+    return TensorBox(ir.GenericView.create(input, sizes, reindexer))
+
+
+@register_lowering(aten.diagonal_copy, type_promotion_kind=None)
+def diagonal_copy(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    return clone(diagonal(input, offset, dim1, dim2))
+
+
+@register_lowering(aten.diagonal_scatter, type_promotion_kind=None)
+def diagonal_scatter(input, src, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    output = clone(input)
+    target = diagonal(output, offset, dim1, dim2)
+    mutate_to(target, src)
+    return output
+
+
 @register_lowering(aten.select, type_promotion_kind=None)
 def select(x, dim, idx):
     idx = View.handle_negative_index(idx, x.get_size()[dim])
@@ -1573,7 +1632,6 @@ make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
 make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
-make_fallback(aten.logaddexp2)
 make_fallback(aten.logcumsumexp)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
@@ -1631,7 +1689,6 @@ make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
 make_fallback(aten.avg_pool3d_backward)
 make_fallback(aten._cdist_backward)
-make_fallback(aten.diagonal_backward, warn=False)
 make_fallback(aten._embedding_bag_dense_backward)
 make_fallback(aten.fractional_max_pool2d_backward)
 make_fallback(aten.fractional_max_pool3d_backward)

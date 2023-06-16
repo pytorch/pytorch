@@ -1408,13 +1408,30 @@ class SqueezeView(BaseView):
 
 
 @dataclasses.dataclass
-class View(BaseView):
+class GenericView(BaseView):
     size: List[Expr]
     reindex: Callable[..., Any]
 
     def make_reindexer(self):
         return self.reindex
 
+    def __str__(self):
+        return self.str_helper(
+            [self.data, f"size={self.size}", f"reindex={self.reindex_str()}"]
+        )
+
+    __repr__ = __str__
+
+    @classmethod
+    def create(cls, x, new_size, reindex):
+        return cls(x, list(new_size), reindex)
+
+    def get_size(self):
+        return self.size
+
+
+@dataclasses.dataclass
+class View(GenericView):
     @staticmethod
     def handle_negative_index(idx, size):
         idx = sympy.expand(idx)
@@ -1429,13 +1446,6 @@ class View(BaseView):
         index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
         index_new = list(self.reindex(index_old))
         return f"lambda {', '.join(map(str, index_old))}: {index_new}"
-
-    def __str__(self):
-        return self.str_helper(
-            [self.data, f"size={self.size}", f"reindex={self.reindex_str()}"]
-        )
-
-    __repr__ = __str__
 
     @classmethod
     def create(cls, x, new_size):
@@ -1558,9 +1568,6 @@ class View(BaseView):
             return tuple(sympy_subs(x, replacements) for x in view_expr)
 
         return reindex
-
-    def get_size(self):
-        return self.size
 
 
 @dataclasses.dataclass
