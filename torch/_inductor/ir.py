@@ -1415,6 +1415,11 @@ class GenericView(BaseView):
     def make_reindexer(self):
         return self.reindex
 
+    def reindex_str(self):
+        index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
+        index_new = list(self.reindex(index_old))
+        return f"lambda {', '.join(map(str, index_old))}: {index_new}"
+
     def __str__(self):
         return self.str_helper(
             [self.data, f"size={self.size}", f"reindex={self.reindex_str()}"]
@@ -1441,11 +1446,6 @@ class View(GenericView):
             sizevars.guard_lt(idx, 0)
             idx = idx + size
         return idx
-
-    def reindex_str(self):
-        index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
-        index_new = list(self.reindex(index_old))
-        return f"lambda {', '.join(map(str, index_old))}: {index_new}"
 
     @classmethod
     def create(cls, x, new_size):
