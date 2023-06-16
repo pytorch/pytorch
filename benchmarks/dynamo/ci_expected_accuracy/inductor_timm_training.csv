@@ -4,7 +4,7 @@ adv_inception_v3,pass,8
 beit_base_patch16_224,pass,8
 botnet26t_256,pass,8
 coat_lite_mini,pass,8
-convit_base,pass,11
+convit_base,pass,9
 convmixer_768_32,pass,6
 convnext_base,pass,8
 cspdarknet53,pass,8

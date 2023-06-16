@@ -6,7 +6,6 @@ BartForCausalLM,pass,0
 BartForConditionalGeneration,pass,0
 BertForMaskedLM,pass,0
 BertForQuestionAnswering,pass,0
-BlenderbotForCausalLM,pass_due_to_skip,0
 BlenderbotSmallForCausalLM,pass,0
 BlenderbotSmallForConditionalGeneration,pass,0
 CamemBert,pass,0

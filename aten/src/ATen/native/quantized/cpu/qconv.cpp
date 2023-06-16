@@ -14,7 +14,7 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
-#include <ATen/native/ConvUtils.h>
+#include <ATen/native/quantized/ConvUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
@@ -187,55 +187,6 @@ std::array<int64_t, 2> MakeInputShape(int64_t /*D*/, int64_t H, int64_t W) {
 template <>
 std::array<int64_t, 3> MakeInputShape(int64_t D, int64_t H, int64_t W) {
   return {D, H, W};
-}
-
-template <int kSpatialDim>
-at::SmallVector<int64_t, kSpatialDim + 2> MakeConvOutputShape(
-    int N, // mini-batch
-    int M, // output channels
-    const std::array<int64_t, kSpatialDim>& input_image_shape,
-    const std::vector<int64_t>& kernel,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation);
-
-template <>
-at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
-    int N, // mini-batch
-    int M, // output channels
-    const std::array<int64_t, 2>& input_image_shape,
-    const std::vector<int64_t>& kernel,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation) {
-  const int H = input_image_shape[0];
-  const int W = input_image_shape[1];
-  const int64_t Y_H =
-      (H + 2 * padding[0] - dilation[0] * (kernel[0] - 1) - 1) / stride[0] + 1;
-  const int64_t Y_W =
-      (W + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1;
-  return {N, M, Y_H, Y_W};
-}
-
-template <>
-at::SmallVector<int64_t, 5> MakeConvOutputShape<3>(
-    int N, // mini-batch
-    int M, // output channels
-    const std::array<int64_t, 3>& input_image_shape,
-    const std::vector<int64_t>& kernel,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation) {
-  const int D = input_image_shape[0];
-  const int H = input_image_shape[1];
-  const int W = input_image_shape[2];
-  const int64_t Y_D =
-      (D + 2 * padding[0] - dilation[0] * (kernel[0] - 1) - 1) / stride[0] + 1;
-  const int64_t Y_H =
-      (H + 2 * padding[1] - dilation[1] * (kernel[1] - 1) - 1) / stride[1] + 1;
-  const int64_t Y_W =
-      (W + 2 * padding[2] - dilation[2] * (kernel[2] - 1) - 1) / stride[2] + 1;
-  return {N, M, Y_D, Y_H, Y_W};
 }
 
 #endif // USE_PYTORCH_QNNPACK
@@ -656,7 +607,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
    * quantization means XNNPACK will ignore kernel zero point(s).
    */
 
-  if ((std::is_same<underlying_t, c10::quint8>::value )) {
+  if constexpr (std::is_same_v<underlying_t, c10::quint8>) {
     TORCH_CHECK(!per_channel(),
       func_name, ": xnnpack does not currently have per_channel support with activation dtype of c10::quint8."
     );
@@ -793,7 +744,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
     output_shape = MakeDeConvOutputShape<kSpatialDim>(
         N, M, {H, W}, kernel_, stride(), padding(), output_padding(), dilation());
   } else {
-    output_shape = MakeConvOutputShape<kSpatialDim>(
+    output_shape = at::native::quantized::MakeConvOutputShape<kSpatialDim>(
         N, M, input_shape, kernel_, stride(), padding(), dilation());
   }
 
@@ -987,7 +938,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         output_padding(),
         dilation());
   } else {
-    output_shape = MakeConvOutputShape<kSpatialDim>(
+    output_shape = at::native::quantized::MakeConvOutputShape<kSpatialDim>(
         N, M, input_shape, kernel_, stride(), padding(), dilation());
   }
 
@@ -1059,7 +1010,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 }
 
 #ifdef USE_XNNPACK
-bool can_use_xnnp(
+static bool can_use_xnnp(
     c10::ScalarType dtype,
     int kSpatialDim,
     bool per_channel,
@@ -1197,8 +1148,8 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
 
   // has_accum: extra input besides the conv to do conv add fusion.
   bool has_accum = accum.has_value() ? true : false;
-  auto& ctx = at::globalContext();
   if (has_accum) {
+    auto& ctx = at::globalContext();
     func_name += "_add";
     TORCH_CHECK(
       !transpose(),
@@ -1221,8 +1172,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   auto src_data_type = dnnl::memory::data_type::u8;
   auto src_desc = ideep::tensor::desc(src_dims, src_data_type,
       kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
-  ideep::tensor src;
-  src.init(src_desc, act_contig.data_ptr());
+  ideep::tensor src(src_desc, act_contig.data_ptr());
   // weights & bias
   ideep::tensor& weights = *(weight_.get());
   bool with_bias = bias_.has_value();
@@ -1311,11 +1261,9 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     // The true scale and zero point is stored in ideep::scale_t(scale_size, inv_output_scale) and dst_zero_points.
     dst.set_scale(accum_scale);
     dst.set_zero_point(accum_zero_points);
-  } else {
-    op_attr = kReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  } else if (kReluFused) {
+    op_attr = ideep::attr_t::fuse_relu();
   }
-  // Since src zero point is unknown, set runtime value here
-  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), src_zero_points);
 
   // Bias might be modified outside (e.g. by quantization bias correction).
   // If so, update the prepacked bias as well.
@@ -1339,15 +1287,14 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
             dnnl::algorithm::deconvolution_direct,
             dnnl::prop_kind::forward_inference,
             ideep::u8s8, ideep::engine::cpu_engine());
-        get_deconv_cache() = DeconvPrimitiveCache(cache_key, params, b);
+        get_deconv_cache() = DeconvPrimitiveCache(cache_key, params);
         auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     if (get_deconv_cache().hit(cache_key)) {
       DeconvParams& params = get_deconv_cache().get_params();
-      auto& expected_bias = get_deconv_cache().get_bias();
       ideep::convolution_transpose_forward::compute<false, false>(
-          params, src, weights, expected_bias, dst);
+          params, src, weights, b, dst);
     } else {
       ideep::convolution_transpose_forward::compute(
           src, weights, b, dst_dims, dst,
@@ -1372,15 +1319,14 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
             op_attr, dnnl::algorithm::convolution_direct,
             dnnl::prop_kind::forward_inference,
             ideep::u8s8, ideep::engine::cpu_engine());
-        get_conv_cache() = ConvPrimitiveCache(cache_key, params, b);
+        get_conv_cache() = ConvPrimitiveCache(cache_key, params);
         auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     // If hit, use cached data. If miss, fall back to normal path.
     if (get_conv_cache().hit(cache_key)) {
       auto& params = get_conv_cache().get_params();
-      auto& expected_bias = get_conv_cache().get_bias();
-      ideep::convolution_forward::compute<false, false>(params, src, weights, expected_bias, dst);
+      ideep::convolution_forward::compute<false, false>(params, src, weights, b, dst);
     } else {
       ideep::convolution_forward::compute(
           src, weights, b, dst_dims, dst,
@@ -1425,8 +1371,7 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_relu(
 
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 /*
@@ -1585,5 +1530,4 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
