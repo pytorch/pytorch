@@ -268,9 +268,9 @@ class TestPasses(TestCase):
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
 
-        # 2 constraints for b
-        self.assertEqual(num_assert, 2)
-        self.assertEqual(num_scalar_tensor, 2)
+        # TODO: De-duplicate assertions for same symbol.
+        self.assertEqual(num_assert, 4)
+        self.assertEqual(num_scalar_tensor, 4)
 
         with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
             ep(torch.tensor([1, 1, 0, 0, 0]))
