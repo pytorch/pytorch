@@ -874,7 +874,7 @@ function MiniMap(mini_svg, plot, data, left_pad, height=70) {
     return {}
 }
 
-function Legend(svg, categories) {
+function Legend(plot_svg, categories, width) {
     let xstart = width - 100
     let ystart = 30
     plot_svg.append('g').selectAll('rect')
@@ -925,7 +925,7 @@ function create(max_entries) {
     let plot = MemoryPlot(plot_svg, data, left_pad)
 
     if (alloc_data.categories !== null) {
-        Legend(plot_svg.append('g'), alloc_data.categories)
+        Legend(plot_svg.append('g'), alloc_data.categories, width)
     }
 
     MiniMap(body.append("svg").attr('width', width).attr('height', 80).attr('display', 'block'), plot, data, left_pad)

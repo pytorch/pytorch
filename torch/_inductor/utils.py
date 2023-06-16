@@ -15,7 +15,7 @@ import textwrap
 import time
 from collections import defaultdict
 from io import StringIO
-from typing import Any, Dict, List, NamedTuple, Optional, Union
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -334,6 +334,23 @@ def get_kernel_metadata(node_schedule):
     for original_aten, nodes in sorted(original_aten_dict.items()):
         metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
     return "\n".join(metadata)
+
+
+def dominated_nodes(initial_queue: Iterable[torch.fx.Node], skip_filter=None):
+    """Returns the set of nodes whose values depend on those within initial_queue"""
+    initial_queue = list(initial_queue)
+    dominated_set = set(initial_queue)
+
+    while initial_queue:
+        node = initial_queue.pop()
+        for user in node.users:
+            if skip_filter and skip_filter(user):
+                continue
+            if user not in dominated_set:
+                dominated_set.add(user)
+                initial_queue.append(user)
+
+    return dominated_set
 
 
 def gather_origins(args, kwargs):

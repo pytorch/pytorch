@@ -320,9 +320,6 @@ class TestFSDPWrap(FSDPTest):
 
 
 class TestAutoWrap(TestCase):
-    def __init__(self, methodName="runTest"):
-        super().__init__(methodName)
-
     def setUp(self) -> None:
         super().setUp()
         # For all the tests here, we use a fake group
