@@ -229,9 +229,10 @@ class VariableTracker(metaclass=HasPostInit):
             raise NotImplementedError()
 
         from .builder import VariableBuilder
+        from ..guards import GuardBuilder
 
         attr_source = AttrSource(self.source, name)
-        has_attr_guard = attr_source.source.make_guard(GuardBuilder.HASATTR)
+        has_attr_guard = attr_source.make_guard(GuardBuilder.HASATTR)
         return (
             VariableBuilder(tx, attr_source)(real_value)
             .add_options(self)
