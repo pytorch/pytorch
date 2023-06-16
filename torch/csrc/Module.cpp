@@ -16,7 +16,6 @@
 #include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
-#include <ATen/native/ForeachUtils.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -1720,33 +1719,6 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_should_allow_numbers_as_tensors", [](const std::string& name) {
         return torch::should_allow_numbers_as_tensors(name);
-      });
-
-  // FIXME(crcrpar): Better to have `at::ScalarType` get mapped to `torch.dtype`
-  // Currently I see the second item of the key is displayed as
-  // e.g. `torch._C._te.ScalarType at 0x7fcf318adab0`
-  // I thought adding an appropriate type_caster of `at::ScalarType` to
-  // torch/csrc/pybind.h` would solve this but it caused segmentation fault in
-  // my environment.
-  using _DeviceDtypeKey = std::pair<at::Device, std::string>;
-  using _FlatMap = std::unordered_map<
-      _DeviceDtypeKey,
-      at::native::TensorsAndIndicesT,
-      at::native::ParamsHash<_DeviceDtypeKey>>;
-  py_module.def(
-      "_group_tensors_by_device_and_dtype",
-      [](const std::vector<std::vector<c10::optional<at::Tensor>>>&
-             nested_tensorlist,
-         const bool with_indices) {
-        _FlatMap map;
-        for (const auto& iter :
-             at::native::_group_tensors_by_first_tensors_device_and_dtype(
-                 nested_tensorlist, with_indices)) {
-          const auto scalar_type_name =
-              torch::utils::getDtypeNames(iter.first.second).first;
-          map.insert({{iter.first.first, scalar_type_name}, iter.second});
-        }
-        return map;
       });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();

@@ -321,7 +321,7 @@ def _multi_tensor_adagrad(
         return
 
     grouped_tensorlists = Optimizer._group_tensors_by_device_and_dtype([params, grads, state_sums, state_steps])
-    for ((device_params, device_grads, device_state_sums, device_state_steps), _) in grouped_tensorlists.values():
+    for device_params, device_grads, device_state_sums, device_state_steps in grouped_tensorlists.values():
 
         if maximize:
             device_grads = torch._foreach_neg(device_grads)
