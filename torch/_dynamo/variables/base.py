@@ -196,9 +196,6 @@ class VariableTracker(metaclass=HasPostInit):
         if not self.source:
             raise NotImplementedError()
 
-        if not is_from_local_source(self.source):
-            raise NotImplementedError()
-
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
 
