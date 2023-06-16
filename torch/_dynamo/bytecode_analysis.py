@@ -12,6 +12,8 @@ TERMINAL_OPCODES = {
 }
 if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
+else:
+    TERMINAL_OPCODES.add(dis.opmap["END_FINALLY"])
 if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
