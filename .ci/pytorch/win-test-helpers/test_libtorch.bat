@@ -18,6 +18,10 @@ python test\run_test.py --cpp --verbose -i cpp/test_api
 if errorlevel 1 exit /b 1
 if not errorlevel 0 exit /b 1
 
+:: DEBUG
+echo "FAILING LIKE A STONE"
+exit /b 1
+
 cd %TMP_DIR_WIN%\build\torch\test
 for /r "." %%a in (*.exe) do (
     call :libtorch_check "%%~na" "%%~fa"
