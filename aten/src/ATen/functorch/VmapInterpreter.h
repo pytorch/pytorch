@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/functorch/Interpreter.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // This is the interpreter that handles the functionalize() transform.
 // See NOTE: [functorch interpreter stack] for more details.
@@ -22,4 +22,4 @@ struct VmapInterpreterPtr {
   const Interpreter* base_;
 };
 
-}} // namespace at::functorch
+} // namespace at::functorch
