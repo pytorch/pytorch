@@ -12,8 +12,6 @@ TERMINAL_OPCODES = {
 }
 if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
-else:
-    TERMINAL_OPCODES.add(dis.opmap["END_FINALLY"])
 if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_BACKWARD"])
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
@@ -215,7 +213,9 @@ def stacksize_analysis(instructions):
 
         for inst, next_inst in zip(instructions, instructions[1:] + [None]):
             stack_size = stack_sizes[inst]
-            if inst.opcode not in TERMINAL_OPCODES:
+            if inst.opcode not in TERMINAL_OPCODES and (
+                sys.version_info >= (3, 9) or inst.opcode != dis.opmap["END_FINALLY"]
+            ):
                 assert next_inst is not None, f"missing next inst: {inst}"
                 stack_sizes[next_inst].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=False)
