@@ -30,8 +30,8 @@ pick_loop_orders = True
 # reuse a kernel input as the output
 inplace_buffers = True
 
-# reuse a buffer for an unrelated purpose
-allow_buffer_reuse = True
+# allow reusing buffers for more efficient memory use
+allow_buffer_reuse = False
 
 # codegen benchmark harness
 benchmark_harness = True
