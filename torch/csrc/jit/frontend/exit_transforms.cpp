@@ -522,7 +522,7 @@ struct ExitTransformer {
   std::shared_ptr<Graph> graph_;
 };
 
-bool inlineConsecutiveIfs(Node* node) {
+static bool inlineConsecutiveIfs(Node* node) {
   if (node->kind() != prim::If || node->next()->kind() != prim::If) {
     return false;
   }
@@ -605,7 +605,7 @@ bool inlineConsecutiveIfs(Node* node) {
 //   return 1
 // else:
 //   return 2
-void inlineConsecutiveIfs(Block* block) {
+static void inlineConsecutiveIfs(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     for (Block* b : it->blocks()) {

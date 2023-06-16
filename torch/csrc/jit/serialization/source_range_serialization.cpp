@@ -206,6 +206,8 @@ void ConcreteSourceRangeUnpickler::unpickle() {
                           .toTuple();
 
   const auto& ivalues = ivaluesTuple->elements();
+  TORCH_CHECK(
+      ivalues.size(), "Invalid unpickle operation: empty ivalues tuple");
   unpickled_records = std::make_shared<SourceRangeRecords>();
   IValue lines;
   if (ivalues[0].isString() &&
