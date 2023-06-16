@@ -241,8 +241,9 @@ class OptimizeForInferenceTemplate(TestCase):
             def forward(self, x):
                 return self.conv(x)
 
-            def get_example_inputs(self):
-                return (torch.rand(2, 3, 5, 5).cuda(),)
+            @staticmethod
+            def get_example_inputs():
+                return (torch.rand(2, 3, 5, 5).to(self.device),)
 
         from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 
@@ -269,14 +270,22 @@ class OptimizeForInferenceTemplate(TestCase):
             return out
 
         mod = torch.compile(
-            Model().cuda(),
+            Model().eval().to(self.device),
             backend=functools.partial(compile_fx, inner_compile=my_inner_compile),
         )
         inp = mod.get_example_inputs()
         with torch.no_grad():
             mod(*inp)
 
-        self.assertTrue(nconv == 1)
+        if self.device == "cuda":
+            self.assertTrue(nconv == 1)
+        else:
+            assert self.device == "cpu"
+            # For CPU, we get torch.ops.mkldnn._convolution_pointwise.default
+            # in the joint graph rather than torch.ops.aten.convolution.default.
+            # Currently we only handle aten.convolution.default in layout
+            # optimization. That's why the count is 0 here for CPU.
+            self.assertTrue(nconv == 0)
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
