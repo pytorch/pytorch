@@ -758,7 +758,8 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    const auto key = "gelu_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + gelutype_to_string(approximate_type);
+    const auto key =
+        "gelu_backward_out_mps" + getTensorsStringKey({self, grad}) + ":" + gelutype_to_string(approximate_type);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto dataType = getMPSDataType(self);
 
