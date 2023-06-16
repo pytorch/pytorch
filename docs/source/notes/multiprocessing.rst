@@ -146,7 +146,7 @@ This tutorial will explain what CPU oversubscription is and how to
 avoid it.
 
 CPU oversubscription
-~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^
 
 CPU oversubscription is a technical term that refers to a situation
 where the total number of vCPUs allocated to a system exceeds the total
@@ -190,7 +190,7 @@ subscription:
    overhead and reduces the overall system efficiency.
 
 Avoid CPU oversubscription
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 A good way to avoid CPU oversubscription is proper resource allocation.
 Ensure that the number of processes or threads running concurrently does
