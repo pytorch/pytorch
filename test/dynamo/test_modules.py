@@ -16,7 +16,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.testing import same
+from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn import functional as F
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
@@ -1186,6 +1186,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
@@ -1254,6 +1256,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module2(self):
         # Test FX graph 'call_module' works well if argument is lazy module
         m = LazyMLP()
@@ -1265,6 +1269,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_lazy_module3(self):
         m = LazyMLP()
@@ -1283,6 +1289,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(ref, res))
         self.assertEqual(cnt.frame_count, 2)
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module4(self):
         m = LazyMLP()
         x = torch.rand([10, 10])
@@ -1299,6 +1307,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         except RuntimeError:
             self.assertIn("must have same reduction dim", traceback.format_exc())
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module5(self):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
@@ -1308,6 +1318,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module6(self):
         # Test new lazy submodule in lazy module's initialize_parameters
         m = LazyModuleWithLazySubmodule()

@@ -111,7 +111,7 @@ runs:
     - name: Build and push docker image
       if: inputs.always-rebuild || steps.check.outputs.rebuild
       env:
-        IMAGE_NAME: ${{inputs.docker-image-name}}
+        IMAGE_NAME: ${{ inputs.docker-image-name }}
         DOCKER_SKIP_S3_UPLOAD: "1"
         # Skip push if we don't need it, or if specified in the inputs
         DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || inputs.skip_push }}
