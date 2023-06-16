@@ -3777,36 +3777,12 @@ def diag(
         return torch.diagonal_copy(self, offset)
 
 
-@register_decomposition(aten.diagonal_scatter)
-@out_wrapper()
-def diagonal_scatter(
-    input: TensorLikeType,
-    src: TensorLikeType,
-    offset: int = 0,
-    dim1: int = 0,
-    dim2: int = 1,
-) -> TensorLikeType:
-    out = utils.clone_preserve_strides(input)
-    diag = out.diagonal(offset, dim1, dim2)
-    check(
-        diag.shape == src.shape,
-        lambda: "expected src to have a size equal to the diagonal of the input."
-        f"Got {src.shape} for a diagonal of shape {diag.shape}",
-    )
-    copy_to(diag, src)
-    return out
-
-
-@register_decomposition(aten.diagonal)
-def diagonal(
+def _diagonal_as_strided_args(
     self: TensorLikeType,
     offset: int = 0,
     dim1: int = 0,
     dim2: int = 1,
 ) -> TensorLikeType:
-    """
-    Reference implementation of torch.diagonal
-    """
     num_dims = self.dim()
     dim1 = utils.canonicalize_dim(idx=dim1, rank=num_dims)
     dim2 = utils.canonicalize_dim(idx=dim2, rank=num_dims)
@@ -3834,12 +3810,62 @@ def diagonal(
     strides = [s for i, s in enumerate(self.stride()) if i not in (dim1, dim2)]
     strides.append(self.stride()[dim1] + self.stride()[dim2])
 
+    return sizes, strides, storage_offset
+
+
+@register_decomposition(aten.diagonal_scatter)
+@out_wrapper()
+def diagonal_scatter(
+    input: TensorLikeType,
+    src: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    out = utils.clone_preserve_strides(input)
+    diag = out.diagonal(offset, dim1, dim2)
+    check(
+        diag.shape == src.shape,
+        lambda: "expected src to have a size equal to the diagonal of the input."
+        f"Got {src.shape} for a diagonal of shape {diag.shape}",
+    )
+    sizes, strides, storage_offset = _diagonal_as_strided_args(
+        input, offset, dim1, dim2
+    )
+    return aten.as_strided_scatter(
+        input, src, size=sizes, stride=strides, storage_offset=storage_offset
+    )
+
+
+@register_decomposition(aten.diagonal)
+def diagonal(
+    self: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.diagonal
+    """
+    sizes, strides, storage_offset = _diagonal_as_strided_args(
+        self, offset, dim1, dim2
+    )
     result = self.as_strided(size=sizes, stride=strides, storage_offset=storage_offset)
 
     return result
 
 
-diagonal_copy = _make_copy_from_view(diagonal)
+@register_decomposition(aten.diagonal_copy)
+def diagonal_copy(
+    self: TensorLikeType,
+    offset: int = 0,
+    dim1: int = 0,
+    dim2: int = 1,
+) -> TensorLikeType:
+    sizes, strides, storage_offset = _diagonal_as_strided_args(
+        self, offset, dim1, dim2
+    )
+    return aten.as_strided_copy(self, size=sizes, stride=strides, storage_offset=storage_offset)
 
 
 @register_decomposition(aten.diag_embed)

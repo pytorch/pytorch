@@ -202,6 +202,8 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.detach,
             aten.diag_embed,
             aten.diagonal,
+            aten.diagonal_copy,
+            aten.diagonal_scatter,
             aten.dot,
             aten.elu,
             aten.elu_backward,

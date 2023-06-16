@@ -898,11 +898,17 @@ def as_strided(x, size, stride, storage_offset=None):
     return TensorBox(ir.ReinterpretView(storage, new_layout))
 
 
-@register_lowering(aten.as_strided_)
+@register_lowering(aten.as_strided_, type_promotion_kind=None)
 def as_strided_(x, size, stride, storage_offset=None):
     assert isinstance(x, TensorBox)
     x.data = as_strided(x, size, stride, storage_offset).data
     return x
+
+
+@register_lowering(aten.as_strided_copy, type_promotion_kind=None)
+def as_strided_copy(x, size, stride, storage_offset=None):
+    result = as_strided(x, size, stride, storage_offset)
+    return clone(result)
 
 
 @register_lowering(aten.cat)
@@ -1535,8 +1541,6 @@ make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
 make_fallback(aten.cumprod, warn=False)
-make_fallback(aten.diagonal_copy, warn=False)
-make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
