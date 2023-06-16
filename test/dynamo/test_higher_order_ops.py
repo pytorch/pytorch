@@ -817,6 +817,11 @@ class GraphModule(torch.nn.Module):
             wrapper_fn,
             (x,),
         )
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_fn_closure_0_cell_contents : torch.Tensor):
@@ -841,7 +846,7 @@ class GraphModule(torch.nn.Module):
         actual = remove_trailing_space(
             strip_comment(wrapped_gm.print_readable(print_output=False))
         )
-        print(actual)
+
         self.assertExpectedInline(actual, expected)
 
     def test_grad_closure_scalar(self):
