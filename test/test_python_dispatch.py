@@ -1344,13 +1344,13 @@ class TestPythonDispatch(TestCase):
             # TODO: figure out why broken
             # self.assertEqual(saved_x._version, x._version)
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.aten.mul.Tensor($0, $0)
-$2 = input('grad_y')
+$0: f32[1] = input('x')
+$1: f32[1] = torch._ops.aten.mul.Tensor($0, $0)
+$2: f32[1] = input('grad_y')
 True = torch._ops.aten.is_same_size.default($1, $2)
-$3 = torch._ops.aten.mul.Tensor($2, $0)
-$4 = torch._ops.aten.mul.Tensor($2, $0)
-$5 = torch._ops.aten.add.Tensor($4, $3)''')
+$3: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
+$4: f32[1] = torch._ops.aten.mul.Tensor($2, $0)
+$5: f32[1] = torch._ops.aten.add.Tensor($4, $3)''')
 
     def test_out(self) -> None:
         with capture_logs() as logs:
@@ -1364,9 +1364,9 @@ $5 = torch._ops.aten.add.Tensor($4, $3)''')
         # TODO: arguably this shouldn't pass and we should complain
         # that out isn't a kwarg
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = input('y')
-$2 = torch._ops.aten.abs.out($0, out=$1)''')
+$0: f32[1] = input('x')
+$1: f32[1] = input('y')
+$2: f32[1] = torch._ops.aten.abs.out($0, out=$1)''')
 
     def test_kwarg_only(self) -> None:
         with capture_logs() as logs:
@@ -1385,14 +1385,14 @@ $2 = torch._ops.aten.abs.out($0, out=$1)''')
         # The expectation is that beta/alpha don't show up when they're
         # defaulted.  This is even if the user explicitly specified it.
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = input('y')
-$2 = input('z')
-$3 = torch._ops.aten.addmv.default($0, $1, $2)
-$4 = torch._ops.aten.addmv.default($0, $1, $2)
-$5 = torch._ops.aten.addmv.default($0, $1, $2, beta=2)
-$6 = torch._ops.aten.addmv.default($0, $1, $2, alpha=2)
-$7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
+$0: f32[1] = input('x')
+$1: f32[1, 1] = input('y')
+$2: f32[1] = input('z')
+$3: f32[1] = torch._ops.aten.addmv.default($0, $1, $2)
+$4: f32[1] = torch._ops.aten.addmv.default($0, $1, $2)
+$5: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, beta=2)
+$6: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, alpha=2)
+$7: f32[1] = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
 
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
@@ -1406,11 +1406,11 @@ $7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
         # What we are testing here is that we omit arg2
         # if it is defaulted, even if a kwarg is set
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.aten._foobar.default($0)
-$2 = torch._ops.aten._foobar.default($0, False)
-$3 = torch._ops.aten._foobar.default($0, arg3=False)
-$4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
+$0: f32[1] = input('x')
+$1: f32[1] = torch._ops.aten._foobar.default($0)
+$2: f32[1] = torch._ops.aten._foobar.default($0, False)
+$3: f32[1] = torch._ops.aten._foobar.default($0, arg3=False)
+$4: f32[1] = torch._ops.aten._foobar.default($0, False, arg3=False)''')
 
     def test_produce_real_type(self) -> None:
         with capture_logs() as logs:
@@ -1423,12 +1423,12 @@ $4 = torch._ops.aten._foobar.default($0, False, arg3=False)''')
             # triggerable using tensor subclasses (need to use a mode)
 
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
-$2 = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
-$3 = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
-$4 = torch._ops.aten.select.int($3, 1, 1)
-$5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
+$0: f32[2, 2] = input('x')
+$1: f64[2, 2] = torch._ops.aten._to_copy.default($0, dtype=torch.float64)
+$2: f64[2, 2] = torch._ops.aten.cumprod.default($0, 0, dtype=torch.float64)
+$3: f32[2, 2] = torch._ops.aten.slice.Tensor($0, 0, 0, 9223372036854775807)
+$4: f32[2] = torch._ops.aten.select.int($3, 1, 1)
+$5: f32[2] = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)''')
 
     def test_optional_tensor_list(self) -> None:
         def weird(xs):
@@ -1444,9 +1444,8 @@ $5 = torch._ops.aten.clone.default($4, memory_format=torch.contiguous_format)'''
             torch.ops.my_lib.weird.default([None, x])
 
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.my_lib.weird.default([None, LoggingTensor(tensor([[1., 1.],
-        [1., 1.]]))])''')
+$0: f32[2, 2] = input('x')
+$1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])''')
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
@@ -1498,9 +1497,9 @@ $1 = torch._ops.my_lib.weird.default([None, LoggingTensor(tensor([[1., 1.],
         # this test here to make sure we don't regress even further (it
         # would be bad if calling .detach() once emits 3+ detaches).
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = torch._ops.aten.detach.default($0)
-$2 = torch._ops.aten.detach.default($1)''')
+$0: f32[1] = input('x')
+$1: f32[1] = torch._ops.aten.detach.default($0)
+$2: f32[1] = torch._ops.aten.detach.default($1)''')
 
     def test_storage(self) -> None:
         # For now, just make sure it doesn't crash.  Ideally, we should
@@ -1603,14 +1602,14 @@ $2 = torch._ops.aten.detach.default($1)''')
             # self.assertEqual(escape[0]._version, x._version)
 
         self.assertExpectedInline('\n'.join(logs), '''\
-$0 = input('x')
-$1 = input('x.grad')
-$2 = torch._ops.aten.pow.Tensor_Scalar($0, 2)
-$3 = input('grad_output')
+$0: f32[1] = input('x')
+$1: f32[1] = input('x.grad')
+$2: f32[1] = torch._ops.aten.pow.Tensor_Scalar($0, 2)
+$3: f32[1] = input('grad_output')
 True = torch._ops.aten.is_same_size.default($2, $3)
-$4 = torch._ops.aten.mul.Tensor($3, 2)
-$5 = torch._ops.aten.mul.Tensor($4, $0)
-$6 = torch._ops.aten.add_.Tensor($1, $5)''')
+$4: f32[1] = torch._ops.aten.mul.Tensor($3, 2)
+$5: f32[1] = torch._ops.aten.mul.Tensor($4, $0)
+$6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_subclass_creation(self):
         # Make sure these statements runs without error
@@ -1792,8 +1791,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         with capture_logs(is_mode=True) as logs:
             with LoggingTensorMode():
                 torch.empty([])
-        self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
+        self.assertExpectedInline('\n'.join(logs), """$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
 
     def test_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
@@ -1801,8 +1799,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         with capture_logs(is_mode=True) as logs:
             with LoggingTensorMode():
                 x + y
-        self.assertExpectedInline('\n'.join(logs), """\
-$2 = torch._ops.aten.add.Tensor($0, $1)""")
+        self.assertExpectedInline('\n'.join(logs), """$2: f32[] = torch._ops.aten.add.Tensor($0, $1)""")
 
     def test_nested_push_logging_tensor_mode(self):
         x = torch.randn([])
@@ -1814,10 +1811,10 @@ $2 = torch._ops.aten.add.Tensor($0, $1)""")
                     x + y
 
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$3 = torch._ops.aten.add.Tensor($1, $2)
-$3 = torch._ops.aten.add.Tensor($1, $2)""")
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
     def test_capture_logs_with_torch_dispatch_mode(self):
         x = torch.randn([])
@@ -1826,8 +1823,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             torch.empty([])
             x + y
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$3 = torch._ops.aten.add.Tensor($1, $2)""")
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
         x = torch.randn([])
         y = torch.randn([])
@@ -1838,10 +1835,10 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                 x + y
 
         self.assertExpectedInline('\n'.join(logs2), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$3 = torch._ops.aten.add.Tensor($1, $2)
-$3 = torch._ops.aten.add.Tensor($1, $2)""")
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)
+$3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
         self.assertEqual(logs1, logs2)
 
@@ -2097,8 +2094,8 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                 with reenabled:
                     torch.empty([])
             self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
+$0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
 
 
     def test_error_using_class_method_on_mode(self):
