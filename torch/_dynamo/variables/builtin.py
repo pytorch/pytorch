@@ -18,6 +18,7 @@ from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     check_constant_args,
+    check_numpy_ndarray_args,
     check_unspec_python_args,
     get_higher_order_op,
     istype,
@@ -517,6 +518,13 @@ class BuiltinVariable(VariableTracker):
                         need_unwrap=need_unwrap,
                         **options,
                     )
+                elif check_numpy_ndarray_args(args, kwargs):
+                    return wrap_fx_proxy_cls(
+                        variables.NumpyNdarrayVariable,
+                        tx,
+                        proxy,
+                        **options,
+                    )
                 elif all(isinstance(x, SymNodeVariable) for x in args):
                     return SymNodeVariable.create(tx, proxy, None, **options)
                 else:
@@ -916,7 +924,7 @@ class BuiltinVariable(VariableTracker):
         source = (
             None
             if a.source is None or b.source is None
-            else SuperSource(a.source, b.source)
+            else SuperSource(type=a.source, base=b.source)
         )
         return variables.SuperVariable(a, b, source=source)
 
