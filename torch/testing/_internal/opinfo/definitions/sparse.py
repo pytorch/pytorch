@@ -585,37 +585,14 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
         )
     elif (
         layout is torch.sparse_coo
-        and dtype is torch.complex32
-        and t_inp.numel() > 0
-        and t_args[0].numel() > 0
-        and t_args[0].ndim > 0
-    ):
-        return ErrorInput(
-            sample,
-            error_regex="\"mul_out_sparse\" not implemented for 'ComplexHalf'",
-        )
-    elif (
-        layout is torch.sparse_csr
-        and dtype is torch.complex32
-        and t_inp.numel() > 0
-        and t_inp._nnz() > 0
-        and t_args[0].numel() > 0
-        and t_args[0].ndim > 0
-    ):
-        return ErrorInput(
-            sample,
-            error_regex="\"mul_out_sparse\" not implemented for 'ComplexHalf'",
-        )
-    elif (
-        layout is torch.sparse_coo
-        and dtype in {torch.bool, torch.float16}
+        and dtype is torch.bool
         and t_args[0].ndim > 0
         and t_inp.is_cpu
         and t_inp.numel() > 0
         and t_inp.dense_dim() > 0
     ):
         return ErrorInput(
-            sample, error_regex="\"addcmul_cpu_out\" not implemented for '(Bool|Half)'"
+            sample, error_regex="\"addcmul_cpu_out\" not implemented for 'Bool'"
         )
     elif (
         layout in {torch.sparse_coo, torch.sparse_csr}
@@ -659,7 +636,6 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
         return ErrorInput(
             sample, error_regex="\"addcmul_cpu_out\" not implemented for 'Half'"
         )
-
     return sample
 
 
