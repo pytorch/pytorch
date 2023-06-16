@@ -424,4 +424,3 @@ class FlopCounterMode(TorchDispatchMode):
 class _ForwardHookHandles(NamedTuple):
     forward_pre_hook_handle: RemovableHandle
     forward_hook_handle: RemovableHandle
-
