@@ -3116,10 +3116,22 @@ class CommonTemplate:
 
         # test no-op
         fns = (
-            lambda x: x + torch.zeros_like(x, dtype=torch.float32),  # noqa: E731
-            lambda x: x - torch.zeros_like(x, dtype=torch.float32),  # noqa: E731
-            lambda x: x * torch.ones_like(x, dtype=torch.float32),  # noqa: E731
-            lambda x: x / torch.ones_like(x, dtype=torch.float32),  # noqa: E731
+            lambda x: x
+            + torch.zeros(
+                [256, 256], dtype=torch.float32, device=x.device
+            ),  # noqa: E731
+            lambda x: x
+            - torch.zeros(
+                [256, 256], dtype=torch.float32, device=x.device
+            ),  # noqa: E731
+            lambda x: x
+            * torch.ones(
+                [256, 256], dtype=torch.float32, device=x.device
+            ),  # noqa: E731
+            lambda x: x
+            / torch.ones(
+                [256, 256], dtype=torch.float32, device=x.device
+            ),  # noqa: E731
         )
 
         inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]

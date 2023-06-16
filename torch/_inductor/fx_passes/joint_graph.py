@@ -129,6 +129,14 @@ def constant_fold_uniform_value(gm):
         value = constant.flatten()[0].item()
 
         with graph.inserting_after(node):
+            # the conversion from tensor and back to value can be lossy, just use the original full ctor value
+            if (
+                node.op == "call_function"
+                and node.target == aten.full.default
+                and len(node.args) == 2
+            ):
+                value = node.args[1]
+
             # zeros, and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
