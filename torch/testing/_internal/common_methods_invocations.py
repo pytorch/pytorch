@@ -19358,9 +19358,9 @@ python_ref_db = [
                          dtypes=(torch.complex64, torch.complex128)),
         ),
     ),
-    ElementwiseBinaryPythonRefInfo(
+    PythonRefInfo(
         "_refs.logaddexp2",
-        torch_opinfo_name="logaddexp",
+        torch_opinfo_name="logaddexp2",
         supports_nvfuser=False,
         skips=(
             # failure due to mismatch in edge cases, which boils down to what torch.exp(inf + infj) should be
