@@ -103,6 +103,7 @@ from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
+graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 @functools.lru_cache(None)
@@ -417,11 +418,11 @@ def break_graph_if_unsupported(*, push):
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if (
-                    config.print_graph_breaks
+                    graph_break_log.isEnabledFor(logging.DEBUG)
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
-                    log.warning(
+                    graph_break_log.debug(
                         "Graph break: %s from user code at %s",
                         excp,
                         user_stack_formatted,

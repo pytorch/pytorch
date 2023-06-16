@@ -32,6 +32,8 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
+import torch.distributed.fsdp
+import torch.distributed.utils
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
