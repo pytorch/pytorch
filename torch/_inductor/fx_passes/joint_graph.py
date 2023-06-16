@@ -121,6 +121,8 @@ def constant_fold_uniform_value(gm):
         if constant.numel() == 0 or not (constant == constant.flatten()[0]).all():
             continue
 
+
+
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
         # hasn't shown up to be important yet
         if not constant.is_contiguous(memory_format=torch.contiguous_format):
