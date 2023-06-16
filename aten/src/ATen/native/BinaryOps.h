@@ -4,7 +4,16 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
+#if defined(__CUDA_ARCH__)
+#include <c10/cuda/CUDAMathCompat.h>
+#define compat_copysign c10::cuda::compat::copysign
+#elif defined(__HIPCC__)
+#include <c10/hip/HIPMathCompat.h>
+#define compat_copysign c10::hip::compat::copysign
+#else
 #include <c10/util/copysign.h>
+#define compat_copysign c10::copysign
+#endif
 
 
 namespace at {
@@ -43,6 +52,12 @@ inline void sub_check(const TensorBase& self, const Scalar& scalar) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#define HOST_DEVICE __host__ __device__
+#else
+#define HOST_DEVICE
+#endif
+
 // NOTE: [Floor Division in Python]
 // Python's __floordiv__ operator is more complicated than just floor(a / b).
 // It aims to maintain the property: a == (a // b) * b + remainder(a, b)
@@ -54,7 +69,7 @@ inline void sub_check(const TensorBase& self, const Scalar& scalar) {
 // https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 
 template <typename scalar_t>
-inline scalar_t div_floor_floating(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ {
+inline HOST_DEVICE scalar_t div_floor_floating(scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ {
   if (C10_UNLIKELY(b == 0)) {
     // Divide by zero: return standard IEEE result
     return a / b;
@@ -73,13 +88,13 @@ inline scalar_t div_floor_floating(scalar_t a, scalar_t b) __ubsan_ignore_float_
       floordiv += scalar_t(1.0);
     }
   } else {
-    floordiv = c10::copysign(scalar_t(0), a / b);
+    floordiv = compat_copysign(scalar_t(0), a / b);
   }
   return floordiv;
 }
 
 template <typename scalar_t>
-inline scalar_t div_floor_integer(scalar_t a, scalar_t b) {
+inline HOST_DEVICE scalar_t div_floor_integer(scalar_t a, scalar_t b) {
   if (c10::signs_differ(a, b)) {
     // Subtracts one from the results of truncation division if the
     // divisor and dividend have different sign(bit)s and the remainder of
