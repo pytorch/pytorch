@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import math
 import warnings
 from typing import (
@@ -28,8 +29,8 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
-    _has_fsdp_params,
     _get_module_fsdp_state_if_fully_sharded_module,
+    _has_fsdp_params,
     _is_composable,
     _module_handles,
     clean_tensor_name,
@@ -51,6 +52,9 @@ from torch.distributed.utils import _replace_by_prefix
 
 from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
 from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
+
+
+logger = logging.getLogger(__name__)
 
 
 def _convert_to_wrapped_module_name(module_name: str) -> str:
@@ -676,6 +680,19 @@ def _post_state_dict_hook(
         processed_state_dict = _post_state_dict_hook_fn[fsdp_state._state_dict_type](
             module, fsdp_state, state_dict, prefix
         )
+
+    if fsdp_state._is_root:
+        logger.info("FSDP finished processing state_dict(), prefix=%s", prefix)
+        for key, tensor in sorted(processed_state_dict.items()):
+            if key.startswith(prefix) and isinstance(tensor, torch.Tensor):
+                logger.info(
+                    "%s: type=%s, shape=%s, dtype=%s, device=%s",
+                    key,
+                    type(tensor),
+                    tensor.dtype,
+                    tensor.device,
+                )
+
     return processed_state_dict
 
 
