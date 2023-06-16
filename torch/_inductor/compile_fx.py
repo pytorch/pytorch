@@ -822,12 +822,8 @@ def compile_fx(
                     orig_model_outputs_node.args
                 )
                 num_orig_model_outputs = len(orig_model_outputs)
-                original_output_start_index = model.meta.get(
-                    "original_output_start_index", 0
-                )
             else:
                 num_orig_model_outputs = num_model_outputs
-                original_output_start_index = 0
 
             assert num_orig_model_outputs <= num_model_outputs
 

@@ -8,6 +8,7 @@ import torch.utils._pytree as pytree
 from . import config
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._mode_utils import no_dispatch
+from torch._dynamo.utils import dynamo_timed
 
 aten = torch.ops.aten
 
@@ -231,6 +232,7 @@ def discard_traced_gm_params(mod):
         setattr(mod, attr_name, e_t)
 
 
+@dynamo_timed
 def convert_conv_weights_to_channels_last(gm):
     """
     Convert 4d convolution weight tensor to channels last format.
