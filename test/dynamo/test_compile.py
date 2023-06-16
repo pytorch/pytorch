@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 import torch
-import torch.compiler
+import torch._dynamo
 from torch._dynamo.testing import CompileCounter
 
 
@@ -89,9 +89,6 @@ class PublicTorchCompilerTests(unittest.TestCase):
             f"Signatures do not match for function {public_fn_name}() \n Public: {public_sig} \n Private: {private_sig}",
         )
 
-    def test_is_enabled(self):
-        self.assertTrue(torch.compiler.is_enabled())
-
     def test_dynamo_signatures(self):
         function_names = [
             "reset",
@@ -103,9 +100,3 @@ class PublicTorchCompilerTests(unittest.TestCase):
 
         for fn_name in function_names:
             self.check_signature(fn_name, fn_name, torch._dynamo)
-
-    def test_inductor_signatures(self):
-        function_names = ["list_options", "list_mode_options"]
-
-        for fn_name in function_names:
-            self.check_signature(fn_name, fn_name, torch._inductor)
