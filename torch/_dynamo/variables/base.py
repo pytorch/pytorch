@@ -209,7 +209,7 @@ class VariableTracker(metaclass=HasPostInit):
             # L['mod'].model.model.encoder.embed_positions)", scope)
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
-        except TypeError:
+        except Exception:
             raise NotImplementedError()
 
         if _input_associated_real_value is None:
