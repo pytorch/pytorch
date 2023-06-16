@@ -952,7 +952,7 @@ class Scheduler:
                 for dep in sorted(n.unmet_dependencies, key=lambda d: d.name):
                     dep_depth = visit(name_to_node[dep.name])
                     max_depth = max(dep_depth, max_depth)
-                for name in node.get_names():
+                for name in n.get_names():
                     name_to_depth[name] = max_depth + 1
             return name_to_depth[n.get_first_name()]
 
