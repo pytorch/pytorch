@@ -1444,7 +1444,7 @@ void initJITBindings(PyObject* module) {
             at::DataPtr data;
             size_t size = 0;
             std::tie(data, size) = self.getRecord(key);
-            return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+            return py::memoryview::from_memory(reinterpret_cast<const char*>(data.get()), size);
           })
       .def(
           "has_record",
