@@ -36,9 +36,6 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestUtils(TestCase):
-    def __init__(self, methodName="runTest"):
-        super().__init__(methodName)
-
     @parametrize(
         "devices", [["cpu"], ["cuda"], subtest(["cpu", "cuda"], name="cpu_cuda")]
     )
@@ -161,9 +158,6 @@ class TestGetSubmoduleToStates(TestCase):
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.seq2(self.lin(self.seq1(x)))  # equivalent to one matmul
-
-    def __init__(self, methodName="runTest"):
-        super().__init__(methodName)
 
     def test_get_fully_sharded_module_to_states(self):
         """

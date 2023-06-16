@@ -758,6 +758,22 @@ class CudaReproTests(TestCase):
             res2 = jit_func(x)
             self.assertEqual(res1, res2)
 
+    def test_issue103481(self):
+        def fn(x, y):
+            # NOTE: 6 dimensions is important! does not fail for 5 dimensions
+            mean = torch.mean(x, [2, 3, 4, 5], keepdim=True)
+            add = mean + y
+            return add
+
+        x = torch.rand(4, 4, 4, 4, 4, 4, device="cuda")
+        y = torch.rand((), device="cuda")
+        expect = fn(x, y)
+
+        opt_fn = torch.compile(fn)
+        actual = opt_fn(x, y)
+
+        self.assertEqual(expect, actual)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
