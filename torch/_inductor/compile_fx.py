@@ -676,7 +676,7 @@ def fw_compiler_freezing(
     graph_id,
     forward_device,
 ):
-    from torch._inductor.freezing import freeze, convert_conv_weights_to_channels_last
+    from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
     joint_graph_passes(aot_autograd_model)

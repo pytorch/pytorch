@@ -154,7 +154,9 @@ class GraphLowering(torch.fx.Interpreter):
     ):
         super().__init__(gm)
 
-        self.layout_opt = layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
+        self.layout_opt = (
+            layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
+        )
         self.num_channels_last_conv = 0
 
         self.extra_traceback = False  # we do our own error wrapping

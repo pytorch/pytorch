@@ -3,14 +3,15 @@ import weakref
 from typing import List, Optional, Tuple
 
 import torch
-from torch import nn
 import torch.utils._pytree as pytree
-from . import config
+from torch import nn
+from torch._dynamo.utils import dynamo_timed
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._mode_utils import no_dispatch
-from torch._dynamo.utils import dynamo_timed
+from . import config
 
 aten = torch.ops.aten
+
 
 def replace_node_with_constant(gm, node, constant):
     g = gm.graph
@@ -107,7 +108,6 @@ def constant_fold(gm):
             # TODO - remove constant from node_replacement when it has no uses
             if node.op != "get_attr" and isinstance(out, torch.Tensor):
                 node_replacements[node] = out
-                # print(f"Shunting: {node.format_node()} becomes a const") # TODO
 
             return out
 
@@ -257,7 +257,9 @@ def convert_conv_weights_to_channels_last(gm):
 
                 # Even though inductor does not use meta['val'] or meta['tensor_meta']
                 # for get_attr node, we still update them to be consistent.
-                weight_node.meta['val'] = weight_node.meta['val'].to(memory_format=torch.channels_last)
-                weight_node.meta['tensor_meta'] = _extract_tensor_metadata(
-                    weight_node.meta['val']
+                weight_node.meta["val"] = weight_node.meta["val"].to(
+                    memory_format=torch.channels_last
+                )
+                weight_node.meta["tensor_meta"] = _extract_tensor_metadata(
+                    weight_node.meta["val"]
                 )
