@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from typing import Set
 
 import torch
@@ -113,6 +114,14 @@ def constant_fold_uniform_value(gm):
     zeros = set()
     ones = set()
 
+    # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
+    # so just constant-ify if a Tensor is unaliased
+    constant_data_ptrs = Counter()
+
+    for constant in node_replacements.values():
+        if constant.numel() != 0:
+            constant_data_ptrs[constant.untyped_storage().data_ptr()] += 1
+
     for node, constant in node_replacements.items():
         # Constant folding can leak memory, especially with repeated compilation, so we are only going to
         # remove constants which can be replaced with a constructor.
@@ -124,6 +133,9 @@ def constant_fold_uniform_value(gm):
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
         # hasn't shown up to be important yet
         if not constant.is_contiguous(memory_format=torch.contiguous_format):
+            continue
+
+        if constant_data_ptrs[constant.untyped_storage().data_ptr()] != 1:
             continue
 
         value = constant.flatten()[0].item()
