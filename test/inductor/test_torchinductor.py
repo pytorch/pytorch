@@ -2752,6 +2752,43 @@ class CommonTemplate:
             check_lowp=False,  # too painful to match types of bn model
         )
 
+    @skipIfRocm
+    def test_batch_norm_2d_2(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.self_0 = torch.nn.Conv2d(
+                    64,
+                    128,
+                    kernel_size=(3, 3),
+                    stride=(2, 2),
+                    padding=(1, 1),
+                    bias=False,
+                )
+                self.self_1 = torch.nn.BatchNorm2d(
+                    128,
+                    eps=0.0001,
+                    momentum=0.03,
+                    affine=True,
+                    track_running_stats=True,
+                )
+                self.self_2 = torch.nn.LeakyReLU(negative_slope=0.1, inplace=True)
+
+            def forward(self, l_input_: torch.Tensor):
+                self_0 = self.self_0(l_input_)
+                self_1 = self.self_1(self_0)
+                self_2 = self.self_2(self_1)
+                return (self_2,)
+
+        inp = torch.randn((4, 64, 192, 256), dtype=torch.float32, device="cuda")
+        mod = Repro().cuda()
+        o1 = mod(inp)
+        o2 = torch.compile(mod)(inp)
+        self.assertEqual(o1, o2)
+
     def test_layer_norm(self):
         m = torch.nn.Sequential(
             torch.nn.LayerNorm(32),
