@@ -1,6 +1,6 @@
-#include <torch/csrc/utils/pybind.h>
 #include <ATen/cpu/CPUUtils.h>
 #include <torch/csrc/cpu/Module.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace torch {
 namespace cpu {
