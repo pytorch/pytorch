@@ -199,7 +199,7 @@ class VariableBuilder:
     def __call__(self, value):
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
-            dup_guard = _make_dupe_guard(side_effect_result)
+            dup_guard = self._make_dupe_guard(side_effect_result)
             if dup_guard:
                 side_effect_result = side_effect_result.add_guards(
                     self.make_guards(dup_guard)
@@ -224,8 +224,8 @@ class VariableBuilder:
 
         # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
         # leave unsourced - like a local list created and discharged entirely within a local scope.
-        if side_effect_result.source and side_effect_result.source != self.source:
-            ser_source_is_local = is_from_local_source(side_effect_result.source)
+        if deduped_object.source and deduped_object.source != self.source:
+            ser_source_is_local = is_from_local_source(deduped_object.source)
             source_is_local = is_from_local_source(self.source)
             # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
             # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
@@ -235,9 +235,9 @@ class VariableBuilder:
                 # Note - this is a little agressive - these being duplicate input does not always matter.
                 # However, this should always be a sound guard to add here.
                 dup_guard = functools.partial(
-                    GuardBuilder.DUPLICATE_INPUT, source_b=side_effect_result.source
+                    GuardBuilder.DUPLICATE_INPUT, source_b=deduped_object.source
                 )
-            return dup_guard
+                return dup_guard
         return None
 
     def _can_lift_attrs_to_inputs(self, vt):
