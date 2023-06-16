@@ -1488,7 +1488,7 @@ class FakeTensorMode(TorchDispatchMode):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
 
-            if common_device is None:
+            if isinstance(e, torch.Tensor) and common_device is None:
                 (
                     common_device,
                     has_scalar_only_inputs,
