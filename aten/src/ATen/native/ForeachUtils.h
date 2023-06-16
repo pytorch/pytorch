@@ -1,11 +1,7 @@
 #pragma once
 
-#include <ATen/Device.h>
 #include <ATen/Dispatch.h>
-#include <ATen/ScalarType.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/native/utils/ParamsHash.h>
-#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -13,9 +9,6 @@
 #else
 #include <ATen/ops/result_type_native.h>
 #endif
-
-#include <unordered_map>
-#include <vector>
 
 namespace at::native {
 namespace {
@@ -219,123 +212,6 @@ bool can_use_fast_route(
     bool does_op_promote_integer_inputs_to_float = false) {
   return can_use_fast_route(
       {tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
-}
-
-using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;
-using IndicesT = std::vector<int>;
-using nested_optional_tensorvec_t =
-    std::vector<std::vector<c10::optional<at::Tensor>>>;
-using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
-using FlatMap = std::unordered_map<
-    DeviceDtypeKey,
-    TensorsAndIndicesT,
-    ParamsHash<DeviceDtypeKey>>;
-
-FlatMap _group_tensors_by_first_tensors_device_and_dtype(
-    const nested_optional_tensorvec_t& nested_tensorlist,
-    const bool with_indices) {
-  FlatMap grouped_tensors_with_indices;
-
-  TORCH_CHECK(nested_tensorlist.size() > 0);
-  TORCH_CHECK(nested_tensorlist[0].size() > 0);
-  const auto num_lists = nested_tensorlist.size();
-  const auto num_tensors = nested_tensorlist[0].size();
-
-  TORCH_CHECK(std::all_of(
-      nested_tensorlist.cbegin(),
-      nested_tensorlist.cend(),
-      [&](const auto& tensorlist) -> bool {
-        // note(crcrpar): Allow empty tensorlists following
-        // ref:
-        // https://github.com/pytorch/pytorch/blob/85885301fd3c6adb8b9dc3cf7afadf6945566684/torch/utils/_foreach_utils.py#L21-L24
-        return tensorlist.size() == num_tensors || tensorlist.size() == 0;
-      }));
-
-  for (const auto& tensor_index : c10::irange(num_tensors)) {
-    const auto key = [&]() -> DeviceDtypeKey {
-      const auto t = nested_tensorlist[0][tensor_index];
-      TORCH_CHECK(
-          t.has_value(),
-          "Tensors of the first list of nested Tensor lists are supposed to be defined but ",
-          "the ",
-          tensor_index,
-          "-th Tensor is not.");
-      return {t->device(), t->scalar_type()};
-    }();
-    TORCH_CHECK(
-        std::all_of(
-            nested_tensorlist.cbegin(),
-            nested_tensorlist.cend(),
-            [&](const auto& tensorlist) -> bool {
-              if (tensorlist.size() == 0) {
-                return true;
-              }
-              const auto& tensor = tensorlist[tensor_index];
-              // note(crcrpar): Currently the scope of this function is
-              // optimizers so there could be `state_steps` whose elements are a
-              // float tensor no matter what the parameter's dtype is.
-              if (!tensor.has_value()) {
-                return true;
-              } else {
-                const auto s = tensor->scalar_type();
-                const auto d = tensor->device();
-                // Note: `step` or `state_step` is float32 by default.
-                if (key.first == d) {
-                  return key.second == s || s == at::ScalarType::Float;
-                } else if (d.is_cpu()) {
-                  // note(crcrpar): There are some test cases (e.g.
-                  // TestOptim::test_adam) where state_steps are on CPU and the
-                  // others are on CUDA. Currently a state_step Tensor has the
-                  // dtype of float.
-                  return s == at::ScalarType::Float;
-                } else {
-                  return false;
-                }
-              }
-            }),
-        "Tensors of the same index must be on the same device the same dtype except `step` tensors that can be CPU and float32 notwithstanding");
-    if (!grouped_tensors_with_indices.count(key)) {
-      grouped_tensors_with_indices.insert(
-          {key,
-           TensorsAndIndicesT{
-               [&]() -> nested_optional_tensorvec_t {
-                 nested_optional_tensorvec_t nested_tensorvec;
-                 nested_tensorvec.reserve(num_lists);
-                 for (const auto& i : c10::irange(num_lists)) {
-                   std::vector<c10::optional<at::Tensor>> tensors;
-                   if (!nested_tensorlist[i].empty()) {
-                     // NB: num_tensors is the max possible length for any of
-                     // the inner lists of tensor references. Reserving the max
-                     // trades memory for perf. This should not have significant
-                     // impact.
-                     tensors.reserve(num_tensors);
-                   }
-                   nested_tensorvec.emplace_back(tensors);
-                 }
-                 return nested_tensorvec;
-               }(),
-               [&]() -> IndicesT {
-                 if (!with_indices) {
-                   return {};
-                 } else {
-                   IndicesT indices;
-                   indices.reserve(num_tensors);
-                   return indices;
-                 }
-               }()}});
-    }
-    for (const auto& list_index : c10::irange(num_lists)) {
-      if (!nested_tensorlist[list_index].empty()) {
-        grouped_tensors_with_indices[key].first[list_index].emplace_back(
-            nested_tensorlist[list_index][tensor_index]);
-      }
-    }
-    if (with_indices) {
-      grouped_tensors_with_indices[key].second.emplace_back(tensor_index);
-    }
-  }
-
-  return grouped_tensors_with_indices;
 }
 
 } // namespace
