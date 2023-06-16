@@ -32,7 +32,7 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
 
 void BatchedTensorImpl::refreshTensorMetadata() {
   const auto public_dims = value_.dim() - 1;
-  
+
   // update size, strides and storage_offset
   if (value_.unsafeGetTensorImpl()->has_symbolic_sizes_strides()){
     // for tensor with symbolic size and strides

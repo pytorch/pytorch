@@ -1274,7 +1274,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
             # chunk_size is a keyword only args which is currently not supported.
             if chunk_size.value is not None:
-                unimplemented("NYI - torch.func.vmap is not implemented when chunk_size is passed")
+                unimplemented(
+                    "NYI - torch.func.vmap is not implemented when chunk_size is passed"
+                )
 
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
@@ -1292,11 +1294,19 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             # body_lifted_variable should not be treated as batched.
             # So here we update `in_dims` to reflect that.
             _, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
-            broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(in_dims, arg_spec)
+            broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(
+                in_dims, arg_spec
+            )
             # NOTE: updated_in_dims is flat list, it is ok for now
             #       as speculate_subgraph does not supports functions with non-Tenosr args.
             #       (so we graph-break above)
-            updated_in_dims = TupleVariable(broadcasted_in_dims + [ConstantVariable(None),] * len(body_lifted_freevars))
+            updated_in_dims = TupleVariable(
+                broadcasted_in_dims
+                + [
+                    ConstantVariable(None),
+                ]
+                * len(body_lifted_freevars)
+            )
 
             vmap_proxy_args = (
                 body_node,
@@ -1314,7 +1324,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 name="vmap_proxy",
             )
 
-            batched_fn_args = tuple(arg.as_proxy() for arg in batch_input_args) + tuple(body_lifted_freevars)
+            batched_fn_args = tuple(arg.as_proxy() for arg in batch_input_args) + tuple(
+                body_lifted_freevars
+            )
 
             # proxy corresponds to `call = vmap_proxy(*batched_fn_args, **batched_fn_kwargs)`
             proxy = vmap_proxy(*batched_fn_args)
