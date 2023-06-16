@@ -271,8 +271,8 @@ class PReLU(torch.nn.Module):
         qprelu = cls(float(scale), int(zero_point), mod.num_parameters)
         float_wt = mod.weight.float()
         observer = mod.qconfig.weight()
-        observer(float_wt.unsqueeze(-1))
-        if observer.dtype == torch.quint8:
+        observer(float_wt)
+        if observer.dtype != torch.quint8:
             warn(
                 f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}"
             )
@@ -287,8 +287,8 @@ class PReLU(torch.nn.Module):
         qprelu = cls(float(scale), int(zero_point), mod.num_parameters)
         float_wt = mod.weight.float()
         observer = mod.qconfig.weight()
-        observer(float_wt.unsqueeze(-1))
-        if observer.dtype == torch.quint8:
+        observer(float_wt)
+        if observer.dtype != torch.quint8:
             warn(
                 f"PReLU's weight observer should have dtype quint8 but got {observer.dtype}"
             )

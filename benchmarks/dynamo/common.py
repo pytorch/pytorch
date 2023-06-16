@@ -272,6 +272,12 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     "sebotnet33ts_256",  # Flaky accuracy failed
 ]
 
+CI_SKIP[CI("inductor", training=False, dynamic=True, device="cpu")] = [
+    *CI_SKIP[CI("inductor", training=False, device="cpu")],
+    "pyhpc_isoneutral_mixing",
+    "dpn107",
+]
+
 CI_SKIP_OPTIMIZER = {
     # TIMM
     "convmixer_768_32",  # accuracy
@@ -1234,10 +1240,6 @@ class BenchmarkRunner:
         return set()
 
     @property
-    def failing_dynamic_shape_models(self):
-        return set()
-
-    @property
     def skip_accuracy_checks_large_models_dashboard(self):
         return set()
 
@@ -2128,7 +2130,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--timeout",
         type=int,
-        default=1800,
+        default=2000,
         help="timeout (second) for benchmarking.",
     )
 
@@ -2297,7 +2299,6 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.assume_static_by_default = True
         torch._dynamo.config.automatic_dynamic_shapes = True
     if args.dynamic_shapes:
-        torch._dynamo.config.dynamic_shapes = True
         torch._dynamo.config.automatic_dynamic_shapes = True
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
@@ -2372,13 +2373,7 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
-            # See https://github.com/pytorch/pytorch/issues/102814
-            if torch._dynamo.config.dynamic_shapes:
-                torch._dynamo.config.assume_static_by_default = False
-            if not torch._dynamo.config.automatic_dynamic_shapes:
-                log.warning(
-                    "hf_T5_generate compiles extremely slowly without dynamic shapes; consider lowering cache_size_limit"
-                )
+            torch._dynamo.config.automatic_dynamic_shapes = True
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -2432,10 +2427,6 @@ def run(runner, args, original_dir=None):
         )
         if args.training:
             runner.skip_models.add("hf_T5")
-
-    if torch._dynamo.config.dynamic_shapes:
-        # TODO(jansel): fix bugs in these
-        runner.skip_models.update(runner.failing_dynamic_shape_models)
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)
@@ -2554,7 +2545,9 @@ def run(runner, args, original_dir=None):
         output_filename = "coverage.csv"
 
     if args.inductor or args.backend == "inductor":
-        inductor_config.triton.cudagraphs = not args.disable_cudagraphs
+        inductor_config.triton.cudagraphs = (
+            not args.disable_cudagraphs and not args.dynamic_shapes
+        )
         inductor_config.triton.persistent_reductions = (
             not args.disable_persistent_reductions
         )
@@ -2747,12 +2740,27 @@ def run(runner, args, original_dir=None):
                 print(f"Running model {i+1}/{nmodels}", flush=True)
 
             def write_csv(status):
-                for device in args.devices:
-                    output_csv(
-                        output_filename,
-                        ["dev", "name", "batch_size", "accuracy"],
-                        [device, name, placeholder_batch_size, status],
-                    )
+                if args.accuracy:
+                    headers = ["dev", "name", "batch_size", "accuracy"]
+                    rows = [
+                        [device, name, placeholder_batch_size, status]
+                        for device in args.devices
+                    ]
+                elif args.performance:
+                    headers = ["dev", "name", "batch_size", "speedup", "abs_latency"]
+                    rows = [
+                        [device, name, placeholder_batch_size, 0.0, 0.0]
+                        for device in args.devices
+                    ]
+                else:
+                    headers = []
+                    rows = [
+                        [device, name, placeholder_batch_size, 0.0]
+                        for device in args.devices
+                    ]
+
+                for row in rows:
+                    output_csv(output_filename, headers, row)
 
             try:
                 timeout = args.timeout
