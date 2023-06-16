@@ -139,7 +139,7 @@ AttrFunction attr_func_hardsigmoid =
       ideep::attr_t attr;
       ideep::post_ops po;
       po.append_eltwise(
-          1.0f, ideep::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
+          ideep::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
       attr.set_post_ops(po);
       return attr;
     };

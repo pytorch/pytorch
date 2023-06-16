@@ -1148,8 +1148,8 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
 
   // has_accum: extra input besides the conv to do conv add fusion.
   bool has_accum = accum.has_value() ? true : false;
-  auto& ctx = at::globalContext();
   if (has_accum) {
+    auto& ctx = at::globalContext();
     func_name += "_add";
     TORCH_CHECK(
       !transpose(),
@@ -1172,8 +1172,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   auto src_data_type = dnnl::memory::data_type::u8;
   auto src_desc = ideep::tensor::desc(src_dims, src_data_type,
       kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
-  ideep::tensor src;
-  src.init(src_desc, act_contig.data_ptr());
+  ideep::tensor src(src_desc, act_contig.data_ptr());
   // weights & bias
   ideep::tensor& weights = *(weight_.get());
   bool with_bias = bias_.has_value();
@@ -1262,11 +1261,9 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     // The true scale and zero point is stored in ideep::scale_t(scale_size, inv_output_scale) and dst_zero_points.
     dst.set_scale(accum_scale);
     dst.set_zero_point(accum_zero_points);
-  } else {
-    op_attr = kReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  } else if (kReluFused) {
+    op_attr = ideep::attr_t::fuse_relu();
   }
-  // Since src zero point is unknown, set runtime value here
-  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), src_zero_points);
 
   // Bias might be modified outside (e.g. by quantization bias correction).
   // If so, update the prepacked bias as well.
@@ -1290,15 +1287,14 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
             dnnl::algorithm::deconvolution_direct,
             dnnl::prop_kind::forward_inference,
             ideep::u8s8, ideep::engine::cpu_engine());
-        get_deconv_cache() = DeconvPrimitiveCache(cache_key, params, b);
+        get_deconv_cache() = DeconvPrimitiveCache(cache_key, params);
         auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     if (get_deconv_cache().hit(cache_key)) {
       DeconvParams& params = get_deconv_cache().get_params();
-      auto& expected_bias = get_deconv_cache().get_bias();
       ideep::convolution_transpose_forward::compute<false, false>(
-          params, src, weights, expected_bias, dst);
+          params, src, weights, b, dst);
     } else {
       ideep::convolution_transpose_forward::compute(
           src, weights, b, dst_dims, dst,
@@ -1323,15 +1319,14 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
             op_attr, dnnl::algorithm::convolution_direct,
             dnnl::prop_kind::forward_inference,
             ideep::u8s8, ideep::engine::cpu_engine());
-        get_conv_cache() = ConvPrimitiveCache(cache_key, params, b);
+        get_conv_cache() = ConvPrimitiveCache(cache_key, params);
         auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     // If hit, use cached data. If miss, fall back to normal path.
     if (get_conv_cache().hit(cache_key)) {
       auto& params = get_conv_cache().get_params();
-      auto& expected_bias = get_conv_cache().get_bias();
-      ideep::convolution_forward::compute<false, false>(params, src, weights, expected_bias, dst);
+      ideep::convolution_forward::compute<false, false>(params, src, weights, b, dst);
     } else {
       ideep::convolution_forward::compute(
           src, weights, b, dst_dims, dst,
