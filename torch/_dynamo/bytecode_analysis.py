@@ -213,14 +213,14 @@ def stacksize_analysis(instructions):
 
         for inst, next_inst in zip(instructions, instructions[1:] + [None]):
             stack_size = stack_sizes[inst]
-            if inst.opcode not in TERMINAL_OPCODES and (
-                sys.version_info >= (3, 9) or inst.opcode != dis.opmap["END_FINALLY"]
-            ):
+            if inst.opcode not in TERMINAL_OPCODES:
                 assert next_inst is not None, f"missing next inst: {inst}"
                 stack_sizes[next_inst].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=False)
                 )
-            if inst.opcode in JUMP_OPCODES:
+            if inst.opcode in JUMP_OPCODES and (
+                sys.version_info >= (3, 9) or inst.opcode != dis.opmap["CALL_FINALLY"]
+            ):
                 stack_sizes[inst.target].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )
