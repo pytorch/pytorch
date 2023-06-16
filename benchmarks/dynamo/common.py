@@ -1303,13 +1303,15 @@ class BenchmarkRunner:
             else:
                 model, example_inputs = cast_to_bf16(model, example_inputs)
 
+        return model, example_inputs
+
     def validate_model(self, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
-        self.cast_based_on_args(model, example_inputs)
+        model, example_inputs = self.cast_based_on_args(model, example_inputs)
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
@@ -1318,7 +1320,7 @@ class BenchmarkRunner:
     def maybe_cast(self, model, example_inputs):
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
-        self.cast_based_on_args(model, example_inputs)
+        model, example_inputs = self.cast_based_on_args(model, example_inputs)
         return model, example_inputs
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
@@ -2717,7 +2719,7 @@ def run(runner, args, original_dir=None):
                     args.per_process_memory_fraction
                 )
 
-            runner.cast_based_on_args(model, example_inputs)
+            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.run_one_model(
                 name,
                 model,
