@@ -4,6 +4,7 @@
 #       and there isn't a mechanism to selectively expose only some functions (eg. grad) from a file
 #       to Dynamo.
 from torch._functorch.eager_transforms import grad_impl, exposed_in, Callable, argnums_t
+import functools
 
 @exposed_in("torch.func")
 def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
@@ -100,6 +101,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         should not depend on the result of a context manager outside of ``f``.
 
     """
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return grad_impl(func, argnums, has_aux, args, kwargs)
     return wrapper

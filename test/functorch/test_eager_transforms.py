@@ -4709,6 +4709,13 @@ class TestHigherOrderOperatorInteraction(TestCase):
         z, = torch.autograd.grad(y.sum(), x)
         self.assertEqual(z, torch.full_like(x, 2))
 
+    def test_grad_name_wrapping(self, device):
+
+        def my_fn(x):
+            return x.sum()
+        grad_fn = grad(my_fn)
+        self.assertEqual(grad_fn.__name__, "my_fn")
+
     def test_functional_call_multiple_dicts(self):
         mod = nn.Linear(1, 1)
         x = torch.randn((1, 1))
