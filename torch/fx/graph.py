@@ -1295,14 +1295,16 @@ class Graph:
         """
         try:
             from tabulate import tabulate
+            
+            node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
+                        for n in self.nodes]
+            print(tabulate(node_specs,
+                headers=['opcode', 'name', 'target', 'args', 'kwargs']))
+
         except ImportError:
-            print("`print_tabular` relies on the library `tabulate`, "
+            raise ImportError("`print_tabular` relies on the library `tabulate`, "
                   "which could not be found on this machine. Run `pip "
                   "install tabulate` to install the library.")
-        node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
-                      for n in self.nodes]
-        print(tabulate(node_specs,
-              headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
     @compatibility(is_backward_compatible=True)
     def lint(self):
