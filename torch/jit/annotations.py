@@ -7,7 +7,8 @@ import builtins
 import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future, _Await, is_await, is_ignored_fn, Union, is_union
+    is_optional, _qualified_name, Any, Future, is_future, _Await, is_await, is_ignored_fn, \
+    Union, is_union, Sequence, is_sequence
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
@@ -45,6 +46,7 @@ class EvalEnv:
         'typing': Module('typing', {'Tuple': Tuple}),
         'Tuple': Tuple,
         'List': List,
+        'Sequence': Sequence,
         'Dict': Dict,
         'Optional': Optional,
         'Union': Union,
@@ -331,7 +333,7 @@ def try_ann_to_type(ann, loc, rcb=None):
         if len(ann.__args__) == 1 and ann.__args__[0] == ():
             return TupleType([])
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
-    if is_list(ann):
+    if is_list(ann) or is_sequence(ann):
         elem_type = try_ann_to_type(ann.__args__[0], loc)
         if elem_type:
             return ListType(elem_type)

@@ -7,6 +7,7 @@ circular dependency problems
 import ast
 import builtins
 import collections
+import collections.abc
 import contextlib
 import enum
 import inspect
@@ -27,6 +28,7 @@ from typing import (  # noqa: F401
     Generic,
     List,
     Optional,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
@@ -1004,6 +1006,19 @@ def is_list(ann) -> bool:
     if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is list:
         return True
     return ann.__module__ == "typing" and (ann_origin is List or ann_origin is list)
+
+
+def is_sequence(ann) -> bool:
+    if ann is Sequence:
+        raise_error_container_parameter_missing("Sequence")
+
+    if not hasattr(ann, "__module__"):
+        return False
+
+    ann_origin = getattr(ann, "__origin__", None)
+    if IS_PY39_PLUS and ann.__module__ == "collections.abc" and ann_origin is collections.abc.Sequence:
+        return True
+    return ann.__module__ == "typing" and (ann_origin is Sequence or ann_origin is collections.abc.Sequence)
 
 
 def is_dict(ann) -> bool:

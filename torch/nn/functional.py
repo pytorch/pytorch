@@ -1,5 +1,5 @@
 """Functional interface"""
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union, Sequence
 import math
 import warnings
 import importlib
@@ -9,7 +9,7 @@ from torch import _VF
 from torch import sym_int as _sym_int
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes, sparse_support_notes
-from torch.types import _size
+_size = Sequence[int]
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:

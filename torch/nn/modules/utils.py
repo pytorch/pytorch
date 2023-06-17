@@ -1,7 +1,7 @@
 from itertools import repeat
-from typing import Any, Callable, Dict, Iterable, List, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, Iterable, List, Tuple, TypeVar, Union, Sequence
 
-from torch.types import _size
+_size = Sequence[int]
 
 __all__ = ['consume_prefix_in_state_dict_if_present']
 
