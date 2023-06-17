@@ -885,11 +885,6 @@ def compile_fx(
     else:
         inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
-    # Save and restore dynamic shapes setting for backwards, as it is
-    # sometimes done as a context manager which won't be set when we
-    # hit backwards compile
-    dynamic_shapes = dynamo_config.dynamic_shapes
-
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
