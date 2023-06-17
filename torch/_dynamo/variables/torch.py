@@ -1308,7 +1308,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 else in_dims_v
             )
             broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(
-                list(in_dims.as_python_constant()), arg_spec
+                list(in_dims_v), arg_spec
             )
             # NOTE: updated_in_dims is flat list, it is ok for now
             #       as speculate_subgraph does not supports functions with non-Tenosr args.
