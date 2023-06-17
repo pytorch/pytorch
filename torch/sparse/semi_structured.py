@@ -20,8 +20,7 @@ _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
 
 
 class SparseSemiStructuredTensor(torch.Tensor):
-    """
-    This class implementes semi-structured sparsity as a Tensor subclass.
+    """This class implementes semi-structured sparsity as a Tensor subclass.
 
     Semi-structured sparsity describes a sparsity pattern where n in every 2n elements are sparse,
     depending on the datatype. It is also referred to as 2:4 sparsity or fine-grained
@@ -44,7 +43,22 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     @staticmethod
-    def __new__(cls, custom_shape, compressed_tensor, transposed):
+    def __new__(cls, custom_shape: torch.Size, compressed_tensor: torch.Tensor, transposed: bool = Flase) -> torch.Tensor:
+        """
+        Create a new instance of the class.
+
+        Args:
+            custom_shape (tuple): The custom shape for the new instance.
+            compressed_tensor (torch.Tensor): The compressed tensor to use for the new instance.
+            transposed (bool): Indicates whether the tensor is transposed.
+
+        Returns:
+            torch.Tensor: A torch.Tensor wrapper subclass.
+
+        Raises:
+            None
+
+        """
         kwargs = {}
         kwargs["device"] = compressed_tensor.device
         kwargs["dtype"] = compressed_tensor.dtype
@@ -68,11 +82,22 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
         Returns:
             None
+
+        Raises:
+            None
         """
         self.compressed_tensor = compressed_tensor
         self.transposed = transposed
 
-    def __repr__(self):
+    def __repr__(self) -> str:
+        """Return string representation of SparseSemiStructuredTensor
+
+        Returns:
+            str: String representation
+
+        Raises:
+            None
+        """
         return (
             f"SparseSemiStructuredTensor(shape={self.shape}, "
             f"transposed={self.transposed}"
@@ -83,7 +108,24 @@ class SparseSemiStructuredTensor(torch.Tensor):
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs):
+    def __torch_dispatch__(cls, func, types, args, kwargs) -> torch.Tensor:
+        """Overload __torch_dispatch__ to use torch._structred_sparse_linear.
+
+        `torch.structured_sparse_linear` uses accelerated sparse CUTLASS kernels.
+        In the future we plan to also add in support for cuSPARSELt kernels.
+
+        Args:
+            func: The function being dispatched.
+            types: The types of the arguments.
+            args: The arguments passed to the function.
+            kwargs: The keyword arguments passed to the function.
+
+        Returns:
+            torch.Tensor: The result of the dispatched operation.
+
+        Raises:
+            NotImplementedError: If the dispatched operation is not implemented.
+        """
         # since we create a new compressed tensor, the tensor will already be detached
         # this effecitvely functions as a no-op.
         if func is torch.ops.aten.detach.default:
@@ -190,12 +232,19 @@ def to_sparse_semi_structured(
     - torch.float16  (r, c) must be >= and a multiple of 64
     - torch.int8     (r, c) must be >= and a multiple of 128
 
-    Args::
+    Args:
         original_tensor (Tensor): the dense tensor to convert
         mask (Optional BoolTensor): boolean mask to apply to the original tensor
         transposed (bool, optional): whether the dense tensor is transposed
 
-    Example::
+    Returns:
+        SparseSemiStructuredTensor: A sparse semi-structured tensor created from the given original_tensor and mask
+
+    Raises:
+        NotImplementedError: If ``mask=None``, as we currently do not support inferring a mask from the dense tensor.
+        RuntimeError: If original_tensor is not a supported dtype, dim, shape, or device.
+
+    Example:
         >>> from torch.sparse import to_sparse_semi_structured
         >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()
         tensor([[0., 0., 1.,  ..., 0., 1., 1.],

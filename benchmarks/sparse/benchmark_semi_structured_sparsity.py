@@ -62,7 +62,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     dense_output = model(input_tensor)
 
     # sparsify weights
-    model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight))
+    model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight, mask=mask.bool()))
 
     sparse_output = model(input_tensor)
 
@@ -93,7 +93,7 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
     B = torch.zeros(k, n).to(dtype).cuda()
     bias = torch.rand(n).to(dtype).cuda()
 
-    sA = to_sparse_semi_structured(A)
+    sA = to_sparse_semi_structured(A, mask=A.bool())
 
     # torch.mm calculation
     if dtype is not torch.int8:
