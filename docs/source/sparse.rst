@@ -203,9 +203,10 @@ In this compressed form, the sparse tensor is stored by retaining only the *spec
     and mask, one can use ``.indices()`` and ``.values()`` to access the mask and specified elements respectively.
 
 
-    - ``.indices()`` returns the metadata_mask in a tensor of size `(r, c//2 )` and with element type ``torch.int16``.
-
     - ``.values()`` returns the specified elements in a tensor of size `(r, c//2)` and with the same dtype as the dense matrix.
+
+    - ``.indices()`` returns the metadata_mask in a tensor of size `(r, c//2 )` and with element type ``torch.int16`` if dtype is torch.float16 and element type ``torch.int32`` if dtype is torch.int8.
+
 
 For 2:4 sparse tensors, the metadata overhead is minor - just 2 bits per specified element.
 
@@ -247,10 +248,8 @@ The following datatypes are supported for semi-structured sparsity. Note that ea
    :widths: 15, 45, 10, 10
    :delim: ;
 
-   ``torch.float32``; Tensor must be 2D and (r, c) must both be a positive multiple of 8;9/16;1:2
-   ``torch.float16``; Tensor must be 2D and (r, c) must both be a positive multiple of 16;9/16;2:4
-   ``torch.bfloat16``; Tensor must be 2D and (r, c) must both be a positive multiple of 16;9/16;2:4
-   ``torch.int8``; Tensor must be 2D and (r, c) must both be a positive multiple of 32;10/16;2:4
+   ``torch.float16``; Tensor must be 2D and (r, c) must both be a positive multiple of 64;9/16;2:4
+   ``torch.int8``; Tensor must be 2D and (r, c) must both be a positive multiple of 128;10/16;2:4
 
 
 To construct a semi-structured sparse tensor, start by creating a regular dense tensor that adheres to a 2:4 (or semi-structured) sparse format.
@@ -303,6 +302,7 @@ To use these ops, simply pass the output of ``to_sparse_semi_structured(tensor)`
     >>> torch.allclose(c, torch.mm(a_sparse, b))
     True
 
+Under the hood, SparseSemiStructuredTensor will call ``torch._structured_sparse_linear`` for accelerated inference using CUTLASS sparse kernels.
 
 Accelerating nn.Linear with semi-structured sparsity
 ----------------------------------------------------

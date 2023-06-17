@@ -51,16 +51,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
         kwargs["layout"] = compressed_tensor.layout
         kwargs["requires_grad"] = False
 
-        warnings.warn(
-            (
-                "The PyTorch API of SparseSemiStructuredTensor is in prototype stage "
-                "and will change in the near future. Please open a Github issue "
-                "for features requests and see our documentation on the torch.sparse "
-                "module for further information about the project."
-            ),
-            UserWarning,
-        )
-
         return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)  # type: ignore[attr-defined]
 
     def __init__(
