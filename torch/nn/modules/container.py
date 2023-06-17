@@ -111,7 +111,15 @@ class Sequential(Module):
             raise IndexError('index {} is out of range'.format(idx))
         idx %= size
         return next(islice(iterator, idx, None))
+        
+    @overload
+    def __getitem__(self, idx: int) -> Module:
+        ...
 
+    @overload
+    def __getitem__(self, idx: slice) -> 'ModuleList': 
+        ...
+        
     @_copy_to_script_wrapper
     def __getitem__(self, idx: Union[slice, int]) -> Union['Sequential', T]:
         if isinstance(idx, slice):
