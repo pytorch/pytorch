@@ -93,14 +93,6 @@ blocklist = [
     "range",
     # defined in functional
     "einsum",
-    # reduction argument; these bindings don't make sense
-    "binary_cross_entropy_with_logits",
-    "ctc_loss",
-    "cosine_embedding_loss",
-    "hinge_embedding_loss",
-    "kl_div",
-    "margin_ranking_loss",
-    "triplet_margin_loss",
     # Somehow, these are defined in both _C and in functional. Ick!
     "broadcast_tensors",
     # Manually define named tensor type stubs in __init__.pyi.in
@@ -854,112 +846,6 @@ def gen_pyi(
                 "def nonzero(input: Tensor, *, as_tuple: Literal[False] = False, out: Optional[Tensor] = None) -> Tensor: ...",
                 "def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
             ],
-            "binary_cross_entropy_with_logits": [
-                "def binary_cross_entropy_with_logits({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "target: Tensor",
-                            "weight: Optional[Tensor] = None",
-                            "size_average: Optional[bool] = None",
-                            "reduce: Optional[bool] = None",
-                            "reduction: str = ...",
-                            "pos_weight: Optional[Tensor] = None",
-                        ]
-                    )
-                )
-            ],
-            "cosine_embedding_loss": [
-                "def cosine_embedding_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input1: Tensor",
-                            "input2: Tensor",
-                            "target: Tensor",
-                            "margin: float = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
-            "ctc_loss": [
-                "def ctc_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "log_probs: Tensor",
-                            "targets: Tensor",
-                            "input_lengths: Tensor",
-                            "target_lengths: Tensor",
-                            "blank: int = ...",
-                            "reduction: str = ...",
-                            "zero_infinity: bool = ...",
-                        ]
-                    )
-                )
-            ],
-            "hinge_embedding_loss": [
-                "def hinge_embedding_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "target: Tensor",
-                            "margin: float = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
-            "kl_div": [
-                "def kl_div({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input: Tensor",
-                            "target: Tensor",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                            "log_target: bool = ...",
-                        ]
-                    )
-                )
-            ],
-            "margin_ranking_loss": [
-                "def margin_ranking_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "input1: Tensor",
-                            "input2: Tensor",
-                            "target: Tensor",
-                            "margin: float = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
-            "triplet_margin_loss": [
-                "def triplet_margin_loss({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "anchor: Tensor",
-                            "positive: Tensor",
-                            "negative: Tensor",
-                            "margin: float = ...",
-                            "p: float = ...",
-                            "eps: float = ...",
-                            "swap: bool = ...",
-                            "size_average: Optional[bool] = ...",
-                            "reduce: Optional[bool] = ...",
-                            "reduction: str = ...",
-                        ]
-                    )
-                )
-            ],
             "dsmm": ["def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "hsmm": ["def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "saddmm": [
@@ -1028,8 +914,14 @@ def gen_pyi(
             else:
                 namedtuples[tuple_name] = tuple_def
 
+    def replace_special_case(hint: str) -> str:
+        # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
+        hint = hint.replace("at::Reduction::Mean", "1")
+        return hint
+
     function_hints = []
     for name, hints in sorted(unsorted_function_hints.items()):
+        hints = [replace_special_case(h) for h in hints]
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
         function_hints += hints
