@@ -9,6 +9,7 @@ from torch import _VF
 from torch import sym_int as _sym_int
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes, sparse_support_notes
+from torch.types import _size
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -2432,7 +2433,7 @@ if embedding_bag.__doc__:
     embedding_bag.__doc__ = embedding_bag.__doc__.format(**reproducibility_notes)
 
 
-def _verify_batch_size(size: List[int]) -> None:
+def _verify_batch_size(size: _size) -> None:
     # XXX: JIT script does not support the reduce from functools, and mul op is a
     # builtin, which cannot be used as a value to a func yet, so rewrite this size
     # check to a simple equivalent for loop
@@ -2485,7 +2486,7 @@ def batch_norm(
     )
 
 
-def _verify_spatial_size(size: List[int]) -> None:
+def _verify_spatial_size(size: _size) -> None:
     # Verify that there is > 1 spatial element for instance norm calculation.
     size_prods = 1
     for i in range(2, len(size)):
@@ -4781,7 +4782,7 @@ def _in_projection_packed(
     v: Tensor,
     w: Tensor,
     b: Optional[Tensor] = None,
-) -> List[Tensor]:
+) -> Tuple[Tensor, Tensor, Tensor]:
     r"""
     Performs the in-projection step of the attention operation, using packed weights.
     Output is a triple containing projection tensors for query, key and value.
@@ -4806,7 +4807,7 @@ def _in_projection_packed(
         - b: :math:`E * 3` where E is the embedding dimension
 
         Output:
-        - in output list :math:`[q', k', v']`, each output tensor will have the
+        - in output tuple :math:`(q', k', v')`, each output tensor will have the
             same shape as the corresponding input tensor.
     """
     E = q.size(-1)
