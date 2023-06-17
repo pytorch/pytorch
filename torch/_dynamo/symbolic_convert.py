@@ -1890,7 +1890,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         # The first field of tuple is the fully qualified name of current module
         # in original hierarchy.  The second field is the type of current nn.module
         self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
-        self.fwd_seq_id = -1
+        # Unique id of python level ops similar to sequence_nr
+        # implemented in eager mode autograd.  This id is used to map
+        # forward ops to their corresponding backward ops in aot_autograd.
+        # See Note [Sequence Number] for more details on the usage of seq_id.
+        self.seq_id = -1
         # Flag to indicate whether tracing is used for export.
         self.export = export
 

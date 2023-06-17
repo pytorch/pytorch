@@ -3550,8 +3550,6 @@ def aot_function(
         if cached_res is None:
             flat_fn, out_spec = create_tree_flattened_fn(fn, args, kwargs)
 
-            print(f"Calling create_aot_dispatch fn {fn}- no max fwd_seq_id set")
-
             compiled_fn = create_aot_dispatcher_function(
                 flat_fn,
                 flat_args,
@@ -3591,7 +3589,6 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
-    print("Calling aot_module")
 
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
@@ -3704,8 +3701,6 @@ def aot_module_simplified(
         if isinstance(x, FakeTensor):
             dynamic_shapes = x.fake_mode.shape_env is not None
             break
-    print(f"AOT creating dispatcher for module w/ max fwd ops {mod_count} ")
-
 
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,

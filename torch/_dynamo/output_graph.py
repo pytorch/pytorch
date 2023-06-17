@@ -1130,9 +1130,9 @@ class SubgraphTracer(fx.Tracer):
             inc_seq_id = True
 
         if inc_seq_id:
-            tx.fwd_seq_id = tx.fwd_seq_id + 1
+            tx.seq_id = tx.seq_id + 1
 
-        rv.node.meta["seq_id"] = tx.fwd_seq_id
+        rv.node.meta["seq_id"] = tx.seq_id
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

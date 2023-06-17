@@ -703,6 +703,75 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         f(torch.ones(4))
         f(torch.ones(6))
 
+    def test_aot_sequence_nr(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv1 = torch.nn.Conv2d(
+                    in_channels=16,
+                    out_channels=16,
+                    kernel_size=(1, 1),
+                    stride=1,
+                    padding="same",
+                    bias=True,
+                )
+                self.bn1 = torch.nn.BatchNorm2d(num_features=16)
+                self.relu1 = torch.nn.ReLU()
+                self.fc1 = torch.nn.Linear(in_features=1638400, out_features=1)
+                self.loss_fn = torch.nn.L1Loss()
+
+            def forward(self, x, target):
+                y = x
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu1(x)
+                x = x + y
+                x = torch.flatten(x)
+                x = self.fc1(x)
+                output = self.loss_fn(x, target)
+
+                return (output,)
+
+        mod = Model()
+        if self.device == "cpu":
+            mod.cpu().to(memory_format=torch.contiguous_format)
+        else:
+            mod.cuda().to(memory_format=torch.contiguous_format)
+        mod.train()
+        x = torch.rand(100, 16, 32, 32, device=self.device, requires_grad=True)
+        target = torch.rand(1, device=self.device)
+
+        # Use dynamo export to get the fx graph module
+        g_mod, _ = torch._dynamo.export(mod, x, target)
+
+        # aot_export requires a graph mod input of fwd graph
+        # returns the full fwd/bwd graph in graph mod format
+        with torch.enable_grad(), fx_traceback.preserve_node_meta():
+            fx_g, signature = aot_export_module(
+                g_mod,
+                [x, target],
+                trace_joint=True,
+                output_loss_index=0,
+                skip_flatten_joint=True,
+            )
+
+        # Testing aot full graph
+        seq_id_list = []
+        fwd_detected = False
+        bwd_detected = False
+        for node in fx_g.graph.nodes:
+            if "call_" in node.op:
+                seq_id = node.meta.get("seq_id", -1)
+                if seq_id >= 0:
+                    if not seq_id_list or seq_id_list[-1] < seq_id:
+                        seq_id_list.append(seq_id)
+                        fwd_detected = True
+                    elif seq_id_list[-1] > seq_id:
+                        seq_id_list.pop()
+                        bwd_detected = True
+        # Last node in list will be 0, just pop it to clear list
+        seq_id_list.pop()
+        self.assertTrue(fwd_detected and bwd_detected and not seq_id_list)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
