@@ -85,6 +85,7 @@ try:
     # To be moved to compiler side later
     from quantization.pt2e.test_graph_utils import TestGraphUtils  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
+    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EOps  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFX  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXX86Inductor  # noqa: F401
