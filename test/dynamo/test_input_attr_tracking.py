@@ -276,3 +276,96 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
         # call_function  mul     <built-in function mul>  (l_y_, 6)        {}
         # call_function  mul_1   <built-in function mul>  (l_x_, 6)        {}
         # output         output  output                   ((mul_1, mul),)  {}
+
+    def test_set_data_on_input_tensor(self):
+        def fn(x, y):
+            x.data = y.data
+            if x.size() == y.size():
+                return x * y
+            else:
+                return y * y
+
+        x = torch.randn([5, 5])
+        y = torch.randn([2, 2])
+
+        eager_result = fn(x, y)
+
+        counter = CompileCounter()
+
+        fn = torch._dynamo.optimize(counter, nopython=True)(fn)
+
+        compile_result = fn(x, y)
+        self.assertEqual(compile_result, eager_result)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 2)
+        # Graph for reference
+        # __compiled_fn_0 <eval_with_key>.0 opcode         name    target                   args          kwargs
+        # -------------  ------  -----------------------  ------------  --------
+        # placeholder    l_x_    L_x_                     ()            {}
+        # placeholder    l_y_    L_y_                     ()            {}
+        # call_method    detach  detach                   (l_y_,)       {}
+        # call_function  mul     <built-in function mul>  (l_x_, l_y_)  {}
+        # output         output  output                   ((mul,),)     {}
+
+    # Note - this does not actually get captured in the graph yet.
+    # The plan of record is to introduce a set_data op, entirely subsume the operation into a call_function
+    # in the the fx graph, and let aot_autograd handle it.
+    def test_set_data_on_scoped_tensor(self):
+        def fn(x):
+            z = torch.zeros([4, 4])
+            z.data = x.data
+            if x.size() == z.size():
+                return z * x
+            else:
+                return x
+
+        x = torch.randn([5, 5])
+
+        eager_result = fn(x)
+
+        counter = CompileCounter()
+
+        fn = torch._dynamo.optimize(counter, nopython=False)(fn)
+
+        compile_result = fn(x)
+        self.assertEqual(compile_result, eager_result)
+        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.op_count, 3)
+
+    def test_set_data_on_user_defined_class_input_tensor(self):
+        class MyUserDefinedClass:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            def do_some_setattr_stuff(self):
+                self.z = x * y
+                self.a = x + x
+                return self.z * self.a
+
+        x = torch.randn([5, 5])
+        y = torch.randn([5, 5])
+        mudc_1 = MyUserDefinedClass(x, y)
+
+        eager_result = mudc_1.do_some_setattr_stuff()
+
+        counter = CompileCounter()
+
+        mudc_2 = MyUserDefinedClass(x, y)
+        do_some_setattr_stuff = torch._dynamo.optimize(counter, nopython=True)(
+            mudc_2.do_some_setattr_stuff
+        )
+
+        compile_result = do_some_setattr_stuff()
+        self.assertEqual(compile_result, eager_result)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 3)
+        # Graph for reference
+        #  __compiled_fn_0 <eval_with_key>.0 opcode         name    target                   args                  kwargs
+        # -------------  ------  -----------------------  --------------------  --------
+        # placeholder    l_x_    L_x_                     ()                    {}
+        # placeholder    l_y_    L_y_                     ()                    {}
+        # call_function  mul     <built-in function mul>  (l_x_, l_y_)          {}
+        # call_function  add     <built-in function add>  (l_x_, l_x_)          {}
+        # call_function  mul_1   <built-in function mul>  (mul, add)            {}
+        # output         output  output                   ((mul_1, mul, add),)  {}
