@@ -163,7 +163,12 @@ def constant_fold_uniform_value(gm):
             new_node = graph.call_function(
                 aten.full.default,
                 args=(list(constant.shape), value),
-                kwargs={"dtype": constant.dtype, "device": constant.device},
+                kwargs={
+                    "dtype": constant.dtype,
+                    "layout": torch.strided,
+                    "device": constant.device,
+                    "pin_memory": False,
+                },
             )
 
             new_node.meta.update(node.meta)
