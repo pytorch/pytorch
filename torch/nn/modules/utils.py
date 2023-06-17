@@ -1,13 +1,14 @@
-import collections
 from itertools import repeat
-from typing import List, Dict, Any
+from typing import Any, Callable, Dict, Iterable, List, Tuple, TypeVar, Union
 
 __all__ = ['consume_prefix_in_state_dict_if_present']
 
+T = TypeVar("T")
 
-def _ntuple(n, name="parse"):
-    def parse(x):
-        if isinstance(x, collections.abc.Iterable):
+
+def _ntuple(n, name="parse") -> Callable[[Union[T, Iterable[T]]], Tuple[T, ...]]:
+    def parse(x: Union[T, Iterable[T]]) -> Tuple[T, ...]:
+        if isinstance(x, Iterable):
             return tuple(x)
         return tuple(repeat(x, n))
 
