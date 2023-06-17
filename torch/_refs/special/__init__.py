@@ -85,7 +85,7 @@ def erfcx(a: TensorLikeType) -> TensorLikeType:
 
 
 # alias for sigmoid
-expit = _make_alias(torch.sigmoid, "expit", __name__)
+expit = _make_alias(torch.sigmoid, "expit")
 
 
 @_make_elementwise_unary_reference(

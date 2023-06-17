@@ -1,5 +1,6 @@
 import builtins
 import collections
+import inspect
 import math
 import operator
 import warnings
@@ -439,10 +440,10 @@ def _make_elementwise_unary_reference(
     return inner
 
 
-def _make_alias(fn, name, module_name):
+def _make_alias(fn, name):
     """
-    This function defines an alias of another function and sets its __name__ and __module__
-    argument.
+    This function defines an alias of another function and sets its __name__ argument.
+    It also sets its __module__ argument to the module of the caller.
     Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`, and
     `alias.__module__ == fn.__module__`.
     """
@@ -451,7 +452,7 @@ def _make_alias(fn, name, module_name):
         return fn(*args, **kwargs)
 
     _fn.__name__ = name
-    _fn.__module__ = module_name
+    _fn.__module__ = inspect.currentframe().f_back.f_globals["__name__"]
     return _fn
 
 
@@ -679,7 +680,7 @@ def isnan(a: TensorLikeType) -> TensorLikeType:
 
 
 # alias
-mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma", __name__)  # type: ignore[has-type]
+mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma")  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(
