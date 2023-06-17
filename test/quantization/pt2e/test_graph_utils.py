@@ -8,12 +8,12 @@ import torch._dynamo as torchdynamo
 from torch.ao.quantization._pt2e.graph_utils import (
     find_sequential_partitions,
     _create_equivalent_types_dict,
+    get_equivalent_types,
 )
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TestCase,
 )
-from typing import List, Set
 
 
 class TestGraphUtils(TestCase):
@@ -101,17 +101,20 @@ class TestGraphUtils(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on Windows")
     def test_customized_equivalet_types_dict(self):
-        _CUSTOMIZED_EQUIVALENT_TYPES: List[Set] = [
-            {torch.nn.Conv2d, torch.nn.functional.conv2d},
-            {torch.nn.ReLU},
-        ]
-        _CUSTOMIZED_EQUIVALENT_TYPES_DICT = _create_equivalent_types_dict(_CUSTOMIZED_EQUIVALENT_TYPES)
+        native_equivalent_types = get_equivalent_types()
+        customized_equivalent_types = native_equivalent_types
+
+        for equivalent_type_set in customized_equivalent_types:
+            if torch.nn.ReLU in equivalent_type_set:
+                equivalent_type_set.clear()
+                equivalent_type_set.add(torch.nn.ReLU)
+
+        customized_equivalent_types_dict = _create_equivalent_types_dict(customized_equivalent_types)
 
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.conv = torch.nn.Conv2d(3, 3, 3)
-                self.relu = torch.nn.ReLU()
 
             def forward(self, x):
                 return torch.nn.functional.relu(self.conv(x))
@@ -128,6 +131,6 @@ class TestGraphUtils(TestCase):
         fused_partitions = find_sequential_partitions(
             m,
             [torch.nn.Conv2d, torch.nn.ReLU],
-            equivalent_types_dict=_CUSTOMIZED_EQUIVALENT_TYPES_DICT,
+            equivalent_types_dict=customized_equivalent_types_dict,
         )
         self.assertEqual(len(fused_partitions), 0)

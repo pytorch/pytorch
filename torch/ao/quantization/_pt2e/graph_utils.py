@@ -20,6 +20,9 @@ _EQUIVALENT_TYPES: List[Set] = [
 ]
 
 
+def get_equivalent_types() -> List[Set]:
+    return _EQUIVALENT_TYPES
+
 def _create_equivalent_types_dict(equivalent_types=None):
     if equivalent_types is None:
         # If no equivalent_types passed in, use the default _EQUIVALENT_TYPES.
