@@ -60,7 +60,7 @@ def assert_async_msg_decomp(tensor, msg):
     return
 
 
-# Following `assert_async_msg_decomp` to implement non-op.
+# Following `assert_async_msg_decomp` and implement as non-op.
 @register_decomposition([aten._functional_assert_async.msg])
 def functional_assert_async_msg_decomp(tensor, msg):
     return
