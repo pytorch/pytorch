@@ -1722,7 +1722,7 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
 Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
   TORCH_CHECK(
      sparse_dim == self.sparse_dim(), "sparse dim argument for sparse_coo_to_sparse must not be different than sparse dim of original tensor");
-  return self;
+  return self.alias();
 }
 
 Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim) {
@@ -1783,7 +1783,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
     AT_ERROR("sparse_compressed_to_sparse for ", self.layout(), " to ", layout_, " conversion does not support specifying number of dense dimensions");
   }
   if (self.layout() == layout_ && (!blocksize.has_value() || at::sparse_csr::getBlockSize(self) == *blocksize)) {
-    return self;
+    return self.alias();
   }
   switch (layout_) {
   case kStrided:
@@ -1828,13 +1828,13 @@ Tensor sparse_coo_to_sparse(const Tensor& self, c10::optional<c10::Layout> layou
     AT_ERROR("sparse_coo_to_sparse for ", self.layout(), " to ", layout_, " conversion does not support specifying number of dense dimensions");
   }
   if (self.layout() == layout_) {
-    return self;
+    return self.alias();
   }
   switch (layout_) {
   case kStrided:
     return self.to_dense(c10::nullopt, c10::nullopt);
   case kSparse:
-    return self;
+    return self.alias();
   case kSparseCsr:
     return self.to_sparse_csr(dense_dim_opt);
   case kSparseCsc:
