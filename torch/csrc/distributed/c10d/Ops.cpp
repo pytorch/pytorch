@@ -35,6 +35,8 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "_reduce_scatter_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(
+      "reduce_scatter_tensor_coalesced_(Tensor[] outputs, Tensor[] inputs, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int timeout) -> __torch__.torch.classes.c10d.Work");
+  m.def(
       "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
   m.def(
       "gather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int timeout) -> __torch__.torch.classes.c10d.Work");
@@ -317,6 +319,27 @@ IMPL__REDUCE_SCATTER_BASE(CPU)
 IMPL__REDUCE_SCATTER_BASE(CUDA)
 IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
 
+#define IMPL_REDUCE_SCATTER_TENSOR_COALESCED(DEV)                       \
+  c10::intrusive_ptr<c10d::Work> reduce_scatter_tensor_coalesced_##DEV( \
+      at::TensorList outputs,                                           \
+      at::TensorList inputs,                                            \
+      const c10::intrusive_ptr<ProcessGroup>& process_group,            \
+      const c10::intrusive_ptr<ReduceOp>& reduce_op,                    \
+      int64_t timeout) {                                                \
+    auto output_vec = outputs.vec();                                    \
+    auto input_vec = inputs.vec();                                      \
+    return process_group->getBackend(c10::DeviceType::DEV)              \
+        ->reduce_scatter_tensor_coalesced(                              \
+            output_vec,                                                 \
+            input_vec,                                                  \
+            ReduceScatterOptions{                                       \
+                *reduce_op.get(), std::chrono::milliseconds(timeout)}); \
+  }
+
+IMPL_REDUCE_SCATTER_TENSOR_COALESCED(CPU)
+IMPL_REDUCE_SCATTER_TENSOR_COALESCED(CUDA)
+IMPL_REDUCE_SCATTER_TENSOR_COALESCED(PrivateUse1)
+
 #define IMPL_GATHER(DEV)                                                       \
   c10::intrusive_ptr<Work> gather_##DEV(                                       \
       const std::vector<std::vector<at::Tensor>>& output_tensors,              \
@@ -462,6 +485,7 @@ REGISTER_C10D_OP(allgather_coalesced_)
 REGISTER_C10D_OP(allgather_into_tensor_coalesced_)
 REGISTER_C10D_OP(reduce_scatter_)
 REGISTER_C10D_OP(_reduce_scatter_base_)
+REGISTER_C10D_OP(reduce_scatter_tensor_coalesced_)
 REGISTER_C10D_OP(gather_)
 REGISTER_C10D_OP(scatter_)
 REGISTER_C10D_OP(alltoall_)
