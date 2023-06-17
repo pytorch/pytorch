@@ -1277,6 +1277,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 unimplemented(
                     "NYI - torch.func.vmap is not implemented when chunk_size is passed"
                 )
+            # if randomness.value != 'error':
+            #     unimplemented(
+            #         "NYI - torch.func.vmap is only implemented for randomness='error'"
+            #     )
 
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
@@ -1294,14 +1298,23 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             # body_lifted_variable should not be treated as batched.
             # So here we update `in_dims` to reflect that.
             _, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
+
+            in_dims_v = in_dims.as_python_constant()
+            in_dims_v = (
+                [
+                    in_dims_v,
+                ]
+                if isinstance(in_dims_v, int)
+                else in_dims_v
+            )
             broadcasted_in_dims = torch._functorch.vmap._broadcast_to_and_flatten(
-                in_dims, arg_spec
+                list(in_dims.as_python_constant()), arg_spec
             )
             # NOTE: updated_in_dims is flat list, it is ok for now
             #       as speculate_subgraph does not supports functions with non-Tenosr args.
             #       (so we graph-break above)
             updated_in_dims = TupleVariable(
-                broadcasted_in_dims
+                [ConstantVariable(dim) for dim in broadcasted_in_dims]
                 + [
                     ConstantVariable(None),
                 ]
