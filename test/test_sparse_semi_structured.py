@@ -5,16 +5,9 @@ import torch
 from torch import nn
 
 from torch.sparse.semi_structured import (
-    to_sparse_semi_structured,
-    SparseSemiStructuredTensor,
     _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG,
-)
-
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-    parametrize,
-    subtest,
+    SparseSemiStructuredTensor,
+    to_sparse_semi_structured,
 )
 
 from torch.testing._internal.common_device_type import (
@@ -22,13 +15,21 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 
-from torch.testing._internal.common_dtype import (
-    all_types_and_complex
+from torch.testing._internal.common_dtype import all_types_and_complex
+
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
 )
 
 SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
 
-def rand_sparse_semi_structured_mask(r, c, dtype=torch.float16, device="cuda", choice=None):
+
+def rand_sparse_semi_structured_mask(
+    r, c, dtype=torch.float16, device="cuda", choice=None
+):
     """
     This function returns a 1:2 sparse matrix of size (r, c).
     Note that this means this matrix will also be 2:4 and 4:8 sparse as well.
@@ -43,39 +44,46 @@ def rand_sparse_semi_structured_mask(r, c, dtype=torch.float16, device="cuda", c
         .contiguous()
     )
 
-class TestSparseSemiStructured(TestCase):
 
+class TestSparseSemiStructured(TestCase):
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_to_sparse_semi_structured(self, dtype):
-        a = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
-        a_sparse = to_sparse_semi_structured(a, mask=a.bool())
+        A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
+        A_sparse = to_sparse_semi_structured(A, mask=A.bool())
 
-        assert a.shape == a_sparse.shape
-        assert a.device == a_sparse.device
-        assert a.dtype == a_sparse.dtype
+        assert A.shape == A_sparse.shape
+        assert A.device == A_sparse.device
+        assert A.dtype == A_sparse.dtype
 
-        assert isinstance(a, torch.Tensor)
-        assert isinstance(a_sparse, SparseSemiStructuredTensor)
+        assert isinstance(A, torch.Tensor)
+        assert isinstance(A_sparse, SparseSemiStructuredTensor)
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "Creating mask from dense tensor is currently not supported",
+        ):
+            A_sparse = to_sparse_semi_structured(A)
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_mm_sparse_first_NT(self, dtype, device):
         """
-        This function tests torch.mm(A_sparse, B.T), where the first element is sparse and non-transposed, is correct.
+        Ensure torch.mm(A_sparse, B) is correct for float16 and will throw error for int8
+        Ensure torch.mm(A_sparse, B.t()) is correct
         """
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A, mask=A.bool())
 
         B = torch.rand((128, 128), device=A_sparse.device).to(dtype)
 
-
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
-        # CUTLASS and cuSPARSELt have slightly different int8 behavior. CUTLASS will output to an int32 tensor while cuSPARSELt will output to a int8 tensor
         if dtype is torch.int8:
             # This should fail
             with self.assertRaisesRegex(RuntimeError, "_structured_sparse_linear"):
                 sparse_result = torch.mm(A_sparse, B)
 
             # test transpose
+            # NOTE: CUTLASS and cuSPARSELt have slightly different int8 behavior.
+            # CUTLASS will output to an int32 tensor while cuSPARSELt will output to a int8 tensor
             dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32)
             sparse_result = torch.mm(A_sparse, B.t())
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
@@ -88,31 +96,33 @@ class TestSparseSemiStructured(TestCase):
             sparse_result = torch.mm(A_sparse, B.t())
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_mm_sparse_first_T(self, dtype, device):
+        """
+        Ensure torch.mm(A_sparse.t(), B) throws error
+        """
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A, mask=A.bool())
 
         B = torch.rand((128, 128), device=A_sparse.device).to(dtype)
 
-        with self.assertRaisesRegex(NotImplementedError,  r'arg0: SparseSemiStructuredTensor\(.*transposed=True\)'):
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"arg0: SparseSemiStructuredTensor\(.*transposed=True\)",
+        ):
             torch.mm(A_sparse.t(), B)
-
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_mm_sparse_second_T(self, dtype, device):
         """
-        This function tests torch.mm(A_sparse, B.T), where the first element is sparse and non-transposed, is correct.
+        Ensure torch.mm(A, B_sparse.t()) is correct
         """
         B = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         B_sparse = to_sparse_semi_structured(B, mask=B.bool())
 
         A = torch.rand((128, 128), device=B_sparse.device).to(dtype)
 
-
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
-        # CUTLASS and cuSPARSELt have slightly different int8 behavior. CUTLASS will output to an int32 tensor while cuSPARSELt will output to a int8 tensor
         if dtype is torch.int8:
             dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.int32)
             sparse_result = torch.mm(A, B_sparse.t())
@@ -125,19 +135,24 @@ class TestSparseSemiStructured(TestCase):
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_mm_sparse_second_NT(self, dtype, device):
         """
-        This function tests torch.mm(A_sparse, B.T), where the first element is sparse and non-transposed, is correct.
+        Ensure torch.mm(A, B_sparse) throws error
         """
         B = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         B_sparse = to_sparse_semi_structured(B, mask=B.bool())
 
         A = torch.rand((128, 128), device=B_sparse.device).to(dtype)
 
-        with self.assertRaisesRegex(NotImplementedError,  r'arg1: SparseSemiStructuredTensor\(.*transposed=False\)'):
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"arg1: SparseSemiStructuredTensor\(.*transposed=False\)",
+        ):
             sparse_result = torch.mm(A, B_sparse)
-
 
     @parametrize("inference_mode", [subtest(False), subtest(True)])
     def test_linear(self, inference_mode, device):
+        """
+        Test nn.Linear has the same numerics
+        """
         input = torch.rand(128, 128, device=device).half()
         model = nn.Linear(128, 128).to(device).half()
         m, n = model.weight.shape
@@ -188,8 +203,6 @@ class TestSparseSemiStructured(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.dim"):
             A_sparse = to_sparse_semi_structured(A, mask=A.bool())
-
-
 
 
 instantiate_device_type_tests(TestSparseSemiStructured, globals(), only_for="cuda")

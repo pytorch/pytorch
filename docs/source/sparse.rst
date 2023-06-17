@@ -258,67 +258,36 @@ To do this we  tile a small 1x4 strip to create a 16x16 dense float16 tensor.
 Afterwards, we can call ``to_sparse_semi_structured`` on this matrix to compress it for accelerated inference.
 
     >>> from torch.sparse import to_sparse_semi_structured
-    >>> a = torch.Tensor([0, 0, 1, 1]).tile((16, 4)).cuda().half()
-    tensor([[0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.],
-        [0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1., 0., 0., 1., 1.]],
-       device='cuda:0', dtype=torch.float16)
-    >>> a = to_sparse_semi_structured(a)
-    SparseSemiStructuredTensor(shape=torch.Size([16, 16])
-     metadata=tensor([[-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370],
-        [-4370]], device='cuda:0', dtype=torch.int16)
-     values=tensor([[1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.],
-        [1., 1., 1., 1., 1., 1., 1., 1.]], device='cuda:0',
-       dtype=torch.float16))
+    >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()
+    tensor([[0., 0., 1.,  ..., 0., 1., 1.],
+            [0., 0., 1.,  ..., 0., 1., 1.],
+            [0., 0., 1.,  ..., 0., 1., 1.],
+            ...,
+            [0., 0., 1.,  ..., 0., 1., 1.],
+            [0., 0., 1.,  ..., 0., 1., 1.],
+            [0., 0., 1.,  ..., 0., 1., 1.]], device='cuda:0', dtype=torch.float16)
+    >>> A_sparse = to_sparse_semi_structured(A, mask=A.bool())
+    SparseSemiStructuredTensor(shape=torch.Size([128, 128]), transposed=False, values=tensor([[1., 1., 1.,  ..., 1., 1., 1.],
+            [1., 1., 1.,  ..., 1., 1., 1.],
+            [1., 1., 1.,  ..., 1., 1., 1.],
+            ...,
+            [1., 1., 1.,  ..., 1., 1., 1.],
+            [1., 1., 1.,  ..., 1., 1., 1.],
+            [1., 1., 1.,  ..., 1., 1., 1.]], device='cuda:0', dtype=torch.float16), metadata=tensor([[-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            ...,
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370],
+            [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0',
+    dtype=torch.int16))
 
 Sparse Semi-Structured Tensor Operations
 ----------------------------------------
 
 Currently, the following operations are supported for semi-structured sparse tensors:
 
-- torch.addmm(bias, dense, sparse)
-- torch.addmm(bias, sparse, dense)
+- torch.addmm(bias, dense, sparse.t())
 - torch.mm(dense, sparse)
 - torch.mm(sparse, dense)
 - aten.linear.default(dense, sparse, bias)
@@ -330,7 +299,7 @@ To use these ops, simply pass the output of ``to_sparse_semi_structured(tensor)`
     >>> a = torch.Tensor([0, 0, 1, 1]).tile((64, 16)).half().cuda()
     >>> b = torch.rand(64, 64).half().cuda()
     >>> c = torch.mm(a, b)
-    >>> a_sparse = to_sparse_semi_structured(a)
+    >>> a_sparse = to_sparse_semi_structured(a, mask=a.bool())
     >>> torch.allclose(c, torch.mm(a_sparse, b))
     True
 
@@ -340,10 +309,9 @@ Accelerating nn.Linear with semi-structured sparsity
 You can accelerate the linear layers in your model if the weights are already semi-structured sparse with just a few lines of code:
 
     >>> input = torch.rand(64, 64).half().cuda()
-    >>> mask = torch.Tensor([0, 0, 1, 1]).tile((64, 16)).cuda()
+    >>> mask = torch.Tensor([0, 0, 1, 1]).tile((64, 16)).cuda().bool()
     >>> linear = nn.Linear(64, 64).half().cuda()
-    >>> linear.weight.data *= mask
-    >>> linear.weight = nn.Parameter(to_sparse_semi_structured(linear.weight))
+    >>> linear.weight = nn.Parameter(to_sparse_semi_structured(linear.weight, mask=mask))
 
 
 .. _sparse-coo-docs:
