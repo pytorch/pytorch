@@ -229,6 +229,7 @@ if RUN_CUDA:
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
@@ -237,6 +238,7 @@ if RUN_CUDA:
         BaseTest("test_conv_backward"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
+        BaseTest("test_index_tensor"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),

@@ -992,8 +992,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input2), correct2))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """2""")
-            self.assertExpectedInline(cnt.op_count, """4""")
+            if torch._dynamo.config.automatic_dynamic_shapes:
+                self.assertExpectedInline(cnt.frame_count, """2""")
+                self.assertExpectedInline(cnt.op_count, """14""")
+            else:
+                self.assertExpectedInline(cnt.frame_count, """2""")
+                self.assertExpectedInline(cnt.op_count, """4""")
         else:
             self.assertExpectedInline(cnt.frame_count, """2""")
             self.assertExpectedInline(cnt.op_count, """35""")
@@ -1058,6 +1062,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
 
+    # https://github.com/pytorch/pytorch/issues/103620
     @expectedFailureDynamic
     def test_chunk_reformer_ff(self):
         input = torch.randn([1, 4096, 256])
@@ -1138,7 +1143,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.frame_count, 1)
             self.assertEqual(cnt.op_count, 1)
 
-    @expectedFailureDynamic
     def test_create_rand_mask_from_inputs(self):
         args = [
             torch.randn([1, 64, 64]),
@@ -1156,8 +1160,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertTrue(same(opt_fn(*args), correct))
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 8)
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """8""")
+        else:
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """11""")
 
     def test_rng_state(self):
         def fn():

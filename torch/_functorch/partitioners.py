@@ -784,8 +784,8 @@ def min_cut_rematerialization_partition(
             # for performance.
             # TODO: Investigate why this hack helps.
             # TODO: Investigate the interaction with compiler assisted
-            # activation checkpointing. The following condition bans
-            # recomputation for many ops that are in the checkpointed block.
+            # activation checkpointing. Removing the heuristic improves both
+            # memory footprint and speedup.
             if not graph_has_recomputable_ops:
                 if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
                     return True

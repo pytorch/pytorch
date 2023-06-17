@@ -62,7 +62,7 @@ def gh_fetch_url(
 ) -> Any:
     return gh_fetch_url_and_headers(
         url, headers=headers, data=data, reader=json.load, method=method
-    )[0]
+    )[1]
 
 
 def gh_fetch_json(
