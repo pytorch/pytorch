@@ -1206,39 +1206,20 @@ def emit_body(
             # Case with multioutput formulas
             # TODO: process all derivative formulas!!!
             if len(derivative.var_names) != 1:
-                wrap_opt_if_name = "wrap_opt_if"
-                formula = derivative.formula
-                wrap_opt_if_start = formula.find(
-                    f"{wrap_opt_if_name}({arg.nctype.name}"
+                wrap_opt_if_start = derivative.formula.find(
+                    f"wrap_opt_if({arg.nctype.name}"
                 )
                 if wrap_opt_if_start == -1:
                     return None
 
-                # Conditions in wrap_opt_if could be riddled with parantheses,
-                # so we want to find the last ')' in 'wrap_opt_if(...)'.
-                parantheses_stack = []
-                for right_paranthesis_idx in range(
-                    wrap_opt_if_start + len(wrap_opt_if_name), len(formula)
-                ):
-                    if formula[right_paranthesis_idx] == "(":
-                        parantheses_stack.append("(")
-                    elif formula[right_paranthesis_idx] == ")":
-                        parantheses_stack.pop()
-                        # Stop if the very first '(' got it's ')' pair.
-                        if not parantheses_stack:
-                            break
-                # Error if there are unmatched parantheses, it should be empty!
-                assert not parantheses_stack
+                wrap_opt_if_match = re.match(
+                    rf"wrap_opt_if\({arg.nctype.name},(.*?)\)",
+                    derivative.formula[wrap_opt_if_start:],
+                )
+                assert wrap_opt_if_match is not None
+                assert len(wrap_opt_if_match.groups()) == 1
 
-                wrap_opt_if_args = formula[
-                    wrap_opt_if_start
-                    + len(wrap_opt_if_name)
-                    + 1 : right_paranthesis_idx
-                ].split(",")
-                # wrap_opt_if is a 2-arg function
-                assert len(wrap_opt_if_args) == 2
-
-                wrap_opt_if_condition = wrap_opt_if_args[-1].strip()
+                wrap_opt_if_condition = wrap_opt_if_match.group(0).strip()
                 # replace 'grad_input_mask[num]' with 'grad_fn->should_compute_output(num)'
                 wrap_opt_if_condition = re.sub(
                     r"grad_input_mask\[(\d+)\]",
