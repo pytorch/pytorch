@@ -7,6 +7,7 @@ circular dependency problems
 import ast
 import builtins
 import collections
+import collections.abc
 import contextlib
 import enum
 import inspect
@@ -27,6 +28,7 @@ from typing import (  # noqa: F401
     Generic,
     List,
     Optional,
+    Sequence,
     Tuple,
     Type,
     TypeVar,
@@ -1006,6 +1008,25 @@ def is_list(ann) -> bool:
     return ann.__module__ == "typing" and (ann_origin is List or ann_origin is list)
 
 
+def is_sequence(ann) -> bool:
+    if ann is Sequence:
+        raise_error_container_parameter_missing("Sequence")
+
+    if not hasattr(ann, "__module__"):
+        return False
+
+    ann_origin = getattr(ann, "__origin__", None)
+    if (
+        IS_PY39_PLUS
+        and ann.__module__ == "collections.abc"
+        and ann_origin is collections.abc.Sequence
+    ):
+        return True
+    return ann.__module__ == "typing" and (
+        ann_origin is Sequence or ann_origin is collections.abc.Sequence
+    )
+
+
 def is_dict(ann) -> bool:
     if ann is Dict:
         raise_error_container_parameter_missing("Dict")
@@ -1344,6 +1365,8 @@ def check_args_exist(target_type) -> None:
         raise_error_container_parameter_missing("List")
     elif target_type is Tuple or target_type is tuple:
         raise_error_container_parameter_missing("Tuple")
+    elif target_type is Sequence or target_type is collections.abc.Sequence:
+        raise_error_container_parameter_missing("Sequence")
     elif target_type is Dict or target_type is dict:
         raise_error_container_parameter_missing("Dict")
     elif target_type is None or target_type is Optional:
@@ -1375,6 +1398,20 @@ def container_checker(obj, target_type) -> bool:
         for el in obj:
             # check if nested container, ex: List[List[str]]
             if arg_origin:  # processes nested container, ex: List[List[str]]
+                if not container_checker(el, arg_type):
+                    return False
+            elif not isinstance(el, arg_type):
+                return False
+        return True
+    if origin_type is Sequence or origin_type is collections.abc.Sequence:
+        check_empty_containers(obj)
+        if not isinstance(obj, Sequence):
+            return False
+        arg_type = get_args(target_type)[0]
+        arg_origin = get_origin(arg_type)
+        for el in obj:
+            # check if nested container, ex: Sequence[Sequence[str]]
+            if arg_origin:  # processes nested container, ex: Sequence[Sequence[str]]
                 if not container_checker(el, arg_type):
                     return False
             elif not isinstance(el, arg_type):
