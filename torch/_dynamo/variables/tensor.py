@@ -301,7 +301,7 @@ class TensorVariable(VariableTracker):
             elif dim_var is not None:
                 dim = dim_var.as_python_constant()
 
-            def make_const_size_variable(x, **options):
+            def make_const_size_variable(x, **options) -> SizeVariable:
                 return SizeVariable(
                     [ConstantVariable(y, **options) for y in x], **options
                 )
