@@ -401,6 +401,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       at::Tensor& inputTensor,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
+  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
+
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
@@ -634,6 +639,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // multiple GPUs per process, this part may need to redesigned.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       devNCCLCommMap_;
+
+  // The NCCL communicators currently in process of being initialized.
+  std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
+      inInitializationCommMap_;
 
   // Map from ncclUniqueId to appropriate communicator.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
