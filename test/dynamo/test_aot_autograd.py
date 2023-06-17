@@ -5,12 +5,14 @@ import torch
 
 import torch._dynamo
 import torch._dynamo.test_case
+import torch.fx.traceback as fx_traceback
 from torch._dynamo.testing import (
     CompileCounter,
     expectedFailureAutomaticDynamic,
     expectedFailureDynamic,
     rand_strided,
 )
+from torch._functorch.aot_autograd import aot_export_module
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
 
