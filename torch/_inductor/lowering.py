@@ -937,16 +937,18 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
     )
 
-    if offset >= 0:
-        diag_size = max(min(original_shape[dim1], original_shape[dim2] - offset), 0)
-    else:
+    evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
+    offset_negative = evaluate_expr(sympy.Lt(offset, 0))
+    if offset_negative:
         diag_size = max(min(original_shape[dim1] + offset, original_shape[dim2]), 0)
+    else:
+        diag_size = max(min(original_shape[dim1], original_shape[dim2] - offset), 0)
 
     base_idx = (0, 0)
-    if offset >= 0:
-        base_idx = (0, offset)
-    else:
+    if offset_negative:
         base_idx = (-offset, 0)
+    else:
+        base_idx = (0, offset)
 
     sizes = [s for i, s in enumerate(original_shape) if i not in (dim1, dim2)]
     sizes.append(diag_size)

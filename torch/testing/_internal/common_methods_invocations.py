@@ -19362,13 +19362,6 @@ python_ref_db = [
         "_refs.logaddexp2",
         torch_opinfo_name="logaddexp2",
         supports_nvfuser=False,
-        skips=(
-            # failure due to mismatch in edge cases, which boils down to what torch.exp(inf + infj) should be
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='cpu',
-                         dtypes=(torch.complex64, torch.complex128)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='cpu',
-                         dtypes=(torch.complex64, torch.complex128)),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.floor_divide",
