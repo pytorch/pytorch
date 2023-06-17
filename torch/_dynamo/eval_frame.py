@@ -24,10 +24,10 @@ import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
+from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
-
 from ..fx import GraphModule
 from .backends.registry import CompilerFn, lookup_backend
 
@@ -192,7 +192,7 @@ def enable_dynamic(enable: bool = True, export: bool = False):
     # dynamic=True used to mean fully dynamic. However, with automatic dynamic, the default flipped to
     # deriving dynamism. For back compat, and forward compat for when dynamic=True is default, we take
     # dynamic=True here to mean "fully dynamic from the start".
-    with config.patch(dynamic_shapes=True, assume_static_by_default=False):
+    with config.patch(assume_static_by_default=False):
         yield
 
 
@@ -798,6 +798,7 @@ def export(
     tracing_mode: str = "symbolic",
     constraints: Optional[List[Constraint]] = None,
     assume_static_by_default: bool = False,
+    fake_mode: fake_tensor.FakeTensorMode = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -821,6 +822,10 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
+
+        fake_mode (fake_tensor.FakeTensorMode): Use this fake_mode instead of creating an internal one.
+        Useful during symbolic tracing, when user input is already fakefied. Implies free fake tensors
+        are allowed on `make_fx`.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
@@ -853,6 +858,9 @@ def export(
     out_guards = None
     graph_captured_input = None
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
+    _allow_fake_constant: bool = (
+        fake_mode is not None
+    )  # Allow fake constants during symbolic tracing
 
     def produce_matching(source_args, candidate_args):
         matched_elements_positions = []
@@ -888,7 +896,6 @@ def export(
         assert out_guards is None, "whole graph export entails exactly one guard export"
         out_guards = guards
 
-    fake_mode = None
     example_inputs = []
 
     def dynamo_normalization_capturing_compiler(
@@ -901,7 +908,7 @@ def export(
         graph = gm
 
         nonlocal fake_mode, example_inputs
-        fake_mode = _guards.detect_fake_mode(inner_example_inputs)
+        fake_mode = fake_mode or _guards.detect_fake_mode(inner_example_inputs)
         example_inputs = inner_example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
@@ -926,7 +933,7 @@ def export(
         specialize_int=True,
         assume_static_by_default=assume_static_by_default,
         automatic_dynamic_shapes=False,
-    ):
+    ), torch._guards.export_fake_mode(fake_mode):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(
@@ -1012,6 +1019,7 @@ def export(
                     tracing_mode="real",
                     _allow_non_fake_inputs=True,
                     pre_autograd=pre_autograd,
+                    _allow_fake_constant=_allow_fake_constant,
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:
                 # Wrap the internal error to the user-facing error
@@ -1229,10 +1237,35 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward, recursive=False
             )
 
-        from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd
+        # Note: this excludes the optimizers that are unsupported in excluded_opts below
+        from ..optim import (
+            adadelta,
+            adagrad,
+            adam,
+            adamax,
+            adamw,
+            asgd,
+            nadam,
+            rmsprop,
+            rprop,
+            sgd,
+        )
 
-        for opt_mod in adagrad, adam, adamax, adamw, asgd, nadam, sgd:
-            multi_tensor_fn_name = f"_multi_tensor_{opt_mod.__name__.split('.')[-1]}"
+        for opt_mod in (
+            adadelta,
+            adagrad,
+            adam,
+            adamax,
+            adamw,
+            asgd,
+            nadam,
+            rmsprop,
+            rprop,
+            sgd,
+        ):
+            opt_name = opt_mod.__name__.split(".")[-1]
+            multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
+            fused_fn_name = f"_fused_{opt_name}"
             if hasattr(opt_mod, multi_tensor_fn_name):
                 setattr(
                     opt_mod,
@@ -1240,6 +1273,12 @@ class TorchPatcher:
                     disable(getattr(opt_mod, multi_tensor_fn_name)),
                 )
 
+            if hasattr(opt_mod, fused_fn_name):
+                setattr(
+                    opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                )
+
+        # Note: we don't support sparsity, data-dependent control, or tracing through backwards
         excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
             if opt in excluded_opts:
