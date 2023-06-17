@@ -1,6 +1,8 @@
 from itertools import repeat
 from typing import Any, Callable, Dict, Iterable, List, Tuple, TypeVar, Union
 
+from torch.types import _size
+
 __all__ = ['consume_prefix_in_state_dict_if_present']
 
 T = TypeVar("T")
@@ -31,7 +33,7 @@ def _reverse_repeat_tuple(t, n):
     return tuple(x for x in reversed(t) for _ in range(n))
 
 
-def _list_with_default(out_size: List[int], defaults: List[int]) -> List[int]:
+def _list_with_default(out_size: Union[int, _size], defaults: _size) -> Union[int, List[int]]:
     if isinstance(out_size, int):
         return out_size
     if len(defaults) <= len(out_size):
