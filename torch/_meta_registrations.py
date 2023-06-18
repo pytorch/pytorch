@@ -1012,7 +1012,7 @@ def _linalg_det_meta(A):
     return det, LU, pivots
 
 
-def padding_check_valid_input(input, padding, *, dim):
+def _padding_check_valid_input(input, padding, *, dim):
     check(
         len(padding) == 2 * dim,
         lambda: f"padding size is expected to be {2 * dim}, but got: {len(padding)}",
@@ -1053,7 +1053,7 @@ def _pad1d_common(input, padding, *, is_reflection):
         dim_w += 1
         dim_plane += 1
 
-    padding_check_valid_input(input, padding, dim=1)
+    _padding_check_valid_input(input, padding, dim=1)
 
     pad_l, pad_r = padding
 
@@ -1141,7 +1141,7 @@ def _pad2d_common(input, padding, *, is_reflection):
     dim_slices = 0
     nbatch = 1
 
-    padding_check_valid_input(input, padding, dim=2)
+    _padding_check_valid_input(input, padding, dim=2)
 
     ndim = input.ndim
     if ndim == 4:
@@ -1229,12 +1229,12 @@ def meta_pad2d_backward(grad_output, self, padding):
     output_w = input_w + pad_l + pad_r
 
     check(
-        output_w == grad_output.shape[dim_w],
-        lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.shape[dim_w]}",
+        output_w == grad_output.size(dim_w),
+        lambda: f"grad_output width unexpected. Expected: {output_w}, Got: {grad_output.size(dim_w)}",
     )
     check(
-        output_h == grad_output.shape[dim_h],
-        lambda: f"grad_output height unexpected. Expected: {output_h}, Got: {grad_output.shape[dim_h]}",
+        output_h == grad_output.size(dim_h),
+        lambda: f"grad_output height unexpected. Expected: {output_h}, Got: {grad_output.size(dim_h)}",
     )
     return self.new_empty(self.shape)
 
@@ -1245,10 +1245,11 @@ def _pad3d_common(input, padding, *, is_reflection):
     dim_d = 1
     dim_plane = 0
 
-    padding_check_valid_input(input, padding, dim=3)
+    _padding_check_valid_input(input, padding, dim=3)
 
     batch_mode = input.ndim == 5
     if batch_mode:
+        nbatch = input.size(0)
         dim_w += 1
         dim_h += 1
         dim_d += 1
@@ -1296,7 +1297,7 @@ def _pad3d_common(input, padding, *, is_reflection):
     )
 
     if batch_mode:
-        return input.new_empty((input.size(0), nplane, output_d, output_h, output_w))
+        return input.new_empty((nbatch, nplane, output_d, output_h, output_w))
     else:
         return input.new_empty((nplane, output_d, output_h, output_w))
 
@@ -1355,7 +1356,7 @@ def meta_pad3d_backward(grad_output, input, padding):
     )
     check(
         output_d == grad_output.size(dim_d),
-        lambda: f"grad_output depth unexpected. Expected: {output_h}, Got: {grad_output.size(dim_d)}",
+        lambda: f"grad_output depth unexpected. Expected: {output_d}, Got: {grad_output.size(dim_d)}",
     )
 
     return input.new_empty(input.shape)

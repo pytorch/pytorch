@@ -61,10 +61,9 @@ TORCH_META_FUNC(reflection_pad1d)(const Tensor& input, IntArrayRef padding) {
 
   TORCH_CHECK(
       output_w >= 1,
-      2,
       "input (W: ",
       input_w,
-      ")is too small. Calculated output W: ",
+      ") is too small. Calculated output W: ",
       output_w);
 
   if (input.ndimension() == 2) {
@@ -202,7 +201,7 @@ TORCH_META_FUNC(reflection_pad3d_backward)(
   TORCH_CHECK(output_h == grad_output.size(dim_h), "grad_output height unexpected."
     " Expected: ", output_h, ", Got: ", grad_output.size(dim_h));
   TORCH_CHECK(output_d == grad_output.size(dim_d), "grad_output depth unexpected."
-    " Expected: ", output_h, ", Got: ", grad_output.size(dim_d));
+    " Expected: ", output_d, ", Got: ", grad_output.size(dim_d));
 
   set_output_raw_strided(0, input.sizes(), {}, input.options());
 }
