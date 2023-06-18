@@ -26,7 +26,7 @@ namespace at { namespace native {
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
   TORCH_CHECK(mkldnn_tensor.scalar_type() == ScalarType::Float ||
               mkldnn_tensor.scalar_type() == ScalarType::BFloat16 ||
-              mkldnn_tensor.scalar_type() == ScalarType::Half,
+              mkldnn_tensor.scalar_type() == ScalarType::Half ||
               mkldnn_tensor.scalar_type() == ScalarType::Byte ||
               mkldnn_tensor.scalar_type() == ScalarType::Char,
               "mkldnn_to_dense expects float, bfloat16, half, uint8, int8 tensor input");
@@ -38,7 +38,7 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dt
               data_type == ScalarType::Half ||
               data_type == ScalarType::Byte ||
               data_type == ScalarType::Char,
-              "mkldnn tensor only can be converted to be a float, bfloat16, uint8, int8 cpu tensor")
+              "mkldnn tensor only can be converted to be a float, bfloat16, Half, uint8, int8 cpu tensor")
   if (mkldnn_tensor.scalar_type() == ScalarType::Byte || mkldnn_tensor.scalar_type() == ScalarType::Char) {
     // For int8, uint8 input, we should not change the data type.
     TORCH_CHECK(mkldnn_tensor.scalar_type() == data_type,
@@ -97,7 +97,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype
               data_type == ScalarType::Half ||
               data_type == ScalarType::Byte ||
               data_type == ScalarType::Char,
-              "cpu tensor only can be converted to be a float, bfloat16, uint8, int8 mkldnn tensor")
+              "cpu tensor only can be converted to be a float, bfloat16, half, uint8, int8 mkldnn tensor")
   Tensor mkldnn_tensor = empty_mkldnn(cpu_tensor_cont.sizes(), data_type,
                                       cpu_tensor_cont.options().layout_opt(), cpu_tensor_cont.options().device_opt(),
                                       cpu_tensor_cont.options().pinned_memory_opt());
