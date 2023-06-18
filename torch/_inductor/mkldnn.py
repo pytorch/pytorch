@@ -3,12 +3,12 @@ from functools import reduce
 from typing import Optional
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 import torch.nn.functional as F
 
 from torch._dynamo.utils import detect_fake_mode
 from torch.fx.experimental.optimization import replace_node_module
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
 from . import config
@@ -200,20 +200,8 @@ class PackedConvTranspose2d(nn.ConvTranspose2d):
 
     def _conv_transpose_forward(self, input, weight, bias):
         if self.padding_mode != "zeros":
-            return torch.ops.mkldnn._convolution_transpose_pointwise(
-                F.pad(
-                    input, self._reversed_padding_repeated_twice, mode=self.padding_mode
-                ),
-                weight,
-                bias,
-                _pair(0),
-                self.output_padding,
-                self.stride,
-                self.dilation,
-                self.groups,
-                "none",
-                [],
-                "",
+            raise ValueError(
+                "Only `zeros` padding mode is supported for PackedConvTranspose2d"
             )
         return torch.ops.mkldnn._convolution_transpose_pointwise(
             input,
@@ -260,17 +248,19 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         if isinstance(example_input, torch.Tensor)
     )
 
-    # make sure the autograd is disabled.
-    if torch.is_grad_enabled():
+    # make sure the autograd and autocast are disabled.
+    if torch.is_grad_enabled() or torch.is_autocast_cpu_enabled():
         return gm
     if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
         return gm
     if not is_cpu:
         return gm
     fake_mode = detect_fake_mode(example_inputs)
-    if config.cpp.weight_prepack:
-        if not dynamo_config.dynamic_shapes:
-            ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+    # NB: free_symbols test here is a BIG hammer.  ShapeProp doesn't
+    # work with symbolic shapes though, see
+    # https://github.com/pytorch/pytorch/pull/103512
+    if config.cpp.weight_prepack and not any(free_symbols(e) for e in example_inputs):
+        ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
         gm = pack_module(gm)
     return gm
 
@@ -282,9 +272,11 @@ def pack_module(gm: torch.fx.GraphModule):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in computation_op_packed_map:
-                if cur_module.weight.device != torch.device(
-                    "cpu"
-                ) or cur_module.weight.dtype not in [torch.bfloat16, torch.float32]:
+                if (
+                    cur_module.weight.device != torch.device("cpu")
+                    or cur_module.weight.dtype not in [torch.bfloat16, torch.float32]
+                    or any(size == 0 for size in cur_module.weight.shape)
+                ):
                     continue
                 if cur_module.training:
                     continue
@@ -293,7 +285,7 @@ def pack_module(gm: torch.fx.GraphModule):
                     and not torch.ops.mkldnn._is_mkldnn_bf16_supported()
                 ):
                     continue
-                if dynamo_config.dynamic_shapes:
+                if free_symbols(node.args[0].meta.get("tensor_meta").shape):
                     computation_node_input_size = None
                     # Conv2d and ConvTranspose2d weight format are dependent on input size,
                     # but ShapeProp may be failed to get the input size, so we skip them.
@@ -303,9 +295,11 @@ def pack_module(gm: torch.fx.GraphModule):
                     ):
                         continue
                 else:
-                    computation_node_input_size = (
-                        node.args[0].meta.get("tensor_meta").shape
+                    computation_node_input_size = tuple(
+                        int(x) for x in node.args[0].meta.get("tensor_meta").shape
                     )
+                    if any(size == 0 for size in computation_node_input_size):
+                        continue
                     if type(cur_module) in [torch.nn.Linear]:
                         # for fp32 linear, only packed when has mkl.
                         if (
@@ -323,7 +317,16 @@ def pack_module(gm: torch.fx.GraphModule):
                 # TODO: remove this when group depthwise ConvTranspose is supported
                 if type(cur_module) in [nn.ConvTranspose2d] and (
                     is_group_depthwise_conv_transpose(cur_module)
-                    or dynamo_config.dynamic_shapes
+                    or len(node.args) > 1
+                    or len(node.kwargs) > 0
+                    or any(
+                        not isinstance(output_padding, int)
+                        or not isinstance(stride, int)
+                        or output_padding >= stride
+                        for output_padding, stride in zip(
+                            cur_module.output_padding, cur_module.stride
+                        )
+                    )  # Port from: aten/src/ATen/native/Convolution.cpp:is_output_padding_big
                 ):
                     continue
                 new_module = computation_op_packed_map[type(cur_module)](

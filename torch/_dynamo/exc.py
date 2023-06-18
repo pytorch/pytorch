@@ -13,7 +13,7 @@ if is_fbcode():
     from torch.fb.exportdb.logging import exportdb_error_message
 else:
 
-    def exportdb_error_message(ref_case_id):
+    def exportdb_error_message(case_name):
         return ""
 
 
@@ -105,20 +105,22 @@ class UserErrorType(Enum):
     ANTI_PATTERN = auto()
     STANDARD_LIBRARY = auto()
     CONSTRAIN_VIOLATION = auto()
+    DYNAMIC_DIM = auto()
 
 
 class UserError(Unsupported):
-    def __init__(self, error_type: UserErrorType, msg, ref_case_id=None):
+    def __init__(self, error_type: UserErrorType, msg, case_name=None):
         """
         Type of errors that would be valid in Eager, but not supported in TorchDynamo.
         The error message should tell user about next actions.
 
         error_type: Type of user error
         msg: Actionable error message
+        case_name: (Optional) Unique name (snake case) for the usage example in exportdb.
         """
-        if ref_case_id is not None:
-            assert isinstance(ref_case_id, int)
-            msg += exportdb_error_message(ref_case_id)
+        if case_name is not None:
+            assert isinstance(case_name, str)
+            msg += exportdb_error_message(case_name)
         super().__init__(msg)
         self.error_type = error_type
         self.message = msg
@@ -166,7 +168,7 @@ def augment_exc_message(exc, msg="\n"):
  torch._dynamo.replay('{exc.record_filename}').\n"
 
     if not config.verbose and hasattr(exc, "real_stack"):
-        msg += "\nSet torch._dynamo.config.verbose=True or TORCHDYNAMO_VERBOSE=1 for more information\n"
+        msg += '\nSet TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information\n'
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"

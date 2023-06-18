@@ -433,11 +433,15 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
     call_super_init: bool = False
+    _compiled_call_impl : Optional[Callable] = None
+
+
 
     def __init__(self, *args, **kwargs) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
+
         torch._C._log_api_usage_once("python.nn_module")
 
         # Backward compatibility: no args used to be allowed when call_super_init=False
@@ -1491,6 +1495,12 @@ class Module:
                 tracing_state.pop_scope()
         return result
 
+    def _wrapped_call_impl(self, *args, **kwargs):
+        if self._compiled_call_impl is not None:
+            return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+        else:
+            return self._call_impl(*args, **kwargs)
+
     def _call_impl(self, *args, **kwargs):
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
@@ -1572,10 +1582,16 @@ class Module:
 
         return result
 
-    __call__ : Callable[..., Any] = _call_impl
+    __call__ : Callable[..., Any] = _wrapped_call_impl
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_compiled_call_impl", None)
+        return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+
         # Support loading old checkpoints that don't have the following attrs:
         if '_forward_pre_hooks' not in self.__dict__:
             self._forward_pre_hooks = OrderedDict()
@@ -1880,6 +1896,9 @@ class Module:
         For state dicts without metadata, :attr:`local_metadata` is empty.
         Subclasses can achieve class-specific backward compatible loading using
         the version number at `local_metadata.get("version", None)`.
+        Additionally, :attr:`local_metadata` can also contain the key
+        `assign_to_params_buffers` that indicates whether keys should be
+        assigned their corresponding tensor in the state_dict.
 
         .. note::
             :attr:`state_dict` is not the same object as the input
@@ -1910,6 +1929,7 @@ class Module:
         persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
+        assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
 
         for name, param in local_state.items():
             key = prefix + name
@@ -1938,7 +1958,15 @@ class Module:
                     continue
                 try:
                     with torch.no_grad():
-                        param.copy_(input_param)
+                        if assign_to_params_buffers:
+                            # Shape checks are already done above
+                            if (isinstance(param, torch.nn.Parameter) and
+                                    not isinstance(input_param, torch.nn.Parameter)):
+                                setattr(self, name, torch.nn.Parameter(input_param))
+                            else:
+                                setattr(self, name, input_param)
+                        else:
+                            param.copy_(input_param)
                 except Exception as ex:
                     error_msgs.append('While copying the parameter named "{}", '
                                       'whose dimensions in the model are {} and '
@@ -1966,11 +1994,15 @@ class Module:
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: Mapping[str, Any],
-                        strict: bool = True):
+                        strict: bool = True, assign: bool = False):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
         by this module's :meth:`~torch.nn.Module.state_dict` function.
+
+        .. warning::
+            If :attr:`assign` is ``True`` the optimizer must be created after
+            the call to :attr:`load_state_dict`.
 
         Args:
             state_dict (dict): a dict containing parameters and
@@ -1978,6 +2010,13 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+            assign (bool, optional): whether to assign items in the state
+                dictionary to their corresponding keys in the module instead
+                of copying them inplace into the module's current parameters and buffers.
+                When ``False``, the properties of the tensors in the current
+                module are preserved while when ``True``, the properties of the
+                Tensors in the state dict are preserved.
+                Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
@@ -2005,6 +2044,8 @@ class Module:
 
         def load(module, local_state_dict, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            if assign:
+                local_metadata['assign_to_params_buffers'] = assign
             module._load_from_state_dict(
                 local_state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
@@ -2420,3 +2461,14 @@ class Module:
         replica._is_replica = True  # type: ignore[assignment]
 
         return replica
+
+    def compile(self, *args, **kwargs):
+        """
+        Compile this Module's forward using :func:`torch.compile`.
+
+        This Module's `__call__` method is compiled and all arguments are passed as-is
+        to :func:`torch.compile`.
+
+        See :func:`torch.compile` for details on the arguments for this function.
+        """
+        self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)

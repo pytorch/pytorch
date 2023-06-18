@@ -2032,13 +2032,27 @@ class TestNestedTensorDeviceType(TestCase):
         nt_empty_req_grad = torch.empty_like(nt, requires_grad=True)
         self.assertEqual(nt_empty_req_grad.requires_grad, True)
 
-        # Test noncontiguous tensor fails to copy
+        # Test noncontiguous tensor does not fail to copy
         nt_cont, nt_noncont = random_nt_noncontiguous_pair((2, 3, 6, 7))
         nt_empty = torch.empty_like(nt_cont)
         assert nt_cont.is_same_size(nt_empty)
-        with self.assertRaisesRegex(RuntimeError, "empty_like only supports contiguous memory format for Nested Tensors"):
-            nt_empty = torch.empty_like(nt_noncont)
+        nt_empty_non_contig = torch.empty_like(nt_noncont)
+        assert nt_noncont.is_same_size(nt_empty_non_contig)
 
+        # Test the contiguous memory format option
+        nt_empty_contig = torch.empty_like(nt_cont, memory_format=torch.contiguous_format)
+        assert nt_cont.is_same_size(nt_empty_contig)
+        assert nt_empty_contig.is_contiguous()
+
+        nt_empty_non_contig = torch.empty_like(nt_noncont, memory_format=torch.contiguous_format)
+        assert nt_noncont.is_same_size(nt_empty_non_contig)
+        assert nt_empty_non_contig.is_contiguous()
+
+        # Test other memory formats fail
+        self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_cont, memory_format=torch.channels_last))
+        self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_noncont, memory_format=torch.channels_last))
+        self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_cont, memory_format=torch.channels_last_3d))
+        self.assertRaises(RuntimeError, lambda: torch.empty_like(nt_noncont, memory_format=torch.channels_last_3d))
 
 class TestNestedTensorAutograd(TestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck

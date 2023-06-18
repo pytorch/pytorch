@@ -68,14 +68,8 @@ void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
     if (is_constant_index(ntensor, strides)) {
       // specialization for when every element uses the same index
       int64_t offset = indexer.get(0);
-      if (strides[0] == sizeof(scalar_t) && strides[1] == sizeof(scalar_t)) {
-        for (const auto i : c10::irange(n)) {
-          f(dst + strides[0] * i, src + strides[1] * i, offset);
-        }
-      } else {
-        for (const auto i : c10::irange(n)) {
-          f(dst + strides[0] * i, src + strides[1] * i, offset);
-        }
+      for (const auto i : c10::irange(n)) {
+        f(dst + strides[0] * i, src + strides[1] * i, offset);
       }
     } else {
       for (const auto i : c10::irange(n)) {

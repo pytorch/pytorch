@@ -17,6 +17,7 @@
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
@@ -429,6 +430,14 @@ static PyObject* THPModule_cxxFlags(PyObject* module, PyObject* noargs) {
 static PyObject* THPModule_parallelInfo(PyObject* module, PyObject* noargs) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(at::get_parallel_info());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_getCpuCapability(
+    PyObject* module,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packString(at::get_cpu_capability());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1039,6 +1048,7 @@ static PyMethodDef TorchMethods[] = {
     {"_show_config", THPModule_showConfig, METH_NOARGS, nullptr},
     {"_cxx_flags", THPModule_cxxFlags, METH_NOARGS, nullptr},
     {"_parallel_info", THPModule_parallelInfo, METH_NOARGS, nullptr},
+    {"_get_cpu_capability", THPModule_getCpuCapability, METH_NOARGS, nullptr},
     {"_set_backcompat_broadcast_warn",
      THPModule_setBackcompatBroadcastWarn,
      METH_O,
@@ -1262,6 +1272,12 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
   }
 }
 
+static void LogAPIUsageMetadataFromPython(
+    const std::string& event,
+    const std::map<std::string, std::string>& metadata_map) {
+  c10::LogAPIUsageMetadata(event, metadata_map);
+}
+
 // Weak reference to tensor, used to test a tensor isn't leaked
 class WeakTensorRef {
   c10::weak_intrusive_ptr<c10::TensorImpl> weakref_;
@@ -1382,7 +1398,7 @@ PyObject* initModule() {
 #else
   PyObject* has_cudnn = Py_False;
 #endif
-  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
+  ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
 #if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
   PyObject* has_spectral = Py_True;
@@ -1408,6 +1424,7 @@ PyObject* initModule() {
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
+  py_module.def("_log_api_usage_metadata", &LogAPIUsageMetadataFromPython);
 
   py_module.def("vitals_enabled", &at::vitals::torchVitalEnabled);
   py_module.def(
@@ -1624,10 +1641,10 @@ Call this whenever a new thread is created in order to propagate values from
   PyObject* has_mps = Py_False;
 #endif
 
-  ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
-  ASSERT_TRUE(set_module_attr("has_mps", has_mps));
+  ASSERT_TRUE(set_module_attr("_has_cuda", has_cuda));
+  ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
   ASSERT_TRUE(
-      set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
+      set_module_attr("_has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
 #ifdef _GLIBCXX_USE_CXX11_ABI
   ASSERT_TRUE(set_module_attr(

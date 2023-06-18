@@ -4,6 +4,7 @@ import copy
 import math
 import os
 import random
+import re
 import signal
 import sys
 import tempfile
@@ -409,6 +410,27 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             work.wait()
         torch.cuda.synchronize(local_device)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_allreduce_in_cudagraph(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_idx = self.rank_to_GPU[self.rank][0]
+        with torch.cuda.device(local_device_idx):
+            xs = [torch.FloatTensor([1]).cuda(local_device_idx)]
+
+            # single warmup
+            pg.allreduce(xs).wait()
+            self.assertEqual(xs[0].item(), 2)
+
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                pg.allreduce(xs).wait()
+            self.assertEqual(xs[0].item(), 2)
+
+            graph.replay()
+            graph.replay()
+            self.assertEqual(xs[0].item(), 8)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -2713,12 +2735,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         torch.cuda.set_device(self.rank)
         self._test_sequence_num_set_new_group(backend="nccl")
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_pass_nccl_options_high_priority_stream(self):
-        pg_opts = c10d.ProcessGroupNCCL.Options()
-        pg_opts.is_high_priority_stream = True
-
+    def _test_pass_nccl_options(self, pg_opts):
         store = c10d.FileStore(self.file_name, self.world_size)
         # Test init_process_group accepts options
         dist.init_process_group(
@@ -2736,6 +2753,37 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg.allreduce(t).wait()
         expected_tensor = torch.tensor([3] * 10).cuda(self.rank)
         self.assertEqual(expected_tensor, t)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_high_priority_stream(self):
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        pg_opts.is_high_priority_stream = True
+        self._test_pass_nccl_options(pg_opts)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 17), "Need NCCL 2.17+ for configuring NCCL communicators")
+    @skip_if_lt_x_gpu(2)
+    def test_pass_nccl_options_config(self):
+        pg_opts = c10d.ProcessGroupNCCL.Options()
+        pg_opts.config.max_ctas = 4
+        pg_opts.config.min_ctas = 2
+        pg_opts.config.cga_cluster_size = 2
+        nccl_debug_file = tempfile.NamedTemporaryFile()
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+
+        # Tests functionality when passing nccl config
+        self._test_pass_nccl_options(pg_opts)
+
+        # Tests if comms were configured
+        nccl_debug_file_content = nccl_debug_file.read()
+        max_ctas = re.search(rb'Max CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
+        min_ctas = re.search(rb'Min CTAs.*(\d+)|$', nccl_debug_file_content).group(1)
+        cga_cluster_size = re.search(rb'CGA cluster.*(\d+)|$', nccl_debug_file_content).group(1)
+        self.assertEqual(pg_opts.config.max_ctas, int(max_ctas))
+        self.assertEqual(pg_opts.config.min_ctas, int(min_ctas))
+        self.assertEqual(pg_opts.config.cga_cluster_size, int(cga_cluster_size))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
@@ -2786,54 +2834,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
                     store=store,
                     timeout=timedelta(seconds=10),
                 )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(4)
-    def test_nccl_barrier_timeout_new_group(self):
-        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store,
-            timeout=timedelta(seconds=10),
-        )
-
-        if self.rank == 0:
-            with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
-            ):
-                c10d.new_group([0, 1], timeout=timedelta(seconds=1))
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Timed out initializing process group"
-            ):
-                c10d.new_group([0], timeout=timedelta(seconds=1))
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(4)
-    def test_nccl_barrier_timeout_new_group_non_member(self):
-        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="nccl",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=store,
-            timeout=timedelta(seconds=10),
-        )
-
-        if self.rank == 1:
-            with self.assertRaisesRegex(
-                RuntimeError, "Health check failure"
-            ):
-                c10d.new_group([0, 1], timeout=timedelta(seconds=1))
-
-            with self.assertRaisesRegex(
-                RuntimeError, "Timed out initializing process group"
-            ):
-                c10d.new_group([0], timeout=timedelta(seconds=1))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -3042,6 +3042,11 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @skip_if_lt_x_gpu(4)
     def test_new_group_local_sync_sanity_check(self):
         self._test_new_group_local_sync_sanity_check(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    def test_new_group_local_sync_duplicated_pg(self):
+        self._test_new_group_local_sync_duplicate_pg(backend="nccl")
 
 
 

@@ -150,7 +150,13 @@ class TestScatterGather(TestCase):
             else:
                 expected.div_(counts, rounding_mode="floor")
 
-        self.assertEqual(actual, expected, atol=0, rtol=0)
+        if dtype == torch.float16 or dtype == torch.bfloat16:
+            # Some CUDA kernels (e.g. indexing_backward_kernel_stride_1) that are called during
+            # the test use fp32 for internal accumulation for improved accuracy. When using 16 bit
+            # precision types can be small differences
+            self.assertEqual(actual, expected, atol=0.04, rtol=0.05)
+        else:
+            self.assertEqual(actual, expected, atol=0, rtol=0)
 
         # Tests empty index
         dst = make_tensor((2, 2), device=device, dtype=dtype)
