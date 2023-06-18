@@ -1,7 +1,3 @@
-aten::__ilshift__.Scalar
-aten::__ilshift__.Tensor
-aten::__irshift__.Scalar
-aten::__irshift__.Tensor
 aten::__lshift__.Scalar
 aten::__lshift__.Scalar_out
 aten::__lshift__.Tensor
@@ -468,6 +464,8 @@ aten::_sparse_log_softmax
 aten::_sparse_log_softmax.out
 aten::_sparse_log_softmax_backward_data
 aten::_sparse_log_softmax_backward_data.out
+aten::_sparse_mask_projection
+aten::_sparse_mask_projection.out
 aten::_sparse_mm_reduce_impl
 aten::_sparse_mm_reduce_impl_backward
 aten::_sparse_softmax
@@ -488,6 +486,7 @@ aten::_standard_gamma
 aten::_standard_gamma.out
 aten::_standard_gamma_grad
 aten::_standard_gamma_grad.out
+aten::_structured_sparse_linear
 aten::_test_autograd_multiple_dispatch.fullcoverage
 aten::_test_autograd_multiple_dispatch.fullcoverage_out
 aten::_test_autograd_multiple_dispatch_view
@@ -527,6 +526,8 @@ aten::_unique
 aten::_unique.out
 aten::_unique2
 aten::_unique2.out
+aten::_unsafe_index.Tensor
+aten::_unsafe_index_put
 aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
 aten::_upsample_bicubic2d_aa_backward
@@ -973,8 +974,6 @@ aten::pixel_unshuffle
 aten::pixel_unshuffle.out
 aten::poisson
 aten::poisson.out
-aten::polar
-aten::polar.out
 aten::polygamma
 aten::polygamma.out
 aten::polygamma_
@@ -1013,6 +1012,8 @@ aten::quantized_max_pool1d
 aten::quantized_max_pool1d.out
 aten::quantized_max_pool2d
 aten::quantized_max_pool2d.out
+aten::quantized_max_pool3d
+aten::quantized_max_pool3d.out
 aten::rand
 aten::rand.generator
 aten::rand.generator_with_names
@@ -1159,8 +1160,6 @@ aten::slow_conv_transpose2d
 aten::slow_conv_transpose2d.out
 aten::slow_conv_transpose3d
 aten::slow_conv_transpose3d.out
-aten::smooth_l1_loss
-aten::smooth_l1_loss.out
 aten::softmax.int_out
 aten::sort
 aten::sort.stable
@@ -1317,6 +1316,7 @@ aten::values_copy
 aten::values_copy.out
 aten::vdot
 aten::vdot.out
+aten::view.dtype
 aten::view_as_complex
 aten::view_as_complex_copy
 aten::view_as_complex_copy.out

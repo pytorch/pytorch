@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import weakref
 import operator
 from torch.utils._stats import count
+import logging
 
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
@@ -36,6 +37,9 @@ from torch.utils.weak import WeakTensorKeyDictionary
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
 aten = torch.ops.aten
 prim = torch.ops.prim
+
+log = logging.getLogger(__name__)
+not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
@@ -252,12 +256,20 @@ def inside_mode(proxy_mode):
         proxy_mode.is_inside_mode = old
 
 def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
+    unrecognized_types = []
+
     def can_handle_tensor(x):
-        return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
+        r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
+        if proxy_mode._allow_fake_constant:
+            r = r or type(x) in (torch._subclasses.FakeTensor,)
+        if not r:
+            unrecognized_types.append(type(x))
+        return r
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
     if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
+        not_implemented_log.debug("ProxyTensorMode tensors without proxy had unrecognized subclasses: %s", unrecognized_types)
         return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:
@@ -522,13 +534,14 @@ def set_original_aten_op(func):
 
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, tracing_mode, pre_autograd=False):
+    def __init__(self, tracer, tracing_mode, pre_autograd=False, _allow_fake_constant=False):
         dk = torch._C.DispatchKey.AutogradFunctionality if pre_autograd else None
         super().__init__(dk)
         self.tracer = tracer
         self.tracing_mode = tracing_mode
         self.enable_tracing = True
         self.pre_autograd = pre_autograd
+        self._allow_fake_constant = _allow_fake_constant
         self.is_inside_mode = False
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
@@ -691,7 +704,13 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, *, pre_autograd=False):
+def make_fx(f,
+            decomposition_table=None,
+            tracing_mode="real",
+            _allow_non_fake_inputs=False,
+            *,
+            pre_autograd=False,
+            _allow_fake_constant=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -733,7 +752,10 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         if tracing_mode == "symbolic" or pre_autograd:
             python_dispatcher_mode = enable_python_dispatcher()
 
-        proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode, pre_autograd=pre_autograd)
+        proxy_mode = ProxyTorchDispatchMode(fx_tracer,
+                                            tracing_mode,
+                                            pre_autograd=pre_autograd,
+                                            _allow_fake_constant=_allow_fake_constant)
 
         arg_count = 0
 

@@ -63,17 +63,15 @@ public:
 
   MPSCommandBuffer* commandBuffer();
   MTLComputeCommandEncoder_t commandEncoder();
-  void commit(bool flush);
   void endKernelCoalescing();
-  void commitAndWait();
-  void commitAndContinue();
   void synchronize(SyncType syncType);
   void fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType = SyncType::NONE);
   void copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
-            size_t length, size_t srcOffset, size_t dstOffset, SyncType syncType = SyncType::NONE);
+            size_t length, size_t srcOffset, size_t dstOffset,
+            uint64_t profileId, SyncType syncType = SyncType::NONE);
   void copy_and_sync(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
-                     size_t length, size_t srcOffset, size_t dstOffset, bool non_blocking);
-  void flush();
+                     size_t length, size_t srcOffset, size_t dstOffset,
+                     bool non_blocking, uint64_t profileId);
   void executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType = SyncType::NONE);
   void addCompletedHandler(MTLCommandBufferHandler block);
 
@@ -89,14 +87,20 @@ public:
 
 private:
   Stream _stream;
-  MTLCommandQueue_t   _commandQueue = nil;
-  MPSCommandBuffer*  _commandBuffer = nil;
+  MTLCommandQueue_t _commandQueue = nil;
+  MPSCommandBuffer* _commandBuffer = nil;
+  MPSCommandBuffer* _prevCommandBuffer = nil;
   MTLComputeCommandEncoder_t _commandEncoder = nil;
-
   MPSGraphExecutionDescriptor *_executionDescriptor = nil;
-  void _flush(bool commitAndWait) const;
+  dispatch_queue_t _serialQueue = nullptr;
+  // CommitAndContinue is enabled by default
+  bool _enableCommitAndContinue = true;
 
-  dispatch_queue_t    _serialQueue = nullptr;
+  // use synchronize() to access any of these commit functions outside MPSStream
+  void commit();
+  void commitAndWait();
+  void commitAndContinue();
+  void flush();
 };
 
 /**

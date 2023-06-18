@@ -3,37 +3,18 @@ import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.distributed._spmd.experimental_ops
 import torch.fx as fx
-import torch.nn as nn
-from torch._functorch.aot_autograd import aot_module, make_boxed_func
-from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.distributed._spmd.aot_function_patch import patched_aot_function
+
 from torch.distributed._spmd.comm_tensor import _get_tracer
-from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._spmd.log_utils import get_logger
 
 from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.dispatch import (
-    _CURRENT_DECOMPOSITION_TABLE,
-    _operator_dispatch,
-)
+from torch.distributed._tensor.dispatch import _operator_dispatch
 from torch.distributed._tensor.op_schema import OpSchema
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -42,16 +23,9 @@ from torch.distributed._tensor.placement_types import (
     Shard,
 )
 from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
-from torch.fx.experimental.proxy_tensor import (
-    make_fx,
-    maybe_disable_fake_tensor_mode,
-    proxy_slot,
-)
+from torch.fx.experimental.proxy_tensor import make_fx, proxy_slot
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
 
-# patch aot_function so that we can pass the full (non-sharded) input to capture the graph
-# pyre-fixme
-torch._functorch.aot_autograd.aot_function = patched_aot_function  # type: ignore[assignment]
 
 logger: Optional[logging.Logger] = None
 
@@ -812,139 +786,3 @@ def _convert_to_distributed(
     _rebuild_graph(gm, node_replacements)
 
     return gm, output_schemas
-
-
-class _SPMD:
-    def __init__(
-        self,
-        dist_graph: DistributedGraph,
-        param_schema: Schema,
-        input_schemas: Sequence[Placement],
-    ) -> None:
-        self._dist_graph = dist_graph
-        self._param_schema = param_schema
-        # Override the default sharding of input to the model.
-        self._input_schemas = input_schemas
-        # used to propagate sharding from the output of the forward pass to
-        # the input of backward pass
-        self._known_specs_by_node_name: Dict[str, Schema] = {}
-
-    def _is_param(self, t: torch.Tensor) -> bool:
-        # N.B.: id(t) and id(param) does not match
-        orig_module = cast(nn.Module, self._dist_graph.orig_module)
-        return t.data_ptr() in (p.data_ptr() for p in orig_module.parameters())
-
-    def _compile_wrapper(
-        self,
-        training_phase: TrainingPhase,
-        original_inputs: List[List[torch.Tensor]],
-        gm: fx.GraphModule,
-        inps: List[torch.Tensor],
-    ) -> fx.GraphModule:
-        with maybe_disable_fake_tensor_mode():
-            return self._compile(training_phase, gm, original_inputs[0])
-
-    def _compile(
-        self,
-        training_phase: TrainingPhase,
-        gm: fx.GraphModule,
-        inps: List[torch.Tensor],
-    ) -> fx.GraphModule:
-        shard_schema: Schema = Schema(
-            mesh=self._param_schema.mesh, placements=[Shard(0)]
-        )
-        schemas: List[Schema] = []
-        inp_schema_count = 0
-        nparams = 0
-
-        # iterate through inputs (and initial nodes of the graph that should
-        # correspond 1:1 to those inputs)
-        for inp, placeholder_node in zip(inps, gm.graph.nodes):
-            # This is a no-op but we want the order of schemas
-            # to match the order of inputs when we iterate through
-            # the graph. Usually the non-tensor inputs are at the
-            # end of the list so we could drop the schemas for it.
-
-            assert placeholder_node.op == "placeholder", (
-                "Expected initial nodes of the GraphModule to be input placeholders. "
-                "Got {placeholder_node.op}"
-            )
-
-            known_schema = self._known_specs_by_node_name.get(placeholder_node.name)
-
-            if known_schema is not None:
-                schemas.append(known_schema)
-            elif not isinstance(inp, torch.Tensor):
-                schemas.append(
-                    Schema(mesh=self._param_schema.mesh, placements=[Replicate()])
-                )
-            else:
-                if self._is_param(inp):
-                    schemas.append(self._param_schema)
-                    nparams += 1
-                elif self._input_schemas:
-                    schemas.append(self._input_schemas[inp_schema_count])  # type: ignore[arg-type]
-                    inp_schema_count += 1
-                else:
-                    schemas.append(shard_schema)
-
-        parallelized_gm, output_specs = _convert_to_distributed(
-            gm,
-            inps,
-            schemas,
-            _allow_partial=False,
-        )
-        self._known_specs_by_node_name.update(output_specs)
-
-        if training_phase == TrainingPhase.FORWARD:
-            self._dist_graph.fwd_graph_modules.append(parallelized_gm)
-        elif training_phase == TrainingPhase.BACKWARD:
-            self._dist_graph.bwd_graph_modules.append(parallelized_gm)
-        return make_boxed_func(parallelized_gm)
-
-
-def distribute(
-    dist_graph: DistributedGraph,
-    param_schema: Schema,
-    input_schemas: Sequence[Placement],
-    *args: Tuple[Any, ...],
-    **kwargs: Dict[str, Any],
-) -> nn.Module:
-    flat_args, _ = tree_flatten(args)
-    flat_kwargs, _ = tree_flatten(kwargs)
-    input_set: Set[Any] = set(flat_args + flat_kwargs)
-
-    fake_mode: FakeTensorMode = detect_fake_mode(input_set)
-    if fake_mode is None:
-        fake_mode = FakeTensorMode()
-
-    # will update this to the original forward inputs
-    original_inputs: List[Optional[Sequence[Any]]] = [None]
-
-    def input_to_fake(input: Any) -> Any:
-        if not isinstance(input, torch.Tensor):
-            return input
-        y = fake_mode.from_tensor(input)
-        if input in input_set:
-            # "unshard" our fake tensor
-            # (considers that inputs are sharded)
-            y = y.repeat(param_schema.mesh.size(0), *((1,) * (y.ndim - 1)))
-        # TODO assume non-inputs (params, etc) are replicated for now.
-        return y
-
-    def gather_inputs_for_compilation(
-        inps: Tuple[Any, ...],
-    ) -> Tuple[Any, ...]:
-        original_inputs[0] = inps
-        return tuple(input_to_fake(x) for x in inps)
-
-    spmd = _SPMD(dist_graph, param_schema, input_schemas)
-    compiled_m = aot_module(
-        cast(nn.Module, dist_graph.orig_module),
-        partial(spmd._compile_wrapper, TrainingPhase.FORWARD, original_inputs),
-        partial(spmd._compile, TrainingPhase.BACKWARD),
-        pre_compile_fn=gather_inputs_for_compilation,
-        decompositions=_CURRENT_DECOMPOSITION_TABLE,
-    )
-
-    return compiled_m

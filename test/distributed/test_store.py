@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import socket
 import sys
 import tempfile
 import time
@@ -20,7 +21,8 @@ if not dist.is_available():
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_distributed import (
     skip_if_win32,
-    create_tcp_store
+    create_tcp_store,
+    tp_transports
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -121,6 +123,41 @@ class StoreTestBase:
     def test_simple_wait(self):
         self._test_simple_wait(self._create_store())
 
+    def _test_append(self, store):
+        if not store.has_extended_api():
+            self.skipTest("Store doesn't support extended APIs")
+        store.set("foo", "po")
+        store.append("foo", "tato")
+        store.append("bar", "po")
+        store.append("bar", "tato")
+        self.assertEqual(b"potato", store.get("foo"))
+        self.assertEqual(b"potato", store.get("bar"))
+
+    def test_append(self):
+        self._test_append(self._create_store())
+
+    def _test_multi_set(self, store):
+        if not store.has_extended_api():
+            self.skipTest("Store doesn't support extended APIs")
+        store.multi_set(["foo", "bar"], ["po", "tato"])
+        self.assertEqual(b"po", store.get("foo"))
+        self.assertEqual(b"tato", store.get("bar"))
+
+    def test_multi_set(self):
+        self._test_multi_set(self._create_store())
+
+    def _test_multi_get(self, store):
+        if not store.has_extended_api():
+            self.skipTest("Store doesn't support extended APIs")
+        store.set("foo", "po")
+        store.set("bar", "tato")
+        v0, v1 = store.multi_get(["foo", "bar"])
+        self.assertEqual(b"po", v0)
+        self.assertEqual(b"tato", v1)
+
+    def test_multi_get(self):
+        self._test_multi_get(self._create_store())
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -145,6 +182,7 @@ class FileStoreTest(TestCase, StoreTestBase):
         # Init RPC using file
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
         rpc_backend_options.init_method = f"file://{file.name}"
+        rpc_backend_options._transports = tp_transports()
         rpc.init_rpc("worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options)
 
         # Init PG using file
@@ -258,7 +296,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
         backend_opts = rpc.TensorPipeRpcBackendOptions(
-            init_method=f"tcp://{addr}:{port}"
+            init_method=f"tcp://{addr}:{port}",
+            _transports=tp_transports()
         )
         rpc.init_rpc(
             name="worker0",
@@ -268,6 +307,18 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
         rpc.shutdown()
+
+    @skip_if_win32()
+    def test_take_over_listen_socket(self):
+        listen_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listen_sock.bind(("localhost", 0))
+        addr, port, *_ = listen_sock.getsockname()
+        listen_fd = listen_sock.detach()
+
+        store = dist.TCPStore(addr, port, 1, is_master=True, master_listen_fd=listen_fd)
+
+        store.set("key", "value")
+        self.assertEqual(b"value", store.get("key"))
 
     # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
     # the user and one additional key used for coordinate all the workers.
@@ -324,6 +375,28 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(None)
 
+    def test_append(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.append("foo", "tato")
+        store.append("bar", "po")
+        store.append("bar", "tato")
+        self.assertEqual(b"potato", store.get("foo"))
+        self.assertEqual(b"potato", store.get("bar"))
+
+    def test_multi_set(self):
+        store = self._create_store()
+        store.multi_set(["foo", "bar"], ["po", "tato"])
+        self.assertEqual(b"po", store.get("foo"))
+        self.assertEqual(b"tato", store.get("bar"))
+
+    def test_multi_get(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.set("bar", "tato")
+        v0, v1 = store.multi_get(["foo", "bar"])
+        self.assertEqual(b"po", v0)
+        self.assertEqual(b"tato", v1)
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -341,7 +414,6 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
     @property
     def num_keys_total(self):
         return 6
-
 
 class MyPythonStore(dist.Store):
     def __init__(self):
@@ -366,6 +438,16 @@ class MyPythonStore(dist.Store):
         self.set(key, bytes(str(new).encode("utf-8")))
         return new
 
+    def compare_set(self, key, expected, newValue):
+        if type(expected) is not bytes:
+            raise AssertionError("compare_set::expected not bytes")
+        if type(newValue) is not bytes:
+            raise AssertionError("compare_set::newValue not bytes")
+
+        val = self.store.get(key, None)
+        if expected == val or val is None:
+            val = self.store[key] = newValue
+        return val
 
 class PythonStoreTest(TestCase):
     def test_set_get(self):
@@ -498,6 +580,93 @@ class RendezvousTCPTest(TestCase):
         end = time.time()
         time_diff = end - start
         self.assertGreater(test_store_timeout.seconds * 10, time_diff)
+
+class DummyStore(dist.Store):
+    def __init__(self):
+        self.appends = []
+        self.multi_sets = []
+        self.multi_gets = []
+        self.multi_get_res = []
+        super().__init__()
+
+    def append(self, key, value):
+        self.appends.append((key, value))
+
+    def multi_get(self, keys):
+        self.multi_gets.append(keys)
+        return self.multi_get_res.pop(0)
+
+    def multi_set(self, keys, values):
+        self.multi_sets.append((keys, values))
+
+    def has_extended_api(self):
+        return True
+
+class TestPythonStore(TestCase):
+    def test_optional_methods_fail(self):
+        class TestStore(dist.Store):
+            pass
+        store = TestStore()
+        self.assertFalse(store.has_extended_api())
+        with self.assertRaisesRegex(RuntimeError, "Not implemented."):
+            store.append("foo", "bar")
+        with self.assertRaisesRegex(RuntimeError, "Not implemented."):
+            store.multi_get(["foo", "bar"])
+        with self.assertRaisesRegex(RuntimeError, "Not implemented."):
+            store.multi_set(["foo", "bar"], [b"v", b"v"])
+
+    def test_has_extended_api_passthrough(self):
+        class TestStore(dist.Store):
+            pass
+        test_store = TestStore()
+        store = dist.PrefixStore("p", test_store)
+        self.assertFalse(store.has_extended_api())
+        with self.assertRaisesRegex(RuntimeError, "Not implemented."):
+            store.append("foo", "bar")
+        with self.assertRaisesRegex(RuntimeError, "Not implemented."):
+            store.multi_get(["foo", "bar"])
+        with self.assertRaisesRegex(RuntimeError, "Not implemented."):
+            store.multi_set(["foo", "bar"], [b"v", b"v"])
+
+    def test_has_extended_api_roundtrip(self):
+        store = DummyStore()
+        prefix = dist.PrefixStore("p", store)
+        self.assertTrue(prefix.has_extended_api())
+
+    def test_append_roundtrip(self):
+        store = DummyStore()
+        prefix = dist.PrefixStore("p", store)
+        prefix.append("foo", "bar")
+        self.assertEqual(1, len(store.appends))
+        self.assertEqual(("p/foo", b"bar"), store.appends[0])
+
+    def test_multi_get_roundtrip(self):
+        store = DummyStore()
+        prefix = dist.PrefixStore("p", store)
+        store.multi_get_res.append([b"x", b"y"])
+        res = prefix.multi_get(["foo", "bar"])
+        self.assertEqual(1, len(store.multi_gets))
+        self.assertEqual(["p/foo", "p/bar"], store.multi_gets[0])
+        self.assertEqual([b"x", b"y"], res)
+
+    def test_multi_set_roundtrip(self):
+        store = DummyStore()
+        prefix = dist.PrefixStore("p", store)
+        prefix.multi_set(["foo", "bar"], [b'x', b'y'])
+        self.assertEqual(1, len(store.multi_sets))
+        self.assertEqual(["p/foo", "p/bar"], store.multi_sets[0][0])
+        self.assertEqual([b'x', b'y'], store.multi_sets[0][1])
+
+    def test_extended_methods_fallbacks(self):
+        test_store = MyPythonStore()
+        store = dist.PrefixStore("p", test_store)
+        self.assertFalse(store.has_extended_api())
+        store.append("foo", b"po")
+        store.append("foo", b"tato")
+        self.assertEqual(store.get("foo"), b"potato")
+
+        store.multi_set(["a", "b"], [b"c", b"d"])
+        self.assertEqual(store.multi_get(["a", "b", "foo"]), [b"c", b"d", b"potato"])
 
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
