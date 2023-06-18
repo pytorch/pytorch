@@ -30,7 +30,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes
-
+from torch.fx.experimental.symbolic_shapes import constrain_range
 from torch.utils._pytree import tree_map
 
 
@@ -135,11 +135,78 @@ def logcumsumexp(self, dim):
     return torch.empty_like(self).contiguous()
 
 
+# Stride-related code from _exec_fft in aten/src/ATen/native/cuda/SpectralOps.cpp
+def _exec_fft(out, self, out_sizes, dim, forward):
+    ndim = self.ndim
+    signal_ndim = len(dim)
+    batch_dims = ndim - signal_ndim
+
+    # Permute dimensions so batch dimensions come first, and in stride order
+    dim_permute = list(range(ndim))
+
+    is_transformed_dim = [False for _ in range(ndim)]
+    for d in dim:
+        is_transformed_dim[d] = True
+
+    # std::partition
+    left, right = [], []
+    for d in dim_permute:
+        if not is_transformed_dim[d]:
+            left.append(d)
+        else:
+            right.append(d)
+    dim_permute = left + right
+    batch_end = len(left)
+
+    self_strides = self.stride()
+    tmp = dim_permute[:batch_end]
+    tmp.sort(key=lambda x: self_strides[x], reverse=True)
+    dim_permute = tmp + dim_permute[batch_end:]
+    input = self.permute(dim_permute)
+
+    # Collapse batch dimensions into a single dimension
+    batched_sizes = [-1] + list(input.shape[batch_dims:])
+    input = input.reshape(batched_sizes)
+
+    batch_size = input.size(0)
+    batched_sizes[0] = batch_size
+    batched_out_sizes = batched_sizes
+    for i in range(len(dim)):
+        batched_out_sizes[i + 1] = out_sizes[dim[i]]
+    out = out.reshape(batched_out_sizes)
+
+    # Reshaping to original batch shape and inverting the dimension permutation
+    out_strides = [0 for _ in range(ndim)]
+    batch_numel = 1
+    i = batch_dims - 1
+    while i >= 0:
+        out_strides[dim_permute[i]] = batch_numel * out.stride(0)
+        batch_numel *= out_sizes[dim_permute[i]]
+        i -= 1
+    for i in range(batch_dims, ndim):
+        out_strides[dim_permute[i]] = out.stride(1 + (i - batch_dims))
+    return out.as_strided(out_sizes, out_strides, out.storage_offset())
+
+
+# See _fft_c2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
+# and _fft_c2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
 @register_meta([aten._fft_c2c.default, aten._fft_c2c.out])
 @out_wrapper()
 def meta_fft_c2c(self, dim, normalization, forward):
     assert self.dtype.is_complex
-    return self.new_empty(self.size())
+
+    out_sizes = self.shape
+    output = self.new_empty(out_sizes)
+
+    if not dim:
+        return output
+
+    sorted_dims = dim[:]
+    self_strides = self.stride()
+    sorted_dims.sort(key=lambda x: self_strides[x], reverse=True)
+    output = _exec_fft(output, self, out_sizes, sorted_dims, forward)
+
+    return output
 
 
 @register_meta([aten._fft_r2c.default, aten._fft_r2c.out])
@@ -309,6 +376,11 @@ def assert_async(val):
 @register_meta(aten._assert_async.msg)
 def assert_async_meta(val, assert_msg):
     return
+
+
+@register_meta(aten.sym_constrain_range.default)
+def sym_constrain_range(size, min, max):
+    constrain_range(size, min=min, max=max)
 
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
@@ -2526,6 +2598,51 @@ def meta_round(self, **kwargs):
     return _elementwise_meta(
         self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
     )
+
+
+def shift_dtype_check(fn_name, self, val):
+    check(
+        utils.is_integer_dtype(self.dtype),
+        lambda: f"{fn_name}: Expected input tensor to have an integral dtype. Got {self.dtype}",
+    )
+    if isinstance(val, torch.Tensor):
+        check(
+            utils.is_integer_dtype(val.dtype),
+            lambda: f"{fn_name}: Expected shift value to have an integral dtype. Got {val.dtype}",
+        )
+    else:
+        check(
+            isinstance(val, IntLike),
+            lambda: f"{fn_name}: Expected shift value to be an int. Got {val}",
+        )
+
+
+@register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
+def meta_rshifts(self, other):
+    shift_dtype_check("rshift", self, other)
+    element_wise = _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    # Annoying edgecase
+    if self.dim() == 0 and isinstance(other, torch.Tensor):
+        return torch.empty(
+            other.shape, device=element_wise.device, dtype=element_wise.dtype
+        )
+    return element_wise
+
+
+@register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
+def meta_lshifts(self, other):
+    shift_dtype_check("lshift", self, other)
+    element_wise = _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    # Annoying edgecase
+    if self.dim() == 0 and isinstance(other, torch.Tensor):
+        return torch.empty(
+            other.shape, device=element_wise.device, dtype=element_wise.dtype
+        )
+    return element_wise
 
 
 @register_meta(aten.zero.default)
