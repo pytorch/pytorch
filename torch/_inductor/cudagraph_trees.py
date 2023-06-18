@@ -865,7 +865,6 @@ class CUDAGraphNode:
                     self._tensor_metadata(out, ignore_storage_offset=False)
                 )
             else:
-                assert out is None
                 self.outputs_metadata.append(None)
 
         self.graph.replay()
@@ -1112,7 +1111,7 @@ class CUDAGraphNode:
 
         assert not self.outputs_weakrefs
         for out, static_output_tensor in zip(outputs, self.static_output_tensors):
-            if out is None or static_output_tensor is not None:
+            if not isinstance(out, torch.Tensor) or static_output_tensor is not None:
                 self.outputs_weakrefs.append(None)
                 self.tensor_weakrefs.append(None)
             else:
