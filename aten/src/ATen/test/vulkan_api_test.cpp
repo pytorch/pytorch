@@ -4311,6 +4311,24 @@ TEST_F(VulkanAPITest, cat_4d_dim3_diffwidth_success) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, cat_3d_dim0_mult4ch_success) {
+  // Arrange
+  const auto in_cpu1 = at::rand({4, 193, 113}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({4, 193, 113}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({4, 193, 113}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 0);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
 
 TEST_F(VulkanAPITest, cat_3d_dim0_diff_channel_success) {
   // Arrange
