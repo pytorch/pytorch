@@ -9,9 +9,8 @@ Compiled workloads on modern x86 CPUs are usually optimized by SIMD instruction 
 Which ISAs are supported by a machine can be checked with `collect_env script <https://github.com/pytorch/pytorch/blob/main/torch/utils/collect_env.py>`. As the script provides complete environment information for PyTorch, we can use ``grep`` to extract the line containing ISA information.
 
 ::
-	
-	python collect_env.py | grep "a[(v|m)]x"
 
+    python collect_env.py | grep "a[(v|m)]x"
 
 Normally, if AVX-512 is supported, instructions start with "avx512" (like ``avx512f``, ``avx512bw``, ``avx512_vnni``) should be observed. If AMX is supported, instructions start with "amx" (like ``amx_tile``, ``amx_bf16``, ``amx_int8``) should be observed.
 
