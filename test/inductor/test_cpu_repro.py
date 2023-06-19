@@ -387,6 +387,25 @@ class CPUReproTests(TestCase):
             (torch.randn(8),),
         )
 
+    def test_ModularIndexing_range_issue_103133(self):
+        def fn(q, k):
+            einsum = torch.einsum("bcxd,bcyd->bcxy", (q, k))
+            constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                einsum, [0, 0, 0, 1], 0.0
+            )
+            view = torch.ops.aten.view.default(constant_pad_nd, [12, 1, 512, 513])
+            y = view.new_zeros((12, 2, 256, 513))
+            y[:, :-1, :, 256:] = view[:, :, :256, :257]
+            return y
+
+        self.common(
+            fn,
+            (
+                torch.empty_strided((12, 1, 512, 64), (64, 196608, 768, 1)),
+                torch.empty_strided((12, 1, 512, 64), (64, 196608, 768, 1)),
+            ),
+        )
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_max_reduction_bfloat16(self):
         def fn(x):
