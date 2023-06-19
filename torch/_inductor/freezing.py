@@ -6,6 +6,11 @@ import torch
 import torch.utils._pytree as pytree
 from . import config
 
+from .fx_passes.mkldnn_fusion import (
+    get_preserved_arg_indices_and_constant_nodes,
+    mkldnn_weight_prepack_fx,
+)
+
 
 def replace_node_with_constant(gm, node, constant):
     g = gm.graph
@@ -40,28 +45,17 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
 
     Returns a list of indices representing the input parameters that were not converted to constants.
     """
+    (
+        preserved_arg_indices,
+        constant_nodes,
+    ) = get_preserved_arg_indices_and_constant_nodes(gm, flat_params, fw_metadata)
 
     params = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    fake_inp_nodes = params[: len(params)]
+    fake_inp_nodes = params[: len(flat_params)]
 
-    g = gm.graph
-
-    preserved_arg_indices = []
-    aliased_input_args = [
-        out_info.base_idx
-        for out_info in fw_metadata.output_info
-        if out_info.base_idx is not None
-    ]
-
-    for i, (real_input, node) in enumerate(zip(flat_params, fake_inp_nodes)):
-        if i in fw_metadata.mutated_inp_indices or aliased_input_args:
-            preserved_arg_indices.append(i)
-            continue
-
-        replace_node_with_constant(gm, node, real_input)
-
-    # add on non param inputs
-    preserved_arg_indices.extend(range(len(flat_params), len(params)))
+    for real_input, node in zip(flat_params, fake_inp_nodes):
+        if node in constant_nodes:
+            replace_node_with_constant(gm, node, real_input)
 
     # is this necessary ?
     gm.recompile()
@@ -169,7 +163,9 @@ def freeze(
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
+
     params_flat = torch._guards.TracingContext.get().params_flat
+    mkldnn_weight_prepack_fx(aot_autograd_gm, params_flat, fw_metadata)
     preserved_arg_indices = replace_params_with_constants(
         aot_autograd_gm, params_flat, fw_metadata
     )
