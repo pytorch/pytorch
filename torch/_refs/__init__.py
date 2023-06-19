@@ -146,6 +146,8 @@ __all__ = [
     "lcm",
     # 'ldexp',
     "le",
+    "logaddexp",
+    "logaddexp2",
     "logical_and",
     "logical_not",
     "logical_or",
@@ -3105,15 +3107,25 @@ def permute(a: TensorLikeType, *dims) -> TensorLikeType:
     )
     return prims.transpose(a, _permutation)
 
+
 @register_decomposition(aten.renorm)
 @out_wrapper()
-def renorm(input: TensorLikeType, p: Number, dim: int, maxnorm: FloatLike) -> TensorLikeType:
+def renorm(
+    input: TensorLikeType, p: Number, dim: int, maxnorm: FloatLike
+) -> TensorLikeType:
     utils.check(not isinstance(p, complex), lambda: "renorm: p must be real-valued")
     utils.check(p > 0, lambda: "renorm: non-positive norm not supported")
-    utils.check(not isinstance(maxnorm, complex), lambda: "renorm: maxnorm must be real-valued")
-    utils.check(maxnorm > 0, lambda: f"renorm: expected maxnorm to be >= but got {maxnorm}")
+    utils.check(
+        not isinstance(maxnorm, complex), lambda: "renorm: maxnorm must be real-valued"
+    )
+    utils.check(
+        maxnorm > 0, lambda: f"renorm: expected maxnorm to be >= but got {maxnorm}"
+    )
     ndim = input.dim()
-    utils.check(ndim > 1, lambda: f"renorm: input needs at least 2 dimensions, got {ndim} dimensions")
+    utils.check(
+        ndim > 1,
+        lambda: f"renorm: input needs at least 2 dimensions, got {ndim} dimensions",
+    )
 
     dim = utils.canonicalize_dim(ndim, dim)
     reduce_dims = list(range(ndim))
@@ -3124,7 +3136,9 @@ def renorm(input: TensorLikeType, p: Number, dim: int, maxnorm: FloatLike) -> Te
     acc_type = utils.get_computation_dtype(input.dtype)
     extra_kwargs = {}
     if acc_type != input.dtype:
-        norm = torch.linalg.vector_norm(input, p, reduce_dims, keepdim=True, dtype=acc_type)
+        norm = torch.linalg.vector_norm(
+            input, p, reduce_dims, keepdim=True, dtype=acc_type
+        )
     else:
         norm = torch.linalg.vector_norm(input, p, reduce_dims, keepdim=True)
 
@@ -3133,7 +3147,6 @@ def renorm(input: TensorLikeType, p: Number, dim: int, maxnorm: FloatLike) -> Te
     if acc_type != input.dtype:
         norm_factor = prims.convert_element_type(norm_factor, input.dtype)
     return input * norm_factor
-
 
 
 # Get the new shape and stride after applying unfold to an input tensor
