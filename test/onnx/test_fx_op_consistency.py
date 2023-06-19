@@ -136,6 +136,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "scatter_add",
         "scatter_reduce",
+        "stft",
         "unflatten",
         "vstack",  # aten::cat is invoked instead
     ]
@@ -482,6 +483,10 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="ONNX doesn't support reduce='mean' option",
     ),
     xfail(
+        "stft",
+        reason=onnx_test_common.reason_dynamo_does_not_support("aten._fft_r2c.default"),
+    ),
+    xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
     ),
@@ -680,7 +685,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 
                     if dtype == torch.float32:
                         # Relax atol and rtol for float32 based on empirical results
-                        # The current most relaxed values are for aten::stft
                         rtol = 1e-5
                         atol = 2e-5
                     else:

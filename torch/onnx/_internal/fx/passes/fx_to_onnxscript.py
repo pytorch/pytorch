@@ -209,7 +209,14 @@ def _fill_tensor_shape_type(
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
-        if expected_value.dtype in _type_utils.COMPLEX_TO_FLOAT:
+        # aten::sym_size output is a int, not a tensor, which stands
+        # for the size of one dim. We treat it as 0-D tensor.
+        # TODO(titaiwang): set shape?
+        if isinstance(expected_value, torch.SymInt):
+            onnxscript_value.dtype = torch.int64
+        elif isinstance(expected_value, torch.SymFloat):
+            onnxscript_value.dtype = torch.float32
+        elif expected_value.dtype in _type_utils.COMPLEX_TO_FLOAT:
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
             # additional last dimension of 2
             onnxscript_value.shape = tuple(
@@ -220,14 +227,6 @@ def _fill_tensor_shape_type(
             onnxscript_value.dtype = _type_utils.COMPLEX_TO_FLOAT[expected_value.dtype]
             # Dispatcher needs to know the value is complex
             onnxscript_value.is_complex = True
-
-        # aten::sym_size output is a int, not a tensor, which stands
-        # for the size of one dim. We treat it as 0-D tensor.
-        # TODO(titaiwang): set shape?
-        elif isinstance(expected_value, torch.SymInt):
-            onnxscript_value.dtype = torch.int64
-        elif isinstance(expected_value, torch.SymFloat):
-            onnxscript_value.dtype = torch.float32
         else:
             # We set node output sizes to be dynamic to continue the model conversion,
             # and inputs are also set to be dynamic in add_input().
