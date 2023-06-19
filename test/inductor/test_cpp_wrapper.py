@@ -21,6 +21,8 @@ try:
             test_cpu_repro,
             test_foreach,
             test_mkldnn_pattern_matcher,
+            test_pattern_matcher,
+            test_select_algorithm,
             test_torchinductor,
             test_torchinductor_dynamic_shapes,
         )
@@ -28,6 +30,8 @@ try:
         import test_cpu_repro
         import test_foreach
         import test_mkldnn_pattern_matcher
+        import test_pattern_matcher
+        import test_select_algorithm
         import test_torchinductor
         import test_torchinductor_dynamic_shapes
 except unittest.SkipTest:
@@ -72,29 +76,46 @@ test_failures_cpp_wrapper = {
     "test_conv2d_binary_inplace_fusion_failed_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
+    "test_conv2d_binary_inplace_fusion_pass_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+}
+
+# see https://github.com/pytorch/pytorch/issues/103194
+test_failures_cuda_wrapper = {
+    "test_fft_real_input_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",)
+    ),
+    "test_fft_real_input_real_output_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cuda_wrapper",)
+    ),
 }
 
 
 def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
     test_name = f"{name}_{device}" if device else name
 
+    func = getattr(tests, test_name)
+    assert callable(func), "not a callable"
+    func = slowTest(func) if slow else func
+
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
         try:
-            func = getattr(tests, test_name)
-            assert callable(func), "not a callable"
-            func = slowTest(func) if slow else func
             code = test_torchinductor.run_and_get_cpp_code(
                 func, *func_inputs if func_inputs else []
             )
-            self.assertEqual("load_inline" in code, True)
+            self.assertEqual("CppWrapperCodeCache" in code, True)
         finally:
             tests.tearDown()
             tests.tearDownClass()
 
     fn.__name__ = test_name
+    import copy
+
+    fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
             CppWrapperTemplate if device == "cpu" else CudaWrapperTemplate,
@@ -123,19 +144,30 @@ if RUN_CPU:
             "test_conv2d_binary_inplace_fusion_failed",
             "cpu",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            condition=torch._C.has_mkldnn,
+            condition=torch.backends.mkldnn.is_available(),
             func_inputs=[
                 ["op_convolution_pointwise_binary.call"],
                 ["op_convolution_pointwise_binary_.call"],
             ],
         ),
         BaseTest(
+            "test_conv2d_binary_inplace_fusion_pass",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPaternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            func_inputs=[
+                ["op_convolution_pointwise_binary_.call"],
+                ["op_convolution_pointwise_binary.call"],
+            ],
+        ),
+        BaseTest(
             "test_conv2d_unary",
             "cpu",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            condition=torch._C.has_mkldnn,
+            condition=torch.backends.mkldnn.is_available(),
             slow=True,
         ),
+        BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
@@ -146,7 +178,8 @@ if RUN_CPU:
             "test_linear_binary",
             "",
             test_mkldnn_pattern_matcher.TestPaternMatcher(),
-            torch._C.has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
+            torch.backends.mkldnn.is_available()
+            and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_mm_views"),
@@ -159,7 +192,9 @@ if RUN_CPU:
         BaseTest("test_sort"),
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
+        BaseTest("test_tensor2"),  # constant input
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
+        BaseTest("test_view_as_complex"),
     ]:
         make_test_case(
             item.name,
@@ -181,6 +216,7 @@ if RUN_CPU:
         DynamicShapesCppWrapperCpuTests,
         "cpp_wrapper",
         test_failures_cpp_wrapper,
+        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if RUN_CUDA:
@@ -193,6 +229,7 @@ if RUN_CUDA:
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
@@ -201,6 +238,7 @@ if RUN_CUDA:
         BaseTest("test_conv_backward"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
+        BaseTest("test_index_tensor"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
@@ -209,6 +247,7 @@ if RUN_CUDA:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_scalar_input"),
+        BaseTest("test_scaled_dot_product_efficient_attention"),
         BaseTest("test_sort"),
         BaseTest("test_silu"),  # single input, single output
         BaseTest("test_sum_dtype"),  # float64
@@ -219,6 +258,28 @@ if RUN_CUDA:
             device=None,
             tests=test_foreach.ForeachTests(),
         ),  # test foreach
+        BaseTest(
+            "test_cat_slice_cat",
+            device=None,
+            tests=test_pattern_matcher.TestPaternMatcher(),
+        ),
+        BaseTest(
+            "test_addmm",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_linear_relu",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest(
+            "test_convolution1",
+            device=None,
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        BaseTest("test_fft_real_input"),
+        BaseTest("test_fft_real_input_real_output"),
     ]:
         make_test_case(item.name, item.device, item.tests)
 
@@ -232,6 +293,8 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperTemplate,
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
+        test_failures_cuda_wrapper,
+        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if __name__ == "__main__":
