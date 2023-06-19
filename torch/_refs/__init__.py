@@ -300,6 +300,10 @@ __all__ = [
     # Statistical operations
     #
     "bucketize",
+    #
+    # Misc
+    #
+    "renorm",
 ]
 
 Tensor = torch.Tensor
@@ -3100,6 +3104,36 @@ def permute(a: TensorLikeType, *dims) -> TensorLikeType:
         a.ndim, utils.extract_dims_from_varargs(dims)
     )
     return prims.transpose(a, _permutation)
+
+@register_decomposition(aten.renorm)
+@out_wrapper()
+def renorm(input: TensorLikeType, p: Number, dim: int, maxnorm: FloatLike) -> TensorLikeType:
+    utils.check(not isinstance(p, complex), lambda: "renorm: p must be real-valued")
+    utils.check(p > 0, lambda: "renorm: non-positive norm not supported")
+    utils.check(not isinstance(maxnorm, complex), lambda: "renorm: maxnorm must be real-valued")
+    utils.check(maxnorm > 0, lambda: f"renorm: expected maxnorm to be >= but got {maxnorm}")
+    ndim = input.dim()
+    utils.check(ndim > 1, lambda: f"renorm: input needs at least 2 dimensions, got {ndim} dimensions")
+
+    dim = utils.canonicalize_dim(ndim, dim)
+    reduce_dims = list(range(ndim))
+    del reduce_dims[dim]
+
+    # For half and bfloat16, calculate norm in float precision then cast
+    # normalization factor to half
+    acc_type = utils.get_computation_dtype(input.dtype)
+    extra_kwargs = {}
+    if acc_type != input.dtype:
+        norm = torch.linalg.vector_norm(input, p, reduce_dims, keepdim=True, dtype=acc_type)
+    else:
+        norm = torch.linalg.vector_norm(input, p, reduce_dims, keepdim=True)
+
+    eps = 1e-7
+    norm_factor = torch.where(norm > maxnorm, maxnorm / (norm + eps), 1.0)
+    if acc_type != input.dtype:
+        norm_factor = prims.convert_element_type(norm_factor, input.dtype)
+    return input * norm_factor
+
 
 
 # Get the new shape and stride after applying unfold to an input tensor
