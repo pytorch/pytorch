@@ -336,6 +336,20 @@ class CudaReproTests(TestCase):
         with torch.cuda.amp.autocast(enabled=False):
             assert same_two_models(mod, opt_mod, args), "Dynamo failed"
 
+    @config.patch(allow_buffer_reuse=False)
+    def test_issue103461(self):
+        def forward(add_1):
+            var_mean = torch.ops.aten.var_mean.correction(
+                add_1, [2], correction=0, keepdim=True
+            )
+            getitem_1 = var_mean[1]
+            return getitem_1
+
+        x = torch.randn(1, 8, 768, device="cuda")
+        correct = forward(x)
+        actual = torch.compile(forward, fullgraph=True)(x)
+        self.assertEqual(actual, correct)
+
     def test_autotune_inplace_kernel(self):
         """
         This UT tests autotune on an inplace kernel. The autotune should not contaminate

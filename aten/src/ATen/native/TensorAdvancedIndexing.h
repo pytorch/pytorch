@@ -12,7 +12,7 @@ namespace at {
 struct TensorIterator;
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 using index_put_with_sort_fn = void(*)(Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool accumulate, bool unsafe);
 using index_put_with_sort_quantized_fn = void(*)(Tensor& self, const c10::List<c10::optional<Tensor>>& indices, const Tensor& value, double scale, int zero_point, bool unsafe);
@@ -109,4 +109,4 @@ DECLARE_DISPATCH(scatter_add_expanded_index_fn, scatter_add_expanded_index_stub)
 DECLARE_DISPATCH(scatter_reduce_expanded_index_fn, scatter_reduce_expanded_index_stub);
 DECLARE_DISPATCH(gather_expanded_index_fn, gather_expanded_index_stub);
 
-}} // namespace at::native
+} // namespace at::native

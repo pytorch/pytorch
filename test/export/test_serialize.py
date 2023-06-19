@@ -7,6 +7,7 @@ from torch._export import dynamic_dim, export
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
+    ExportedProgramDeserializer,
     ExportedProgramSerializer,
     deserialize,
     serialize,
@@ -177,8 +178,8 @@ class TestDeserialize(TestCase):
         # TODO(angelayi): test better with some sort of wrapper
         constraints = [] if constraints is None else constraints
         ep = export(fn, inputs, constraints)
-        serialized_struct, state_dict = serialize(ep)
-        deserialized_ep = deserialize(serialized_struct, state_dict)
+        serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
+        deserialized_ep = deserialize(serialized_struct, state_dict, expected_opset_version={"aten": 0})
 
         orig_outputs = ep(*inputs)
         loaded_outputs = deserialized_ep(*inputs)
@@ -352,6 +353,32 @@ class TestDeserialize(TestCase):
 
 
 instantiate_parametrized_tests(TestDeserialize)
+
+
+class TestOpVersioning(TestCase):
+    """Test if serializer/deserializer behaves correctly if version mismatch."""
+
+    def test_empty_model_opset_version_raises(self):
+        compiler_opset_version = {"aten": 4}
+        model_opset_version = None
+        deserializer = ExportedProgramDeserializer(compiler_opset_version)
+        with self.assertRaises(RuntimeError):
+            deserializer._validate_model_opset_version(model_opset_version)
+
+    def test_opset_mismatch_raises(self):
+        compiler_opset_version = {"aten": 4}
+        model_opset_version = {"aten": 3}
+        deserializer = ExportedProgramDeserializer(compiler_opset_version)
+        with self.assertRaises(NotImplementedError):
+            deserializer._validate_model_opset_version(model_opset_version)
+
+    def test_model_op_namespace_version_missing_from_deserializer_do_not_raises(self):
+        compiler_opset_version = {"aten": 3}
+        model_opset_version = {"aten": 3, "custom": 4}
+        deserializer = ExportedProgramDeserializer(compiler_opset_version)
+        with self.assertLogs(level='WARN') as log:
+            deserializer._validate_model_opset_version(model_opset_version)
+            self.assertIn("Compiler doesn't have a version table for op namespace", log.output[0])
 
 
 if __name__ == '__main__':

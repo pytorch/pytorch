@@ -442,7 +442,14 @@ class TestComputeCodegenUnboxedKernels(unittest.TestCase):
             {"T0": ["Double"]},
             {"D0": [0, 1, 2, 3]},
         )
-        selector = SelectiveBuilder.get_nop_selector()
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "include_all_operators": True,
+                "et_kernel_metadata": {
+                    "custom_1::op_1": ["v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3"]
+                },
+            }
+        )
         use_aten_lib = False
         entry = (
             self.native_function_no_kern,
@@ -471,8 +478,67 @@ Kernel(
 
         self.assertEqual(expected_str, result)
 
+    def test_codegen_unboxed_specialized_not_matching(self) -> None:
+        specialized_kernel_key = ETKernelKey.gen_from_yaml(
+            {"self": ("T0", "D0"), "other": ("T0", "D0"), "out": ("T0", "D0")},
+            {"T0": ["Double"]},
+            {"D0": [0, 1, 2, 3]},
+        )
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "include_all_operators": True,
+                "et_kernel_metadata": {
+                    "custom_1::op_1": ["v1/8;0,1,2,3|7;0,1,2,3|7;0,1,2,3"]
+                },
+            }
+        )
+        use_aten_lib = False
+        entry = (
+            self.native_function_no_kern,
+            (specialized_kernel_key, self.default_backend_metadata),
+        )
+
+        self.assertRaises(
+            Exception, ComputeCodegenUnboxedKernels(selector, use_aten_lib), entry
+        )
+
+    def test_codegen_unboxed_specialized_missing_root_op(self) -> None:
+        specialized_kernel_key = ETKernelKey.gen_from_yaml(
+            {"self": ("T0", "D0"), "other": ("T0", "D0"), "out": ("T0", "D0")},
+            {"T0": ["Double"]},
+            {"D0": [0, 1, 2, 3]},
+        )
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "et_kernel_metadata": {
+                    "custom_1::op_1": ["v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3"]
+                }
+            }
+        )
+        use_aten_lib = False
+        entry = (
+            self.native_function_no_kern,
+            (specialized_kernel_key, self.default_backend_metadata),
+        )
+
+        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        # Concat used to prevent whitespace stripping
+        expected_str = """"""
+
+        self.assertEqual(expected_str, result)
+
     def test_codegen_unboxed_default(self) -> None:
-        selector = SelectiveBuilder.get_nop_selector()
+        """
+        This test checks that if there is no specialized kernel, the default kernel is used.
+        """
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "include_all_operators": True,
+                "et_kernel_metadata": {
+                    "custom_1::op_1": ["v1/7;0,1,2,3|7;0,1,2,3|7;0,1,2,3"]
+                },
+            }
+        )
         use_aten_lib = False
         entry = (self.native_function_no_kern, self.default_kernel_entry)
 
