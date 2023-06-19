@@ -529,11 +529,15 @@ SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layo
                " conversion does not use the specified blocksize ", blocksize.value(), ".");
     }
     if (self.layout() == *layout) {
-      return self;
+      if (kStrided == *layout) {
+        // Returning clone to avoid
+        // RuntimeError: result.storage().use_count() == 1 INTERNAL ASSERT FAILED
+        return self.clone();
+      } else {
+        return self.alias();
+      }
     }
     switch (*layout) {
-    case kStrided:
-      return self;
     case kSparse:
       return dense_to_sparse(self, self.dim() - dense_dim_opt.value_or(0));
     case kSparseCsr:

@@ -1027,23 +1027,8 @@ static Tensor sparse_compressed_clone(
     const Tensor& self,
     c10::optional<IntArrayRef> blocksize,
     const std::string& name) {
-  _check_blocksize_matches(self, blocksize, name);
-  // Just returning self doesn't work
-  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
-  // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
-  // please report a bug to PyTorch.
-  const auto layout = self.layout();
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
-  auto values = self.values();
-  return _sparse_compressed_tensor_unsafe(
-      compressed_indices,
-      plain_indices,
-      values,
-      self.sizes(),
-      values.scalar_type(),
-      layout,
-      values.device());
+    _check_blocksize_matches(self, blocksize, name);
+    return self.alias();
 }
 
 static Tensor sparse_compressed_to_flipped(
