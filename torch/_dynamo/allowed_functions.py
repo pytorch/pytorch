@@ -215,10 +215,15 @@ def _allowed_function_ids():
         if idx in torch_object_ids:
             del torch_object_ids[idx]
 
+    fns_to_inline = (
+        torch.nn.functional._none_or_dtype,
+    )
+
     # Funtions in torch.* that we should just inline through
-    for idx in (id(torch.nn.functional._none_or_dtype),):
-        if idx in torch_object_ids:
-            del torch_object_ids[idx]
+    for fn in fns_to_inline:
+        fn_id = id(fn)
+        if fn_id in torch_object_ids:
+            del torch_object_ids[fn_id]
 
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
