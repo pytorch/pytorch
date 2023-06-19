@@ -197,7 +197,7 @@ class AllocateLine(MemoryPlanningLine):
 
         # try to reuse a recently freed buffer
         key = buffer_reuse_key(self.node)
-        if key in state:
+        if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
             free_line.is_reused = True
             return ReuseLine(self.wrapper, free_line.node, self.node)
@@ -219,7 +219,8 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         assert not self.is_reused
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
-        state.push(buffer_reuse_key(self.node), self)
+        if config.allow_buffer_reuse:
+            state.push(buffer_reuse_key(self.node), self)
         return self
 
     def codegen(self, code: IndentedBuffer):
@@ -809,10 +810,6 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_free(self, buffer):
         name = buffer.get_name()
-
-        if not config.allow_buffer_reuse:
-            self.writeline(self.make_buffer_free(buffer))
-            return
 
         # can be freed but not reused
         if isinstance(buffer, ir.InputBuffer):
