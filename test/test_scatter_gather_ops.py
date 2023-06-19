@@ -277,7 +277,7 @@ class TestScatterGather(TestCase):
                 self.assertEqual(input, expected_result)
 
     @onlyCPU
-    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
     def test_scatter_expanded_index(self, device, dtype):
         def helper(input_size, idx_size, atol=1e-5, rtol=0.016):
             is_reduced_type = dtype in [torch.bfloat16, torch.float16]
