@@ -145,6 +145,7 @@ __all__ = [
     "logical_not",
     "logical_or",
     "logical_xor",
+    "logit",
     "logsumexp",
     "lstm_cell",
     "lstm",
@@ -3864,7 +3865,9 @@ def zeros_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
@@ -3924,7 +3927,9 @@ def ones_like(
 ):
     shape = g.op("Shape", input)
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
@@ -3986,7 +3991,9 @@ def full_like(
     fill_value = symbolic_helper._maybe_get_const(fill_value, "f")
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            input, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     if symbolic_helper._is_value(fill_value):
@@ -5184,7 +5191,9 @@ def randn_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        scalar_type = _type_utils.JitScalarType.FLOAT
+        scalar_type = _type_utils.JitScalarType.from_value(
+            self, _type_utils.JitScalarType.FLOAT
+        )
     else:
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op("RandomNormalLike", self, dtype_i=scalar_type.onnx_type())
@@ -5203,7 +5212,9 @@ def rand_like(
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
-        dtype = _type_utils.JitScalarType.FLOAT
+        dtype = _type_utils.JitScalarType.from_value(
+            self, _type_utils.JitScalarType.FLOAT
+        )
     return g.op(
         "RandomUniformLike", self, dtype_i=_type_utils.JitScalarType(dtype).onnx_type()
     )
@@ -7079,3 +7090,26 @@ def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
 
     # they can safely be implemented as no-op for real numbers only
     return noop_complex_operators(g, input)
+
+
+@_onnx_symbolic("aten::logit")
+@_beartype.beartype
+def logit(g: jit_utils.GraphContext, self: torch._C.Value, eps: torch._C.Value):
+    one = g.op("Constant", value_t=torch.tensor(1.0))
+
+    if not symbolic_helper._is_none(eps):
+        eps = g.op(
+            "Cast", eps, to_i=_type_utils.JitScalarType.from_value(self).onnx_type()
+        )
+        one_sub_eps = g.op("Sub", one, eps)
+        self_less_equal_one_sub_eps = g.op("Greater", one_sub_eps, self)
+        temporary_self = g.op("Where", self_less_equal_one_sub_eps, self, one_sub_eps)
+
+        temporary_self_less_eps = g.op("Less", temporary_self, eps)
+        z = g.op("Where", temporary_self_less_eps, eps, temporary_self)
+    else:
+        z = self
+
+    sub = g.op("Sub", one, z)
+    div = g.op("Div", z, sub)
+    return g.op("Log", div)

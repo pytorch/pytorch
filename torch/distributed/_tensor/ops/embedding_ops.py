@@ -2,10 +2,15 @@
 # implement matrix related ops for distributed tensor
 
 import torch
-
-from torch.distributed._tensor.api import _Partial, DTensorSpec, Replicate, Shard
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
+
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    DTensorSpec,
+    Replicate,
+    Shard,
+)
 
 aten = torch.ops.aten
 

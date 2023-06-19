@@ -992,8 +992,6 @@ class HistogramObserver(UniformQuantizationObserverBase):
         dst_bin_of_end = torch.clamp(
             torch.div(src_bin_end, dst_bin_width, rounding_mode='floor'), 0, self.dst_nbins - 1
         )
-        dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
-
         density = self.histogram / bin_width
 
         norm = torch.zeros(self.bins, device=self.histogram.device)
