@@ -767,6 +767,7 @@ def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
 @contextlib.contextmanager
 def dynamo_enable_grad(tx):
     from . import GradModeVariable
+
     org_value = torch.is_grad_enabled()
     GradModeVariable.create(tx, True)
     yield
@@ -783,16 +784,13 @@ def speculate_subgraph(
     checkpoint,
     *,
     always_restore=False,
-    higher_order_op=None,
+    trace_with_autograd=False,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
     from .builder import wrap_fx_proxy
 
     try:
         with tx.output.new_subtracer() as tracer:
-            # attach the HigherOrderOp we are speculating the subgraph for.
-            if higher_order_op is not None:
-                tx.output._higher_order_op = higher_order_op
             args = []
             # One argument to graph per sub_args
             for a in sub_args:
@@ -828,22 +826,9 @@ def speculate_subgraph(
 
             autograd_ctx = (
                 dynamo_enable_grad(tx)
-                if higher_order_op is torch.func.grad
+                if trace_with_autograd
                 else contextlib.nullcontext()
             )
-            # HACK!
-            # `torch.func.grad` should not be affected by `no_grad` outside of `grad`.
-            # So, inside the function to which `grad` is applied, is_grad_enabled should be
-            # True except the parts explicitly disabled with `no_grad`.
-            # Eg.
-            # def f(x):
-            #     with no_grad():  # This will disable grad tracking under it.
-            #        y = x * 2
-            #
-            #     return x ** 2 - y  # grad tracking should be enabled irrespective of outside `no_grad`.
-            #
-            # with no_grad():  # This will not disable grad tracking inside of grad(f).
-            #     grad_o = torch.func.grad(f)(x)
             with autograd_ctx:
                 output = f.call_function(tx, args, {})
 
@@ -1384,13 +1369,27 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             func, argnums, has_aux = grad_args
 
             # Trace through the `func`
+            # NOTE [HACK: Enable autograd while tracing function]
+            # `torch.func.grad` should not be affected by `no_grad` outside of `grad`.
+            # So, we enable_grad right before the function to which `grad` is applied
+            # (the parts explicitly disabled with `no_grad` inside the function are still disabled).
+            # Eg.
+            # def f(x):
+            #     with no_grad():  # This will disable grad tracking under it.
+            #        y = x * 2
+            #
+            #     return x ** 2 - y  # grad tracking should be enabled irrespective of outside `no_grad`.
+            #
+            # with no_grad():  # This will not disable grad tracking inside of grad(f).
+            #     grad_o = torch.func.grad(f)(x)
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
                 func,
                 args[3].items,
                 graph_checkpoint,
                 checkpoint,
-                higher_order_op=torch.func.grad,
+                # See NOTE [HACK: Enable autograd while tracing function]
+                trace_with_autograd=True,
             )
 
             body_name = add_subgraph(

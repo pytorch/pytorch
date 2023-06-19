@@ -665,10 +665,10 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
-    def _grad_compile_check(self, fn, inputs, full_graph=True):
+    def _grad_compile_check(self, fn, inputs, fullgraph=True):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
-        expected = torch.compile(fn, backend=backend, fullgraph=full_graph)(*inputs)
+        expected = torch.compile(fn, backend=backend, fullgraph=fullgraph)(*inputs)
 
         self.assertEqual(actual, expected)
 
@@ -804,19 +804,19 @@ class GraphModule(torch.nn.Module):
     def test_grad_capture_tensor(self):
         counters.clear()
 
-        y = torch.randn(3)
-
-        def fn(x):
-            return (x.sin() + y).sum()
-
         def wrapper_fn(x):
+            y = torch.randn(3)
+
+            def fn(x):
+                return (x.sin() + y).sum()
+
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(
-            wrapper_fn,
-            (x,),
-        )
+
+        # Graph break because dynamo is unable to get source `fn` and
+        # functools.wraps in `grad` leads to graph-break
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
 
         # Dynamic shapes produce a slightly different graph.
         if torch._dynamo.config.dynamic_shapes:
@@ -864,7 +864,7 @@ class GraphModule(torch.nn.Module):
 
         # Graph break because dynamo is unable to get source `fn` and
         # functools.wraps in `grad` leads to graph-break
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), full_graph=False)
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
 
         # Dynamic shapes produce a slightly different graph.
         if torch._dynamo.config.dynamic_shapes:
@@ -1046,7 +1046,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.grad(torch.func.grad(fn))(x)
 
         x = torch.randn(())
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), full_graph=False)
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
 
         # Dynamic shapes produce a slightly different graph.
         if torch._dynamo.config.dynamic_shapes:
