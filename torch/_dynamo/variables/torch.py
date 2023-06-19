@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import inspect
 import logging
 
@@ -763,6 +764,15 @@ def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
         tx.restore_graphstate(checkpoint)
 
 
+@contextlib.contextmanager
+def dynamo_enable_grad(tx):
+    from . import GradModeVariable
+    org_value = torch.is_grad_enabled()
+    GradModeVariable.create(tx, True)
+    yield
+    GradModeVariable.create(tx, org_value)
+
+
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 # See NOTE [speculate_subgraph vs old_speculate_subgraph] for other info
 def speculate_subgraph(
@@ -815,7 +825,28 @@ def speculate_subgraph(
                         "HigherOrderOperator with body that accepts non-Tensors as input"
                     )
                 args.append(new_arg)
-            output = f.call_function(tx, args, {})
+
+            autograd_ctx = (
+                dynamo_enable_grad(tx)
+                if higher_order_op is torch.func.grad
+                else contextlib.nullcontext()
+            )
+            # HACK!
+            # `torch.func.grad` should not be affected by `no_grad` outside of `grad`.
+            # So, inside the function to which `grad` is applied, is_grad_enabled should be
+            # True except the parts explicitly disabled with `no_grad`.
+            # Eg.
+            # def f(x):
+            #     with no_grad():  # This will disable grad tracking under it.
+            #        y = x * 2
+            #
+            #     return x ** 2 - y  # grad tracking should be enabled irrespective of outside `no_grad`.
+            #
+            # with no_grad():  # This will not disable grad tracking inside of grad(f).
+            #     grad_o = torch.func.grad(f)(x)
+            with autograd_ctx:
+                output = f.call_function(tx, args, {})
+
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support pytree output
