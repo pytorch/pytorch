@@ -24,7 +24,7 @@ def semi_structured_sparse_compress_2by4(dense):
     else:
         raise RuntimeError(f"Invalid datatype {dense.dtype} of dense matrix")
     quadbits_per_meta_elem = meta_dtype.itemsize * 8 // 4
-    if not quadbits_per_meta_elem in (4, 8):
+    if quadbits_per_meta_elem not in (4, 8):
         raise RuntimeError("Invalid number of elements per meta element calculated")
 
     if m % 32 != 0:
@@ -209,7 +209,7 @@ def semi_structured_sparse_uncompress_2by4(sparse, meta_reordered):
         )
 
     meta_dtype = meta_reordered.dtype
-    if not (meta_dtype in (torch.int16, torch.int32)):
+    if meta_dtype not in (torch.int16, torch.int32):
         raise RuntimeError(f"Invalid datatype {meta_dtype} of meta matrix")
     quadbits_per_meta_elem = meta_dtype.itemsize * 8 // 4
 
@@ -220,7 +220,8 @@ def semi_structured_sparse_uncompress_2by4(sparse, meta_reordered):
         )
     if meta_ncols * 4 * quadbits_per_meta_elem != 2 * k:
         raise RuntimeError(
-            f"Number of columns of sparse matrix {k} different from the {meta_ncols * 4 * quadbits_per_meta_elem // 2}, expected according to the number of columns of meta matrix"
+            f"Number of columns of sparse matrix {k} different from the {meta_ncols * 4 * quadbits_per_meta_elem // 2}, "
+            "expected according to the number of columns of meta matrix"
         )
 
     if meta_dtype == torch.int32:
