@@ -244,6 +244,7 @@ def generate_inputs_for_submodules(
 
     try:
         with torch.no_grad():
+
             model(*inputs)
     except Exception as e:
         clean_up_handles()

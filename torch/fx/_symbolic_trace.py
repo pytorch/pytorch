@@ -359,6 +359,7 @@ class Tracer(TracerBase):
                 i = 0
                 while True:
                     qualname = f"_tensor_constant{i}"
+                    # breakpoint()
                     if not hasattr(self.root, qualname):
                         break
                     i += 1
