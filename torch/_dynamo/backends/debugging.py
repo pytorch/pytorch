@@ -1,9 +1,12 @@
+import dataclasses
 import functools
 from importlib import import_module
+from typing import Any, List, Optional
 
 from functorch.compile import min_cut_rematerialization_partition
 
 import torch
+from torch import _guards
 from torch._functorch.compilers import ts_compile
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
@@ -132,3 +135,134 @@ def non_leaf_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs
         if not t.is_leaf:
             raise TestingOnlyCompileError()
     return gm
+
+
+@dataclasses.dataclass
+class ExplainOutput:
+    """
+    This is the output of :func:`torch._dynamo.explain()`
+    There is no reason to create this class directly.
+    """
+
+    graphs: List[torch.fx.GraphModule]
+    graph_count: int
+    graph_break_count: int
+    break_reasons: List[
+        Any
+    ]  # Type is GraphCompileReason but doesn't matter for this purpose
+    op_count: int
+    ops_per_graph: Optional[List[torch.fx.Node]] = None
+    out_guards: Optional[List[_guards.Guard]] = None
+    compile_times: Optional[str] = None
+
+    def __str__(self):
+        output = f"Graph Count: {self.graph_count}\n"
+        output += f"Graph Break Count: {self.graph_break_count}\n"
+        output += f"Op Count: {self.op_count}\n"
+
+        output += "Break Reasons:\n"
+        for idx, break_reason in enumerate(self.break_reasons):
+            output += f"  Break Reason {idx+1}:\n"
+            output += f"    Reason: {break_reason.reason}\n"
+            output += "    User Stack:\n"
+            for frame_summary in break_reason.user_stack:
+                output += f"      {frame_summary}\n"
+
+        if self.ops_per_graph is not None:
+            output += "Ops per Graph:\n"
+            for idx, ops in enumerate(self.ops_per_graph):
+                output += f"  Ops {idx+1}:\n"
+                for op in ops:
+                    output += f"    {op}\n"
+
+        if self.out_guards is not None:
+            output += "Out Guards:\n"
+            for i, guard in enumerate(self.out_guards):
+                output += f"  Guard {i+1}:\n"
+                output += f"    {str(guard)}"
+
+        if self.compile_times is not None:
+            output += f"Compile Times: {self.compile_times}\n"
+        return output
+
+
+def _explain_graph_detail(
+    gm: torch.fx.GraphModule, graphs, op_count, ops_per_graph, break_reasons
+):
+    """
+    This function is a utility which processes a torch.fx.GraphModule and
+    accumulates information about its ops, graph breaks, and other details. It
+    is intended to be used by the ExplainWithBackend class and
+    `torch._dynamo.explain()` to provide details from Dynamo's graph capture.
+
+    Parameters:
+        gm (torch.fx.GraphModule): The GraphModule to be processed.
+        graphs (list): A list that accumulates all the GraphModules processed.
+        op_count (int): The total count of operations in all GraphModules processed so far.
+        ops_per_graph (list): A list that accumulates the operations of each GraphModule.
+        break_reasons (list): A list that accumulates the reasons for breaks in each GraphModule.
+
+    Returns:
+        tuple: A tuple containing the processed GraphModule, the updated lists of graphs,
+               operations per graph, and break reasons, and the updated operation count.
+    """
+    graphs.append(gm)
+    ops = [node.target for node in gm.graph.nodes if node.op == "call_function"]
+    op_count += len(ops)
+    ops_per_graph.append(ops)
+    if gm.compile_subgraph_reason.graph_break:
+        break_reasons.append(gm.compile_subgraph_reason)
+
+    return gm, graphs, op_count, ops_per_graph, break_reasons
+
+
+class ExplainWithBackend:
+    """
+    This class is intended to be used as a backend for `torch.compile`. It is
+    composable with other backends. When used in this way, it accumulates
+    information about graph breaks, ops, and other info and provides a string
+    representation summarizing this information.
+
+    Attributes:
+        backend (str): The name of the backend to use for optimization.
+        graphs (list): A list of the graphs captured by TorchDynamo.
+        op_count (int): The total number of operations in all optimized graphs.
+        break_reasons (list): A list of graph break reasons with stack traces.
+
+    Example Usage:
+        def fn(x):
+            x = torch.sigmoid(x)
+            return x
+
+        torch._dynamo.reset()
+        eb = ExplainWithBackend("inductor")
+        optimized_fn = torch.compile(fn, backend=eb)
+        result = optimized_fn(torch.randn(5))
+        print(eb.output())
+    """
+
+    def __init__(self, backend):
+        from .registry import lookup_backend
+
+        self.backend = lookup_backend(backend)
+        self.graphs = []
+        self.op_count = 0
+        self.break_reasons = []
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        gm, self.graphs, self.op_count, _, self.break_reasons = _explain_graph_detail(
+            gm, self.graphs, self.op_count, [], self.break_reasons
+        )
+        return self.backend(gm, example_inputs)
+
+    def output(self) -> ExplainOutput:
+        graph_count = len(self.graphs)
+        output = ExplainOutput(
+            self.graphs,
+            graph_count,
+            graph_count - 1,
+            self.break_reasons,
+            self.op_count,
+        )
+
+        return output

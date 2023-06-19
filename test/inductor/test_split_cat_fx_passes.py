@@ -7,8 +7,14 @@ from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
+def patch(f):
+    f = torch._inductor.config.patch(split_cat_fx_passes=True)(f)
+    f = torch._dynamo.config.patch(dynamic_shapes=True)(f)
+    return f
+
+
 class TestSplitCatFxPasses(TestCase):
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_split_normalization(self):
         def arg_only(x):
             return [torch.relu(s) for s in torch.split(x, 2, 1)]
@@ -77,7 +83,7 @@ class TestSplitCatFxPasses(TestCase):
             (cm_with_list, 1),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -86,7 +92,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_consecutive_split_merge(self):
         def multi_split(x):
             return [torch.split(s, 2, 1) for s in torch.split(x, 2, 1)]
@@ -238,7 +244,7 @@ class TestSplitCatFxPasses(TestCase):
             (split_getitem_out_of_order, 1),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -247,7 +253,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_split_cat_merge(self):
         def simple_split_cat(x):
             return torch.cat(torch.split(x, 4, dim=1), dim=1)
@@ -257,6 +263,12 @@ class TestSplitCatFxPasses(TestCase):
 
         def simple_split_cat_argspec2(x):
             return torch.cat(tensors=torch.split(x, 4, dim=1), dim=1)
+
+        def simple_split_cat_argspec3(x):
+            return torch.cat(torch.split(x, 4, dim=1), -2)
+
+        def simple_split_cat_argspec4(x):
+            return torch.cat(tensors=torch.split(x, 4, dim=1), dim=-2)
 
         def simple_split_stack(x):
             return torch.stack(torch.split(x, 4, dim=1), dim=1)
@@ -401,6 +413,26 @@ class TestSplitCatFxPasses(TestCase):
 
             return cat1, stack1, relu1
 
+        def input_shuffling_direct_output(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            cat1 = torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+            stack1 = torch.stack(
+                [
+                    torch.ones(2, 4, 32, 16),
+                    split_output[4],
+                    split_output[5],
+                    torch.ones(2, 4, 32, 16),
+                ],
+                dim=1,
+            )
+
+            return cat1, stack1, split_output[6]
+
         def input_shuffling_multiple_output_same_ranges(x):
             split_output = list(torch.split(x, 4, dim=1))
             cat1 = torch.cat(
@@ -502,6 +534,8 @@ class TestSplitCatFxPasses(TestCase):
             (simple_split_cat, 0, 1, 0, 1, 7, default_args),
             (simple_split_cat_argspec1, 0, 1, 0, 1, 7, default_args),
             (simple_split_cat_argspec2, 0, 1, 0, 1, 7, default_args),
+            (simple_split_cat_argspec3, 0, 1, 0, 1, 7, default_args),
+            (simple_split_cat_argspec4, 0, 1, 0, 1, 7, default_args),
             (simple_split_stack, 0, 1, 0, 1, 7, default_args),
             (simple_split_stack_argspec1, 0, 1, 0, 1, 7, default_args),
             (simple_split_stack_argspec2, 0, 1, 0, 1, 7, default_args),
@@ -519,11 +553,12 @@ class TestSplitCatFxPasses(TestCase):
             (input_shuffling_dim_mismatch, 1, 1, 1, 1, 4, default_args),
             (input_shuffling_dim_mismatch_stack, 1, 1, 1, 1, 4, default_args),
             (input_shuffling_multiple_output, 1, 1, 2, 2, 3, default_args),
+            (input_shuffling_direct_output, 1, 1, 2, 2, 3, default_args),
             (unequal_split_multiple_output, 1, 1, 2, 2, 3, default_args),
             (multi_split_cat, 2, 2, 4, 4, 3, multi_args),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -566,7 +601,7 @@ class TestSplitCatFxPasses(TestCase):
         ]
 
         expected = split_with_cat(*args)
-        actual = torch.compile(split_with_cat, dynamic=True)(*args)
+        actual = torch.compile(split_with_cat)(*args)
 
         torch.testing.assert_close(actual, expected)
         self.assertEqual(
@@ -578,7 +613,7 @@ class TestSplitCatFxPasses(TestCase):
             0,
         )
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_split_cat_merge_mutation(self):
         args = [
             torch.randn(2, 32, 32, 16),
@@ -590,14 +625,14 @@ class TestSplitCatFxPasses(TestCase):
             return torch.cat(splits, dim=1)
 
         expected = split_cat_mutation(*args)
-        actual = torch.compile(split_cat_mutation, dynamic=True)(*args)
+        actual = torch.compile(split_cat_mutation)(*args)
 
         torch.testing.assert_close(actual, expected)
 
         self.assertEqual(counters["inductor"]["scmerge_split_removed"], 0)
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 0)
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_split_squeeze(self):
         def split_squeeze_stack(x):
             items = list(torch.split(x, 1, dim=1))
@@ -670,7 +705,7 @@ class TestSplitCatFxPasses(TestCase):
             (other_users_2, 0),
         ]:
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
@@ -679,7 +714,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(split_cat_fx_passes=True)
+    @patch
     def test_unbind_stack(self):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, dim=1), 1)
@@ -807,7 +842,7 @@ class TestSplitCatFxPasses(TestCase):
             print()
             print(fn)
             expected = fn(*args)
-            actual = torch.compile(fn, dynamic=True)(*args)
+            actual = torch.compile(fn)(*args)
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
