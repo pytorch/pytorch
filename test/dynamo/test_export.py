@@ -22,6 +22,7 @@ from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfRocm
 
@@ -2407,6 +2408,44 @@ def forward(self, x):
         # metadata won't be saved in the serialized module
         buffer = io.BytesIO()
         torch.save(gm, buffer)
+
+    def test_export_with_inline_constraints(self):
+        def f(x):
+            a = x.item()
+            constrain_as_size(a, 4, 7)
+            return torch.empty((a, 4))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, r"Invalid value 20 for range \[4:7\]"
+        ) as cm:
+            torch._export.export(f, (torch.tensor([20]),))
+
+        ep = torch._export.export(f, (torch.tensor([5]),))
+        self.assertEqual(ep(torch.tensor([6])).shape, (6, 4))
+
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+        ) as cm:
+            ep(torch.tensor([30]))
+
+    def test_export_with_inline_constraints_complex(self):
+        def f(x):
+            a = x.item()
+            constrain_as_size(a, 4, 7)
+            empty = torch.empty((a, 4))
+
+            return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
+
+        ep = torch._export.export(f, (torch.tensor([6]),))
+        self.assertEqual(ep(torch.tensor([5])).shape, (10, 5))
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])

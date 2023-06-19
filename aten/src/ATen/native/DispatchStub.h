@@ -37,12 +37,10 @@
 // the main dispatch mechanism is.
 
 // ignore warnings about DispatchStub::DEFAULT, AVX, AVX2 defined elsewhere
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wundefined-var-template"
-#endif
+C10_CLANG_DIAGNOSTIC_PUSH()
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wundefined-var-template")
 
-namespace at { namespace native {
+namespace at::native {
 
 enum class CPUCapability {
   DEFAULT = 0,
@@ -309,9 +307,6 @@ struct RegisterPRIVATEUSE1Dispatch {
 #endif
 
 
-}} // namespace at::native
+} // namespace at::native
 
-
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
+C10_CLANG_DIAGNOSTIC_POP()
