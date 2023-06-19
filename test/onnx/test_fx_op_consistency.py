@@ -69,6 +69,9 @@ TESTED_OPS: frozenset[str] = frozenset(
         "asinh",
         "atan",
         "atanh",
+        "atleast_1d",
+        "atleast_2d",
+        "atleast_3d",
         "baddbmm",
         "bmm",
         "broadcast_to",
@@ -106,7 +109,9 @@ TESTED_OPS: frozenset[str] = frozenset(
         "fmod",
         "full",
         "full_like",
+        "hstack",  # aten::cat is invoked instead
         "index_put",
+        "logit",
         # "new_empty",  non-deterministic
         # "new_empty_strided",  non-deterministic
         "new_full",
@@ -124,11 +129,15 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.dropout",
         "nn.functional.elu",
         "nn.functional.embedding",
+        "nn.functional.max_pool1d",
+        "nn.functional.max_pool2d",
+        "nn.functional.max_pool3d",
         "nn.functional.nll_loss",
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "scatter_add",
         "scatter_reduce",
         "unflatten",
+        "vstack",  # aten::cat is invoked instead
     ]
 )
 
@@ -404,16 +413,21 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
+        "logit",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Log", "bool, int"),
+    ),
+    xfail(
         "nn.functional.adaptive_avg_pool1d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool2d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool3d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.mean.dim"),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("aten.index.Tensor"),
     ),
     xfail(
         "nn.functional.conv1d",
@@ -535,6 +549,12 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.cross_entropy",
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
+    ),
+    skip(
+        "nn.functional.max_pool3d",
+        matcher=lambda sample: sample.kwargs.get("ceil_mode") is True
+        and sample.kwargs.get("padding") == 1,
+        reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
     ),
     xfail(
         "nn.functional.nll_loss",

@@ -2,8 +2,7 @@
 
 #include <c10/core/ScalarType.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void Unfold3dCopyCPU(
     ScalarType dtype,
@@ -47,5 +46,4 @@ void Unfold3dAccCPU(
     int64_t pad_w,
     void *dst);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
