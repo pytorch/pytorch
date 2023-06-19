@@ -753,6 +753,12 @@ def _check_single_device_module(
     module must be either fully on the CPU or fully on a non-CPU device.
     """
     devices = {param.device for param in _get_orig_params(module, ignored_params)}
+    if len(devices) == 2 and torch.device("cpu") in devices:
+        warnings.warn(
+            f"FSDP wrapping module with params on multiple devices: {devices}"
+            "This could occur in cases where another parallelism algorithm has already"
+            "moved some parameters to a non-CPU device."
+        )
     if len(devices) > 1:
         raise RuntimeError(
             f"FSDP only supports single device modules but got params on {devices}"
