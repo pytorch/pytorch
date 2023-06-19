@@ -32,6 +32,7 @@ namespace mkl {
 
 namespace {
 
+#if AT_USE_MKL_SPARSE()
 c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
     const Tensor& tensor) {
   if (tensor.is_non_overlapping_and_dense() ||
@@ -110,7 +111,6 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
 /*
   Resizes `input` tensor and fills it with the data from MKL.
 */
-#if AT_USE_MKL_SPARSE()
 template <typename scalar_t>
 void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
   sparse_index_base_t indexing = SPARSE_INDEX_BASE_ZERO;

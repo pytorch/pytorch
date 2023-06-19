@@ -1,7 +1,3 @@
-aten::__ilshift__.Scalar
-aten::__ilshift__.Tensor
-aten::__irshift__.Scalar
-aten::__irshift__.Tensor
 aten::__lshift__.Scalar
 aten::__lshift__.Scalar_out
 aten::__lshift__.Tensor
@@ -1320,6 +1316,7 @@ aten::values_copy
 aten::values_copy.out
 aten::vdot
 aten::vdot.out
+aten::view.dtype
 aten::view_as_complex
 aten::view_as_complex_copy
 aten::view_as_complex_copy.out

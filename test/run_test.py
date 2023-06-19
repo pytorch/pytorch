@@ -44,16 +44,17 @@ try:
         calculate_shards,
         get_reordered_tests,
         get_test_case_configs,
+        log_time_savings,
         NUM_PROCS,
         ShardedTest,
         THRESHOLD,
     )
 
     HAVE_TEST_SELECTION_TOOLS = True
-except ImportError:
+except ImportError as e:
     HAVE_TEST_SELECTION_TOOLS = False
     print(
-        "Unable to import test_selections from tools/testing. Running without test selection stats..."
+        f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
     )
 
 
@@ -400,8 +401,8 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG["ucc"] = {
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
-            "UCX_TLS": "tcp",
-            "UCC_TLS": "nccl,ucp",
+            "UCX_TLS": "tcp,cuda",
+            "UCC_TLS": "nccl,ucp,cuda",
             "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
             "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
         }
@@ -1610,6 +1611,13 @@ def main():
     remaining_tests = selected_tests
     if IS_CI:
         (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
+        log_time_savings(
+            selected_tests,
+            prioritized_tests,
+            is_serial_test_fn=must_serial,
+            num_procs=NUM_PROCS,
+        )
+
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
