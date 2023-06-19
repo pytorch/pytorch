@@ -637,9 +637,15 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         skips=(
             # Compiler issue on ROCm
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
-                         dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
-        )),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_non_standard_bool_values",
+                dtypes=[torch.bool],
+                active_if=TEST_WITH_ROCM,
+            ),
+        ),
+    ),
     OpInfo(
         "fft.ifftshift",
         dtypes=all_types_and_complex_and(
@@ -651,9 +657,15 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         skips=(
             # Compiler issue on ROCm
-            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
-                         dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
-        )),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCommon",
+                "test_non_standard_bool_values",
+                dtypes=[torch.bool],
+                active_if=TEST_WITH_ROCM,
+            ),
+        ),
+    ),
 ]
 
 python_ref_db: List[OpInfo] = [
