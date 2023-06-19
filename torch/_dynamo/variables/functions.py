@@ -11,7 +11,7 @@ import torch
 from .. import variables
 from ..allowed_functions import is_allowed, is_builtin_callable
 from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import istensor, istype, make_cell
 from .base import typestr, VariableTracker

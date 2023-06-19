@@ -1174,7 +1174,7 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
-            if not all(_arg_cuda_or_cpu(x) for x in tensor_args):
+            elif not all(_arg_cuda_or_cpu(x) for x in tensor_args):
                 why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
             elif torch.is_grad_enabled() and any(_arg_requires_grad(x) for x in tensor_args):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
