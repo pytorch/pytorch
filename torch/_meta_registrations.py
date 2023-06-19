@@ -30,7 +30,7 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _broadcast_shapes
-
+from torch.fx.experimental.symbolic_shapes import constrain_range
 from torch.utils._pytree import tree_map
 
 
@@ -104,6 +104,14 @@ def linalg_cross(self, other, *, dim=-1):
     )
     out_shape = _broadcast_shapes(self.shape, other.shape)
     return self.new_empty(out_shape)
+
+
+@register_meta(aten.linalg_matrix_exp)
+@out_wrapper()
+def linalg_matrix_exp(self):
+    squareCheckInputs(self, "linalg.matrix_exp")
+    checkFloatingOrComplex(self, "matrix_exp")
+    return torch.empty_like(self)
 
 
 @register_meta(
@@ -303,6 +311,11 @@ def assert_async_meta(val, assert_msg):
     return
 
 
+@register_meta(aten.sym_constrain_range.default)
+def sym_constrain_range(size, min, max):
+    constrain_range(size, min=min, max=max)
+
+
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def squareCheckInputs(self: Tensor, f_name: str):
     assert (
@@ -362,12 +375,12 @@ def checkFloatingOrComplex(
     dtype = t.dtype
     check(
         t.is_floating_point() or t.is_complex(),
-        lambda: f"{f_name}, : Expected a floating point or complex tensor as input. Got , {dtype}",
+        lambda: f"{f_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
-    if allow_low_precision_dtypes:
+    if not allow_low_precision_dtypes:
         check(
             dtype in (torch.float, torch.double, torch.cfloat, torch.cdouble),
-            lambda: f"{f_name} : Low precision dtypes not supported. Got {dtype}",
+            lambda: f"{f_name}: Low precision dtypes not supported. Got {dtype}",
         )
 
 
@@ -704,6 +717,47 @@ def linalg_lu_solve_meta(
     return result
 
 
+@register_meta(aten.lu_unpack)
+@out_wrapper("P", "L", "U")
+def lu_unpack_meta(
+    LU: Tensor,
+    pivots: Tensor,
+    unpack_data: bool = True,
+    unpack_pivots: bool = True,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    torch._check(
+        LU.ndim >= 2,
+        lambda: f"torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: {LU.shape} instead",
+    )
+    if unpack_pivots:
+        torch._check(
+            pivots.dtype == torch.int32,
+            lambda: (
+                "torch.lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype.\n"
+                "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor"
+            ),
+        )
+    sizes = list(LU.shape)
+    m = sizes[-2]
+    n = sizes[-1]
+    k = min(m, n)
+    sizes[-1] = m
+    if unpack_pivots:
+        P = LU.new_empty(sizes)
+    else:
+        P = LU.new_empty([0])
+    if unpack_data:
+        sizes[-1] = k
+        L = LU.new_empty(sizes)
+        sizes[-2] = k
+        sizes[-1] = n
+        U = LU.new_empty(sizes)
+    else:
+        L = LU.new_empty([0])
+        U = LU.new_empty([0])
+    return P, L, U
+
+
 # parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
 def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
     if mode == "reduced":
@@ -755,6 +809,24 @@ def linalg_qr_meta(
     R = A.new_empty(R_shape)
     R.as_strided_(R_shape, make_contiguous_strides_for(R_shape, row_major=False))
     return Q, R
+
+
+@register_meta([aten._linalg_slogdet.default, aten._linalg_slogdet.sign])
+@out_wrapper("sign", "logabsdet", "LU", "pivots")
+def _linalg_slogdet(A: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    squareCheckInputs(A, "linalg.slogdet")
+    checkFloatingOrComplex(A, "linalg.slogdet", False)
+    shape = A.shape
+    sign = A.new_empty(shape[:-2])
+    logabsdet = A.new_empty(shape[:-2], dtype=toRealValueType(A.dtype))
+    LU = torch.empty_strided(
+        size=shape,
+        stride=make_contiguous_strides_for(shape, False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+    pivots = A.new_empty(shape[:-1], dtype=torch.int32)
+    return sign, logabsdet, LU, pivots
 
 
 # From aten/src/ATen/native/BatchLinearAlgebra.cpp
@@ -829,6 +901,74 @@ def _linalg_broadcast_batch_dims_name(
         arg2 if arg2_expand_size == arg2.shape else arg2.expand(arg2_expand_size)
     )
     return arg1_broadcasted, arg2_broadcasted
+
+
+def linalg_solve_is_vector_rhs(input: Tensor, other: Tensor) -> bool:
+    expected_batched_rhs_shape = input.shape[:-1]
+    vector_case = other.ndim == 1 or (
+        input.ndim - 1 == other.ndim and other.shape == expected_batched_rhs_shape
+    )
+    return vector_case
+
+
+@register_meta(aten._linalg_solve_ex)
+def _linalg_solve_ex(
+    A: Tensor,
+    B: Tensor,
+    *,
+    left: bool = True,
+    check_errors: bool = False,
+    result: Optional[Tensor] = None,
+    LU: Optional[Tensor] = None,
+    pivots: Optional[Tensor] = None,
+    info: Optional[Tensor] = None,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    checkFloatingOrComplex(A, "linalg.solve")
+    torch._check(
+        A.dtype == B.dtype,
+        lambda: (
+            f"linalg.solve: Expected A and B to have the same dtype, but found A of type "
+            f"{A.dtype} and B of type {B.dtype} instead"
+        ),
+    )
+    vector_case = linalg_solve_is_vector_rhs(A, B)
+    B_ = B.unsqueeze(-1) if vector_case else B
+    checkInputsSolver(A, B_, left, "linalg.solve")
+    B_broad_shape, _ = _linalg_broadcast_batch_dims(B_, A)
+    torch._check(
+        left or not vector_case,
+        lambda: (
+            "linalg.solve: Vector broadcasting of the left hand side is not supported for left=False. "
+            "In this case linalg.solve is equivalent to B / A.squeeze(-1)"
+        ),
+    )
+    result_shape = B_broad_shape[:-1] if vector_case else B_broad_shape
+    result_ = torch.empty_strided(
+        size=result_shape,
+        stride=make_contiguous_strides_for(result_shape, not left),
+        dtype=B.dtype,
+        device=B.device,
+    )
+    shape = A.shape
+    ndim = A.ndim
+    LU_ = torch.empty_strided(
+        size=shape,
+        stride=make_contiguous_strides_for(shape, False),
+        dtype=A.dtype,
+        device=A.device,
+    )
+    pivots_ = A.new_empty(shape[:-1], dtype=torch.int32)
+    info_ = A.new_empty(shape[:-2], dtype=torch.int32)
+    out = (result, LU, pivots, info)
+    res = (result_, LU_, pivots_, info_)
+    if all(x is not None for x in out):
+        for r, o in zip(res, out):
+            # resize and copy operations are done in-place
+            _maybe_resize_out(o, r.shape)  # type: ignore[arg-type]
+            # strides are not copied in out_wrapper
+            o.as_strided_(r.shape, r.stride())  # type: ignore[union-attr]
+            _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=False)  # type: ignore[arg-type]
+    return res
 
 
 @register_meta([aten.linalg_solve_triangular.default, aten.linalg_solve_triangular.out])
@@ -948,6 +1088,10 @@ def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
     self = self.expand((dim1, dim2, dim3))
     check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+    check(
+        self.dtype == batch1.dtype == batch2.dtype,
+        lambda: f"Input dtypes must be the same, got: input: {self.dtype}, batch1: {batch1.dtype}, batch2: {batch2.dtype}",
+    )
     batch1_sizes = batch1.shape
     batch2_sizes = batch2.shape
     bs = batch1_sizes[0]
@@ -1193,7 +1337,7 @@ def meta_conv(
     return out
 
 
-if torch._C.has_mkldnn:
+if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
         "mkldnn", "IMPL", "Meta"
     )
@@ -1447,6 +1591,172 @@ def meta_avg_pool2d_backward(
     )
 
 
+@register_meta(aten.avg_pool3d)
+@out_wrapper()
+def meta_avg_pool3d(
+    input,
+    kernel_size,
+    stride=(),
+    padding=(0,),
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+):
+    check(
+        len(kernel_size) in (1, 3),
+        lambda: "avg_pool3d: kernel_size must be a single int, or a tuple of three ints",
+    )
+    kT = kernel_size[0]
+    kH = kT if len(kernel_size) == 1 else kernel_size[1]
+    kW = kT if len(kernel_size) == 1 else kernel_size[2]
+
+    check(
+        not stride or len(stride) in (1, 3),
+        lambda: "avg_pool3d: stride must be omitted, a single int, or a tuple of three ints",
+    )
+    dT = kT if not stride else stride[0]
+    dH = kH if not stride else (dT if len(stride) == 1 else stride[1])
+    dW = kW if not stride else (dT if len(stride) == 1 else stride[2])
+
+    check(
+        len(padding) in (1, 3),
+        lambda: "avg_pool3d: padding must be a single int, or a tuple of three ints",
+    )
+    padT = padding[0]
+    padH = padT if len(padding) == 1 else padding[1]
+    padW = padT if len(padding) == 1 else padding[2]
+
+    check(
+        input.ndim in (4, 5),
+        lambda: "non-empty 4D or 5D (batch mode) tensor expected for input",
+    )
+
+    check(
+        not divisor_override or divisor_override != 0,
+        lambda: "divisor must be not zero",
+    )
+
+    nbatch = input.size(0)
+    nslices = input.size(-4)
+    itime = input.size(-3)
+    iheight = input.size(-2)
+    iwidth = input.size(-1)
+
+    otime = pooling_output_shape(itime, kT, padT, dT, 1, ceil_mode)
+    oheight = pooling_output_shape(iheight, kH, padH, dH, 1, ceil_mode)
+    owidth = pooling_output_shape(iwidth, kW, padW, dW, 1, ceil_mode)
+
+    pool3d_shape_check(
+        input,
+        nslices,
+        kT,
+        kH,
+        kW,
+        dT,
+        dH,
+        dW,
+        padT,
+        padH,
+        padW,
+        1,
+        1,
+        1,
+        itime,
+        iheight,
+        iwidth,
+        otime,
+        oheight,
+        owidth,
+        "avg_pool3d()",
+        check_input_size=True,
+    )
+
+    if input.ndim == 4:
+        return input.new_empty((nslices, otime, oheight, owidth))
+    else:
+        return input.new_empty((nbatch, nslices, otime, oheight, owidth))
+
+
+@register_meta(aten.avg_pool3d_backward)
+@out_wrapper()
+def meta_avg_pool3d_backward(
+    grad_output,
+    input,
+    kernel_size,
+    stride,
+    padding,
+    ceil_mode,
+    count_include_pad,
+    divisor_override,
+):
+    check(
+        len(kernel_size) in (1, 3),
+        lambda: "avg_pool3d: kernel_size must be a single int, or a tuple of three ints",
+    )
+    kT = kernel_size[0]
+    kH = kT if len(kernel_size) == 1 else kernel_size[1]
+    kW = kT if len(kernel_size) == 1 else kernel_size[2]
+
+    check(
+        not stride or len(stride) in (1, 3),
+        lambda: "avg_pool3d: stride must be omitted, a single int, or a tuple of three ints",
+    )
+    dT = kT if not stride else stride[0]
+    dH = kH if not stride else (dT if len(stride) == 1 else stride[1])
+    dW = kW if not stride else (dT if len(stride) == 1 else stride[2])
+
+    check(
+        len(padding) in (1, 3),
+        lambda: "avg_pool3d: padding must be a single int, or a tuple of three ints",
+    )
+    padT = padding[0]
+    padH = padT if len(padding) == 1 else padding[1]
+    padW = padT if len(padding) == 1 else padding[2]
+
+    check(
+        input.ndim in (4, 5),
+        lambda: "non-empty 4D or 5D (batch mode) tensor expected for input",
+    )
+
+    check(
+        not divisor_override or divisor_override != 0,
+        lambda: "divisor must be not zero",
+    )
+
+    nslices = input.size(-4)
+    itime = input.size(-3)
+    iheight = input.size(-2)
+    iwidth = input.size(-1)
+
+    otime_for_shape_check = pooling_output_shape(itime, kT, padT, dT, 1, ceil_mode)
+    oheight_for_shape_check = pooling_output_shape(iheight, kH, padH, dH, 1, ceil_mode)
+    owidth_for_shape_check = pooling_output_shape(iwidth, kW, padW, dW, 1, ceil_mode)
+
+    avg_pool3d_backward_shape_check(
+        input,
+        grad_output,
+        nslices,
+        kT,
+        kH,
+        kW,
+        dT,
+        dH,
+        dW,
+        padT,
+        padH,
+        padW,
+        itime,
+        iheight,
+        iwidth,
+        otime_for_shape_check,
+        oheight_for_shape_check,
+        owidth_for_shape_check,
+        "avg_pool3d_backward()",
+    )
+
+    return input.new_empty(input.shape)
+
+
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
@@ -1491,7 +1801,10 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
     )
-    return self.new_empty(self.shape)
+    memory_format = torch.contiguous_format
+    if is_channels_last(self):
+        memory_format = torch.channels_last
+    return self.new_empty(self.shape).to(memory_format=memory_format)
 
 
 @register_meta(aten.repeat_interleave.Tensor)
@@ -1508,6 +1821,11 @@ def meta_complex(real, imag):
     assert imag.dtype.is_floating_point
     out_shape = _broadcast_shapes(real.shape, imag.shape)
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
+
+
+@register_meta(aten.view.dtype)
+def view_dtype(self, dtype):
+    return utils.clone_preserve_strides(self).to(dtype)
 
 
 @register_meta(aten.vdot.default)
@@ -1741,6 +2059,12 @@ def meta__foreach_add(self, other, alpha=1):
     return [torch.empty_like(s) for s in self]
 
 
+@register_meta([aten._foreach_sub.List])
+def meta__foreach_sub(self, other, alpha=1):
+    _check_foreach_binop_tensor_lists(self, other)
+    return [torch.empty_like(s) for s in self]
+
+
 @register_meta([aten._foreach_add_.List])
 def meta__foreach_add__list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
@@ -1749,6 +2073,12 @@ def meta__foreach_add__list(self, other, alpha=1):
 @register_meta([aten._foreach_div_.List])
 def meta__foreach_binop__list(self, other):
     _check_foreach_binop_tensor_lists(self, other)
+
+
+@register_meta([aten._foreach_maximum.List])
+def meta__foreach_maximum__list(self, other, alpha=1):
+    _check_foreach_binop_tensor_lists(self, other)
+    return [torch.empty_like(s) for s in self]
 
 
 @register_meta(
@@ -2203,6 +2533,51 @@ def meta_round(self, **kwargs):
     )
 
 
+def shift_dtype_check(fn_name, self, val):
+    check(
+        utils.is_integer_dtype(self.dtype),
+        lambda: f"{fn_name}: Expected input tensor to have an integral dtype. Got {self.dtype}",
+    )
+    if isinstance(val, torch.Tensor):
+        check(
+            utils.is_integer_dtype(val.dtype),
+            lambda: f"{fn_name}: Expected shift value to have an integral dtype. Got {val.dtype}",
+        )
+    else:
+        check(
+            isinstance(val, IntLike),
+            lambda: f"{fn_name}: Expected shift value to be an int. Got {val}",
+        )
+
+
+@register_meta([aten.__rshift__.Tensor, aten.__rshift__.Scalar])
+def meta_rshifts(self, other):
+    shift_dtype_check("rshift", self, other)
+    element_wise = _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    # Annoying edgecase
+    if self.dim() == 0 and isinstance(other, torch.Tensor):
+        return torch.empty(
+            other.shape, device=element_wise.device, dtype=element_wise.dtype
+        )
+    return element_wise
+
+
+@register_meta([aten.__lshift__.Tensor, aten.__lshift__.Scalar])
+def meta_lshifts(self, other):
+    shift_dtype_check("lshift", self, other)
+    element_wise = _elementwise_meta(
+        self, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    # Annoying edgecase
+    if self.dim() == 0 and isinstance(other, torch.Tensor):
+        return torch.empty(
+            other.shape, device=element_wise.device, dtype=element_wise.dtype
+        )
+    return element_wise
+
+
 @register_meta(aten.zero.default)
 def meta_zero(self):
     return self.new_empty(self.shape)
@@ -2385,6 +2760,153 @@ def pool2d_shape_check(
         f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
         "Output size is too small",
     )
+
+
+def pool3d_shape_check(
+    input: Tensor,
+    nslices: int,
+    kT: int,
+    kH: int,
+    kW: int,
+    dT: int,
+    dH: int,
+    dW: int,
+    pT: int,
+    pH: int,
+    pW: int,
+    dilationT: int,
+    dilationH: int,
+    dilationW: int,
+    itime: int,
+    iheight: int,
+    iwidth: int,
+    otime: int,
+    oheight: int,
+    owidth: int,
+    fn_name: str,
+    check_input_size: bool = False,
+):
+    ndim = input.ndim
+
+    check(
+        kT > 0 and kW > 0 and kH > 0,
+        lambda: (
+            f"kernel size should be greater than zero, but got "
+            f"kT: {kT}, kH: {kH}, kW: {kW}"
+        ),
+    )
+    check(
+        dT > 0 and dW > 0 and dH > 0,
+        lambda: (
+            f"stride should be greater than zero, but got "
+            f"dT: {dT}, dH: {dH}, dW: {dW}"
+        ),
+    )
+    check(
+        dilationT > 0 and dilationW > 0 and dilationH > 0,
+        lambda: (
+            f"dilation should be greater than zero, but got "
+            f"dilationT: {dilationT}, dilationH: {dilationH}, dilationW: {dilationW}"
+        ),
+    )
+
+    check(
+        ndim in (4, 5),
+        lambda: f"{fn_name}: Expected 4D or 5D tensor for input, but got: {input.shape}",
+    )
+
+    for i in range(ndim):
+        if ndim == 5 and i == 0:
+            # size of batch-dim can be 0.
+            continue
+        check(
+            input.size(i) > 0,
+            lambda: (
+                f"{fn_name}: Expected input's non-batch dimensions to have positive length,"
+                f" but input has a shape of {input.shape}"
+                f" and non-batch dimension {input.size(i)} has length zero!"
+            ),
+        )
+
+    if check_input_size:  # AveragePool3d
+        check(
+            itime >= kT and iheight >= kH and iwidth >= kW,
+            lambda: (
+                f"input image (T: {itime} H: {iheight} W: {iwidth}) smaller than "
+                f"kernel size (kT: {kT} kH: {kH} kW: {kW})"
+            ),
+        )
+
+    check(
+        kT / 2 >= pT and kW / 2 >= pW and kH / 2 >= pH,
+        lambda: (
+            f"pad should be smaller than or equal to half of kernel size, but got "
+            f"kT: {kT} kW: {kW} kH: {kH} padT: {pT} padW: {pW} padH: {pH}"
+        ),
+    )
+
+    check(
+        otime >= 1 and owidth >= 1 and oheight >= 1,
+        lambda: (
+            f"Given input size: ({nslices}x{itime}x{iheight}x{iwidth}). "
+            f"Calculated output size: ({nslices}x{otime}x{oheight}x{owidth}). "
+            f"Output size is too small"
+        ),
+    )
+
+
+def avg_pool3d_backward_shape_check(
+    input: Tensor,
+    grad_output: Tensor,
+    nslices: int,
+    kT: int,
+    kH: int,
+    kW: int,
+    dT: int,
+    dH: int,
+    dW: int,
+    pT: int,
+    pH: int,
+    pW: int,
+    itime: int,
+    iheight: int,
+    iwidth: int,
+    otime: int,
+    oheight: int,
+    owidth: int,
+    fn_name: str,
+):
+    ndim = input.ndim
+
+    pool3d_shape_check(
+        input,
+        nslices,
+        kT,
+        kH,
+        kW,
+        dT,
+        dH,
+        dW,
+        pT,
+        pH,
+        pW,
+        1,
+        1,
+        1,
+        itime,
+        iheight,
+        iwidth,
+        otime,
+        oheight,
+        owidth,
+        fn_name,
+        True,
+    )
+
+    check_dim_size(grad_output, ndim, ndim - 4, nslices)
+    check_dim_size(grad_output, ndim, ndim - 3, otime)
+    check_dim_size(grad_output, ndim, ndim - 2, oheight)
+    check_dim_size(grad_output, ndim, ndim - 1, owidth)
 
 
 def max_pool2d_checks_and_compute_shape(

@@ -4045,7 +4045,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # Tensor.view(a, b, c) or Tensor.view((a, b, c)) Function call torch.view
 # doesn't support unpacked shapes
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
-@register_decomposition(aten.view)
+@register_decomposition(aten.view.default)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
@@ -4966,8 +4966,8 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             value_ndim == 0,
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
-        # `masked_fill` allows cpu scalar to be moved to cuda but not otherwise.
-        is_cpu_scalar = a.device.type == "cuda" and value.device.type == "cpu"
+        # `masked_fill` allows cpu scalar to be moved to cuda and xpu but not otherwise.
+        is_cpu_scalar = a.device.type in ["cuda", "xpu"] and value.device.type == "cpu"
         check(
             is_cpu_scalar or value.device == a.device,
             lambda: "Expected `value` to be on same device as `a`",
