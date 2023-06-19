@@ -6,7 +6,8 @@ import warnings
 import functools
 import math
 
-from typing import Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
+from torch import Tensor
 
 import torch.utils.hooks as hooks
 from torch.utils.hooks import RemovableHandle
@@ -393,6 +394,27 @@ class Optimizer:
             'param_groups': param_groups,
         }
 
+    @staticmethod
+    def _process_value_according_to_param_policy(param: Tensor, value: Tensor, param_id: int = None,
+                                                 param_groups: List[Dict[Any, Any]] = None, key=None) -> Tensor:
+        # Floating-point types are a bit special here. They are the only ones
+        # that are assumed to always match the type of params.
+        # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
+        # UNLESS fused or capturable, see note [special device hosting for step]
+        fused = False
+        capturable = False
+        for pg in param_groups:
+            if param_id in pg["params"]:
+                fused = pg["fused"] if "fused" in pg else False
+                capturable = pg["capturable"] if "capturable" in pg else False
+                break
+
+        if key != "step" or capturable or fused:
+            if param.is_floating_point():
+                return value.to(dtype=param.dtype, device=param.device)
+            return value.to(device=param.device)
+        return value
+
     def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
 
@@ -419,21 +441,14 @@ class Optimizer:
         id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
                       chain.from_iterable((g['params'] for g in groups))))
 
-        def cast(param, value, key=None):
+        def cast(param, value, param_id=None, param_groups=None, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
-                # Floating-point types are a bit special here. They are the only ones
-                # that are assumed to always match the type of params.
-                # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-                if (key != "step"):
-                    if param.is_floating_point():
-                        value = value.to(param.dtype)
-                    value = value.to(param.device)
-                return value
+                return Optimizer._process_value_according_to_param_policy(param, value, param_id, param_groups, key)
             elif isinstance(value, dict):
-                return {k: cast(param, v, key=k) for k, v in value.items()}
+                return {k: cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
             elif isinstance(value, container_abcs.Iterable):
-                return type(value)(cast(param, v) for v in value)
+                return type(value)(cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)
             else:
                 return value
 
@@ -444,7 +459,7 @@ class Optimizer:
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = cast(param, v)
+                state[param] = cast(param, v, param_id=k, param_groups=state_dict['param_groups'])
             else:
                 state[k] = v
 
