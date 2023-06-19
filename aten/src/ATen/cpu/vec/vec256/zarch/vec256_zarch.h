@@ -375,6 +375,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   // because of gcc inconsistency for int64_t we are obliged to use this, not
   // value_type
   using ElementType = ZSimdVectElement<T>;
+  using vinner_data = std::pair<vtype, vtype>;
 
  private:
   vtype _vec0;
@@ -387,6 +388,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   Vectorized() {}
 
   C10_ALWAYS_INLINE Vectorized(vtype v) : _vec0{v}, _vec1{v} {}
+  C10_ALWAYS_INLINE Vectorized(const vinner_data &v) : _vec0{v.first}, _vec1{v.second} {}
   C10_ALWAYS_INLINE Vectorized(vtype v1, vtype v2) : _vec0{v1}, _vec1{v2} {}
   C10_ALWAYS_INLINE Vectorized(T s)
       : _vec0{vec_splats((ElementType)s)}, _vec1{vec_splats((ElementType)s)} {}
@@ -426,6 +428,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
 
   C10_ALWAYS_INLINE const vtype& vec1() const {
     return _vec1;
+  }
+
+  C10_ALWAYS_INLINE vinner_data data() const {
+    return std::make_pair<>(_vec0, _vec1);
+  }
+
+  C10_ALWAYS_INLINE operator vinner_data() const {
+    return data();
   }
 
   C10_ALWAYS_INLINE const vmaskType vecb0() const {
@@ -703,27 +713,8 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
     return set_inner<1, size()>(a, b, count);
   }
 
-  const ElementType& operator[](int idx) const {
-    if (idx < size() / 2)
-    {
-      return _vec0[idx];
-    }
-    else
-    {
-      return _vec1[idx - (size() / 2)];
-    }
-  }
-
-  ElementType& operator[](int idx) {
-    if (idx < size() / 2)
-    {
-      return _vec0[idx];
-    }
-    else
-    {
-      return _vec1[idx - (size() / 2)];
-    }
-  }
+  const ElementType& operator[](int idx) const = delete;
+  ElementType& operator[](int idx) = delete;
 
   Vectorized<T> C10_ALWAYS_INLINE operator+(const Vectorized<T>& other) const {
     return Vectorized<T>{_vec0 + other._vec0, _vec1 + other._vec1};
@@ -754,6 +745,51 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   Vectorized<T> C10_ALWAYS_INLINE operator^(const Vectorized<T>& other) const {
     return Vectorized<T>{
         (vtype)(vecb0() ^ other.vecb0()), (vtype)(vecb1() ^ other.vecb1())};
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator<<(const Vectorized<T> &other) const {
+    constexpr ElementType max_shift = sizeof(ElementType) * CHAR_BIT;
+
+    ElementType a_array[Vectorized<T>::size()];
+    ElementType b_array[Vectorized<T>::size()];
+    ElementType c_array[Vectorized<T>::size()];
+
+    store(a_array);
+    other.store(b_array);
+
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      T shift = b_array[i];
+      if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+        c_array[i] = 0;
+      } else {
+        c_array[i] = static_cast<std::make_unsigned_t<T>>(a_array[i]) << shift;
+      }
+   }
+
+    return loadu(c_array);
+  }
+
+  Vectorized<T> C10_ALWAYS_INLINE operator>>(const Vectorized<T> &other) const {
+    // right shift value to retain sign bit for signed and no bits for unsigned
+    constexpr ElementType max_shift = sizeof(T) * CHAR_BIT - std::is_signed_v<T>;
+
+    ElementType a_array[Vectorized<T>::size()];
+    ElementType b_array[Vectorized<T>::size()];
+    ElementType c_array[Vectorized<T>::size()];
+
+    store(a_array);
+    other.store(b_array);
+
+    for (int i = 0; i != Vectorized<T>::size(); i++) {
+      T shift = b_array[i];
+      if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+        c_array[i] = a_array[i] >> max_shift;
+      } else {
+        c_array[i] = a_array[i] >> shift;
+      }
+    }
+
+    return loadu(c_array);
   }
 
   Vectorized<T> _not() const {
@@ -1930,6 +1966,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   using vmaskType = ZSimdVectBinary<underline_type>;
   using vinner_type = Vectorized<underline_type>;
   using size_type = int;
+  using vinner_data = typename Vectorized<underline_type>::vinner_data;
 
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(value_type);
@@ -1941,7 +1978,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
  public:
   Vectorized() {}
 
-  C10_ALWAYS_INLINE Vectorized(vinner_type v) : _vec{v} {}
+  C10_ALWAYS_INLINE Vectorized(const vinner_data &v) : _vec{v.first, v.second} {}
 
   template <typename U = T, std::enable_if_t<(sizeof(U) == 16), int> = 0>
   C10_ALWAYS_INLINE Vectorized(T s1, T s2)
@@ -1971,6 +2008,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
 
   C10_ALWAYS_INLINE const vinner_type& vec() const {
     return _vec;
+  }
+
+  C10_ALWAYS_INLINE operator vinner_data() const {
+    return _vec.data();
+  }
+
+  C10_ALWAYS_INLINE vinner_data data() const {
+    return _vec.data();
   }
 
   static Vectorized<T> C10_ALWAYS_INLINE
@@ -2166,7 +2211,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
 #if !defined(ZVECTOR_SIMULATE_X86_MULT)
     vinner_type vi = bv.mergeo();
     vinner_type vr = bv.mergee();
-    vinner_type abs_b = b.abs_2_().vec();
+    vinner_type abs_b = b.abs_2_();
     vi = vi ^ isign_mask<underline_type>();
     vinner_type ret = _vec * vr;
     vinner_type vx_swapped = _vec.swapped();
@@ -2178,7 +2223,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     vinner_type d_c = bv.swapped();
     d_c = d_c ^ rsign_mask<underline_type>();
     vinner_type ad_bc = _vec * d_c;
-    vinner_type abs_b = b.abs_2_().vec();
+    vinner_type abs_b = b.abs_2_();
     vinner_type re_im = vinner_type::horizontal_add_perm(ac_bd, ad_bc);
     vinner_type ret = re_im / abs_b;
 #endif
@@ -2317,19 +2362,19 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     return Vectorized<T>(_vec ^ vinner_type(isign_mask<underline_type>()));
   }
 
-  Vectorized<T> abs_2_() const {
+  vinner_data abs_2_() const {
     auto a = _vec * _vec;
     a = a + a.swapped();
-    return Vectorized<T>(a.mergee());
+    return a.mergee().data();
   }
 
-  Vectorized<T> abs_() const {
+  vinner_data abs_() const {
     auto ret = abs_2_();
-    return Vectorized<T>(ret.vec().sqrt());
+    return Vectorized<T>{ret}.sqrt().data();
   }
 
   Vectorized<T> abs() const {
-    return abs_().real();
+    return Vectorized<T>{abs_()}.real();
   }
 
   Vectorized<T> exp() const {
@@ -2338,9 +2383,6 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
 
   Vectorized<T> exp2() const {
     return mapOrdinary(exp2_impl);
-  }
-  Vectorized<T> expm1() const {
-    return mapOrdinary(std::expm1);
   }
 
   Vectorized<T> expm1() const {
@@ -2383,7 +2425,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     // re = (ac + bd)/abs_2() = c/abs_2()
     // im = (bc - ad)/abs_2() = d/abs_2()
     vinner_type c_d = _vec ^ vinner_type(isign_mask<underline_type>());
-    vinner_type abs = abs_2_().vec();
+    vinner_type abs = abs_2_();
     return Vectorized<T>{c_d / abs};
   }
 
