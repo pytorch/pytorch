@@ -230,17 +230,34 @@ class SelectiveBuilder:
             and dtype in self.kernel_metadata[kernel_tag]
         )
 
-    def is_et_kernel_selected(self, op_name: str, kernel_key: str) -> bool:
+    def et_get_selected_kernels(self, op_name: str, kernel_key: List[str]) -> List[str]:
+        """
+        Return a list of kernel keys that cover the used ops
+        """
         if op_name not in self.et_kernel_metadata:
-            return False
-        # Don't compare the version for now
-        tensor_metadata = kernel_key.split("/")[1]
+            # Operator is unused at all
+            return []
+
+        result_set = set()
 
         for model_kernel_keys in self.et_kernel_metadata[op_name]:
-            if tensor_metadata == model_kernel_keys.split("/")[1]:
-                return True
+            key_found = False
+            for key in kernel_key:
+                # Don't compare the version for now
+                if (
+                    key != "default"
+                    and key.split("/")[1] == model_kernel_keys.split("/")[1]
+                ):
+                    result_set.add(key)
+                    key_found = True
+                    break
+            if not key_found:
+                if "default" not in kernel_key:
+                    raise Exception("Missing kernel for the model")
+                else:
+                    result_set.add("default")
 
-        return False
+        return list(result_set)
 
     def to_dict(self) -> Dict[str, object]:
         ret: Dict[str, object] = {
