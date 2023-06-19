@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/OpMathType.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -84,15 +85,21 @@ static bool use_mkldnn_fp16_matmul() {
       mkldnn_fp16_device_check());
 }
 
-bool mkldnn_fp16_gemm(
+
+template<typename scalar_t>
+inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, bool>
+mkldnn_lower_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
-    const c10::Half *a_data, int64_t lda,
-    const c10::Half *b_data, int64_t ldb,
+    const scalar_t *a_data, int64_t lda,
+    const scalar_t *b_data, int64_t ldb,
     float beta,
-    c10::Half *c_data, int64_t ldc) {
-  if (!use_mkldnn_fp16_matmul() ||
+    scalar_t *c_data, int64_t ldc) {
+  // TORCH_CHECK((std::is_same_v<scalar_t, c10::BFloat16> || std::is_same_v<scalar_t, c10::Half>),
+  //             "mkldnn_gemm:  only enabled for bf16 and fp16 path")
+  bool is_bf16 = std::is_same_v<scalar_t, c10::BFloat16>;
+  if (!(is_bf16 ? use_mkldnn_bf16_matmul() : use_mkldnn_fp16_matmul()) ||
       (m * n * k <= 16 * 16 * 16) ||
       (alpha == 0.0f)) {
     return false;
@@ -114,19 +121,24 @@ bool mkldnn_fp16_gemm(
     std::swap(b_strides[0], b_strides[1]);
   }
 
+  auto idtype = ideep::tensor::data_type::bf16;
+  if constexpr (!std::is_same_v<scalar_t, c10::BFloat16>) {
+    idtype = ideep::tensor::data_type::f16;
+  }
+
   ideep::tensor a({
       /*sizes=*/{k, m},
-      ideep::tensor::data_type::f16,
+      idtype,
       /*strides=*/a_strides},
-    const_cast<c10::Half*>(a_data));
+    const_cast<scalar_t*>(a_data));
   ideep::tensor b({
       /*sizes=*/{n, k},
-      ideep::tensor::data_type::f16,
+      idtype,
       /*strides=*/b_strides},
-    const_cast<c10::Half*>(b_data));
+    const_cast<scalar_t*>(b_data));
   ideep::tensor c({
       /*sizes=*/{n, m},
-      ideep::tensor::data_type::f16,
+      idtype,
       /*strides=*/c_strides},
     c_data);
 
@@ -140,7 +152,7 @@ bool mkldnn_fp16_gemm(
     // under this case, we need copy the re-inited buffer back to given buffer
     ideep::tensor real_output({
         /*sizes=*/{n, m},
-        ideep::tensor::data_type::f16,
+        idtype,
         /*strides=*/c_strides},
       c_data);
     c.reorder_to(real_output);
@@ -153,67 +165,23 @@ bool mkldnn_bf16_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
-    const c10::BFloat16 *a_data, int64_t lda,
-    const c10::BFloat16 *b_data, int64_t ldb,
+    const c10::BFloat16 *a, int64_t lda,
+    const c10::BFloat16 *b, int64_t ldb,
     float beta,
-    c10::BFloat16 *c_data, int64_t ldc) {
-  if (!use_mkldnn_bf16_matmul() ||
-      (m * n * k <= 16 * 16 * 16) ||
-      (alpha == 0.0f)) {
-    return false;
-  }
-
-  ideep::attr_t op_attr;
-  // Use mkldnn post ops to perform the add.
-  if (beta != 0.0f) {
-    op_attr = ideep::attr_t::fuse_sum();
-  }
-
-  // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
-  // Use identity: C = AB <=> C^T = B^T A^T
-  ideep::tensor::dims a_strides{{lda, 1}}, b_strides{{ldb, 1}}, c_strides{{ldc, 1}};
-  if (transa != TransposeType::NoTranspose) {
-    std::swap(a_strides[0], a_strides[1]);
-  }
-  if (transb != TransposeType::NoTranspose) {
-    std::swap(b_strides[0], b_strides[1]);
-  }
-
-  ideep::tensor a({
-      /*sizes=*/{k, m},
-      ideep::tensor::data_type::bf16,
-      /*strides=*/a_strides},
-    const_cast<c10::BFloat16*>(a_data));
-  ideep::tensor b({
-      /*sizes=*/{n, k},
-      ideep::tensor::data_type::bf16,
-      /*strides=*/b_strides},
-    const_cast<c10::BFloat16*>(b_data));
-  ideep::tensor c({
-      /*sizes=*/{n, m},
-      ideep::tensor::data_type::bf16,
-      /*strides=*/c_strides},
-    c_data);
-
-  ideep::matmul_forward::compute(
-      b, a, c, alpha, beta,
-      ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
-
-  if (c.get_data_handle() != c_data){
-    // ideep will query onednn expect format of output
-    // if given output format is not expected, ideep will re-init an output buffer
-    // under this case, we need copy the re-inited buffer back to given buffer
-    ideep::tensor real_output({
-        /*sizes=*/{n, m},
-        ideep::tensor::data_type::bf16,
-        /*strides=*/c_strides},
-      c_data);
-    c.reorder_to(real_output);
-  }
-
-  return true;
+    c10::BFloat16 *c, int64_t ldc) {
+  return mkldnn_lower_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
+bool mkldnn_fp16_gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const c10::Half *a, int64_t lda,
+    const c10::Half *b, int64_t ldb,
+    float beta,
+    c10::Half *c, int64_t ldc) {
+  return mkldnn_lower_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
 
 
 void mkldnn_matmul(
@@ -242,7 +210,7 @@ void mkldnn_matmul(
 #else
   TORCH_CHECK((mat1.scalar_type() == at::kBFloat16 || mat1.scalar_type() == at::kHalf) &&
                  mat2.scalar_type() == mat1.scalar_type() &&
-                 result.scalar_type() == mat1.scalar_type(), "mkldnn_matmul:  only enabled for bf16 and half path");
+                 result.scalar_type() == mat1.scalar_type(), "mkldnn_matmul:  only enabled for bf16 and fp16 path");
   if (mat1.scalar_type() == at::kBFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
     "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq, or AWS Graviton3");
