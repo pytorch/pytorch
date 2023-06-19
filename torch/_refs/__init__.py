@@ -146,6 +146,8 @@ __all__ = [
     "lcm",
     # 'ldexp',
     "le",
+    "logaddexp",
+    "logaddexp2",
     "logical_and",
     "logical_not",
     "logical_or",
