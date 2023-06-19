@@ -1244,6 +1244,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ChanelShuffle.cpp",
     "aten/src/ATen/native/Col2Im.cpp",
     "aten/src/ATen/native/PadNd.cpp",
+    "aten/src/ATen/native/Constraints.cpp",
     "aten/src/ATen/native/Convolution.cpp",
     "aten/src/ATen/native/ConvolutionMM2d.cpp",
     "aten/src/ATen/native/ConvolutionMM3d.cpp",
