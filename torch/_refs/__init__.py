@@ -452,7 +452,7 @@ def _make_alias(fn, name):
         return fn(*args, **kwargs)
 
     _fn.__name__ = name
-    _fn.__module__ = inspect.currentframe().f_back.f_globals["__name__"]
+    _fn.__module__ = inspect.currentframe().f_back.f_globals["__name__"]  # type: ignore[union-attr]
     return _fn
 
 
