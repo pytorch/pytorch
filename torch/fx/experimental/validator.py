@@ -17,7 +17,7 @@ from torch.utils._sympy.interp import sympy_interp
 log = logging.getLogger(__name__)
 
 try:
-    import z3
+    import z3  # type: ignore[import]
 
     # Translation Validation for Dynamo guards
     # ========================================
