@@ -1,4 +1,4 @@
-#include <ATen/cpu/CPUUtils.h>
+#include <ATen/cpu/Utils.h>
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/utils/pybind.h>
 

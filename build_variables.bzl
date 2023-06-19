@@ -1083,7 +1083,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/vulkan/Context.cpp",
     "aten/src/ATen/native/prim_native_functions.cpp",
     "aten/src/ATen/native/verbose_wrapper.cpp",
-    "aten/src/ATen/cpu/CPUUtils.cpp",
+    "aten/src/ATen/cpu/Utils.cpp",
 ] + aten_cpu_non_globed_sources
 
 aten_cpu_source_codegen_list = [

@@ -1,4 +1,4 @@
-#include <ATen/cpu/CPUUtils.h>
+#include <ATen/cpu/Utils.h>
 #include <cpuinfo.h>
 
 namespace at {

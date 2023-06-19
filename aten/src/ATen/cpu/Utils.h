@@ -1,5 +1,5 @@
-#ifndef CPU_UTILS_H
-#define CPU_UTILS_H
+#pragma once
+
 #include <c10/macros/Export.h>
 
 namespace at {
@@ -10,5 +10,3 @@ TORCH_API bool is_cpu_support_vnni();
 
 } // namespace cpu
 } // namespace at
-
-#endif // CPU_UTILS_H
