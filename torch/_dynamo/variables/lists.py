@@ -1,18 +1,20 @@
 import collections
 import functools
+import inspect
 import operator
 from typing import Dict, List, Optional
 
 import torch
 import torch.fx
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
 from ..utils import check_constant_args, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+from .functions import UserFunctionVariable, UserMethodVariable
 
 
 class BaseListVariable(VariableTracker):
@@ -84,8 +86,8 @@ class BaseListVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
@@ -218,8 +220,8 @@ class CommonListMethodsVariable(BaseListVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "append" and self.mutable_local:
@@ -317,8 +319,8 @@ class ListVariable(CommonListMethodsVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if (
@@ -360,8 +362,8 @@ class DequeVariable(CommonListMethodsVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if (
@@ -416,8 +418,8 @@ class TupleVariable(BaseListVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
 
@@ -496,16 +498,13 @@ class SizeVariable(TupleVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            if config.dynamic_shapes:
-                out = self.get_item_dyn(tx, args[0])
-            else:
-                out = self.getitem_const(args[0])
+            out = self.get_item_dyn(tx, args[0])
             return out
         return super().call_method(tx, name, args, kwargs)
 
@@ -547,9 +546,28 @@ class NamedTupleVariable(TupleVariable):
         ] + create_call_function(1, True)
 
     def var_getattr(self, tx, name):
+        def check_and_create_method():
+            options = VariableTracker.propagate(self)
+            method = inspect.getattr_static(self.tuple_cls, name, None)
+            if isinstance(method, classmethod):
+                # We need the unbounded cls method to avoid the inline __self__
+                return UserMethodVariable(
+                    method.__func__,
+                    variables.UserDefinedClassVariable(self.tuple_cls, **options),
+                )
+            elif isinstance(method, staticmethod):
+                return UserFunctionVariable(method.__func__, **options)
+            elif inspect.isfunction(method):
+                return UserMethodVariable(method, self, **options)
+            else:
+                return None
+
         fields = namedtuple_fields(self.tuple_cls)
         if name not in fields:
-            unimplemented(f"NamedTupleVariable.{name}")
+            method = check_and_create_method()
+            if not method:
+                unimplemented(f"NamedTupleVariable.{name}")
+            return method
         return self.items[fields.index(name)].add_options(self)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
