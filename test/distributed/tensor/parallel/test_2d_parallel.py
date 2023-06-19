@@ -8,6 +8,7 @@ import functools
 
 import torch.distributed.distributed_c10d as distributed_c10d
 import torch.nn.functional as F
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._tensor import DeviceMesh, DTensor as DT, Replicate
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -31,6 +32,7 @@ LR = 3e-5
 
 class SimpleModel(torch.nn.Module):
     def __init__(self):
+        torch.manual_seed(0)
         super().__init__()
         self.net1 = torch.nn.Linear(5, 8)
         self.relu = torch.nn.ReLU()
@@ -45,12 +47,50 @@ class SimpleModel(torch.nn.Module):
 
 
 def _distribute_and_fsdp_wrap_module(
-    module, module_shard, mesh_2d, fsdp_pg, use_orig_params, fsdp_nested
+    module, module_shard, mesh_2d, fsdp_pg, use_orig_params, fsdp_nested, use_ddp=False,
 ):
     if module_shard:
         module = parallelize_module(module, mesh_2d, PairwiseParallel(), tp_mesh_dim=1)
     pg = fsdp_pg if module_shard else distributed_c10d._get_default_group()
 
+    if use_ddp:
+        m = module.cuda()
+
+
+        def tp_named_parameters(self, prefix='', recurse=True, remove_duplicate=True):
+            from torch.distributed._tensor import DTensor
+            gen = self._named_members(
+            lambda module: module._parameters.items(),
+            prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+            for (n, p) in gen:
+                if isinstance(p, DTensor):
+                    yield n, p._local_tensor
+                else:
+                    yield n, p
+
+        for m in m.modules():
+            import types
+            method = types.MethodType(tp_named_parameters, m)
+            setattr(m, 'named_parameters', method)
+            # # Specify that this function is a class method
+            #     class_method = types.MethodType(new_function, immediate_child_module)
+
+            #     # Replace the function
+            #     setattr(immediate_child_module, target_function, class_method)
+            # import types
+            # m.named_parameters = tp_named_parameters.__get__(m, torch.nn.Module)
+            # # s.make = types.MethodType(times_eight, s, Simple)
+            # m.named_parameters = tp_named_parameters
+        # gen = self._named_members(
+        #     lambda module: module._parameters.items(),
+        #     prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
+        print(m)
+        for mod in m.modules():
+            for param in mod.parameters(recurse=False):
+                if isinstance(param, torch.nn.parameter.UninitializedParameter):
+                    print(f"{param} from {mod} is not initialized")
+
+        return DDP(module.cuda(torch.cuda.current_device()), device_ids=[torch.cuda.current_device()], process_group=pg)
     fsdp_ctor = functools.partial(FSDP, process_group=pg, use_orig_params=use_orig_params, device_id=torch.cuda.current_device())
     if fsdp_nested:
         module.net1 = fsdp_ctor(module.net1)
@@ -59,7 +99,7 @@ def _distribute_and_fsdp_wrap_module(
     return fsdp_ctor(module)
 
 
-def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False, fsdp_nested=False):
+def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False, fsdp_nested=False, use_ddp=False):
     rank = dist.get_rank()
     torch.cuda.set_device(rank)
     world_size = dist.get_world_size()
@@ -76,7 +116,7 @@ def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False, fsdp_nested
 
     # Create Input
     model = _distribute_and_fsdp_wrap_module(
-        model, True, twod_mesh, fsdp_pg, use_orig_params, fsdp_nested
+        model, True, twod_mesh, fsdp_pg, use_orig_params, fsdp_nested, use_ddp
     )
     return model, fsdp_pg
 
@@ -126,6 +166,26 @@ class Test2dParallelIntegration(DTensorTestBase):
             is_nested_tensor(optim_state["state"]["net1.weight"]["exp_avg"])
         )
         self.assertFalse(is_nested_tensor(optim_state["state"]["net3.bias"]["exp_avg"]))
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_with_ddp(self) -> None:
+        model_tp = init_model(use_ddp=True)[0]
+        ddp = DDP(SimpleModel().cuda(), device_ids=[torch.cuda.current_device()])
+
+        optim_ddp = torch.optim.Adam(ddp.parameters(), lr=0.0001)
+        optim = torch.optim.Adam(model_tp.parameters(), lr=0.0001)
+
+        # Create Input
+        input_seed = self.rank
+        torch.manual_seed(input_seed + 1)
+        input = torch.rand(4, 5).cuda(self.rank)
+
+        model_tp(input).sum().backward()
+        optim.step()
+
+        inp_clone = input.clone()
+
 
     def _compare_params(self, m1, m2):
         with FSDP.summon_full_params(m1):
