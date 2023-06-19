@@ -54,8 +54,6 @@ class Socket {
 
   static Socket listen(std::uint16_t port, const SocketOptions& opts = {});
 
-  static Socket listenFromFd(int fd, std::uint16_t expected_port);
-
   static Socket connect(
       const std::string& host,
       std::uint16_t port,

@@ -183,7 +183,6 @@ class TCPStore(Store):
         timeout: timedelta = ...,
         wait_for_workers: bool = ...,
         multi_tenant: bool = ...,
-        master_listen_fd: Optional[int] = ...,
     ): ...
     @property
     def host(self) -> str: ...

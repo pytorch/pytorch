@@ -1,7 +1,6 @@
 import torch
 from .make_fx import make_fx_check
 from .aot_autograd import aot_autograd_check
-from .fake_tensor import fake_check
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 
 
@@ -48,7 +47,6 @@ def operator_compile_check(
         check_compile(func, args, kwargs, fullgraph=fullgraph, backend='inductor', dynamic=dynamic)
 
     schema_check(func, args, kwargs)
-    fake_check(func, args, kwargs, dynamic_only)
     if not dynamic_only:
         run_static_or_dynamic_tests(dynamic=False)
     run_static_or_dynamic_tests(dynamic=True)
