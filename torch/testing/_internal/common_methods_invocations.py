@@ -20076,6 +20076,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.renorm",
+        torch_opinfo_name="renorm",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.repeat",
         torch_opinfo_name="repeat",
         supports_nvfuser=False,
