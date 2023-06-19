@@ -335,12 +335,16 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 
   if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
-      out->fallback_ = torch_ops_.gpu_fallback_.emplace_back();
+      out->fallback_ = torch_ops_.device_fallback_.emplace_back();
       torch::profiler::impl::cudaStubs()->record(
-          nullptr, &out->fallback_->cuda_event_start_, nullptr);
+          nullptr, &out->fallback_->device_event_start_, nullptr);
     } catch (const std::exception& e) {
       LOG(WARNING) << "Failed to record CUDA event. " << e.what();
     }
+  } else if (config_.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
+    out->fallback_ = torch_ops_.device_fallback_.emplace_back();
+    torch::profiler::impl::privateuse1Stubs()->record(
+        nullptr, &out->fallback_->device_event_start_, nullptr);
   }
 
   event->start_time_ = torch::profiler::impl::getApproximateTime();
@@ -420,7 +424,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
   auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
   auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
-  auto gpu_fallback = StealOrDefault<decltype(gpu_fallback_)>(gpu_fallback_);
+  auto gpu_fallback =
+      StealOrDefault<decltype(device_fallback_)>(device_fallback_);
 
   for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
     ExtraFields<EventType::TorchOp> e{

@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     skipIfCrossRef,
     skipIfTorchDynamo,
     suppress_warnings,
+    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -370,10 +371,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "complex": {f16, f32, f64},
 }
 
-if TEST_WITH_ROCM:
-    # AssertionError: expected size 5==5, stride 5==1 at dim=0
-    inductor_expected_failures_single_sample["cuda"][("norm", "nuc")] = {f32, f64}
-
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
@@ -524,6 +521,7 @@ class TestInductorOpInfo(TestCase):
     )  # inductor kernels failing this test intermittently
     @skipCUDAIf(not HAS_CUDA, "Skipped! Triton not found")
     @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfTorchDynamo("Test uses dynamo already")
     @skipIfCrossRef
     @_ops(op_db[START:END])

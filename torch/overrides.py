@@ -185,6 +185,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_max,
         torch.sym_min,
         torch.sym_not,
+        torch.sym_constrain_range,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -1877,12 +1878,20 @@ class BaseTorchFunctionMode(TorchFunctionMode):
         return func(*args, **kwargs)
 
 
-class enable_reentrant_dispatch():
-    def __enter__(self):
-        self._raii_guard = torch._C._RestorePythonTLSSnapshot()
-
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        del self._raii_guard
+@contextlib.contextmanager
+def enable_reentrant_dispatch():
+    # NB: this can't simply be
+    # `enable_reentrant_dispatch = torch._C._RestorePythonTLSSnapshot`
+    # because:
+    # 1. torch._C._RestorePythonTLSSnapshot is unavailable when this file
+    #    initially gets imported. Probably an import order thing.
+    # 2. enable_reentrant_dispatch is technically public API; assigning
+    #    it the object would change the __module__ to look private.
+    with torch._C._RestorePythonTLSSnapshot():
+        try:
+            yield
+        finally:
+            pass
 
 def get_buffer(tensor_subclass, data, prefix):
     import ctypes
