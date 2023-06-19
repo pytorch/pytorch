@@ -19,12 +19,11 @@ import warnings
 import subprocess
 import random
 from random import randint
-import json
 
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
-from torch.cuda._memory_viz import profile_plot, _profile_to_snapshot
+from torch.cuda._memory_viz import profile_plot
 from torch.cuda._memory_viz import trace_plot
 from torch.cuda._memory_viz import segment_plot
 
@@ -5081,10 +5080,9 @@ class TestCudaComm(TestCase):
             x = torch.rand(128, 128, device='cuda')
             x * x + x * x
         plot = profile_plot(prof)
-        plot = json.dumps(_profile_to_snapshot(prof))
         self.assertTrue("test_cuda.py" in plot)
         self.assertTrue("test_memory_profiler_viz" in plot)
-        self.assertTrue('category' in plot)
+        self.assertTrue('"elements_category": [' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
@@ -5102,15 +5100,16 @@ class TestCudaComm(TestCase):
                 cpp = stacks == "all"
                 record_context = context is not None
                 ss = torch.cuda.memory._snapshot()
-
                 tplot = trace_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in tplot))
+                self.assertTrue(cpp == ("::rand" in tplot))
+
+                self.assertTrue(str(128 * 128 * 4) in tplot)
                 splot = segment_plot(ss)
-                text = json.dumps(ss)
-
-                self.assertTrue(record_context == ("test_memory_plots" in text))
-                self.assertTrue(cpp == ("::rand" in text))
-                self.assertTrue(str(128 * 128 * 4) in text)
-
+                self.assertTrue(record_context == ("test_memory_plots" in splot))
+                self.assertTrue(str(128 * 128 * 4) in splot)
+                self.assertTrue(cpp == ("::rand" in splot))
+                torch.cuda.memory._record_memory_history(None)
             finally:
                 torch.cuda.memory._record_memory_history(None)
 

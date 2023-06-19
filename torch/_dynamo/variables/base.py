@@ -76,7 +76,6 @@ class VariableTracker(metaclass=HasPostInit):
         value,
         cache=None,
         skip_fn=lambda _: False,  # Whether we should skip applying to this var
-        update_contains=False,
     ):
         """
         Walk this object and call fn on all the VariableTracker
@@ -98,25 +97,20 @@ class VariableTracker(metaclass=HasPostInit):
                             fn, updated_dict[key], cache, skip_fn
                         )
                 result = fn(value.clone(**updated_dict))
-                if update_contains is False:
-                    result._update_contains()
             else:
                 result = fn(value)
 
         elif istype(value, list):
-            result = [cls.apply(fn, v, cache, skip_fn, update_contains) for v in value]
+            result = [cls.apply(fn, v, cache, skip_fn) for v in value]
         elif istype(value, tuple):
-            result = tuple(
-                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value
-            )
+            result = tuple(cls.apply(fn, v, cache, skip_fn) for v in value)
         elif istype(value, collections.OrderedDict):
             result = collections.OrderedDict(
-                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value.items()
+                cls.apply(fn, v, cache, skip_fn) for v in value.items()
             )
         elif istype(value, dict):
             result = {
-                k: cls.apply(fn, v, cache, skip_fn, update_contains)
-                for k, v in list(value.items())
+                k: cls.apply(fn, v, cache, skip_fn) for k, v in list(value.items())
             }
         else:
             result = value
@@ -277,29 +271,16 @@ class VariableTracker(metaclass=HasPostInit):
         if self.recursively_contains is None:
             self.recursively_contains = set()
 
+            def aggregate_mutables(var):
+                self.recursively_contains.update(var.recursively_contains)
+                if var.mutable_local is not None:
+                    self.recursively_contains.add(var.mutable_local)
+
+                return var
+
             VariableTracker.apply(
-                self._aggregate_mutables, self, skip_fn=lambda var: var is not self
+                aggregate_mutables, self, skip_fn=lambda var: var is not self
             )
-
-        assert None not in self.recursively_contains
-
-    def _aggregate_mutables(self, var):
-        self.recursively_contains.update(var.recursively_contains)
-        if var.mutable_local is not None:
-            self.recursively_contains.add(var.mutable_local)
-
-        return var
-
-    # This is used to forcely update self.recursively_contains
-    def _update_contains(self):
-        self.recursively_contains = set()
-
-        VariableTracker.apply(
-            self._aggregate_mutables,
-            self,
-            skip_fn=lambda var: var is not self,
-            update_contains=True,
-        )
 
         assert None not in self.recursively_contains
 
