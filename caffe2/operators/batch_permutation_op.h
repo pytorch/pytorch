@@ -19,7 +19,7 @@ class BatchPermutationOp final : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice();
+  bool RunOnDevice() override;
 };
 
 template <typename T, class Context>
@@ -29,7 +29,7 @@ class BatchPermutationGradientOp final : public Operator<Context> {
       : Operator<Context>(def, ws) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice();
+  bool RunOnDevice() override;
 };
 
 } // namespace caffe2
