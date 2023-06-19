@@ -3111,7 +3111,7 @@ def permute(a: TensorLikeType, *dims) -> TensorLikeType:
 @register_decomposition(aten.renorm)
 @out_wrapper()
 def renorm(
-    input: TensorLikeType, p: Number, dim: int, maxnorm: FloatLike
+    input: TensorLikeType, p: Union[bool, int, float], dim: int, maxnorm: float
 ) -> TensorLikeType:
     utils.check(not isinstance(p, complex), lambda: "renorm: p must be real-valued")
     utils.check(p > 0, lambda: "renorm: non-positive norm not supported")
@@ -3146,7 +3146,7 @@ def renorm(
     norm_factor = torch.where(norm > maxnorm, maxnorm / (norm + eps), 1.0)
     if acc_type != input.dtype:
         norm_factor = prims.convert_element_type(norm_factor, input.dtype)
-    return input * norm_factor
+    return (input * norm_factor).contiguous()
 
 
 # Get the new shape and stride after applying unfold to an input tensor
