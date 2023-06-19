@@ -60,6 +60,7 @@ DTYPE_TO_CPP = {
     torch.uint8: "unsigned char",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
+    torch.complex64: "complex64",
 }
 
 DTYPE_TO_ATEN = {
@@ -73,6 +74,7 @@ DTYPE_TO_ATEN = {
     torch.uint8: "at::kByte",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
+    torch.complex64: "at::kComplexFloat",
 }
 
 DEVICE_TO_ATEN = {
@@ -97,6 +99,12 @@ PYTHON_TO_CPP = {
     "int": "long",
     "float": "double",
     "bool": "bool",
+    "ScalarType": "c10::ScalarType",
+}
+
+CONTAINER_PYTHON_TO_CPP = {
+    "List": "std::vector",
+    "Optional": "c10::optional",
 }
 
 
@@ -169,19 +177,23 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     if reduction_type == "argmax":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmax : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmax : {struct_name} :\\",
                 "    omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     elif reduction_type == "argmin":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmin : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmin : {struct_name} :\\",
                 "    omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     return prefix

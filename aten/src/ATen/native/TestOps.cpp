@@ -12,6 +12,7 @@
 #include <ATen/ops/_test_ambiguous_defaults_native.h>
 #include <ATen/ops/_test_autograd_multiple_dispatch_native.h>
 #include <ATen/ops/_test_autograd_multiple_dispatch_view_native.h>
+#include <ATen/ops/_test_check_tensor_native.h>
 #include <ATen/ops/_test_optional_filled_intlist_native.h>
 #include <ATen/ops/_test_optional_floatlist_native.h>
 #include <ATen/ops/_test_optional_intlist_native.h>
