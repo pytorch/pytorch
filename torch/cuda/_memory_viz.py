@@ -378,7 +378,7 @@ html, body {
 </head>
 <body>
 <script type="module">
-import {add_local_files} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch/torch/utils/viz/MemoryViz.js"
+import {add_local_files} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch@main/torch/utils/viz/MemoryViz.js"
 const local_files = $SNAPSHOT
 add_local_files(local_files, $VIZ_KIND)
 </script>
