@@ -83,6 +83,7 @@ CI_SKIP = collections.defaultdict(list)
 CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
+    "hf_BigBird",  # fail_accuracy
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
@@ -249,6 +250,9 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
+    # https://github.com/pytorch/pytorch/issues/103760
+    "dlrm",
+    "hf_T5_generate",
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -1228,6 +1232,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def force_amp_for_fp16_bf16_models(self):
+        return set()
+
+    @property
     def skip_not_suitable_for_training_models(self):
         return set()
 
@@ -1273,19 +1281,41 @@ class BenchmarkRunner:
     def deepcopy_model(self, model):
         return copy.deepcopy(model)
 
+    def cast_based_on_args(self, model, example_inputs):
+        if self.args.float32 or self.args.only in self.fp32_only_models:
+            if not self.args.float32:
+                log.warning("Model %s supports float32 only", self.args.only)
+            model, example_inputs = cast_to_fp32(model, example_inputs)
+        elif self.args.float16:
+            if self.args.only in self.force_amp_for_fp16_bf16_models:
+                log.warning(
+                    "Model %s does not support float16, running with amp instead",
+                    self.args.only,
+                )
+                self.args.amp = True
+                self.setup_amp()
+            else:
+                model, example_inputs = cast_to_fp16(model, example_inputs)
+        elif self.args.bfloat16:
+            if self.args.only in self.force_amp_for_fp16_bf16_models:
+                log.warning(
+                    "Model %s does not support bfloat16, running with amp instead",
+                    self.args.only,
+                )
+                self.args.amp = True
+                self.setup_amp()
+            else:
+                model, example_inputs = cast_to_bf16(model, example_inputs)
+
+        return model, example_inputs
+
     def validate_model(self, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
-        if self.args.float32:
-            model, example_inputs = cast_to_fp32(model, example_inputs)
-        elif self.args.float16:
-            model, example_inputs = cast_to_fp16(model, example_inputs)
-        elif self.args.bfloat16:
-            model, example_inputs = cast_to_bf16(model, example_inputs)
-
+        model, example_inputs = self.cast_based_on_args(model, example_inputs)
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
@@ -1294,12 +1324,7 @@ class BenchmarkRunner:
     def maybe_cast(self, model, example_inputs):
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
-        if self.args.float32:
-            model, example_inputs = cast_to_fp32(model, example_inputs)
-        elif self.args.float16:
-            model, example_inputs = cast_to_fp16(model, example_inputs)
-        elif self.args.bfloat16:
-            model, example_inputs = cast_to_bf16(model, example_inputs)
+        model, example_inputs = self.cast_based_on_args(model, example_inputs)
         return model, example_inputs
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
@@ -2667,13 +2692,6 @@ def run(runner, args, original_dir=None):
             current_batch_size = batch_size
             set_model_name(name)
 
-            if args.float32:
-                model, example_inputs = cast_to_fp32(model, example_inputs)
-            elif args.float16:
-                model, example_inputs = cast_to_fp16(model, example_inputs)
-            elif args.bfloat16:
-                model, example_inputs = cast_to_bf16(model, example_inputs)
-
             # Look for stuff that looks like batch size, and mark it dynamic.
             # Better integration would integrate directly with benchmark suite
             # but cannot conveniently do this
@@ -2705,6 +2723,7 @@ def run(runner, args, original_dir=None):
                     args.per_process_memory_fraction
                 )
 
+            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.run_one_model(
                 name,
                 model,
