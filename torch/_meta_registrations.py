@@ -3366,6 +3366,126 @@ def meta_max_pool2d_with_indices(
     )
 
 
+@register_meta(aten.max_unpool2d)
+@out_wrapper()
+def meta_max_unpool2d(self_, indices, output_size):
+    check(
+        indices.dtype == torch.int64,
+        lambda: f"elements in indices should be type int64 but got: {indices.dtype}",
+    )
+    check(
+        len(output_size) == 2,
+        lambda: (
+            f"There should be exactly two elements (height, width) in output_size, "
+            f"but got {len(output_size)} elements."
+        ),
+    )
+
+    oheight, owidth = output_size
+
+    check(
+        self_.ndim in (3, 4),
+        lambda: (
+            f"Input to max_unpooling2d should be a 3d or 4d Tensor, "
+            f"but got a tensor with {self_.ndim} dimensions."
+        ),
+    )
+    check(
+        self_.shape == indices.shape,
+        lambda: (
+            f"Expected shape of indices to be same as that of the input tensor ({self_.shape}) "
+            f"but got indices tensor with shape: {indices.shape}"
+        ),
+    )
+
+    for i in range(1, self_.ndim):
+        check(
+            self_.size(i) > 0,
+            lambda: (
+                f"Expected input to have non-zero size for non-batch dimensions, "
+                f"but got {self_.shape} with dimension {i} being empty."
+            ),
+        )
+
+    self = self_.contiguous()
+
+    if self_.ndim == 3:
+        nchannels = self.size(0)
+        result = self.new_empty((nchannels, oheight, owidth))
+    else:
+        nbatch = self.size(0)
+        nchannels = self.size(1)
+        result = self.new_empty((nbatch, nchannels, oheight, owidth))
+
+    return result
+
+
+def _max_unpooling3d_shape_check(input, indices, output_size, stride, padding):
+    check(
+        indices.dtype == torch.int64, lambda: "elements in indices should be type int64"
+    )
+    check(
+        input.ndim in (4, 5),
+        lambda: f"Input to max_unpooling3d should be a 4d or 5d Tensor, but got a tensor with {input.ndim} dimensions.",
+    )
+    check(
+        len(output_size) == 3,
+        lambda: (
+            f"There should be exactly three elements (depth, height, width) in output_size, "
+            f"but got {len(output_size)} elements."
+        ),
+    )
+    check(
+        len(stride) == 3,
+        lambda: f"There should be exactly three elements (depth, height, width) in stride, but got: {len(stride)} elements.",
+    )
+    check(
+        len(padding) == 3,
+        lambda: f"There should be exactly three elements (depth, height, width) in padding, but got: {len(padding)} elements.",
+    )
+    check(
+        input.shape == indices.shape,
+        lambda: (
+            f"Expected shape of indices to be same as that of the input tensor ({input.shape}) "
+            f"but got indices tensor with shape: {indices.shape}"
+        ),
+    )
+
+    for i in range(1, input.ndim):
+        check(
+            input.size(i) > 0,
+            lambda: (
+                f"Expected input to have non-zero size for non-batch dimensions, "
+                f"but got {input.shape} with dimension {i} being empty."
+            ),
+        )
+
+    check(
+        stride[0] > 0 and stride[1] > 0 and stride[2] > 0,
+        lambda: f"strides should be greater than zero, but got stride: {stride}",
+    )
+
+
+@register_meta(aten.max_unpool3d)
+@out_wrapper()
+def meta_max_unpool3d(self_, indices_, output_size, stride, padding):
+    _max_unpooling3d_shape_check(self_, indices_, output_size, stride, padding)
+
+    self = self_.contiguous()
+
+    odepth, oheight, owidth = output_size
+
+    if self_.ndim == 4:
+        nchannels = self.size(0)
+        result = self.new_empty((nchannels, odepth, oheight, owidth))
+    else:
+        nbatch = self.size(0)
+        nchannels = self.size(1)
+        result = self.new_empty((nbatch, nchannels, odepth, oheight, owidth))
+
+    return result
+
+
 @register_meta(aten.grid_sampler_2d_backward.default)
 def grid_sampler_2d_backward_meta(
     grad_output,

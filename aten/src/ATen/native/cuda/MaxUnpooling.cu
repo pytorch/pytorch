@@ -150,7 +150,7 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
       "Expected shape of indices to be: ", self_.sizes(), " but got: ", indices_.sizes());
   TORCH_CHECK(
       output_size.size() == 2,
-      "There should be exactly two elements (width, height) in output_size, but got ", output_size.size(), " elements.");
+      "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
 
   int64_t dimw = 2;
   int64_t dimh = 1;
