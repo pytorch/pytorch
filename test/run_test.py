@@ -51,10 +51,10 @@ try:
     )
 
     HAVE_TEST_SELECTION_TOOLS = True
-except ImportError:
+except ImportError as e:
     HAVE_TEST_SELECTION_TOOLS = False
     print(
-        "Unable to import test_selections from tools/testing. Running without test selection stats..."
+        f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
     )
 
 
