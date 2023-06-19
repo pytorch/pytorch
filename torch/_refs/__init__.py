@@ -2176,7 +2176,9 @@ def sum(
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
     if dtype is None:
-        if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
+        if out is not None:
+            dtype = out.dtype
+        elif utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
             dtype = torch.int64
         else:
             dtype = a.dtype
@@ -2226,7 +2228,9 @@ def prod(
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
     if dtype is None:
-        if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
+        if out is not None:
+            dtype = out.dtype
+        elif utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
             dtype = torch.int64
         else:
             dtype = a.dtype
