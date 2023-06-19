@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/Context.h>
-#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/native/transformers/sdp_utils.h>
 
 namespace sdp {
 struct sdp_params {

@@ -114,7 +114,7 @@ file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
 file(GLOB native_nested_cpp "native/nested/*.cpp")
-file(GLOB native_transformers_cpp "native/transformers/*.cpp")
+file(GLOB native_transformers_cpp "native/transformers/*.cpp" "native/transformers/cpu/*.cpp")
 
 file(GLOB native_h "native/*.h")
 file(GLOB native_ao_sparse_h

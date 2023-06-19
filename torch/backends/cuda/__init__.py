@@ -175,7 +175,7 @@ class SDPBackend(IntEnum):
     .. warning:: This class is in beta and subject to change.
 
     This class needs to stay aligned with the enum defined in:
-    pytorch/aten/src/ATen/native/transformers/sdp_utils_cpp.h
+    pytorch/aten/src/ATen/native/transformers/sdp_utils.h
     """
     ERROR = -1
     MATH = 0

@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     freeze_rng_state,
     TEST_WITH_CROSSREF,
+    TEST_MKL,
     slowTest,
     set_default_dtype,
     gradcheck
@@ -1693,14 +1694,18 @@ class TestSDPA(NNTestCase):
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
 
     @onlyCPU
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice_cpu(self, device, type: str):
-        # Test that cpu and nestedtensor cpu return MATH backend
+        # Test that float32 and bfloat16 return FLASH_ATTENTION backend
         for dtype in floating_types_and_half():
             make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
             size = (2, 2, 3, 4)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
-            assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
+            if dtype in [torch.float32, torch.bfloat16]:
+                assert torch._fused_sdp_choice(q, k, v) == SDPBackend.FLASH_ATTENTION
+            else:
+                assert torch._fused_sdp_choice(q, k, v) == SDPBackend.MATH
 
     @onlyCUDA
     @parametrize("type", ["dense", "nested"])
@@ -2330,6 +2335,46 @@ class TestSDPA(NNTestCase):
                 attn_mask=None, dropout_p=0.0, is_causal=False)
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    @onlyCPU
+    def test_flash_attention_cpu(self, device, dtype):
+        def sdp_ref(q, k, v):
+            E = q.size(-1)
+            q = q / math.sqrt(E)
+            # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
+            attn = torch.bmm(q, k.transpose(-2, -1))
+            attn = torch.nn.functional.softmax(attn, dim=-1)
+            # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
+            output = torch.bmm(attn, v)
+            return output
+
+        def rand_tensor(*shape):
+            return torch.randn(shape, device=device, dtype=dtype)
+
+        # This test compares python and C++ implementations of SDP.
+        N, N_prime, L, S, E = 5, 2, 4, 3, 6
+
+        query = rand_tensor(N, N_prime, L, E)
+        key = rand_tensor(N, N_prime, S, E)
+        value = rand_tensor(N, N_prime, S, E)
+
+        assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
+
+        with freeze_rng_state():
+            # Python impl only supports float mask and 3D inputs.
+            q, k, v = query.view(-1, L, E), key.view(-1, S, E), value.view(-1, S, E)
+            expected = sdp_ref(q, k, v)
+            expected = expected.view(-1, N_prime, L, E)
+
+        with freeze_rng_state():
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+
+            if dtype == torch.bfloat16:
+                self.assertEqual(actual, expected, atol=0.01, rtol=0)
+            else:
+                self.assertEqual(actual, expected)
 
 
 device_types = ("cpu", "cuda")
