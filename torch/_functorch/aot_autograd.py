@@ -2805,6 +2805,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         num_symints_saved_for_bw = _num_symints_saved_for_bw
 
         @staticmethod
+        def _compiled_autograd_key(ctx):
+            return aot_config.aot_id
+
+        @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
             args = deduped_flat_tensor_args
             if CompiledFunction.metadata.is_rng_op_functionalized:
@@ -3004,6 +3008,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             del contiguous_args
 
             def call_compiled_backward():
+                if ctx._compiled_autograd_tracing:
+                    context = torch._C._DisableAutocast if disable_amp else nullcontext
+                    with context():
+                        out = normalize_as_list(bw_module(*all_args))
+                    out = functionalized_rng_runtime_epilogue(CompiledFunction.metadata, out)
+                    return tuple(out)
+
                 if CompiledFunction.compiled_bw is None:
                     assert all(a is not None for a in all_args)
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
@@ -3069,6 +3080,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     @staticmethod
                     def backward(ctx, *args):
                         raise RuntimeError("torch.compile with aot_autograd does not currently support double backward")
+
+                CompiledFunctionBackward._compiled_autograd_key = CompiledFunction._compiled_autograd_key
+
                 # Pass args even though they're unused, so that the graph is built
                 out = CompiledFunctionBackward.apply(*all_args)
             else:

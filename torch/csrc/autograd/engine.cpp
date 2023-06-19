@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/autograd/compiled_autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -50,6 +51,8 @@ namespace torch {
 namespace autograd {
 
 namespace {
+static compiled_autograd_fn the_compiled_autograd = nullptr;
+
 static bool in_bad_autograd_fork =
     false; // True for children forked after engine's thread pool init
 
@@ -1178,7 +1181,8 @@ auto Engine::execute(
       /* graph_roots */ std::move(temp_roots));
 
   // If we receive a single root, skip creating extra root node
-  bool skip_dummy_node = root_edges.size() == 1;
+  bool skip_dummy_node =
+      root_edges.size() == 1 && the_compiled_autograd == nullptr;
   auto graph_root = skip_dummy_node
       ? root_edges.at(0).function
       : std::make_shared<GraphRoot>(root_edges, inputs);
@@ -1186,6 +1190,17 @@ auto Engine::execute(
   auto min_topo_nr = compute_min_topological_nr(outputs);
   // Now compute the dependencies for all executable functions
   compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
+
+  if (the_compiled_autograd != nullptr) {
+    if (skip_dummy_node) {
+      // TODO(jansel): avoid the dummy node we forced above
+      throw std::runtime_error("todo");
+    } else {
+      (*the_compiled_autograd)(graph_root, *graph_task);
+      // TODO(jansel): handle outputs
+      return variable_list();
+    }
+  }
 
   if (!outputs.empty()) {
     graph_task->init_to_execute(
@@ -1322,6 +1337,10 @@ void set_default_engine_stub(EngineStub stub) {
 
 Engine& Engine::get_default_engine() {
   return engine_stub.load()();
+}
+
+void Engine::set_compiled_autograd(compiled_autograd_fn fn) {
+  the_compiled_autograd = fn;
 }
 
 void Engine::queue_callback(std::function<void()> callback) {

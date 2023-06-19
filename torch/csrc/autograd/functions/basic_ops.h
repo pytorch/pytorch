@@ -83,11 +83,29 @@ struct TORCH_API GraphRoot : public Node {
     return outputs;
   }
 
+  void compiled_args(CompiledNodeArgs& args) override;
+
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
+
   variable_list outputs;
 };
 
 struct TORCH_API Identity : public Node {
   variable_list apply(variable_list&& inputs) override;
+};
+
+struct TORCH_API ImplicitAdd : public Node {
+  variable_list apply(variable_list&& inputs) override;
+
+  void compiled_args(CompiledNodeArgs& args) override {}
+
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override {
+    return apply(std::move(variable_list(inputs)));
+  }
 };
 
 } // namespace autograd

@@ -35,6 +35,8 @@ namespace autograd {
 struct Edge;
 struct FunctionPostHook;
 struct FunctionPreHook;
+class CompiledNodeArgs;
+class SwapSavedVariables;
 
 using tensor_list = std::vector<at::Tensor>;
 using variable_list = std::vector<Variable>;
@@ -550,6 +552,18 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// NOTE: this value matters only if is_traceable() returns false.
   virtual bool passes_state_transparently() {
     return false;
+  }
+
+  virtual void compiled_args(CompiledNodeArgs& args) {
+    throw std::runtime_error(
+        std::string("compiled_args not implemented: ") + name());
+  }
+
+  virtual variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) {
+    throw std::runtime_error(
+        std::string("apply_with_saved not implemented: ") + name());
   }
 
  protected:

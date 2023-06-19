@@ -2,6 +2,7 @@
 
 #include <ATen/Tensor.h>
 #include <torch/csrc/Export.h>
+#include <string>
 #include <vector>
 
 // A hook that's called on gradients
@@ -9,12 +10,17 @@
 namespace torch {
 namespace autograd {
 
+class CompiledNodeArgs;
 using Variable = at::Tensor;
 using variable_list = std::vector<Variable>;
 
 struct TORCH_API FunctionPreHook {
   virtual ~FunctionPreHook() = default;
   virtual variable_list operator()(const variable_list& grads) = 0;
+  virtual void compiled_args(CompiledNodeArgs& args) {
+    throw std::runtime_error(
+        std::string("compiled_args nyi ") + typeid(*this).name());
+  }
 };
 
 struct TORCH_API FunctionPostHook {
@@ -22,6 +28,10 @@ struct TORCH_API FunctionPostHook {
   virtual variable_list operator()(
       const variable_list& outputs /* grad_inputs */,
       const variable_list& inputs /* grad_outputs */) = 0;
+  virtual void compiled_args(CompiledNodeArgs& args) {
+    throw std::runtime_error(
+        std::string("compiled_args nyi ") + typeid(*this).name());
+  }
 };
 
 } // namespace autograd

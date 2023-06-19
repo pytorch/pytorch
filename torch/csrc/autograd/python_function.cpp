@@ -13,6 +13,7 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/autograd/compiled_autograd.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
@@ -201,6 +202,38 @@ auto PyNode::name() const -> std::string {
   return name;
 }
 
+void PyNode::compiled_args(CompiledNodeArgs& args) {
+  static PyObject* method_name =
+      PyUnicode_InternFromString("_compiled_autograd_key");
+  THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
+  if (!pykey)
+    throw_python_error();
+  auto key = PyLong_AsLong(pykey);
+  if (PyErr_Occurred())
+    throw_python_error();
+  // will contain the unique ID of the AotAutograd graph
+  args.collect(key);
+
+  auto f = (THPFunction*)obj;
+  args.collect(f->saved_variables);
+  args.collect(f->materialize_grads);
+  args.collect(f->is_variable_input);
+  // TODO(jansel): are there other things we need to collect?
+}
+
+variable_list PyNode::apply_with_saved(
+    const variable_list& inputs,
+    SwapSavedVariables& saved) {
+  auto f = (THPFunction*)obj;
+  TORCH_CHECK(!f->compiled_autograd_tracing);
+  saved.before(f->saved_variables);
+  f->compiled_autograd_tracing = true;
+  auto result = apply(std::move(variable_list(inputs)));
+  f->compiled_autograd_tracing = false;
+  saved.after(f->saved_variables);
+  return result;
+}
+
 } // namespace autograd
 } // namespace torch
 
@@ -277,6 +310,7 @@ PyObject* THPFunction_new(
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
   self->materialize_grads = true;
+  self->compiled_autograd_tracing = false;
   return obj;
 }
 
@@ -1181,6 +1215,18 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_compiled_autograd_tracing(
+    THPFunction* self,
+    void* _unused) {
+  // HANDLE_TH_ERRORS  // not needed since can't throw?
+  if (self->compiled_autograd_tracing) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  // END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
   // User tries to access saved variables after they have been freed
@@ -1354,6 +1400,11 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"materialize_grads",
      nullptr,
      (setter)THPFunction_set_materialize_grads,
+     nullptr,
+     nullptr},
+    {"_compiled_autograd_tracing",
+     (getter)THPFunction_compiled_autograd_tracing,
+     nullptr,
      nullptr,
      nullptr},
     {nullptr}};

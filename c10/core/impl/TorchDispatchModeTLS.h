@@ -21,5 +21,17 @@ struct C10_API TorchDispatchModeTLS {
 
 C10_API bool dispatch_mode_enabled();
 
+struct C10_API DisableTorchDispatchModeGuard {
+  DisableTorchDispatchModeGuard() : prior_(TorchDispatchModeTLS::get_state()) {
+    TorchDispatchModeTLS::set_state(TorchDispatchModeTLS());
+  }
+  ~DisableTorchDispatchModeGuard() {
+    TorchDispatchModeTLS::set_state(std::move(prior_));
+  }
+
+ private:
+  TorchDispatchModeTLS prior_;
+};
+
 } // namespace impl
 } // namespace c10

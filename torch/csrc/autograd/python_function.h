@@ -34,6 +34,10 @@ struct PyNode : public Node {
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;
+  void compiled_args(CompiledNodeArgs& args) override;
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override;
 
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
@@ -92,6 +96,9 @@ struct THPFunction {
   // into tensors full of zeros. Set by Python with 'set_materialize_grads'.
   // Default is true.
   bool materialize_grads;
+
+  // Cause AotAutograd to call the original FX graph rather than compiling.
+  bool compiled_autograd_tracing;
 
   std::vector<torch::autograd::VariableInfo> output_info;
   std::vector<torch::autograd::VariableInfo> input_info;

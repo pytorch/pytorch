@@ -1,6 +1,7 @@
 #include <torch/csrc/dynamo/init.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/dynamo/compiled_autograd_py.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/guards.h>
 
@@ -24,6 +25,12 @@ void initDynamoBindings(PyObject* torch) {
 
   PyObject* guards = torch_c_dynamo_guards_init();
   if (guards == NULL || PyModule_AddObject(dynamo, "guards", guards) != 0) {
+    throw python_error();
+  }
+
+  PyObject* compiled_autograd = torch_c_dynamo_compiled_autograd_init();
+  if (compiled_autograd == NULL ||
+      PyModule_AddObject(dynamo, "compiled_autograd", compiled_autograd) != 0) {
     throw python_error();
   }
 }
