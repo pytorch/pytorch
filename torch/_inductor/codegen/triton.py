@@ -14,7 +14,6 @@ import torch
 
 import torch._logging
 from torch._prims_common import is_integer_dtype
-from ..._dynamo import config as dynamo_config
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
@@ -934,7 +933,22 @@ class TritonKernel(Kernel):
         # Note. This may not be correct when there is indirect indexing
         if self.is_indirect_indexing(index):
             return False
-        return not set.issubset(set(self.range_tree_nodes.keys()), index.free_symbols)
+
+        index_numels = [1] * len(self.numels)
+        for symbol in index.free_symbols:
+            if symbol not in self.range_tree_nodes:
+                # Non-iterated variables, e.g. strides
+                continue
+            entry = self.range_tree_nodes[symbol]
+            index_numels[entry.parent.index] *= entry.length
+
+        # If the index variables only iterate over a subset of the kernel
+        # numels, then it must be broadcasted.
+        simplify = V.graph.sizevars.simplify
+        return any(
+            simplify(idx_range) != simplify(iter_range)
+            for idx_range, iter_range in zip(index_numels, self.numels)
+        )
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
@@ -2132,10 +2146,8 @@ class TritonScheduling:
                     stack.close()
                     kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
-                    # TODO - mostly works but needs a couple fixes
-                    if not dynamo_config.dynamic_shapes:
-                        # TODO - use split ranges ?
-                        indexing_dtype_strength_reduction(node._body)
+                    # TODO - use split ranges ?
+                    indexing_dtype_strength_reduction(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 
