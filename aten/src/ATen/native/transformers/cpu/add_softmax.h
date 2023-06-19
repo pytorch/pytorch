@@ -6,6 +6,9 @@
 #include <ATen/native/transformers/cpu/utils.h>
 #include <utility>
 
+#ifdef _OPENMP
+#include <omp.h>
+
 namespace at {
 namespace native {
 
@@ -19,8 +22,7 @@ inline void _exp_reduce_sum_fusion_kernel(
 #pragma omp declare reduction(                                    \
         + : vec::Vectorized<float> : omp_out = omp_out += omp_in) \
     initializer(                                                  \
-            omp_priv = {                                          \
-                { 0 }})
+            omp_priv = 0)
   auto vec_max = vec::Vectorized<float>(val);
   float tmp_sum = 0;
   auto vec_tmp_sum = vec::Vectorized<float>(tmp_sum);
@@ -77,10 +79,8 @@ inline void _mul_reduce_max_fusion_kernel(
         max : vec::Vectorized<float> : omp_out = \
         vec::maximum(omp_out, omp_in))           \
     initializer(                                 \
-            omp_priv = {                         \
-                { -std::numeric_limits<float>::infinity() }})
+            omp_priv = -std::numeric_limits<float>::infinity())
   auto vec_scale = vec::Vectorized<float>(scale);
-  auto vec_a = vec_scale;
   float tmp_max = -std::numeric_limits<float>::infinity();
   auto vec_tmp_max = vec::Vectorized<float>(tmp_max);
   for (long i = 0; i < vec_size * (size / vec_size); i += vec_size) {
@@ -166,8 +166,6 @@ inline void _mha_update_sum_max_kernel(
     const float& exp_val,
     const int& size,
     float* out) {
-  auto vec_sum_old = vec::Vectorized<float>(sum_old);
-  auto vec_sum_new = vec::Vectorized<float>(sum_new);
   float sum_cor = sum_old / sum_new;
   auto vec_sum_cor = vec::Vectorized<float>(sum_cor);
   auto vec_exp = vec::Vectorized<float>(exp_val);
@@ -188,3 +186,5 @@ inline void _mha_update_sum_max_kernel(
 
 } // namespace native
 } // namespace at
+
+#endif // _OPENMP

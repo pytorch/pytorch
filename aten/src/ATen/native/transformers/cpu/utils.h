@@ -15,15 +15,28 @@ inline void _mkl_gemm(
     const int& n,
     const int& k,
     const float& alpha,
-    const float* a,
+    float* a,
     const int& lda,
-    const float* b,
+    float* b,
     const int& ldb,
     const float& beta,
     float* c,
     const int& ldc) {
   cblas_sgemm(
-      layout, transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+      layout,
+      transa,
+      transb,
+      m,
+      n,
+      k,
+      alpha,
+      a,
+      lda,
+      b,
+      ldb,
+      beta,
+      c,
+      ldc);
 }
 
 inline void _mkl_gemm(
@@ -34,9 +47,9 @@ inline void _mkl_gemm(
     const int& n,
     const int& k,
     const float& alpha,
-    const at::BFloat16* a,
+    at::BFloat16* a,
     const int& lda,
-    const at::BFloat16* b,
+    at::BFloat16* b,
     const int& ldb,
     const float& beta,
     float* c,

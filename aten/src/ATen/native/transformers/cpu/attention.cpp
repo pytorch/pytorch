@@ -22,6 +22,13 @@
 #include <mkl.h>
 #endif
 
+#ifdef _OPENMP
+#include <omp.h>
+#else
+#define omp_get_max_threads() 1
+#define omp_get_thread_num() 0
+#endif
+
 namespace at {
 namespace native {
 
@@ -49,7 +56,6 @@ void _mha_mul_softmax_kernel(
     const int& qsize,
     const int& kvsize,
     const int& headsize) {
-  auto vec_scale = vec::Vectorized<scalar_t>(scale);
   float tmp_max = 0.f, tmp_sum = 0.f, sum_old = 0.f, exp_tmp = 0.f;
 
   for (int i = 0; i < qsize; ++i) {
@@ -99,7 +105,7 @@ at::Tensor sd_mha_base_kernel(
       at::empty({batchSize, qSize, hiddenSize}, ConvertTypeToKType<scalar_t>());
 
   int64_t qSplitSize = qSize;
-  for (int i = 0; i < qsplit_range.size(); ++i) {
+  for (size_t i = 0; i < qsplit_range.size(); ++i) {
     if (qSize > qsplit_range[i]) {
       qSplitSize = qsplit_size[i];
       break;
@@ -259,9 +265,6 @@ _scaled_dot_product_flash_attention_cpu(
         hiddenSize,
         softmax_scale);
   } else if (query.scalar_type() == at::kBFloat16) {
-    auto q = query_reshaped.data_ptr<at::BFloat16>();
-    auto k = key_reshaped.data_ptr<at::BFloat16>();
-    auto v = value_reshaped.data_ptr<at::BFloat16>();
     output = sd_mha_base_kernel<at::BFloat16>(
         query_reshaped.data_ptr<at::BFloat16>(),
         key_reshaped.data_ptr<at::BFloat16>(),
