@@ -1938,6 +1938,14 @@ class TestTemp(torch._dynamo.test_case.TestCase):
             res = opt_fn(*args, **kwargs)
             self.assertEqual(ref, res)
 
+            def fn1(*args, **kwargs):
+                return m.forward(*args, **kwargs)
+
+            opt_fn1 = torch._dynamo.optimize("eager", nopython=True)(fn1)
+            ref = fn1(*args, **kwargs)
+            res = opt_fn1(*args, **kwargs)
+            self.assertEqual(ref, res)
+
 instantiate_device_type_tests(TestTemp, globals(), only_for=("cpu",))
 
 if __name__ == "__main__":
