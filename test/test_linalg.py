@@ -5415,7 +5415,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         else:
             f(t, m, v, alpha=alpha, beta=beta, out=res2)
         res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
-        res1_fused_epilogue = (t.is_cuda and t.dim() == 1 and beta == 1 and not TEST_WITH_ROCM)
+        res1_fused_epilogue = (t.is_cuda and t.dim() == 1 and beta == 1)
+        if TEST_WITH_ROCM or _get_torch_cuda_version() < (11, 8):
+            # epilogue fusion enabled only on CUDA >= 11.8
+            res1_fused_epilogue = False
         res2_fused_epilogue = res1_fused_epilogue and res2.is_contiguous()
         if beta != 0:
             res3 += (beta * t).to(numpy_dtype).cpu().numpy()
