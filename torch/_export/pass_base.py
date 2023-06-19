@@ -180,7 +180,7 @@ class ExportPassBase(PassBase):
             elif target == control_flow.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-            elif target == control_flow.map:
+            elif target == control_flow.map or target == torch.ops.map_impl:
                 f, x, *args = args  # type: ignore[assignment]
                 return self.callback.call_map(f, x, args, meta)
             else:

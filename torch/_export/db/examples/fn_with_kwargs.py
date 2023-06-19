@@ -1,6 +1,6 @@
 import torch
 
-from torch._export.db.case import export_case, ExportArgs
+from torch._export.db.case import export_case, ExportArgs, SupportLevel
 
 
 @export_case(
@@ -15,7 +15,7 @@ from torch._export.db.case import export_case, ExportArgs
 )
 def fn_with_kwargs(pos0, tuple0, *myargs, mykw0=None, **mykwargs):
     """
-    Keyword arguments as function inputs are flattened.
+    Keyword arguments are not supported at the moment.
     """
     out = pos0
     for arg in tuple0:
