@@ -1783,6 +1783,7 @@ class TestRefsOpsInfo(TestCase):
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
+        '_refs.alias',
         '_refs.bitwise_right_shift',
         '_refs.copy_to',
         '_refs.empty_permuted',
@@ -1791,6 +1792,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.full',
         '_refs.full_like',
         '_refs.to',
+        '_refs.mvlgamma',
         '_refs.ones',
         '_refs.ones_like',
         '_refs.special.expit',
@@ -1799,6 +1801,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.uniform',
         '_refs.scalar_tensor',
         '_refs.trunc_divide',
+        '_refs.zero',
         '_refs.zeros',
         '_refs.zeros_like',
         '_refs.rfloordiv',
@@ -1837,6 +1840,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs._conversions.cdouble',
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
+        '_refs.mvlgamma',
+        '_refs.nn.functional.layer_norm',
         '_refs.nn.functional.tanhshrink',
         '_refs.nn.functional.triplet_margin_loss',
         '_refs.rfloordiv',
@@ -1854,6 +1859,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.dsplit',
         '_refs.dstack',
         '_refs.fill',
+        '_refs.fill_',
         '_refs.flatten',
         '_refs.fliplr',
         '_refs.flipud',
@@ -1907,6 +1913,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.conj',  # Calls _prims.conj
         '_refs.real',
         '_refs.imag',
+        '_refs.reshape_as',
+        '_refs.view_as',
     }
 
     @parametrize("op", ref_ops_names)
