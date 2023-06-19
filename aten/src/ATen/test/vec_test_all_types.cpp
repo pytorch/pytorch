@@ -1088,6 +1088,11 @@ namespace {
         AssertVectorized<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
         AssertVectorized<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
     }
+    TEST(ComplexTests, TestComplexConstructor) {
+        auto actual1 = vcomplex(1.0);
+        auto expected1 = vcomplex(Complex<float>(1.0));
+        AssertVectorized<vcomplex>(NAME_INFO(complex constructor), expected1, actual1).check();
+    }
     TYPED_TEST(QuantizationTests, Quantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1240,7 +1245,7 @@ namespace {
             for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();
                 qint_b[j] = generator.get();
-                if (std::is_same<underlying, int>::value) {
+                if constexpr (std::is_same_v<underlying, int>) {
                     //filter overflow cases
                     filter_sub_overflow(qint_vals[j], qint_b[j]);
                 }
