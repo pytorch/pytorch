@@ -91,6 +91,11 @@ class ArgsMismatchError(Unsupported):
         super().__init__(msg)
 
 
+class AttributeMutationError(Unsupported):
+    def __init__(self, msg):
+        super().__init__(msg)
+
+
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.
