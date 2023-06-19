@@ -166,6 +166,9 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv1d': [torch.float16],
         'nn.functional.conv2d': [torch.float16],
         'nn.functional.conv3d': [torch.float16],
+        'nn.functional.conv_transpose1d': [torch.float16],
+        'nn.functional.conv_transpose2d': [torch.float16],
+        'nn.functional.conv_transpose3d': [torch.float16],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -10423,6 +10426,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'round', 'xlogy', 'addcmul',
+        '__rmatmul__',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
