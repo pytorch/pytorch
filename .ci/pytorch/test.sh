@@ -322,6 +322,7 @@ test_perf_for_dashboard() {
   fi
   if [[ "$DASHBOARD_TAG" == *inference-true* ]]; then
     modes+=(inference)
+    dtype=bfloat16
   fi
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
   local targets=(accuracy performance)
@@ -432,7 +433,7 @@ test_dynamo_benchmark() {
     if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
     else
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --amp "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
     fi
   fi

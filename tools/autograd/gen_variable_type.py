@@ -1217,7 +1217,6 @@ def emit_body(
                     derivative.formula[wrap_opt_if_start:],
                 )
                 assert wrap_opt_if_match is not None
-                assert len(wrap_opt_if_match.groups()) == 1
 
                 wrap_opt_if_condition = wrap_opt_if_match.group(0).strip()
                 # replace 'grad_input_mask[num]' with 'grad_fn->should_compute_output(num)'
