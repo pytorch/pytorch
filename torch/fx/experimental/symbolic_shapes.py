@@ -36,7 +36,6 @@ from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import PythonValueRangeAnalysis, ValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
-from torch.fx.node import Argument, Target
 
 InputList = List
 DimList = List
