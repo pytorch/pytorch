@@ -38,6 +38,7 @@ def _use_grad_for_differentiable(func):
         finally:
             torch.set_grad_enabled(prev_grad)
         return ret
+    functools.update_wrapper(_use_grad, func)
     return _use_grad
 
 def _get_value(x):

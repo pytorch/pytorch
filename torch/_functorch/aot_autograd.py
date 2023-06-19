@@ -3304,23 +3304,7 @@ class PytreeThunk:
 
 def create_functional_call(mod, params_spec, params_len):
     # Redudant with dynamo, but worth having in case this gets invoked elsewhere.
-
-    # Note [Fake Modules and AOTAutograd]
-    #
-    # A simple heuristic for when to use fake versus real tensors is that fake tensors are for compile time
-    # (when we don't want to actually run the compute, but we do want to know about metadata),
-    # and real tensors are for runtime (when we actually want to do the compute.) However, in AOTAutograd,
-    # modules are the exception: we always pass AOTAutograd modules with real tensors.
-    # This is because AOTAutograd will produce a compiled function which needs to directly access any
-    # parameters the compiled function may need, but these parameters will NOT be passed in by the caller (aka Dynamo).
-    # So at compile time, the compiled function we produce must close over any parameters, and those parameters must be
-    # real parameters, and we cannot do this unless at compile time we get a module with real tensors.
-
-    # Even if Dynamo did pass all parameters explicitly at runtime, which would eliminate the need to close over
-    # the parameters, it would still be profitable to pass real tensor parameters to the compiler at compile time,
-    # because some compilation strategies like CUDA graphs want to burn in the pointer addresses where the parameter data live,
-    # and of course we can't do that unless we give the backend a real tensor.
-    torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
+    # https://github.com/pytorch/pytorch/issues/103569
 
     def functional_call(*args, **kwargs):
         with stateless._reparametrize_module(
