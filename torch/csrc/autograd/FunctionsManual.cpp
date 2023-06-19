@@ -1484,9 +1484,7 @@ Tensor sparse_mask_backward(
     const c10::Layout self_layout) {
   // NOTE: sparse_mask accumulates matches, so the backward step has to
   // accumulate as well.
-  const auto self_grad =
-      sparse_mask_like_grad(mask, grad, /*accumulate_matches=*/true);
-  return self_layout == at::kStrided ? self_grad.to_dense() : self_grad;
+  return sparse_mask_like_grad(mask, grad, /*accumulate_matches=*/true);
 }
 
 Tensor sparse_sparse_matmul_backward(
