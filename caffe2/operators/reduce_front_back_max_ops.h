@@ -20,7 +20,7 @@ class MaxReduceDimsOp final : public Operator<Context> {
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice() {
+  bool RunOnDevice() override {
     auto& X = Input(0);
 
     CAFFE_ENFORCE(

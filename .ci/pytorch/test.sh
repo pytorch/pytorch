@@ -314,7 +314,6 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
-  local dtype=amp
   local backend=inductor
   local modes=()
   if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
@@ -322,12 +321,16 @@ test_perf_for_dashboard() {
   fi
   if [[ "$DASHBOARD_TAG" == *inference-true* ]]; then
     modes+=(inference)
-    dtype=bfloat16
   fi
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
   local targets=(accuracy performance)
 
   for mode in "${modes[@]}"; do
+    if [[ "$mode" == "inference" ]]; then
+      dtype=bfloat16
+    elif [[ "$mode" == "training" ]]; then
+      dtype=amp
+    fi
     for target in "${targets[@]}"; do
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
