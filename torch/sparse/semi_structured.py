@@ -43,7 +43,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     @staticmethod
-    def __new__(cls, custom_shape: torch.Size, compressed_tensor: torch.Tensor, transposed: Optional[bool] = False):
+    def __new__(cls, custom_shape: torch.Size, compressed_tensor: torch.Tensor, transposed: bool = False):
         """
         Create a new instance of the class.
 
@@ -60,9 +60,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
         """
         kwargs = {}
-        kwargs["device"] = compressed_tensor.device
-        kwargs["dtype"] = compressed_tensor.dtype
-        kwargs["layout"] = compressed_tensor.layout
+        kwargs["device"] = compressed_tensor.device  # type: ignore[assignment]
+        kwargs["dtype"] = compressed_tensor.dtype  # type: ignore[assignment]
+        kwargs["layout"] = compressed_tensor.layout  # type: ignore[assignment]
         kwargs["requires_grad"] = False
 
         return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)  # type: ignore[attr-defined]
@@ -219,7 +219,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
     mask: Optional[torch.Tensor] = None,
-    transposed: Optional[bool] = False,
+    transposed: bool = False,
 ) -> SparseSemiStructuredTensor:
     """
     This function converts a dense tensor into a sparse semi-structured tensor.

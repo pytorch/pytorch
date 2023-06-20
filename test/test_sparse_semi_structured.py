@@ -1,5 +1,6 @@
 # Owner(s): ["module: sparse"]
 import random
+import unittest
 
 import torch
 from torch import nn
@@ -26,6 +27,7 @@ from torch.testing._internal.common_utils import (
 
 SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
 
+_IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 def rand_sparse_semi_structured_mask(
     r, c, dtype=torch.float16, device="cuda", choice=None
@@ -46,6 +48,8 @@ def rand_sparse_semi_structured_mask(
 
 
 class TestSparseSemiStructured(TestCase):
+
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_to_sparse_semi_structured(self, dtype):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
@@ -64,6 +68,7 @@ class TestSparseSemiStructured(TestCase):
         ):
             A_sparse = to_sparse_semi_structured(A)
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_mm_sparse_first_NT(self, dtype, device):
         """
@@ -96,6 +101,7 @@ class TestSparseSemiStructured(TestCase):
             sparse_result = torch.mm(A_sparse, B.t())
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_mm_sparse_first_T(self, dtype, device):
         """
@@ -112,6 +118,7 @@ class TestSparseSemiStructured(TestCase):
         ):
             torch.mm(A_sparse.t(), B)
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_mm_sparse_second_T(self, dtype, device):
         """
@@ -132,6 +139,7 @@ class TestSparseSemiStructured(TestCase):
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_mm_sparse_second_NT(self, dtype, device):
         """
@@ -148,6 +156,7 @@ class TestSparseSemiStructured(TestCase):
         ):
             sparse_result = torch.mm(A, B_sparse)
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @parametrize("inference_mode", [subtest(False), subtest(True)])
     def test_linear(self, inference_mode, device):
         """
@@ -171,23 +180,27 @@ class TestSparseSemiStructured(TestCase):
 
         assert torch.allclose(dense_result, sparse_result, rtol=1e-5, atol=1e-5)
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     def test_values(self):
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A, mask=A.bool())
         assert A_sparse.values().shape == (128, 64)
         assert (A_sparse.values() == 1).all()
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     def test_indices(self):
         A = rand_sparse_semi_structured_mask(128, 128)
         A_sparse = to_sparse_semi_structured(A, mask=A.bool())
         assert A_sparse.indices().shape == (128, 8)
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
     def test_unsupported_shape(self, dtype, device):
         A = rand_sparse_semi_structured_mask(4, 4, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.shape"):
             A_sparse = to_sparse_semi_structured(A, mask=A.bool())
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @dtypes(*all_types_and_complex())
     def test_unsupported_dtype(self, dtype, device):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype, device=device)
@@ -198,6 +211,7 @@ class TestSparseSemiStructured(TestCase):
         else:
             A_sparse = to_sparse_semi_structured(A, mask=A.bool())
 
+    @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     def test_unsupported_dim(self, device):
         A = torch.rand(128, 128, 128, device=device, dtype=torch.float16)
 
