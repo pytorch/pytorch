@@ -809,7 +809,8 @@ if _has_triton():
         full_grid = (values.shape[0], row_block, m // row_block)
         grid_blocks = None
         tensor_dims_map = {
-            # TODO: add comment
+            # We span nnz number of blocks, not nnz + 1,
+            # hence crow_indices[..., :-1]
             crow_indices[..., :-1]: (0, None, -1),
             values: (0, None, None),
         }
