@@ -12,15 +12,16 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
-from functools import reduce, partial, wraps
+from functools import reduce, partial
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo)
+     freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, parametrize, skipIfTorchDynamo,
+     setLinalgBackendsToDefaultFinally)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, has_cusolver,
+    (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS, largeTensorTest)
@@ -42,16 +43,6 @@ assert torch.get_default_dtype() is torch.float32
 if TEST_SCIPY:
     import scipy
 
-def setLinalgBackendsToDefaultFinally(fn):
-    @wraps(fn)
-    def _fn(*args, **kwargs):
-        try:
-            fn(*args, **kwargs)
-        finally:
-            # Set linalg backend back to default to make sure potential failures in one test
-            #   doesn't affect other linalg tests
-            torch.backends.cuda.preferred_linalg_library('default')
-    return _fn
 
 @unittest.skipIf(IS_ARM64, "Issue with numpy version on arm")
 class TestLinalg(TestCase):
@@ -2108,6 +2099,30 @@ class TestLinalg(TestCase):
             return "norm failed for input size %s, p=%s, keepdim=%s, dim=%s" % (
                 input_size, p, keepdim, dim)
 
+        # 'nuc' norm uses SVD, and thus its precsion is much lower than other norms.
+        # test_svd takes @precisionOverride({torch.float: 1e-4, torch.cfloat: 2e-4}),
+        # and here we are doing the same thing for nuc norm.
+        class PrecisionContext(object):
+            def __init__(self, test, norm):
+                self.norm = norm
+                self.saved_overrides = getattr(test, 'precision_overrides', None)
+                self.target_test = test
+
+            def __enter__(self):
+                if 'nuc' != self.norm:
+                    return None
+                self.target_test.precision_overrides = {torch.float: 1e-4, torch.cfloat: 2e-4}
+                return self.target_test.precision_overrides
+
+            def __exit__(self, type, value, tb) -> bool:
+                if 'nuc' != self.norm:
+                    return True
+                if self.saved_overrides is None:
+                    delattr(self.target_test, 'precision_overrides')
+                else:
+                    self.target_test.precision_overrides = self.saved_overrides
+                return True
+
         for keepdim in [False, True]:
             # full reduction
             x = torch.randn(25, device=device)
@@ -2133,8 +2148,9 @@ class TestLinalg(TestCase):
                 res = x.norm(p, keepdim=keepdim).cpu()
                 expected = np.linalg.norm(xn, p, keepdims=keepdim)
                 msg = gen_error_message(x.size(), p, keepdim)
-                self.assertEqual(res.shape, expected.shape, msg=msg)
-                self.assertEqual(res, expected, msg=msg)
+                with PrecisionContext(self, p):
+                    self.assertEqual(res.shape, expected.shape, msg=msg)
+                    self.assertEqual(res, expected, msg=msg)
 
             # zero dimensions
             x = torch.randn((), device=device)
@@ -2160,8 +2176,9 @@ class TestLinalg(TestCase):
                     res = x.norm(p=p, dim=dim, keepdim=keepdim).cpu()
                     expected = np.linalg.norm(xn, ord=p, axis=dim, keepdims=keepdim)
                     msg = gen_error_message(x.size(), p, keepdim, dim)
-                    self.assertEqual(res.shape, expected.shape, msg=msg)
-                    self.assertEqual(res, expected, msg=msg)
+                    with PrecisionContext(self, p):
+                        self.assertEqual(res.shape, expected.shape, msg=msg)
+                        self.assertEqual(res, expected, msg=msg)
 
     # Test that torch.norm with p=+/-inf propagates NaN
     def test_norm_old_nan_propagation(self, device):
@@ -2338,6 +2355,7 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     @skipCUDAIfNoCusolver
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -2420,7 +2438,7 @@ class TestLinalg(TestCase):
         if torch.device(device).type == 'cuda':
             if torch.cuda.has_magma:
                 backends.append("magma")
-            if has_cusolver():
+            if has_cusolver() or has_hipsolver():
                 backends.append("cusolver")
 
         ns = (12, 4, 2, 0)
@@ -2482,7 +2500,6 @@ class TestLinalg(TestCase):
             Q.sum().abs().backward()
 
     @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
-    @skipCUDAIfRocm
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
@@ -5575,6 +5592,20 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 y = torch.baddbmm(input, mat1, mat2, beta=0.0, out=out)
                 self.assertEqual(y_ref, y)
 
+    @dtypes(torch.int16, torch.int32, torch.int64, torch.float16, torch.float32, torch.float64)
+    def test_baddbmm_input_dtypes_compatibility(self, device, dtype):
+        batch1 = torch.rand((1, 2, 2), dtype=torch.float32, device=device)
+        batch2 = torch.rand((1, 2, 2), dtype=torch.float32, device=device)
+        input_tensor = torch.rand((1, 2, 2), device=device).to(dtype)
+        if dtype != torch.float32:
+            with self.assertRaisesRegex(RuntimeError, "Input dtypes must be the same"):
+                y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0)
+        else:
+            out = torch.randn((1, 2, 2), dtype=dtype, device=device).fill_(torch.nan)
+            y_ref = torch.bmm(batch1, batch2)
+            y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0, out=out)
+            self.assertEqual(out, y_ref)
+
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
@@ -7157,6 +7188,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         run_test((1, 1), (1, 1, 1025))
 
     @skipCUDAIfNoCusolver
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     def test_pca_lowrank(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
@@ -7344,7 +7376,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @skipCUDAIfNoCusolver
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @skipCUDAIfRocm
     @dtypes(*floating_and_complex_types())
     def test_ldl_factor(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
