@@ -10378,6 +10378,17 @@ class TestNoRegression(TestCase):
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "cpu")
 
+        # Ensures that `mps:0` Tensors can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps:0")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="mps:0")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
 
 MPS_DTYPES = get_all_dtypes()
 for t in [torch.double, torch.cdouble, torch.cfloat, torch.bfloat16]:
