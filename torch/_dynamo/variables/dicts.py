@@ -4,6 +4,8 @@ import functools
 import inspect
 from typing import Dict, List
 
+import torch
+
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..eval_frame import skip_code
@@ -218,6 +220,8 @@ class ConstDictVariable(VariableTracker):
             key.is_python_constant()
             or isinstance(key, TensorVariable)
             and key.specialized_value is not None
+            or isinstance(key, ConstantVariable)
+            and key.python_type() is torch.dtype
         )
 
     @classmethod
