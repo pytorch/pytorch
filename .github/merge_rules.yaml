@@ -296,6 +296,7 @@
   - mingfeima
   - XiaobingSuper
   - jgong5
+  - vfdev-5
   mandatory_checks_name:
   - EasyCLA
   - Lint
