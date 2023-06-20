@@ -1586,7 +1586,6 @@ make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.put)
 make_fallback(aten.reflection_pad1d)
-make_fallback(aten.renorm)
 make_fallback(aten.replication_pad1d)
 make_fallback(aten.resize)
 make_fallback(aten.resize_)
@@ -1827,7 +1826,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    if isinstance(data, sympy.Symbol):
+    if isinstance(data, sympy.Expr):
         ranges = []
 
         def inner_fn(index):

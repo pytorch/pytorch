@@ -9,6 +9,7 @@ import torch._inductor
 
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
     TEST_WITH_ROCM,
     TestCase,
@@ -425,7 +426,6 @@ class ForeachTests(TestCase):
 
     @requires_cuda()
     @bin_ops
-    @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_dynamic_shapes_fallback(self, op):
@@ -443,6 +443,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @unittest.skipIf(IS_FBCODE, "cpp compile not supported in fbcode")
     @bin_ops
     def test_cpu_cpp_fallback(self, op):
         def fn(a0, a1, b0, b1):
