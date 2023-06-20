@@ -5,7 +5,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 
 import torch.utils._pytree as pytree
 
-from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
+from torch._C import DispatchKey, DispatchKeySet, _ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -128,8 +128,8 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
     assert all(not f.requires_grad for f in flat_operands
                if isinstance(f, torch.Tensor))
 
-    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU))
-    return cond(pred, true_fn, false_fn, *operands)
+    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.AutogradCPU)):
+        return cond(pred, true_fn, false_fn, *operands)
 
 
 @cond.py_impl(ProxyTorchDispatchMode)
@@ -245,8 +245,7 @@ def cond_func(pred, true_fn, false_fn, inputs):
     unwrapped_inputs = _unwrap_all_tensors_from_functional(inputs, reapply_views=reapply_views)
     unwrapped_pred = _unwrap_all_tensors_from_functional(pred, reapply_views=reapply_views)
     mode = 'mutations_and_views' if reapply_views else 'mutations'
-    guard = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize))
-    try:
+    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
         functional_true = functionalize(true_fn, remove=mode)
         functional_false = functionalize(false_fn, remove=mode)
         for branch in [true_fn, false_fn]:
@@ -260,9 +259,6 @@ def cond_func(pred, true_fn, false_fn, inputs):
 
         cond_return = cond(unwrapped_pred, functional_true, functional_false, unwrapped_inputs)
         return _wrap_all_tensors_to_functional(cond_return, level=0)
-
-    finally:
-        del guard
 
 
 @cond.py_impl(torch._C._functorch.TransformType.Functionalize)
