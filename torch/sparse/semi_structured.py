@@ -43,7 +43,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     @staticmethod
-    def __new__(cls, custom_shape: torch.Size, compressed_tensor: torch.Tensor, transposed: bool = Flase) -> torch.Tensor:
+    def __new__(cls, custom_shape: torch.Size, compressed_tensor: torch.Tensor, transposed: bool = False) -> torch.Tensor:
         """
         Create a new instance of the class.
 
