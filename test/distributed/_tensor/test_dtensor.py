@@ -3,17 +3,12 @@
 
 import torch
 import torch.distributed as dist
-import torch.distributed._tensor.random as random
 import torch.nn.functional as F
 from numpy.testing import assert_array_equal
 
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    PairwiseParallel,
-    parallelize_module,
-)
+from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -80,41 +75,6 @@ class DTensorTest(DTensorTestBase):
                 requires_grad=True,
                 stride=local_tensor.stride(),
             )
-
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_tensor_parallel_init(self):
-        mesh = torch.arange(self.world_size)
-        model = torch.nn.Linear(5, 1024, device="cuda")
-        model_tp = parallelize_module(model, device_mesh, ColwiseParallel())
-        random_seed = random._rng_tracker.get_seed("tensor-parallel-rng")
-        torch.cuda.manual_seed(random_seed)  # reset random state
-
-        size = [8, 5]
-        device_mesh = DeviceMesh(self.device_type, mesh)
-        # weight sharding (row-wise parallel)
-        placements = [Shard(0), Replicate()]
-        data_parallel_group_1 = [0, 1]
-        # default seed is same within a MP group, and same within a DP group
-        # unless `data_parallel_random_init` is True.
-        default_seed = 100
-        # Model Parallel seed is different within a MP group
-        model_parallel_seed = 10 * (1 if self.rank in data_parallel_group_1 else 2)
-        model_parallel_seed += default_seed
-        # use MP seed to init
-        torch.cuda.manual_seed(model_parallel_seed)
-        local_tensor = torch.empty(size).uniform_()
-        dtensor_1 = DTensor.from_local(local_tensor, device_mesh, placements)
-        dtensor_1 = dtensor_1.redistribute(device_mesh, [Replicate(), Replicate()])
-
-        rng_tracker = MegatronCudaRNGStatesTracker()
-        # How to pass in DP/MP groups information?
-        rng_tracker.manual_seed(device_mesh, default_seed, model_parallel_seed)
-        local_tensor = torch.empty(size)
-        dtensor_2 = DTensor.from_local(local_tensor, device_mesh, placements)
-        dtensor_2.uniform_()
-        dtensor_2 = dtensor_2.redistribute(device_mesh, [Replicate(), Replicate()])
-        self.assertEqual(dtensor_1.to_local(), dtensor_2.to_local())
 
     @with_comms
     def test_meta_dtensor(self):
