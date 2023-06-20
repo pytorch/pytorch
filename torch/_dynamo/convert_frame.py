@@ -369,6 +369,7 @@ def convert_frame_assert(
             hooks,
             frame,
             frame_state=frame_state,
+            cache_size=cache_size,
         )
 
     _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
@@ -388,6 +389,7 @@ def _compile(
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
+    cache_size=None,
 ) -> Optional[GuardedCode]:
     output: Optional[OutputGraph] = None
     # This is shared across restarts
@@ -498,6 +500,7 @@ def _compile(
             hooks.guard_export_fn(output.guards)
 
         output.local_scope.clear()
+
         return guarded_code
     except (
         Unsupported,
