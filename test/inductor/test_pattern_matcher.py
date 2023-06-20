@@ -3,9 +3,9 @@ import copy
 import unittest
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.utils import run_and_get_code
@@ -128,11 +128,12 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
 
+    @expectedFailureDynamicWrapper
     def test_cat_slice_cat(self):
         def check_counter(counter, expected):
             if not inductor_config.cpp_wrapper:
                 self.assertEqual(counter, expected)
-            elif not dynamo_config.dynamic_shapes:
+            else:
                 # cpp_wrapper for the CUDA backend runs two passes
                 self.assertEqual(counter, 2 * expected)
 
