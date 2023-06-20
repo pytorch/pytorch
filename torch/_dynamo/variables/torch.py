@@ -769,9 +769,11 @@ def dynamo_enable_grad(tx):
     from . import GradModeVariable
 
     org_value = torch.is_grad_enabled()
-    GradModeVariable.create(tx, True)
-    yield
-    GradModeVariable.create(tx, org_value)
+    try:
+        GradModeVariable.create(tx, True)
+        yield
+    finally:
+        GradModeVariable.create(tx, org_value)
 
 
 # See NOTE [HigherOrderOperator tracing design] for details of the design
@@ -784,7 +786,7 @@ def speculate_subgraph(
     checkpoint,
     *,
     always_restore=False,
-    trace_with_autograd=False,
+    enable_grad=False,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
     from .builder import wrap_fx_proxy
@@ -825,9 +827,7 @@ def speculate_subgraph(
                 args.append(new_arg)
 
             autograd_ctx = (
-                dynamo_enable_grad(tx)
-                if trace_with_autograd
-                else contextlib.nullcontext()
+                dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
             )
             with autograd_ctx:
                 output = f.call_function(tx, args, {})
@@ -1354,7 +1354,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             example_value = r
         elif self.value is torch._functorch.eager_transforms.grad_impl:
             # TODO: Support `fn` with kwargs.
-            if not torch._dynamo.config.capture_func_grad:
+            if not torch._dynamo.config.capture_func_transforms:
                 unimplemented("torch.func.grad capture is disabled")
             # [NOTE] Here we are (roughly) modelling the following
             #
@@ -1367,6 +1367,12 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
             # get arguments
             func, argnums, has_aux = grad_args
+            kwargs = args[4].items
+            if len(kwargs) > 0:
+                # Since speculate_subgraph doesn't support kwargs, we can't handle this for now.
+                unimplemented(
+                    "torch.func.grad: kwargs arguments are currently unsupported."
+                )
 
             # Trace through the `func`
             # NOTE [HACK: Enable autograd while tracing function]
@@ -1389,7 +1395,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 graph_checkpoint,
                 checkpoint,
                 # See NOTE [HACK: Enable autograd while tracing function]
-                trace_with_autograd=True,
+                enable_grad=True,
             )
 
             body_name = add_subgraph(

@@ -30,6 +30,12 @@ def remove_trailing_space(code):
     return "\n".join([line.rstrip() for line in code.split("\n")])
 
 
+def normalize_gm(gm_str):
+    # strip comments as comments have path to files which may differ from
+    # system to system.
+    return remove_trailing_space(strip_comment(gm_str))
+
+
 # Equivalent to backend="eager", but also records graphs that
 # we can assert on
 class EagerAndRecordGraphs:
@@ -709,11 +715,7 @@ class GraphModule(torch.nn.Module):
             return sum_1
 """
 
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_freevar_tensor(self):
@@ -752,11 +754,7 @@ class GraphModule(torch.nn.Module):
             sum_1 = add.sum();  add = None
             return sum_1
 """
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_freevar_python_scalar(self):
@@ -794,11 +792,7 @@ class GraphModule(torch.nn.Module):
             sum_1 = add.sum();  add = None
             return sum_1
 """
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_capture_tensor(self):
@@ -841,12 +835,7 @@ class GraphModule(torch.nn.Module):
             sum_1 = add.sum();  add = None
             return sum_1
 """
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
-
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_closure_scalar(self):
@@ -888,11 +877,7 @@ class GraphModule(torch.nn.Module):
             sum_1 = add.sum();  add = None
             return sum_1
 """
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_has_aux(self):
@@ -934,11 +919,7 @@ class GraphModule(torch.nn.Module):
             cos = l_x_.cos();  l_x_ = None
             return (sum_1, cos)
 """
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_two_tensor_has_aux(self):
@@ -980,11 +961,7 @@ class GraphModule(torch.nn.Module):
             cos = l_x_.cos();  l_x_ = None
             return (sum_1, cos)
 """
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_two_tensor_all_grad_has_aux(self):
@@ -1029,11 +1006,7 @@ class GraphModule(torch.nn.Module):
             cos = l_x_.cos();  l_x_ = None
             return (sum_1, cos)
 """
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_over_grad(self):
@@ -1077,11 +1050,7 @@ class GraphModule(torch.nn.Module):
                 sum_1 = sin.sum();  sin = None
                 return sum_1
 """
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_with_graph_break(self):
@@ -1177,11 +1146,7 @@ class GraphModule(torch.nn.Module):
             add = sum_1 + 3.0;  sum_1 = None
             return add
 """
-        # strip comments as comments have path to files which may differ from
-        # system to system.
-        actual = remove_trailing_space(
-            strip_comment(wrapped_gm.print_readable(print_output=False))
-        )
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(actual, expected)
 
     def test_grad_disable_capture(self):
@@ -1189,12 +1154,12 @@ class GraphModule(torch.nn.Module):
 
         @contextlib.contextmanager
         def disable_grad_capture():
-            org_val = torch._dynamo.config.capture_func_grad
-            torch._dynamo.config.capture_func_grad = False
+            org_val = torch._dynamo.config.capture_func_transforms
+            torch._dynamo.config.capture_func_transforms = False
             try:
                 yield
             finally:
-                torch._dynamo.config.capture_func_grad = org_val
+                torch._dynamo.config.capture_func_transforms = org_val
 
         with disable_grad_capture():
             # We have verified above that this
@@ -1216,6 +1181,24 @@ class GraphModule(torch.nn.Module):
                 {"torch.func.grad capture is disabled": 2},
             )
             self.assertEqual(actual, expected)
+
+    def test_grad_fn_with_kwargs(self):
+        def fn(x, y):
+            return (x + y).sum()
+
+        def wrapper_fn(x, y):
+            return torch.func.grad(fn)(x, y=y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"torch.func.grad: kwargs arguments are currently unsupported.": 2},
+        )
+        self.assertEqual(actual, expected)
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):

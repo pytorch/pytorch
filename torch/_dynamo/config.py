@@ -261,8 +261,8 @@ _save_config_ignore = {
 
 capture_autograd_function = True
 
-# enable/disable dynamo tracing for `torch.func.grad`
-capture_func_grad = True
+# enable/disable dynamo tracing for `torch.func` transforms
+capture_func_transforms = True
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
