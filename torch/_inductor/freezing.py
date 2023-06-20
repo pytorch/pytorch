@@ -165,7 +165,8 @@ def freeze(
     """
 
     params_flat = torch._guards.TracingContext.get().params_flat
-    mkldnn_weight_prepack_fx(aot_autograd_gm, params_flat, fw_metadata)
+    if config.cpp.weight_prepack:
+        mkldnn_weight_prepack_fx(aot_autograd_gm, params_flat, fw_metadata)
     preserved_arg_indices = replace_params_with_constants(
         aot_autograd_gm, params_flat, fw_metadata
     )

@@ -544,8 +544,8 @@ if torch._C._has_mkldnn:
                     unary_attr=UnaryAttr("relu"),
                 )
 
-    def _reshape_linear_reshape_conversion():
-        # convert reshape+linear+reshape to linear for applying fusion path.
+    def _recover_linear():
+        # convert reshape+linear+reshape to a single linear for applying fusion path.
         @register_graph_pattern(
             CallFunction(
                 aten.reshape.default,
@@ -560,6 +560,7 @@ if torch._C._has_mkldnn:
                 ),
                 KeywordArg("reshape_2"),
             ),
+            pass_number=0,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             reshape_1 = kwargs.get("reshape_1")
@@ -572,10 +573,40 @@ if torch._C._has_mkldnn:
                 node.replace_all_uses_with(repl)
                 match.erase_nodes(graph)
 
+        # convert linear+bias to a single linear for applying fusion path.
+        @register_graph_pattern(
+            CallFunction(
+                aten.add.Tensor,
+                CallFunction(mkldnn._linear_pointwise.default, *_linear_args),
+                Arg(),
+            ),
+        )
+        def linear_bias_pattern(match, *args):
+            graph = match.graph
+            node = match.output_node()
+            linear_node = node.args[0]
+            weight_meta = linear_node.args[1].meta.get("val")
+            bias_meta = node.args[1].meta.get("val")
+            if weight_meta is None or bias_meta is None:
+                return
+            if (
+                linear_node.args[2] is None
+                and bias_meta.dim() == 1
+                and bias_meta.size(0) == weight_meta.size(0)
+            ):
+                new_args = list(linear_node.args)
+                new_args[2] = node.args[1]
+                repl = graph.call_function(
+                    mkldnn._linear_pointwise.default, tuple(new_args)
+                )
+                repl.meta.update(node.meta)
+                node.replace_all_uses_with(repl)
+                match.erase_nodes(graph)
+
     @functools.lru_cache(None)
     def _mkldnn_fusion_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
-            _reshape_linear_reshape_conversion()
+            _recover_linear()
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()

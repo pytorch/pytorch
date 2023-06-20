@@ -3,8 +3,6 @@ import itertools
 
 import torch
 
-import torch._dynamo
-
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
@@ -13,7 +11,6 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CPU
-
 
 unary_list = {
     torch.nn.ReLU(): 2,
@@ -70,6 +67,16 @@ binary_list = {
     lambda x, y: torch.sub(x, y): 2,  # call_function
     lambda x, y: x.sub(y): 2,  # call_method
     lambda x, y: x.sub_(y): 2,  # call_method
+}
+
+linear_binary_list = {
+    lambda x, y: torch.add(x, y): (2, 4, False),  # call_function
+    lambda x, y: torch.add(y, x): (1, 2, False),  # call_function
+    lambda x, y: x.add(y): (2, 4, False),  # call_method
+    lambda x, y: x.add_(y): (2, 4, True),  # call_method
+    lambda x, y: torch.sub(x, y): (1, 2, False),  # call_function
+    lambda x, y: x.sub(y): (1, 2, False),  # call_method
+    lambda x, y: x.sub_(y): (1, 2, True),  # call_method
 }
 
 
@@ -277,19 +284,28 @@ class TestPaternMatcher(TestCase):
 
             def forward(self, x, y):
                 x = self.linear(x)
-                x = self.binary_fn(x, y)
+                x = self.binary_fn(x, y.clone())
                 return x
 
-        options = itertools.product(binary_list, [[2, 3, 10], [2, 10]], [True, False])
+        options = itertools.product(
+            linear_binary_list, [[2, 3, 10], [2, 10]], [True, False]
+        )
         dtype = torch.bfloat16
         out_feature = 30
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
+                match_count = linear_binary_list[binary_fn][0]
+                match_nodes = linear_binary_list[binary_fn][1]
+                if len(input_shape) == 3:
+                    is_inplace = linear_binary_list[binary_fn][2]
+                    # view + linear + view(joint_graph+post_grad)
+                    match_count = match_count + 5 if is_inplace else match_count + 3
+                    match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
                 mod = M(binary_fn, input_shape[-1], out_feature, bias).to(dtype).eval()
                 v = torch.randn(input_shape).to(dtype)
                 other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
                 self._test_common(
-                    mod, (v, other), 1, binary_list[binary_fn], rtol=1e-2, atol=1e-2
+                    mod, (v, other), match_count, match_nodes, rtol=1e-2, atol=1e-2
                 )
 
     # https://github.com/pytorch/pytorch/issues/99841.
