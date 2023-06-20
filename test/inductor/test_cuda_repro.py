@@ -146,7 +146,7 @@ class CudaReproTests(TestCase):
         assert compiled([])[0].device.type == "cuda"
 
     @config.patch({"triton.cudagraphs": True})
-    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
+    @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -174,7 +174,7 @@ class CudaReproTests(TestCase):
         self.common(Repro(), ())
 
     @config.patch({"triton.cudagraphs": True})
-    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
+    @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -188,7 +188,6 @@ class CudaReproTests(TestCase):
 
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(
-        dynamic_shapes=True,
         automatic_dynamic_shapes=True,
         assume_static_by_default=False,
     )
@@ -214,7 +213,7 @@ class CudaReproTests(TestCase):
                 self.assertTrue(same(fn(*inputs), (inputs[0] + inputs[1], 6)))
 
     # TODO: Abstract this out, test more extensively
-    @torch._dynamo.config.patch(dynamic_shapes=True, assume_static_by_default=False)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dynamic_shapes(self):
         torch._dynamo.reset()  # Needed since everywhere else uses "inductor"
 
@@ -236,7 +235,7 @@ class CudaReproTests(TestCase):
         torch._dynamo.reset()
 
     @config.patch({"triton.cudagraphs": True, "size_asserts": False})
-    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
+    @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs_no_size_asserts(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -251,7 +250,7 @@ class CudaReproTests(TestCase):
     # TODO: enable
     @config.patch({"triton.cudagraph_trees": False})
     @config.patch({"triton.cudagraphs": True})
-    @dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
+    @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_inplace_updates_cudagraphs(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -336,6 +335,20 @@ class CudaReproTests(TestCase):
         ]
         with torch.cuda.amp.autocast(enabled=False):
             assert same_two_models(mod, opt_mod, args), "Dynamo failed"
+
+    @config.patch(allow_buffer_reuse=False)
+    def test_issue103461(self):
+        def forward(add_1):
+            var_mean = torch.ops.aten.var_mean.correction(
+                add_1, [2], correction=0, keepdim=True
+            )
+            getitem_1 = var_mean[1]
+            return getitem_1
+
+        x = torch.randn(1, 8, 768, device="cuda")
+        correct = forward(x)
+        actual = torch.compile(forward, fullgraph=True)(x)
+        self.assertEqual(actual, correct)
 
     def test_autotune_inplace_kernel(self):
         """
@@ -536,7 +549,6 @@ class CudaReproTests(TestCase):
         snapshot = str(torch.cuda.memory._snapshot())
         self.assertTrue("called_inside_compile" in snapshot)
 
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_negative_arange_dynamic_shapes(self):
         # Repro from alibi relative encodings
         def sign(x):
@@ -757,6 +769,22 @@ class CudaReproTests(TestCase):
             res1 = func(x)
             res2 = jit_func(x)
             self.assertEqual(res1, res2)
+
+    def test_issue103481(self):
+        def fn(x, y):
+            # NOTE: 6 dimensions is important! does not fail for 5 dimensions
+            mean = torch.mean(x, [2, 3, 4, 5], keepdim=True)
+            add = mean + y
+            return add
+
+        x = torch.rand(4, 4, 4, 4, 4, 4, device="cuda")
+        y = torch.rand((), device="cuda")
+        expect = fn(x, y)
+
+        opt_fn = torch.compile(fn)
+        actual = opt_fn(x, y)
+
+        self.assertEqual(expect, actual)
 
 
 if __name__ == "__main__":

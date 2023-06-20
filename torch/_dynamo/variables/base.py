@@ -4,14 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from .. import variables
 from ..exc import unimplemented
 from ..source import AttrSource, Source
-from ..utils import (
-    dict_values,
-    get_custom_getattr,
-    identity,
-    istype,
-    object_has_getattribute,
-    odict_values,
-)
+from ..utils import dict_values, identity, istype, odict_values
 
 
 class MutableLocal:
@@ -83,6 +76,7 @@ class VariableTracker(metaclass=HasPostInit):
         value,
         cache=None,
         skip_fn=lambda _: False,  # Whether we should skip applying to this var
+        update_contains=False,
     ):
         """
         Walk this object and call fn on all the VariableTracker
@@ -104,20 +98,25 @@ class VariableTracker(metaclass=HasPostInit):
                             fn, updated_dict[key], cache, skip_fn
                         )
                 result = fn(value.clone(**updated_dict))
+                if update_contains is False:
+                    result._update_contains()
             else:
                 result = fn(value)
 
         elif istype(value, list):
-            result = [cls.apply(fn, v, cache, skip_fn) for v in value]
+            result = [cls.apply(fn, v, cache, skip_fn, update_contains) for v in value]
         elif istype(value, tuple):
-            result = tuple(cls.apply(fn, v, cache, skip_fn) for v in value)
+            result = tuple(
+                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value
+            )
         elif istype(value, collections.OrderedDict):
             result = collections.OrderedDict(
-                cls.apply(fn, v, cache, skip_fn) for v in value.items()
+                cls.apply(fn, v, cache, skip_fn, update_contains) for v in value.items()
             )
         elif istype(value, dict):
             result = {
-                k: cls.apply(fn, v, cache, skip_fn) for k, v in list(value.items())
+                k: cls.apply(fn, v, cache, skip_fn, update_contains)
+                for k, v in list(value.items())
             }
         else:
             result = value
@@ -192,62 +191,9 @@ class VariableTracker(metaclass=HasPostInit):
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError()
 
-    def dynamic_getattr(self, tx, name):
-        if not self.source:
-            raise NotImplementedError()
-
-        # For local source, we associate the real value. We use this real value
-        # for implementing getattr fallthrough on the variable tracker base class.
-
-        # Note - this scope construction is mirrored in guards
-        # A subsequent PR will introduce a util.
-        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
-        try:
-            # We raise in case we get a typerror bug w/ SuperSource.
-            # SuperSource has bugs in it atm, and can produce code like
-            # eval("super(L['mod'].model.model.encoder.embed_positions.forward__class__,
-            # L['mod'].model.model.encoder.embed_positions)", scope)
-            # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
-            _input_associated_real_value = eval(self.source.name(), scope)
-        except TypeError:
-            raise NotImplementedError()
-
-        if _input_associated_real_value is None:
-            raise NotImplementedError()
-
-        if object_has_getattribute(_input_associated_real_value):
-            raise NotImplementedError()
-
-        if get_custom_getattr(_input_associated_real_value):
-            raise NotImplementedError()
-
-        real_value = getattr(_input_associated_real_value, name)
-        if callable(real_value):
-            # Callables have more nuanced handling, and we should let the existing system delegate here.
-            # Raising was past behavior and so should always be sound to fall back.
-            # Note - at a certain point we may want to handle
-            raise NotImplementedError()
-
-        from .builder import VariableBuilder
-
-        attr_source = AttrSource(self.source, name)
-        has_attr_guard = attr_source.source.make_guard(GuardBuilder.HASATTR)
-        return (
-            VariableBuilder(tx, attr_source)(real_value)
-            .add_options(self)
-            .add_guard(has_attr_guard)
-        )
-
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)
-        try:
-            value = self.dynamic_getattr(tx, name)
-        except NotImplementedError:
-            # Don't reraise - there are classes that can check const_getattr here.
-            value = None
-        if value:
-            return value
 
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
@@ -332,16 +278,29 @@ class VariableTracker(metaclass=HasPostInit):
         if self.recursively_contains is None:
             self.recursively_contains = set()
 
-            def aggregate_mutables(var):
-                self.recursively_contains.update(var.recursively_contains)
-                if var.mutable_local is not None:
-                    self.recursively_contains.add(var.mutable_local)
-
-                return var
-
             VariableTracker.apply(
-                aggregate_mutables, self, skip_fn=lambda var: var is not self
+                self._aggregate_mutables, self, skip_fn=lambda var: var is not self
             )
+
+        assert None not in self.recursively_contains
+
+    def _aggregate_mutables(self, var):
+        self.recursively_contains.update(var.recursively_contains)
+        if var.mutable_local is not None:
+            self.recursively_contains.add(var.mutable_local)
+
+        return var
+
+    # This is used to forcely update self.recursively_contains
+    def _update_contains(self):
+        self.recursively_contains = set()
+
+        VariableTracker.apply(
+            self._aggregate_mutables,
+            self,
+            skip_fn=lambda var: var is not self,
+            update_contains=True,
+        )
 
         assert None not in self.recursively_contains
 
