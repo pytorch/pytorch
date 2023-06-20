@@ -553,7 +553,6 @@ class TensorVariable(VariableTracker):
                 name == "new"
                 and len(args) == 1
                 and isinstance(args[0], (SizeVariable, ShapeVariable))
-                and not config.dynamic_shapes
             ):
                 name = "new_empty"
             return wrap_fx_proxy(
