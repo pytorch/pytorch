@@ -178,7 +178,7 @@ class TestFunctionalization(TestCase):
                 inputs_to_buffers={"arg2_1": "L__self___buf"},
                 buffers_to_mutate={"add_tensor": "L__self___buf"},
                 backward_signature=None,
-                assertion_dep_token_otuput="dep_token_8",
+                assertion_dep_token_output="dep_token_8",
             ),
         )
         output_node = next(n for n in ep.graph.nodes if n.op == "output")

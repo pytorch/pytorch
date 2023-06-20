@@ -69,7 +69,7 @@ class ExportGraphSignature:
 
     backward_signature: Optional[ExportBackwardSignature]
 
-    assertion_dep_token_otuput: Optional[FQN] = None
+    assertion_dep_token_output: Optional[FQN] = None
 
 
 class ExportedProgram:
@@ -195,7 +195,7 @@ def _update_after_functionalizing_runtime_assertions(
 ) -> ExportedProgram:
     graph_signature = dataclasses.replace(
         copy.deepcopy(ep.graph_signature),
-        assertion_dep_token_otuput=functionalized.dep_token_output,
+        assertion_dep_token_output=functionalized.dep_token_output,
     )
 
     # Update output spec so dep token will always be bundled with original output
@@ -257,7 +257,7 @@ def _update_exported_program(
     graph_signature: Optional[ExportGraphSignature] = None,
     call_spec: Optional[CallSpec] = None,
 ) -> ExportedProgram:
-    if graph_module is None and graph_signature is None:
+    if graph_module is None and graph_signature is None and call_spec is None:
         return ep
 
     gm = copy.deepcopy(ep.graph_module) if graph_module is None else graph_module
