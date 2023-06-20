@@ -1678,6 +1678,8 @@ Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
 The input tensor must be of integral type. This operator supports
 :ref:`broadcasting to a common shape <broadcasting-semantics>` and
 :ref:`type promotion <type-promotion-doc>`.
+In any case, if the value of the right operand is negative or is greater
+or equal to the number of bits in the promoted left operand, the behavior is undefined.
 
 The operation applied is:
 
@@ -1732,6 +1734,10 @@ stack(tensors, dim=0, *, out=None) -> Tensor
 Concatenates a sequence of tensors along a new dimension.
 
 All tensors need to be of the same size.
+
+.. seealso::
+
+    :func:`torch.cat` concatenates the given sequence along an existing dimension.
 
 Arguments:
     tensors (sequence of Tensors): sequence of tensors to concatenate
@@ -2303,6 +2309,10 @@ dimension) or be empty.
 and :func:`torch.chunk`.
 
 :func:`torch.cat` can be best understood via examples.
+
+.. seealso::
+
+    :func:`torch.stack` concatenates the given sequence along a new dimension.
 
 Args:
     tensors (sequence of Tensors): any python sequence of tensors of the same type.
@@ -9151,7 +9161,7 @@ Keyword args:
 add_docstr(
     torch.randn,
     """
-randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+randn(*size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 pin_memory=False) -> Tensor
 """
     + r"""
