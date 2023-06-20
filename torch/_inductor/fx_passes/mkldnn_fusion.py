@@ -1,14 +1,17 @@
 import functools
+from functools import reduce
 
 import torch
+from torch._meta_registrations import device_hint
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .. import ir
 
 from ..lowering import lowerings as L
+
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, get_arg_value, KeywordArg
 from ..virtualized import ops
-from .post_grad import register_lowering_pattern
+from .post_grad import register_graph_pattern, register_lowering_pattern
 
 if torch._C._has_mkldnn:
     aten = torch.ops.aten
@@ -541,9 +544,38 @@ if torch._C._has_mkldnn:
                     unary_attr=UnaryAttr("relu"),
                 )
 
+    def _reshape_linear_reshape_conversion():
+        # convert reshape+linear+reshape to linear for applying fusion path.
+        @register_graph_pattern(
+            CallFunction(
+                aten.reshape.default,
+                CallFunction(
+                    mkldnn._linear_pointwise.default,
+                    CallFunction(aten.reshape.default, Arg(), KeywordArg("reshape_1")),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                ),
+                KeywordArg("reshape_2"),
+            ),
+        )
+        def reshape_linear_reshape_pattern(match, *args, **kwargs):
+            reshape_1 = kwargs.get("reshape_1")
+            reshape_2 = kwargs.get("reshape_1")
+            graph = match.graph
+            node = match.output_node()
+            if reshape_1[0] == reduce(lambda x, y: x * y, reshape_2[:-1]):
+                repl = graph.call_function(mkldnn._linear_pointwise.default, args)
+                repl.meta.update(node.meta)
+                node.replace_all_uses_with(repl)
+                match.erase_nodes(graph)
+
     @functools.lru_cache(None)
     def _mkldnn_fusion_init():
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
+            _reshape_linear_reshape_conversion()
             _register_unary_fusion()
             _register_inplace_fusion()
             _register_binary_unary_fusion()
@@ -574,9 +606,6 @@ def get_preserved_arg_indices_and_constant_nodes(gm, flat_params, fw_metadata):
     # add on non param inputs
     preserved_arg_indices.extend(range(len(flat_params), len(params)))
     return preserved_arg_indices, constant_nodes
-
-
-from torch._meta_registrations import device_hint
 
 
 def _is_packable_convolution(node, constant_nodes):
@@ -659,10 +688,12 @@ def _is_packable_linear(node, constant_nodes):
 
 def _insert_packed_convolution(gm, conv_node):
     with gm.graph.inserting_before(conv_node):
-        input_size = conv_node.args[0].meta.get("val").shape
+        input = conv_node.args[0]
+        input_size = input.meta.get("val").shape
         mkldnn_tensor_node = gm.graph.create_node(
             "call_method", "to_mkldnn", (conv_node.args[1],)
         )
+        bias = conv_node.args[2]
         padding = conv_node.args[4]
         stride = conv_node.args[3]
         dilation = conv_node.args[5]
@@ -670,7 +701,8 @@ def _insert_packed_convolution(gm, conv_node):
         output_padding = conv_node.args[-2]
         is_transposed = conv_node.args[-3]
         if free_symbols(input_size):
-            packed_weight_node = mkldnn_tensor_node
+            # TODO: support symbolic input size
+            return
         else:
             packed_weight_inputs = (
                 (mkldnn_tensor_node, output_padding)
@@ -686,17 +718,35 @@ def _insert_packed_convolution(gm, conv_node):
             packed_weight_node = gm.graph.create_node(
                 "call_function", packed_weight_op, args=packed_weight_inputs
             )
-        packed_conv_inputs = (
-            (conv_node.args[0], packed_weight_node, conv_node.args[2])
-            if is_transposed
-            else (conv_node.args[0], packed_node)
-        )
-        packed_conv_inputs += (padding, stride, dilation, groups, "none", [], "")
-        packed_conv_op = (
-            torch.ops.mkldnn._convolution_transpose_pointwise
-            if is_transposed
-            else torch.ops.mkldnn._convolution_pointwise
-        )
+        if is_transposed:
+            packed_conv_inputs = (
+                input,
+                packed_weight_node,
+                bias,
+                padding,
+                output_padding,
+                stride,
+                dilation,
+                groups,
+                "none",
+                [],
+                "",
+            )
+            packed_conv_op = torch.ops.mkldnn._convolution_transpose_pointwise.default
+        else:
+            packed_conv_inputs = (
+                input,
+                packed_weight_node,
+                bias,
+                padding,
+                stride,
+                dilation,
+                groups,
+                "none",
+                [],
+                "",
+            )
+            packed_conv_op = torch.ops.mkldnn._convolution_pointwise.default
         packed_conv_node = gm.graph.create_node(
             "call_function", packed_conv_op, packed_conv_inputs
         )
@@ -707,7 +757,8 @@ def _insert_packed_convolution(gm, conv_node):
 
 def _insert_packed_linear(gm, linear_node):
     weight_idx = 2 if linear_node.target == aten.addmm.default else 1
-    batch_size = linear_node.args[weight_idx - 1].meta.get("val").shape[0]
+    input = linear_node.args[weight_idx - 1]
+    batch_size = input.meta.get("val").shape[0]
     permute_node = linear_node.args[weight_idx]
     linear_weight = permute_node.args[0]
     with gm.graph.inserting_before(linear_node):
@@ -718,7 +769,8 @@ def _insert_packed_linear(gm, linear_node):
         if not is_bf16_weight and free_symbols(batch_size):
             return
         if free_symbols(batch_size):
-            packed_weight_node = mkldnn_tensor_node
+            # TODO: support symbolic input size for bfloat16 path
+            return
         else:
             packed_weight_inputs = (mkldnn_tensor_node, batch_size)
             packed_weight_op = (
@@ -729,7 +781,7 @@ def _insert_packed_linear(gm, linear_node):
             packed_weight_node = gm.graph.create_node(
                 "call_function", packed_weight_op, args=packed_weight_inputs
             )
-        packed_linear_inputs = (linear_node.args[0], packed_weight_node)
+        packed_linear_inputs = (input, packed_weight_node)
         if is_bf16_weight:
             packed_linear_inputs += (
                 linear_node.args[0] if weight_idx == 2 else None,
@@ -737,7 +789,7 @@ def _insert_packed_linear(gm, linear_node):
                 [],
                 "",
             )
-            packed_linear_op = torch.ops.mkldnn._linear_pointwise
+            packed_linear_op = torch.ops.mkldnn._linear_pointwise.default
         else:
             packed_linear_inputs += (
                 linear_weight,
@@ -759,26 +811,15 @@ def _eliminate_duplicate_packed_nodes(gm):
     """
     Combine packed weight nodes with the same inputs to reduce memory usage.
     for example:
-    opcode         name                          target                          args                                                        kwargs
-    -------------  ----------------------------  ------------------------------  ----------------------------------------------------------  --------
-    placeholder    arg0_1                        arg0_1                          ()                                                          {}
-    placeholder    arg1_1                        arg1_1                          ()                                                          {}
-    placeholder    arg2_1                        arg2_1                          ()                                                          {}
-    call_function  view                          aten.view.default               (arg2_1, [1000, 32])                                        {}
-    call_method    to_mkldnn                     to_mkldnn                       (arg0_1,)                                                   {}
-    call_function  _mkl_reorder_linear_weight    mkl._mkl_reorder_linear_weight  (to_mkldnn, 1000)                                           {}
-    call_function  _mkl_linear                   mkl._mkl_linear                 (view, _mkl_reorder_linear_weight, arg0_1, None, 1000)      {}
-    call_function  view_1                        aten.view.default               (_mkl_linear, [10, 10, 10, 32])                             {}
-    call_function  add                           aten.add.Tensor                 (view_1, arg1_1)                                            {}
-    call_function  view_2                        aten.view.default               (add, [1000, 32])                                           {}
-    call_method    to_mkldnn_1                   to_mkldnn                       (arg0_1,)                                                   {}
-    call_function  _mkl_reorder_linear_weight_1  mkl._mkl_reorder_linear_weight  (to_mkldnn_1, 1000)                                         {}
-    call_function  _mkl_linear_1                 mkl._mkl_linear                 (view_2, _mkl_reorder_linear_weight_1, arg0_1, None, 1000)  {}
-    call_function  view_3                        aten.view.default               (_mkl_linear_1, [10, 10, 10, 32])                           {}
-    call_function  add_1                         aten.add.Tensor                 (view_3, arg1_1)                                            {}
-    output         output                        output                          ((add_1,),)                                                 {}
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = nn.Linear(32, 32, bias=True)
 
-    the above's packed weight nodes are duplicate.
+        def forward(self, x):
+            return self.linear(self.linear(x))
+
+    the above's packed weight nodes are duplicate if two linear calls have same input size.
     """
     for node in gm.graph.nodes:
         if node.target == "to_mkldnn" and len(node.args[0].users) > 1:
