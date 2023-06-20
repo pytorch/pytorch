@@ -15,6 +15,14 @@ DECLARE_DISPATCH(padding_fn, reflection_pad2d_backward_kernel);
 DECLARE_DISPATCH(padding_fn, reflection_pad3d_kernel);
 DECLARE_DISPATCH(padding_fn, reflection_pad3d_backward_kernel);
 
+// replication padding
+DECLARE_DISPATCH(padding_fn, replication_pad1d_kernel);
+DECLARE_DISPATCH(padding_fn, replication_pad1d_backward_kernel);
+DECLARE_DISPATCH(padding_fn, replication_pad2d_kernel);
+DECLARE_DISPATCH(padding_fn, replication_pad2d_backward_kernel);
+DECLARE_DISPATCH(padding_fn, replication_pad3d_kernel);
+DECLARE_DISPATCH(padding_fn, replication_pad3d_backward_kernel);
+
 namespace padding {
 
 template <int dim>
