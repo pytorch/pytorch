@@ -685,7 +685,7 @@ def _listvariable_flatten(d: ListVariable) -> Tuple[List[Any], pytree.Context]:
     return d.items, None
 
 
-def _listvariable_unflatten(values: List[Any], context: pytree.Context) -> List[Any]:
+def _listvariable_unflatten(values: List[Any], context: pytree.Context) -> ListVariable:
     assert all(isinstance(x, VariableTracker) for x in values)
 
     return ListVariable(values)
