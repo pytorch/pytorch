@@ -141,13 +141,14 @@ Tensor cat_feature(
 
 Tensor cat_feature_mult4ch(
     const MaterializedITensorListRef& tensors,
-    vTensor& v_output) {
+    vTensor& v_output,
+    uint32_t ndim) {
   api::Context* const context = api::context();
 
   int64_t depth_size_allprior = 0;
   int64_t ch_interval = 0;
   for (const at::Tensor& tensor : tensors) {
-    ch_interval += tensor.sizes()[1];
+    ch_interval += get_dim<Dim4D::Channel>(tensor);
   }
   const int64_t depth_interval = ch_interval / 4;
 
@@ -159,12 +160,13 @@ Tensor cat_feature_mult4ch(
         tensor_arg.is_vulkan() ? tensor_arg : tensor_arg.vulkan();
     const vTensor& v_self = convert(tensor);
 
-    const uint32_t depth_slice = safe_downcast<uint32_t>(tensor.sizes()[1] / 4);
+    const uint32_t depth_slice =
+        safe_downcast<uint32_t>(get_dim<Dim4D::Channel>(tensor) / 4);
 
     uvec3 copy_extents{
         v_self.extents().data[0u], v_self.extents().data[1u], depth_slice};
 
-    for (const auto b : c10::irange(tensor.sizes()[0])) {
+    for (const auto b : c10::irange(get_dim<Dim4D::Batch>(tensor))) {
       src_offset.data[2u] = safe_downcast<uint32_t>(depth_slice * b);
       dst_offset.data[2u] =
           depth_size_allprior + safe_downcast<uint32_t>(depth_interval * b);
@@ -267,7 +269,6 @@ Tensor cat_height(
 
 Tensor cat(const at::ITensorListRef& tensors, const int64_t in_dim) {
   TORCH_CHECK(!tensors.empty(), "Vulkan cat expects at least one tensor");
-
   auto materialized = tensors.materialize();
   TORCH_INTERNAL_ASSERT(!materialized.empty(), "Accessing empty array");
   const at::Tensor& tensor = materialized[0];
@@ -283,7 +284,7 @@ Tensor cat(const at::ITensorListRef& tensors, const int64_t in_dim) {
         t.dim(),
         "d");
 
-    if (ndim < 3 || t.sizes()[1 - (4u - ndim)] % 4 != 0) {
+    if (ndim < 3 || get_dim<Dim4D::Channel>(t) % 4 != 0) {
       is_mult4ch = false;
     }
 
@@ -311,7 +312,7 @@ Tensor cat(const at::ITensorListRef& tensors, const int64_t in_dim) {
     return cat_height(materialized, v_output);
   } else if (dim == ndim - 3) {
     if (is_mult4ch) {
-      return cat_feature_mult4ch(materialized, v_output);
+      return cat_feature_mult4ch(materialized, v_output, ndim);
     }
     return cat_feature(materialized, v_output);
   }
