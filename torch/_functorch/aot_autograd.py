@@ -3045,8 +3045,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 )
 
                 out = functionalized_rng_runtime_epilogue(CompiledFunction.metadata, out)
-                print("BACKWARD")
-                print(torch.cuda.memory_allocated())
                 return tuple(out)
 
             if torch.is_grad_enabled() and any(t.requires_grad for t in all_args if isinstance(t, torch.Tensor)):
