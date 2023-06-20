@@ -765,10 +765,10 @@ class _Ops(types.ModuleType):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
         self._global_higher_order_op_namespace = _PyOpNamespace(
-            'torch.ops', _global_higher_order_ops
+            "torch.ops", _global_higher_order_ops
         )
         self._higher_order_op_namespace = _PyOpNamespace(
-            'torch.ops.higher_order', _higher_order_ops
+            "torch.ops.higher_order", _higher_order_ops
         )
         self._dir = []
 
