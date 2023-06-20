@@ -433,7 +433,8 @@ struct WrapFunction_<
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(
         get_autocast_dispatch_key_from_device_type(device_type));
-    at::ScalarType out_type = type_from_firstarg(device_type, at::kFloat, args...);
+    at::ScalarType out_type =
+        type_from_firstarg(device_type, at::kFloat, args...);
     return (*F)(args..., out_type);
   }
 };
