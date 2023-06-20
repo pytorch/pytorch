@@ -4,7 +4,7 @@ from typing import List, Any, Dict
 from ._compatibility import compatibility
 
 __all__ = ['preserve_node_meta', 'has_preserved_node_meta',
-           'set_stack_trace', 'format_stack',
+           'set_stack_trace', 'set_bwd_seq_id', 'format_stack',
            'set_current_meta', 'get_current_meta']
 
 current_meta: Dict[str, Any] = {}

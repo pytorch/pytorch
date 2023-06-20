@@ -752,13 +752,9 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 return (output,)
 
         mod = Model()
-        if self.device == "cpu":
-            mod.cpu().to(memory_format=torch.contiguous_format)
-        else:
-            mod.cuda().to(memory_format=torch.contiguous_format)
         mod.train()
-        x = torch.rand(100, 16, 32, 32, device=self.device, requires_grad=True)
-        target = torch.rand(1, device=self.device)
+        x = torch.rand(100, 16, 32, 32, requires_grad=True)
+        target = torch.rand(1)
 
         # Use dynamo export to get the fx graph module
         g_mod, _ = torch._dynamo.export(mod, x, target)
@@ -791,6 +787,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         # Last node in list will be 0, just pop it to clear list
         seq_id_list.pop()
         self.assertTrue(fwd_detected and bwd_detected and not seq_id_list)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
