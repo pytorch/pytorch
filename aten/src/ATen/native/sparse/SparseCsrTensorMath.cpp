@@ -32,6 +32,7 @@
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
 #include <ATen/ops/_sparse_mm_reduce_impl_backward_native.h>
+#include <ATen/ops/_sparse_mm_reduce_impl_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/abs_native.h>
@@ -464,7 +465,7 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-CREATE_UNARY_UFUNC(relu);
+static CREATE_UNARY_UFUNC(relu);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -774,18 +775,6 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
       mat2,
       0.0,
       1.0);
-}
-
-Tensor _sparse_csr_addmm(
-    const Tensor& t,
-    const SparseCsrTensor& sparse,
-    const Tensor& dense,
-    const Scalar& beta,
-    const Scalar& alpha) {
-  // _sparse_addmm forward is functionally equivalent to addmm; it's
-  // just the backward that is different.  This technically does an
-  // unnecessary redispatch, I was too lazy to make it not do that
-  return at::addmm(t, sparse, dense, beta, alpha);
 }
 
 // Functions for element-wise addition.
