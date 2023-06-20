@@ -62,7 +62,7 @@ class Verifier:
         return [
             operator.getitem,
             control_flow.cond,
-            control_flow.map,
+            torch.ops.map_impl,
         ]
 
     @compatibility(is_backward_compatible=False)

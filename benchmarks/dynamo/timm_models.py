@@ -77,6 +77,11 @@ SCALED_COMPUTE_LOSS = {
     "sebotnet33ts_256",
 }
 
+FORCE_AMP_FOR_FP16_BF16_MODELS = {
+    "convit_base",
+    "xcit_large_24_p8_224",
+}
+
 
 def refresh_model_names():
     import glob
@@ -169,6 +174,10 @@ class TimmRunnner(BenchmarkRunner):
         super().__init__()
         self.suite_name = "timm_models"
 
+    @property
+    def force_amp_for_fp16_bf16_models(self):
+        return FORCE_AMP_FOR_FP16_BF16_MODELS
+
     @download_retry_decorator
     def _download_model(self, model_name):
         model = create_model(
@@ -194,6 +203,11 @@ class TimmRunnner(BenchmarkRunner):
         model_name,
         batch_size=None,
     ):
+        if self.args.enable_activation_checkpointing:
+            raise NotImplementedError(
+                "Activation checkpointing not implemented for Timm models"
+            )
+
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
 
