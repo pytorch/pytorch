@@ -1408,12 +1408,22 @@ class SqueezeView(BaseView):
 
 
 @dataclasses.dataclass
-class GenericView(BaseView):
+class View(BaseView):
     size: List[Expr]
     reindex: Callable[..., Any]
 
     def make_reindexer(self):
         return self.reindex
+
+    @staticmethod
+    def handle_negative_index(idx, size):
+        idx = sympy.expand(idx)
+        size = sympy.expand(size)
+        sizevars = V.graph.sizevars
+        if sizevars.size_hint(idx) < 0:
+            sizevars.guard_lt(idx, 0)
+            idx = idx + size
+        return idx
 
     def reindex_str(self):
         index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
@@ -1426,26 +1436,6 @@ class GenericView(BaseView):
         )
 
     __repr__ = __str__
-
-    @classmethod
-    def create(cls, x, new_size, reindex):
-        return cls(x, list(new_size), reindex)
-
-    def get_size(self):
-        return self.size
-
-
-@dataclasses.dataclass
-class View(GenericView):
-    @staticmethod
-    def handle_negative_index(idx, size):
-        idx = sympy.expand(idx)
-        size = sympy.expand(size)
-        sizevars = V.graph.sizevars
-        if sizevars.size_hint(idx) < 0:
-            sizevars.guard_lt(idx, 0)
-            idx = idx + size
-        return idx
 
     @classmethod
     def create(cls, x, new_size):
@@ -1568,6 +1558,9 @@ class View(GenericView):
             return tuple(sympy_subs(x, replacements) for x in view_expr)
 
         return reindex
+
+    def get_size(self):
+        return self.size
 
 
 @dataclasses.dataclass
@@ -2204,9 +2197,7 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self):
-        from torch._inductor.codegen.wrapper import pexpr
-
-        expr = pexpr(V.graph.sizevars.simplify(self.shape))
+        expr = V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
         if V.graph.cpp_wrapper:
             # wrap scalar to 0-d tensor for cpp wrapper
             return f"torch::tensor({expr})"
@@ -3240,7 +3231,7 @@ class FallbackKernel(ExternKernelAlloc):
             self.kernel = (
                 f"at::{op_overload_packet.__name__}"
                 if V.graph.cpp_wrapper
-                else f"aten.{op_overload_packet.__name__}"
+                else f"aten.{kernel.__name__}"
             )
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             if getattr(torch._prims.rng_prims, kernel.__name__, None) is kernel:
