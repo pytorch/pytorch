@@ -172,7 +172,8 @@ class ExportedProgram:
 
 def _process_constraints(
     graph_module: torch.fx.GraphModule,
-    graph_signature: ExportGraphSignature,
+    parameter_names: List[str],
+    buffer_names: List[str],
     example_inputs: List[torch.Tensor],
 ) -> Tuple[Dict[sympy.Symbol, RangeConstraint], List[Tuple[InputDim, InputDim]]]:
     """
@@ -196,7 +197,7 @@ def _process_constraints(
     """
     input_shape_constraints = graph_module.meta.get("input_shape_constraints", [])
     inline_constraints = graph_module.meta.get("inline_constraints", [])
-    num_params_buffer = len(graph_signature.buffers) + len(graph_signature.parameters)
+    num_params_buffer = len(buffer_names) + len(parameter_names)
 
     # Create dict mapping tensor_id to node names
     tensor_id_to_nodes: Dict[int, List[str]] = defaultdict(list)

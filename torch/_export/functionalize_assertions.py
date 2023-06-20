@@ -1,7 +1,13 @@
+from typing import Dict, List
+from dataclasses import dataclass
+
 import torch
-import copy
-from typing import Dict
 from torch._ops import OpOverload
+from torch._export.exported_program import _process_constraints
+from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
+    _AddRuntimeAssertionsForConstraintsPass,
+)
+from torch.fx.passes.pass_manager import PassManager
 
 aten = torch.ops.aten
 
@@ -12,10 +18,36 @@ _NON_FUNCTION_TO_FUNCTIONAL_ASSERTION_FUNCS: Dict[OpOverload, OpOverload] = {
 }
 
 
-def functionalize(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
-    gm = copy.deepcopy(gm)
-    graph = gm.graph
+@dataclass
+class FunctionalizedGraphModule:
+    graph_module: torch.fx.GraphModule
+    assertions_dep_token_index: int
 
+
+def add_functionalized_runtime_assertions(
+    gm: torch.fx.GraphModule,
+    parameter_names: List[str],
+    buffer_names: List[str],
+    example_inputs: List[torch.Tensor],
+) -> FunctionalizedGraphModule:
+    range_constraints, equality_constraints = _process_constraints(
+        gm,
+        buffer_names=buffer_names,
+        parameter_names=parameter_names,
+        example_inputs=example_inputs,
+    )
+    gm = PassManager(
+        [
+            _AddRuntimeAssertionsForConstraintsPass(
+                range_constraints, equality_constraints
+            )
+        ]
+    )(gm).graph_module
+    return functionalize(gm)
+
+
+def functionalize(gm: torch.fx.GraphModule) -> FunctionalizedGraphModule:
+    graph = gm.graph
     inputs_node = next(n for n in graph.nodes if n.op == "placeholder")
 
     with graph.inserting_after(inputs_node):
@@ -49,4 +81,5 @@ def functionalize(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
     graph.lint()
     gm.recompile()
-    return gm
+
+    return FunctionalizedGraphModule(graph_module=gm, assertions_dep_token_index=1)

@@ -17,11 +17,13 @@ from .exported_program import (
     ExportGraphSignature,
     _process_constraints,
 )
+from .functionalize_assertions import add_functionalized_runtime_assertions
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
+from torch._subclasses.fake_tensor import FakeTensorMode
 
 import torch.utils._pytree as pytree
 from torch.fx.experimental.symbolic_shapes import (
@@ -120,6 +122,7 @@ def export(
     constraints: Optional[List[Constraint]] = None,
     *,
     _add_runtime_assertions=True,
+    _functionalize_runtime_assertions=False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -149,11 +152,15 @@ def export(
             )
 
             params_buffers: "OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]]" = OrderedDict()
+            param_names: List[str] = []
+            buffer_names: List[str] = []
             for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
                 params_buffers[name] = param
+                param_names.append(name)
 
             for name, buffer in gm_torch_level.named_buffers(recurse=True, remove_duplicate=False):
                 params_buffers[name] = buffer
+                buffer_names.append(name)
 
             fake_inps = []
             for node in gm_torch_level.graph.nodes:
@@ -162,6 +169,7 @@ def export(
                     fake_inps.append(fake_val)
 
             fake_mode = detect_fake_mode(fake_inps)
+            gm_torch_level.meta["inline_constraints"] = _get_inline_constraints(fake_mode)
 
             fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
 
@@ -185,6 +193,17 @@ def export(
             )
 
             gm_torch_level.recompile()
+            assertions_dep_token_index = None
+            if _add_runtime_assertions and _functionalize_runtime_assertions:
+                functionalized = add_functionalized_runtime_assertions(
+                    gm=gm_torch_level,
+                    parameter_names=param_names,
+                    buffer_names=buffer_names,
+                    example_inputs=flat_args,
+                )
+                gm_torch_level = functionalized.gm_torch_level
+                assertions_dep_token_index = functionalized.assertions_dep_token_index
+
             gm, graph_signature = aot_export_module(gm_torch_level, fake_args, decompositions=DECOMP_TABLE, trace_joint=False)
 
             export_backward_signature = ExportBackwardSignature(
@@ -210,18 +229,13 @@ def export(
             for key, val in gm_torch_level.meta.items():
                 gm.meta[key] = val
 
-            # The unbacked symint symbols are updated in aot_export
-            # so we serialize them here instead of inside dynamo
-            gm.meta["inline_constraints"] = {
-                k: v
-                for k, v in fake_mode.shape_env.var_to_range.items()
-                if re.match(r"^[if]\d+$", str(k))
-            }
+            gm.meta["inline_constraints"] = _get_inline_constraints(fake_mode)
 
             range_constraints, equality_constraints = _process_constraints(
                 gm,
-                export_graph_signature,
-                flat_args,
+                buffer_names=export_graph_signature.buffers,
+                param_names=export_graph_signature.parameters,
+                example_inputs=flat_args,
             )
             assert orig_out_spec is not None
             exported_program = ExportedProgram(
@@ -234,7 +248,7 @@ def export(
                 equality_constraints,
             )
 
-            if _add_runtime_assertions:
+            if _add_runtime_assertions and not _functionalize_runtime_assertions:
                 exported_program = exported_program._add_runtime_assertions()
 
             return exported_program.transform(_ReplaceSymSizeOpPass())
@@ -245,3 +259,12 @@ def export(
             raise UserError(
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
+
+def _get_inline_constraints(fake_mode: FakeTensorMode) -> Dict[sympy.Symbol, ValueRanges]:
+    # The unbacked symint symbols are updated in aot_export
+    # so we serialize them here instead of inside dynamo
+    return {
+        k: v
+        for k, v in fake_mode.shape_env.var_to_range.items()
+        if re.match(r"^[if]\d+$", str(k))
+    }
