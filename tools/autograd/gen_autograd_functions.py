@@ -86,7 +86,7 @@ void ${op}::compiled_args(CompiledNodeArgs& args) {
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
     ${apply_with_saved_before}
-    variable_list result = apply(std::move(variable_list(grads)));
+    variable_list result = apply(variable_list(grads));
     ${apply_with_saved_after}
     return result;
 }
