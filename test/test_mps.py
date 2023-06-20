@@ -10426,6 +10426,9 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'round', 'xlogy', 'addcmul',
+        'nn.functional.conv_transpose1d',
+        'nn.functional.conv_transpose2d',
+        'nn.functional.conv_transpose3d',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
