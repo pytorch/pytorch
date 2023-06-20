@@ -47,7 +47,7 @@ class _ModuleHookCheckpointFunction(torch.autograd.Function):
         return output
 
     @staticmethod
-    def backward(ctx, output_grads: Tuple[Optional[torch.Tensor]]) -> Any:  # type: ignore[override]
+    def backward(ctx, *output_grads: Tuple[Optional[torch.Tensor]]) -> Any:  # type: ignore[override]
         if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError(
                 "Checkpointing is not compatible with .grad() or when an "

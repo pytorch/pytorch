@@ -1,14 +1,20 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from torch.fx import Node
-from typing import Callable, List, NamedTuple, Optional, Dict, Any
+from typing import Callable, List, NamedTuple, Optional, Dict, Union, Tuple
+from torch.ao.quantization import ObserverOrFakeQuantize
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
+from torch import Tensor
 
 import torch
 
 __all__ = [
     "Quantizer",
+    "QuantizationSpecBase",
     "QuantizationSpec",
+    "FixedQParamsQuantizationSpec",
+    "SharedQuantizationSpec",
+    "DerivedQuantizationSpec",
     "QuantizationAnnotation",
 ]
 
@@ -22,8 +28,17 @@ SUPPORTED_QSCHEMES = [
     torch.per_channel_affine_float_qparams,
 ]
 
+class QuantizationSpecBase(ABC):
+    """ Base class for different types of quantization specs that allows users to
+    specify how to quantize a Tensor (input/output of a Node) in the model
+    """
+    pass
+
 @dataclass(eq=True, frozen=True)
-class QuantizationSpec:
+class QuantizationSpec(QuantizationSpecBase):
+    """ Quantization spec for common operators that allows user to specify how to
+    quantize a Tensor, this includes dtype, quant_min, quant_max etc.
+    """
     dtype: torch.dtype
     # observer or fake_quantize constructor such as
     # MinMaxObserver, PerChannelHistogramObserver etc.
@@ -60,11 +75,45 @@ class QuantizationSpec:
         if self.ch_axis is not None and self.ch_axis < 0:
             raise ValueError("Ch_axis is < 0.")
 
+@dataclass(eq=True, frozen=True)
+class FixedQParamsQuantizationSpec(QuantizationSpecBase):
+    dtype: torch.dtype
+    scale: float
+    zero_point: int
+    quant_min: Optional[int] = None
+    quant_max: Optional[int] = None
+    qscheme: Optional[torch.qscheme] = None
+
+EdgeOrNode = Union[Tuple[Node, Node], Node]
+
+@dataclass(eq=True, frozen=True)
+class SharedQuantizationSpec(QuantizationSpecBase):
+    """
+    Quantization spec for the Tensors whose quantization parameters are shared with other Tensors
+
+    The way we refer to other points of quantization in the graph will be either
+    an input edge or an output value
+    input edge is the connection between input node and the node consuming the input, so it's a Tuple[Node, Node]
+    output value is an fx Node
+    """
+    edge_or_node: EdgeOrNode
+
+@dataclass(eq=True, frozen=True)
+class DerivedQuantizationSpec(QuantizationSpecBase):
+    """ quantization spec for the Tensors whose quantization parameters are derived from other Tensors
+    """
+    derived_from: List[EdgeOrNode]
+    derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]]
+    dtype: torch.dtype
+    quant_min: Optional[int] = None
+    quant_max: Optional[int] = None
+    qscheme: Optional[torch.qscheme] = None
 
 # In the absence of better name, just winging it with QuantizationConfig
 @dataclass(eq=True, frozen=True)
 class QuantizationConfig:
-    activation: Optional[QuantizationSpec]
+    input_activation: Optional[QuantizationSpec]
+    output_activation: Optional[QuantizationSpec]
     weight: Optional[QuantizationSpec]
     bias: Optional[QuantizationSpec]
     # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
@@ -98,22 +147,15 @@ class QuantizationAnnotation:
     operator Graph is observed (PTQ) or fake quantized (QAT)
     """
 
-    # a map from torch.fx.Node to QuantizationSpec
-    # TODO: change the value to QuantizationSpec in a separate PR
-    input_qspec_map: Dict[Node, Any] = field(default_factory=dict)
+    # a map from torch.fx.Node to a type of QuantizationSpecBase
+    input_qspec_map: Dict[Node, QuantizationSpecBase] = field(default_factory=dict)
 
-    # How the output of this node is quantized, expressed as QuantizationSPec
+    # How the output of this node is quantized, expressed as QuantizationSpec
     # TODO: change the value to QuantizationSpec in a separate PR
-    output_qspec: Optional[Any] = None
+    output_qspec: Optional[QuantizationSpecBase] = None
 
     # whether the node is annotated or not
     _annotated: bool = False
-
-    # TODO: will be updated soon to use sharing group and be more general
-    _input_output_share_observers: bool = False
-
-    # TODO: remove after sharing API refactor
-    _reuse_input_obs_or_fq: bool = False
 
 class Quantizer(ABC):
 
@@ -134,16 +176,3 @@ class Quantizer(ABC):
     @abstractmethod
     def get_supported_operators(cls) -> List[OperatorConfig]:
         pass
-
-def _annotate_input_qspec_map(node: Node, input_node: Node, qspec):
-    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
-    if quantization_annotation.input_qspec_map is None:
-        quantization_annotation.input_qspec_map = {}
-    quantization_annotation.input_qspec_map[input_node] = qspec
-    node.meta["quantization_annotation"] = quantization_annotation
-
-
-def _annotate_output_qspec(node: Node, qspec):
-    quantization_annotation = node.meta.get("quantization_annotation", QuantizationAnnotation())
-    quantization_annotation.output_qspec = qspec
-    node.meta["quantization_annotation"] = quantization_annotation

@@ -22,6 +22,8 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._tensor import DTensor
+from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _apply_to_modules,
     _FSDPState,
@@ -31,7 +33,10 @@ from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
     clean_tensor_name,
 )
-from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
+from torch.distributed.fsdp._fsdp_extensions import (
+    _ext_chunk_dtensor,
+    _ext_chunk_tensor,
+)
 from torch.distributed.fsdp._runtime_utils import _clear_grads_if_needed, _lazy_init
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
@@ -203,7 +208,10 @@ def _communicate_optim_state(
             ):
                 tensor_state[state_name] = value
                 continue
-            if not value.is_cuda:
+            assert (
+                fsdp_state.compute_device is not None
+            ), "compute_device has not been initialized"
+            if value.device.type != fsdp_state.compute_device.type:
                 value = value.to(fsdp_state.compute_device)
             # Assume that positive-dimension tensor optimizer state
             # has the same shape as the sharded flat parameter
@@ -271,16 +279,23 @@ def _unflatten_communicated_optim_state(
                 flat_param_views[state_name] = views
             else:
                 views = flat_param_views[state_name]
-            optim_state: Union[torch.Tensor, ShardedTensor] = next(views)
+            optim_state: Union[torch.Tensor, ShardedTensor, DTensor] = next(views)
             if shard_state:
-                assert fsdp_state.process_group is not None
-                optim_state = _ext_chunk_tensor(
-                    optim_state,
-                    fsdp_state.rank,
-                    fsdp_state.world_size,
-                    fsdp_state._device_handle.device_count(),
-                    fsdp_state.process_group,
-                )
+                if not fsdp_state._optim_state_dict_config.use_dtensor:
+                    assert fsdp_state.process_group is not None
+                    optim_state = _ext_chunk_tensor(
+                        optim_state,
+                        fsdp_state.rank,
+                        fsdp_state.world_size,
+                        fsdp_state._device_handle.device_count(),
+                        fsdp_state.process_group,
+                    )
+                else:
+                    assert fsdp_state._device_mesh is not None
+                    optim_state = _ext_chunk_dtensor(
+                        optim_state, fsdp_state.rank, fsdp_state._device_mesh
+                    )
+
             unflat_state_param[state_name] = optim_state
 
         # Add zero-dimension tensor state: take the target rank's value
@@ -322,7 +337,7 @@ def _broadcast_processed_state(
 def _broadcast_state(
     fsdp_state: _FSDPState, state: Any, group: Optional[dist.ProcessGroup]
 ) -> Any:
-    device = torch.device("cuda")
+    device = _get_pg_default_device(group)
     if fsdp_state.rank == 0:
         if not isinstance(state, torch.Tensor) or state.dim() == 0:
             return state
@@ -336,9 +351,7 @@ def _broadcast_state(
             return state
         elif not isinstance(state, _PosDimTensorInfo):
             return state
-        tensor = torch.zeros(
-            state.shape, dtype=state.dtype, device=torch.device("cuda")
-        )
+        tensor = torch.zeros(state.shape, dtype=state.dtype, device=device)
     dist.broadcast(tensor, src=0, group=group)
     return tensor
 
@@ -1106,7 +1119,7 @@ def _check_missing_keys_on_rank(
             assert param_key >= 0 and param_key < len(
                 param_key_to_param
             ), "Check the `param_key_to_param` construction"
-    device = torch.device("cuda", torch.cuda.current_device())
+    device = _get_pg_default_device(group)
     num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
     dist.all_reduce(num_missing, group=group)
     if num_missing.item() > 0:
@@ -1495,7 +1508,7 @@ def _all_gather_optim_state(
     object_list: List[StateInfo] = [
         processed_state for _ in range(fsdp_state.world_size)
     ]
-    dist.all_gather_object(object_list, processed_state)
+    dist.all_gather_object(object_list, processed_state, group=fsdp_state.process_group)
 
     # Convert the gathered, pre-processed state of each rank to the original one.
     gathered_state: Dict[str, Any] = {}
@@ -1601,14 +1614,20 @@ def _gather_orig_param_state(
             flat_param._shapes[param_idx]
         )
         if shard_state:
-            assert fsdp_state.process_group is not None
-            value = _ext_chunk_tensor(
-                value,
-                fsdp_state.rank,
-                fsdp_state.world_size,
-                fsdp_state._device_handle.device_count(),
-                fsdp_state.process_group,
-            )
+            if not fsdp_state._optim_state_dict_config.use_dtensor:
+                assert fsdp_state.process_group is not None
+                value = _ext_chunk_tensor(
+                    value,
+                    fsdp_state.rank,
+                    fsdp_state.world_size,
+                    fsdp_state._device_handle.device_count(),
+                    fsdp_state.process_group,
+                )
+            else:
+                assert fsdp_state._device_mesh is not None
+                value = _ext_chunk_dtensor(
+                    value, fsdp_state.rank, fsdp_state._device_mesh
+                )
         value = value.cpu()
         gathered_state[state_name] = value
     return gathered_state
