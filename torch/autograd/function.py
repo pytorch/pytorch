@@ -278,7 +278,7 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
         return self._forward_cls.jvp(self, *args)  # type: ignore[attr-defined]
 
     def _compiled_autograd_key(self):
-        return self._forward_cls._compiled_autograd_key(self)
+        return self._forward_cls._compiled_autograd_key(self)  # type: ignore[attr-defined]
 
 
 class FunctionMeta(type):

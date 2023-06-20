@@ -400,7 +400,7 @@ PyObject_CallNoArgs(PyObject *func)
 PYCAPI_COMPAT_STATIC_INLINE(PyObject*)
 PyObject_CallMethodNoArgs(PyObject *obj, PyObject *name)
 {
-    return PyObject_CallMethodObjArgs(func, name, NULL);
+    return PyObject_CallMethodObjArgs(obj, name, NULL);
 }
 #endif
 
@@ -417,7 +417,7 @@ PyObject_CallOneArg(PyObject *func, PyObject *arg)
 PYCAPI_COMPAT_STATIC_INLINE(PyObject*)
 PyObject_CallMethodOneArg(PyObject *obj, PyObject *name, PyObject *arg)
 {
-    return PyObject_CallMethodObjArgs(func, name, arg, NULL);
+    return PyObject_CallMethodObjArgs(obj, name, arg, NULL);
 }
 #endif
 

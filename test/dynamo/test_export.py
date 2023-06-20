@@ -22,6 +22,7 @@ from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfRocm
 
@@ -2330,7 +2331,6 @@ def forward(self, x):
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
     @config.patch(
-        dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,
         capture_scalar_outputs=True,
@@ -2359,7 +2359,6 @@ def forward(self, x):
         )
 
     @torch._dynamo.config.patch(
-        dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,
         capture_scalar_outputs=True,
@@ -2381,7 +2380,6 @@ def forward(self, x):
         )
 
     @config.patch(
-        dynamic_shapes=True,
         capture_dynamic_output_shape_ops=True,
         specialize_int=True,
         capture_scalar_outputs=True,
@@ -2410,6 +2408,44 @@ def forward(self, x):
         # metadata won't be saved in the serialized module
         buffer = io.BytesIO()
         torch.save(gm, buffer)
+
+    def test_export_with_inline_constraints(self):
+        def f(x):
+            a = x.item()
+            constrain_as_size(a, 4, 7)
+            return torch.empty((a, 4))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, r"Invalid value 20 for range \[4:7\]"
+        ) as cm:
+            torch._export.export(f, (torch.tensor([20]),))
+
+        ep = torch._export.export(f, (torch.tensor([5]),))
+        self.assertEqual(ep(torch.tensor([6])).shape, (6, 4))
+
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
+        ) as cm:
+            ep(torch.tensor([30]))
+
+    def test_export_with_inline_constraints_complex(self):
+        def f(x):
+            a = x.item()
+            constrain_as_size(a, 4, 7)
+            empty = torch.empty((a, 4))
+
+            return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
+
+        ep = torch._export.export(f, (torch.tensor([6]),))
+        self.assertEqual(ep(torch.tensor([5])).shape, (10, 5))
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
+        ).run(ep.graph_module.code)
 
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
@@ -2700,7 +2736,6 @@ def forward(self, x):
 
         self.assertEqual(f_correct(torch.ones(6, 4)), gm(torch.ones(6, 4)))
 
-    @config.patch(dynamic_shapes=True)
     def test_not_functionalize(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -2727,7 +2762,6 @@ def forward(self, x):
         test_inp_v2 = (torch.ones(1, 2, 3),)
         self.assertEqual(gm(*test_inp), Foo()(*test_inp_v2))
 
-    @config.patch(dynamic_shapes=True)
     def test_round_dynamic_shapes(self):
         def f(x):
             return x[: round(x.shape[0] / 2)]
@@ -3033,6 +3067,48 @@ def forward(self, x):
     slice_tensor_9 = torch.ops.aten.slice.Tensor(slice_tensor_8, 2, 3, 3);  slice_tensor_8 = None
     return pytree.tree_unflatten([slice_tensor, slice_tensor_3, slice_tensor_6, slice_tensor_9], self._out_spec)""",
         )
+
+    def test_capture_symbolic_tracing(self) -> None:
+        from torch._dynamo.output_graph import config
+        from torch._subclasses import fake_tensor
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.linear2 = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                out = self.linear(x)
+                out = self.linear2(out)
+                return out
+
+        # User-instantiated FakeTensorMode
+        fake_mode = fake_tensor.FakeTensorMode(
+            allow_non_fake_inputs=False,
+            allow_fallback_kernels=True,
+            shape_env=ShapeEnv(
+                allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                frame_id=0,
+            ),
+        )
+        # Fakefy input+model before exporting it
+        with fake_mode:
+            x = torch.rand(5, 2, 2)
+            model = Model()
+
+        # Export the model with fake inputs and parameters
+        for aten_graph in [True, False]:
+            graph_module, _ = torch._dynamo.export(
+                model, x, aten_graph=aten_graph, fake_mode=fake_mode
+            )
+
+            self.assertTrue(
+                isinstance(graph_module, torch.fx.GraphModule),
+                msg="test_capture_symbolic_tracing_aten_graph_" + str(aten_graph),
+            )
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

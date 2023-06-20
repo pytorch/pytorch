@@ -126,6 +126,9 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
 
+# constant folding on the joint graph
+joint_graph_constant_folding = True
+
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
 
