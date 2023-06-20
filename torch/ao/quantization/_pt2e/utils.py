@@ -9,7 +9,7 @@ from torch.ao.quantization.fx.prepare import (
     _is_activation_post_process_node,
 )
 import operator
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 
 def _get_tensor_constant_from_node(node, m):
@@ -32,28 +32,30 @@ def _get_all_arguments(orig_args, orig_kwargs, args_schema):
 def _fold_bn_weights_into_conv_node(
     conv_node: Node,
     conv_weight_node: Node,
-    conv_bias_node: Node,
+    conv_bias_node: Optional[Node],
     bn_node: Node,
     m: GraphModule
 ) -> None:
-    # conv weight
+    # conv args: input, weight, bias, stride, padding, dilation, transposed, ...
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
-    # conv bias
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
     transpose = conv_node.args[6]
 
+    # eval bn args: input, weight, bias, running mean, running var, momentum, eps
+    # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
     bn_args_schema = bn_node.target._schema.arguments  # type: ignore[union-attr]
     bn_args = _get_all_arguments(bn_node.args, bn_node.kwargs, bn_args_schema)
-
-    # bn weight
     bn_w = _get_tensor_constant_from_node(bn_args[1], m)
-    # bn bias
     bn_b = _get_tensor_constant_from_node(bn_args[2], m)
-    # bn running mean
     bn_rm = _get_tensor_constant_from_node(bn_args[3], m)
-    # bn running variance
     bn_rv = _get_tensor_constant_from_node(bn_args[4], m)
-    bn_eps = bn_args[6]
+    if bn_node.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
+        eps_arg_index = 6
+    elif bn_node.target == torch.ops.aten._native_batch_norm_legit.default:
+        eps_arg_index = 7
+    else:
+        raise ValueError("BN node target is unexpected ", bn_node.target)
+    bn_eps = bn_args[eps_arg_index]
 
     fused_weight, fused_bias = fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, transpose=transpose)
 
@@ -61,7 +63,8 @@ def _fold_bn_weights_into_conv_node(
     conv_args = list(conv_node.args)
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
-    setattr(m, weight_attr_name, fused_weight)  # type: ignore[arg-type]
+    assert isinstance(weight_attr_name, str)
+    setattr(m, weight_attr_name, fused_weight)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
     else:

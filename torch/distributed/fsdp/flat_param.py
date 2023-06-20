@@ -1287,11 +1287,23 @@ class FlatParamHandle:
             padded_unsharded_flat_param.numel() == expected_numel,
             f"Expects {expected_numel} numel but got {padded_unsharded_flat_param.numel()}",
         )
-        dist.all_gather_into_tensor(
-            padded_unsharded_flat_param,
-            sharded_flat_param,
-            self.process_group,
-        )
+
+        # HACK this should be handled by C10D
+        if sharded_flat_param.is_cpu:  # type: ignore[attr-defined]
+            tensor_list = list(
+                torch.chunk(
+                    padded_unsharded_flat_param, dist.get_world_size(self.process_group)
+                )
+            )
+            work = dist.all_gather(
+                tensor_list, sharded_flat_param, group=self.process_group
+            )
+        else:
+            dist.all_gather_into_tensor(
+                padded_unsharded_flat_param,
+                sharded_flat_param,
+                self.process_group,
+            )
         return padded_unsharded_flat_param
 
     def _use_unsharded_flat_param(
@@ -1384,7 +1396,7 @@ class FlatParamHandle:
         if flat_param.grad is None:
             # In the case that only some ranks have `None` gradient, we use
             # zeros to approximate as a best effort attempt
-            if self._debug_level == dist.DebugLevel.DETAIL:
+            if self._debug_level == dist.DebugLevel.INFO:
                 warnings.warn(
                     f"[Rank {self.rank}] Only some but not all ranks have a "
                     "`None` `FlatParameter` gradient, so FSDP is using zeros to "
@@ -2177,7 +2189,7 @@ class FlatParamHandle:
             len(expected_shape) == 1,
             f"Expects a 1D expected shape but got {expected_shape}",
         )
-        if self._debug_level == dist.DebugLevel.DETAIL:
+        if self._debug_level == dist.DebugLevel.INFO:
             rank = self.rank if hasattr(self, "rank") else dist.get_rank()
             src_shape = src_tensor.shape if src_tensor is not None else None
             src_device = src_tensor.device if src_tensor is not None else None

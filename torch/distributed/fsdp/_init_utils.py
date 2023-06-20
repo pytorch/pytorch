@@ -212,7 +212,6 @@ def _init_inter_node_process_group(
         # every rank always needs to call dist.new_group
         grp = dist.new_group(ranks=ranks_for_inter_group, backend=sharding_backend)
         if local_rank == my_local_rank:
-            print(f"{local_rank} created process group for {ranks_for_inter_group}")
             inter_node_pg = grp
 
     assert (
@@ -245,12 +244,21 @@ def _init_ignored_module_states(
     state: _FSDPState,
     module: nn.Module,
     ignored_modules: Optional[Iterable[torch.nn.Module]],
-    ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
+    ignored_states: Union[
+        Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
+    ] = None,
 ) -> _FSDPState:
     assert (
-        ignored_modules is None or ignored_parameters is None
-    ), "Can not pass `ignored_modules` and `ignored_parameters` at the same time. \
-        Please either pass `ignored_modules` or `ignored_parameters`."
+        ignored_modules is None or ignored_states is None
+    ), "Can not pass `ignored_modules` and `ignored_states` at the same time. \
+        Please either pass `ignored_modules` or `ignored_states`."
+    ignored_parameters = None
+    ignored_states_list = list(ignored_states) if ignored_states is not None else []
+    if ignored_states_list and len(ignored_states_list) > 0:
+        if isinstance(ignored_states_list[0], torch.nn.Parameter):
+            ignored_parameters = ignored_states_list
+        else:
+            ignored_modules = ignored_states_list
     state._ignored_modules = _get_ignored_modules(module, ignored_modules)
     state._ignored_params = _get_ignored_params(
         module,
@@ -587,7 +595,6 @@ def _init_param_handle_from_params(
         state.process_group,
         state._use_orig_params,
     )
-    # TODO: Can simplify call `shard()` in the `FlatParamHandle` ctor
     handle.shard()
     assert handle not in state._handles
     state.params.append(handle.flat_param)
@@ -659,7 +666,7 @@ def _get_ignored_modules(
     for module in ignored_root_modules:
         if not isinstance(module, torch.nn.Module):
             raise TypeError(msg_prefix + f"but got an iterable with {type(module)}")
-        if isinstance(module, fsdp_file.FullyShardedDataParallel):
+        if _get_module_fsdp_state(module):
             # TODO: We may relax this by taking the FSDP instance's wrapped
             # module to provide more flexibility to the user.
             raise ValueError("`ignored_modules` should not include FSDP modules")
@@ -716,12 +723,12 @@ def _get_ignored_params(
         }
         all_ignored_params.update(params_in_ignored_parameters)
 
-        # Include nested FSDP modules' ignored parameters
-        for submodule in root_module.modules():
-            optional_fsdp_state = _get_module_fsdp_state(submodule)
-            if optional_fsdp_state is not None:
-                assert hasattr(optional_fsdp_state, "_ignored_params")
-                all_ignored_params.update(optional_fsdp_state._ignored_params)
+    # Always include nested FSDP modules' ignored parameters
+    for submodule in root_module.modules():
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_params")
+            all_ignored_params.update(optional_fsdp_state._ignored_params)
 
     return all_ignored_params
 
@@ -846,32 +853,40 @@ def _move_module_to_device(
 
     Precondition: ``_check_single_device_module()``.
     """
-    param = next(_get_orig_params(module, ignored_params), None)
-    if param is None:
-        return  # no original parameters to manage
     cpu_device = torch.device("cpu")
-    # TODO: This only checks the parameter's device, not any buffers. Thus, a
-    # buffer-only module will not get offloaded to CPU.
     if device_from_device_id is not None:
-        if param.device == cpu_device:
-            # BFS from `module` without traversing any nested FSDP instances to
-            # collect the parameters/buffers that have not yet been managed
-            queue: Deque[nn.Module] = collections.deque()
-            queue.append(module)
-            params: List[nn.Parameter] = []
-            buffers: List[torch.Tensor] = []
-            while queue:
-                curr_module = queue.popleft()
-                params.extend(curr_module.parameters(recurse=False))
-                buffers.extend(curr_module.buffers(recurse=False))
-                for submodule in curr_module.children():
-                    if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
-                        queue.append(submodule)
-            # NOTE: This includes moving ignored modules' parameters. If we
-            # decide to change the semantics in the future, simply filter based
-            # on the ignored parameters (and buffers).
-            _move_states_to_device(params, buffers, device_from_device_id)
-    elif param.device == cpu_device:
+        # BFS from `module` without traversing any nested FSDP instances to
+        # collect the parameters/buffers that have not yet been managed
+        queue: Deque[nn.Module] = collections.deque()
+        queue.append(module)
+        params: List[nn.Parameter] = []
+        buffers: List[torch.Tensor] = []
+        while queue:
+            curr_module = queue.popleft()
+            # NOTE: We include a check to only move parameters/buffers that are
+            # on CPU device. If they are on a CUDA device different from the
+            # one specified by `device_id`, then this does NOT move them. This
+            # is so that we can raise an error in `_get_compute_device()`.
+            params.extend(
+                param
+                for param in curr_module.parameters(recurse=False)
+                if param.device == cpu_device
+            )
+            buffers.extend(
+                buffer
+                for buffer in curr_module.buffers(recurse=False)
+                if buffer.device == cpu_device
+            )
+            for submodule in curr_module.children():
+                if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
+                    queue.append(submodule)
+        # NOTE: This includes moving ignored modules' parameters. If we
+        # decide to change the semantics in the future, simply filter based
+        # on the ignored parameters (and buffers).
+        _move_states_to_device(params, buffers, device_from_device_id)
+        return
+    param = next(_get_orig_params(module, ignored_params), None)
+    if param is not None and param.device == cpu_device:
         _warn_cpu_init()
 
 
@@ -965,7 +980,6 @@ def _sync_module_params_and_buffers(
     Precondition: ``sync_module_states == True`` and ``self.process_group`` has
     been set.
     """
-    _check_params_for_sync_module_states(params)
     module_states: List[torch.Tensor] = []
     for buffer in module.buffers():
         # Avoid re-synchronizing buffers in case of nested wrapping
@@ -973,6 +987,7 @@ def _sync_module_params_and_buffers(
             setattr(buffer, FSDP_SYNCED, True)
             module_states.append(buffer.detach())
     module_states.extend(param.detach() for param in params)
+    _check_module_states_for_sync_module_states(module_states)
     _sync_params_and_buffers(
         process_group,
         module_states,
@@ -986,12 +1001,12 @@ def _sync_module_states(
     buffers: List[torch.Tensor],
     process_group: dist.ProcessGroup,
 ) -> None:
-    _check_params_for_sync_module_states(params)
     # Assumes that each call to this method passes in disjoint `params` and
     # and `buffers` across calls, so there is no chance of re-synchronizing
     params_and_buffers = [param.detach() for param in params] + [
         buffer.detach() for buffer in buffers
     ]
+    _check_module_states_for_sync_module_states(params_and_buffers)
     _sync_params_and_buffers(
         process_group,
         params_and_buffers,
@@ -1000,15 +1015,16 @@ def _sync_module_states(
     )
 
 
-def _check_params_for_sync_module_states(
-    params: List[nn.Parameter],
+def _check_module_states_for_sync_module_states(
+    module_states: List[torch.Tensor],
 ) -> None:
-    if params and any(param.device == torch.device("cpu") for param in params):
+    if module_states and any(
+        tensor.device == torch.device("cpu") for tensor in module_states
+    ):
         raise ValueError(
-            "The module has CPU parameters when `sync_module_states=True`, "
-            "which only works when all parameters are on GPU. Please specify "
-            "the `device_id` argument or move the module to GPU before passing "
-            "into FSDP."
+            "The module has CPU parameters or buffers when `sync_module_states=True`, "
+            "which requires them to be on GPU. Please specify the `device_id` argument "
+            "or move the module to GPU before passing it to FSDP."
         )
 
 
