@@ -595,15 +595,17 @@ def clone_inputs(example_inputs):
 
 @contextmanager
 def preserve_rng_state():
-    rng = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    with torch.utils._python_dispatch._disable_current_modes():
+        rng_state = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
-        torch.random.set_rng_state(rng)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng)
+        with torch.utils._python_dispatch._disable_current_modes():
+            torch.random.set_rng_state(rng_state)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
 
 
 def is_jit_model(model0):
@@ -780,6 +782,15 @@ def check_unspec_python_args(args, kwargs):
     return unspec_count > 0
 
 
+def check_numpy_ndarray_args(args, kwargs):
+    from .variables.tensor import NumpyNdarrayVariable
+
+    return any(
+        isinstance(x, NumpyNdarrayVariable)
+        for x in itertools.chain(args, kwargs.values())
+    )
+
+
 def specialize_args_kwargs(tx, args, kwargs):
     specialized_args = []
     specialized_kwargs = {}
@@ -895,6 +906,9 @@ def same(
         fp64_ref = ref
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
+        if len(ref) != len(res):
+            log_error("Length mismatch")
+            return False
         return len(ref) == len(res) and all(
             same(
                 ai,
@@ -960,6 +974,7 @@ def same(
                 if not r:
                     log_error("Accuracy failed: uint8 tensor did not match")
                 return r
+
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -1398,22 +1413,8 @@ def fqn(obj: Any):
     return f"{obj.__module__}.{obj.__qualname__}"
 
 
-def ifdyn(count1, count2):
-    if torch._dynamo.config.dynamic_shapes:
-        return count1
-    else:
-        return count2
-
-
 def ifdynstaticdefault(count1, count2):
     if torch._dynamo.config.assume_static_by_default:
-        return count1
-    else:
-        return count2
-
-
-def ifunspec(count1, count2):
-    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
         return count1
     else:
         return count2
