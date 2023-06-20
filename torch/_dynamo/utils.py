@@ -595,15 +595,17 @@ def clone_inputs(example_inputs):
 
 @contextmanager
 def preserve_rng_state():
-    rng = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    with torch.utils._python_dispatch._disable_current_modes():
+        rng_state = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
-        torch.random.set_rng_state(rng)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng)
+        with torch.utils._python_dispatch._disable_current_modes():
+            torch.random.set_rng_state(rng_state)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
 
 
 def is_jit_model(model0):
@@ -780,6 +782,15 @@ def check_unspec_python_args(args, kwargs):
     return unspec_count > 0
 
 
+def check_numpy_ndarray_args(args, kwargs):
+    from .variables.tensor import NumpyNdarrayVariable
+
+    return any(
+        isinstance(x, NumpyNdarrayVariable)
+        for x in itertools.chain(args, kwargs.values())
+    )
+
+
 def specialize_args_kwargs(tx, args, kwargs):
     specialized_args = []
     specialized_kwargs = {}
@@ -895,6 +906,9 @@ def same(
         fp64_ref = ref
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
+        if len(ref) != len(res):
+            log_error("Length mismatch")
+            return False
         return len(ref) == len(res) and all(
             same(
                 ai,
@@ -960,6 +974,7 @@ def same(
                 if not r:
                     log_error("Accuracy failed: uint8 tensor did not match")
                 return r
+
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -1398,22 +1413,8 @@ def fqn(obj: Any):
     return f"{obj.__module__}.{obj.__qualname__}"
 
 
-def ifdyn(count1, count2):
-    if torch._dynamo.config.dynamic_shapes:
-        return count1
-    else:
-        return count2
-
-
 def ifdynstaticdefault(count1, count2):
     if torch._dynamo.config.assume_static_by_default:
-        return count1
-    else:
-        return count2
-
-
-def ifunspec(count1, count2):
-    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
         return count1
     else:
         return count2
@@ -1677,13 +1678,16 @@ def defake(x):
 # NB: The dictionary has to be created lazily after TorchPatcher is called so
 # that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
 # sitting in a separate function.
-@functools.lru_cache(None)
 def higher_order_op_converter():
-    import torch._higher_order_ops.wrap
+    import torch._higher_order_ops.wrap as higher_order_ops
 
-    return {
-        torch.utils.checkpoint.checkpoint: torch._higher_order_ops.wrap.wrap_activation_checkpoint,
-    }
+    # TODO - This is a temporary sitaution where we have two versions of
+    # checkpointing implemetation. We will converge on one and remove the other.
+    activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
+    if torch._functorch.config.functionalize_rng_ops:
+        activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
+
+    return {torch.utils.checkpoint.checkpoint: activation_checkpoint_op}
 
 
 def requires_higher_order_op(obj):
@@ -1691,29 +1695,4 @@ def requires_higher_order_op(obj):
 
 
 def get_higher_order_op(obj):
-    if (
-        obj is torch.utils.checkpoint.checkpoint
-        and not torch._functorch.config.functionalize_rng_ops
-    ):
-        from .exc import unimplemented
-
-        # TODO - functionalize_rng_ops flags cannot be turned ON by default
-        # because 1) Performance concerns - seed and offset are read and passed
-        # to each AOT graph 2) Inductor has rand-specific optimizations and
-        # there is work remaining to compose them together with
-        # functionalization.
-        #
-        # Until we make it ON by default, we will have to ask users to turn on
-        # this flag manually.  TODO - Revisit if there is a simpler way to
-        # resolve this problem.
-        torch._logging.warning_once(
-            log,
-            "torch.compile on activation checkpointing is an experimental feature. "
-            "Please manually set torch._functorch.config.functionalize_rng_ops=True "
-            "to run torch.compile with activation checkpointing. Without this flag, "
-            "checkpointed function will not get compiled and fallback to eager.",
-        )
-        unimplemented(
-            "torch.compile requires functioanlization of rng ops to be turned on"
-        )
     return higher_order_op_converter().get(obj)
