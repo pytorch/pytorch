@@ -203,7 +203,7 @@ class ConstDictVariable(VariableTracker):
             items=items, recursively_contains=recursively_contains, **options
         )
 
-    def unpack_var_sequence(self, tx, recursive=False):
+    def unpack_var_sequence(self, tx):
         options = VariableTracker.propagate([self])
         val = self.items
         result = [ConstDictVariable._key_to_var(tx, k, **options) for k in val.keys()]

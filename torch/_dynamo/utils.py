@@ -1696,14 +1696,3 @@ def requires_higher_order_op(obj):
 
 def get_higher_order_op(obj):
     return higher_order_op_converter().get(obj)
-
-
-def recursive_unpack(tx, obj):
-    results = []
-    for x in obj.unpack_var_sequence(tx):
-        if x.has_unpack_var_sequence(tx):
-            results.extend(recursive_unpack(tx, x))
-        else:
-            results.append(x.add_options(obj))
-
-    return results
