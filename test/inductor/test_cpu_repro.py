@@ -387,6 +387,25 @@ class CPUReproTests(TestCase):
             (torch.randn(8),),
         )
 
+    def test_ModularIndexing_range_issue_103133(self):
+        def fn(q, k):
+            einsum = torch.einsum("bcxd,bcyd->bcxy", (q, k))
+            constant_pad_nd = torch.ops.aten.constant_pad_nd.default(
+                einsum, [0, 0, 0, 1], 0.0
+            )
+            view = torch.ops.aten.view.default(constant_pad_nd, [12, 1, 512, 513])
+            y = view.new_zeros((12, 2, 256, 513))
+            y[:, :-1, :, 256:] = view[:, :, :256, :257]
+            return y
+
+        self.common(
+            fn,
+            (
+                torch.empty_strided((12, 1, 512, 64), (64, 196608, 768, 1)),
+                torch.empty_strided((12, 1, 512, 64), (64, 196608, 768, 1)),
+            ),
+        )
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_max_reduction_bfloat16(self):
         def fn(x):
@@ -395,6 +414,16 @@ class CPUReproTests(TestCase):
         self.common(
             fn,
             (torch.randn(1, 32, 4, 4).bfloat16(),),
+        )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_vec_transpose_bf16(self):
+        def fn(x):
+            return x.to(memory_format=torch.channels_last).bfloat16()
+
+        self.common(
+            fn,
+            (torch.randn(2, 3, 4, 4),),
         )
 
     @patch("torch.cuda.is_available", lambda: False)
@@ -431,6 +460,40 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
+
+    def test_slice_scatter_default_end_value(self):
+        # From HF AllenaiLongformerBase.
+        def fn(query, key, window_overlap):
+            batch_size, seq_len, num_heads, head_dim = query.size()
+            assert (
+                seq_len % (window_overlap * 2) == 0
+            ), f"Sequence length should be multiple of {window_overlap * 2}. Given {seq_len}"
+
+            chunks_count = torch.div(seq_len, window_overlap, rounding_mode="trunc") - 1
+            diagonal_chunked_attention_scores = key
+            diagonal_attention_scores = diagonal_chunked_attention_scores.new_zeros(
+                (
+                    batch_size * num_heads,
+                    chunks_count + 1,
+                    window_overlap,
+                    window_overlap * 2 + 1,
+                )
+            )
+            diagonal_attention_scores[
+                :, :3, :, window_overlap:
+            ] = diagonal_chunked_attention_scores[
+                :, :, :window_overlap, : window_overlap + 1
+            ]
+            return diagonal_attention_scores
+
+        self.common(
+            fn,
+            (
+                torch.randn(1, 1024, 12, 64),
+                torch.randn(12, 3, 512, 513),
+                256,
+            ),
+        )
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -626,7 +689,6 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_vec_dynamic_shapes(self):
         def fn(x):
             return torch.softmax(x, -1)
@@ -1541,6 +1603,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.max_horizontal_fusion_size": 0}):
             metrics.reset()
+            torch._dynamo.reset()
             a = torch.randn(size=(4, 16), dtype=torch.bfloat16)
             b = torch.randn(size=(4, 16), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 16), dtype=torch.bfloat16)
@@ -1552,6 +1615,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.max_horizontal_fusion_size": 1}):
             metrics.reset()
+            torch._dynamo.reset()
             a = torch.randn(size=(4, 32), dtype=torch.bfloat16)
             b = torch.randn(size=(4, 32), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 32), dtype=torch.bfloat16)
@@ -1563,6 +1627,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.max_horizontal_fusion_size": 2}):
             metrics.reset()
+            torch._dynamo.reset()
             a = torch.randn(size=(4, 64), dtype=torch.bfloat16)
             b = torch.randn(size=(4, 64), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 64), dtype=torch.bfloat16)
@@ -1575,6 +1640,7 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.max_horizontal_fusion_size": 3}):
             metrics.reset()
+            torch._dynamo.reset()
             a = torch.randn(size=(4, 128), dtype=torch.bfloat16)
             b = torch.randn(size=(4, 128), dtype=torch.bfloat16)
             c = torch.randn(size=(4, 128), dtype=torch.bfloat16)
