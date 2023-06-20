@@ -16,7 +16,10 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.random import OffsetBasedRNGTracker
+from torch.distributed._tensor.random import (
+    is_rng_supported_mesh,
+    OffsetBasedRNGTracker,
+)
 from torch.distributed._tensor.redistribute import Redistribute
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -403,7 +406,7 @@ def distribute_tensor(
     # OffsetBasedRNGTracker to perform random operators.
     # TODO: the value assignment to global variable is not the ideal solution
     # we can replace it in future.
-    if not random._rng_tracker:
+    if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
         random._rng_tracker = OffsetBasedRNGTracker()
 
     # convert tensor to the corresponding device type if it's not in that device type
