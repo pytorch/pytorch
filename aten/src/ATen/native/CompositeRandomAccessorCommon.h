@@ -2,7 +2,7 @@
 
 #pragma once
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -260,4 +260,4 @@ protected:
   ValueAccessor values;
 };
 
-}} // namespace at::native
+} // namespace at::native
