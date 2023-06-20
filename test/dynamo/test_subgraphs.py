@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import ifdyn, ifdynstaticdefault, ifunspec
+from torch._dynamo.utils import ifdynstaticdefault
 
 globalmod = torch.nn.ReLU()
 
@@ -305,7 +305,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 2, 5)
 
-    @patch("torch._dynamo.config.dynamic_shapes", True)
     def test_restore_state(self):
         def fn(a, b):
             len_ = len
@@ -328,7 +327,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         # means we fail to unroll the loop.
         # TODO: Consider forcing specialization when we iterate over
         # the loop
-        self._common(fn, 2, ifunspec(1, 4))
+        self._common(fn, 2, ifdynstaticdefault(4, 1))
 
     def test_restore_range_iter(self):
         def fn(a, b):
@@ -351,7 +350,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 2, 6)
 
-    @patch("torch._dynamo.config.dynamic_shapes", True)
     @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_getitem(self):
         def fn(a, b):
@@ -395,7 +393,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, y), fn(x, y))
         self.assertEqual(cnt_dynamic.frame_count, 2)
 
-    @patch("torch._dynamo.config.dynamic_shapes", True)
     def test_dynamic_order_dependence(self):
         def fn(a, b):
             return a.sum() + b.sum()
@@ -438,7 +435,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(cnt_dynamic.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):
         def fn(a, b):
@@ -450,7 +446,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
 
         self._common(fn, 1, 6)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
         def fn(a, b):
@@ -598,7 +593,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 b = b + x * i
             return b
 
-        self._common(fn, 1, ifdyn(ifdynstaticdefault(2, 7), 2))
+        self._common(fn, 1, ifdynstaticdefault(2, 7))
 
 
 if __name__ == "__main__":
