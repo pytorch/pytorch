@@ -3,6 +3,7 @@ from typing import Dict, Union
 
 import torch
 import torch.nn as nn
+import torch.distributed._tensor.random as random
 from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
@@ -11,6 +12,7 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.random import TensorParallelRNGTracker
 from torch.distributed._tensor.sharding_prop import _CachingPropagator
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.multihead_attention_tp import (
@@ -81,6 +83,11 @@ def parallelize_module(  # type: ignore[return]
     """
 
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
+
+    # instantiate a TP RNG state tracker if it's not there
+    if isinstance(random._rng_tracker, TensorParallelRNGTracker):
+        random._rng_tracker = TensorParallelRNGTracker()
+        random._rng_tracker._manual_seed(device_mesh, base_seed=(1234 + 2718), tp_dim=tp_mesh_dim)
 
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
