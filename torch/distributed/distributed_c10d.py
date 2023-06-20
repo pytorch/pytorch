@@ -33,6 +33,7 @@ from torch._C._distributed_c10d import (
     Work
 )
 from torch.autograd.profiler import record_function
+from torch.futures import Future, collect_all
 from .constants import default_pg_timeout
 from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
@@ -1622,6 +1623,9 @@ class _CoalescingManager:
     def wait(self):
         for work in self.works:
             work.wait()
+
+    def get_future(self) -> Future:
+        return collect_all([work.get_future() for work in self.works])
 
 
 @contextlib.contextmanager
