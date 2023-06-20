@@ -116,7 +116,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 )
             )
             self.graph_stack.enter_context(
-                dynamo_config.patch(dynamic_shapes=True, automatic_dynamic_shapes=True)
+                dynamo_config.patch(automatic_dynamic_shapes=True)
             )
             self.device_idx = torch.rand([0], device="cuda").device.index
             warnings.filterwarnings("ignore")

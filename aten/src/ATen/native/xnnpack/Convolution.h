@@ -62,6 +62,15 @@ Tensor run(ContextConv2D& context, const Tensor& input);
 
 } // namespace convolution2d
 } // namespace internal
+
+Tensor convolution2d(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
+    const int64_t groups);
 } // namespace xnnpack
 } // namespace native
 } // namespace at

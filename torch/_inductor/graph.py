@@ -22,8 +22,6 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._mode_utils import no_dispatch
 
-from .._dynamo import config as dynamo_config
-
 from . import config, ir, metrics
 from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
 from .exc import (
@@ -493,14 +491,7 @@ class GraphLowering(torch.fx.Interpreter):
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
         # symbolic shapes.
-        if (
-            config.static_weight_shapes
-            and (
-                len(self.graph_inputs) < self.num_static_inputs
-                or not dynamo_config.dynamic_shapes
-            )
-            and not example._has_symbolic_sizes_strides
-        ):
+        if not example._has_symbolic_sizes_strides:
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
         else:
@@ -789,15 +780,10 @@ class GraphLowering(torch.fx.Interpreter):
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
-    def check_constant_for_cpp_buffer(self):
-        if self.constants:
-            self.disable_cpp_wrapper("Constants")
-
     def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()
         self.check_platform()
         self.check_input_for_cpp_buffer()
-        self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
         self.cuda = "cuda" in self.device_types
