@@ -2,7 +2,7 @@
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._export.constraints import constrain_as_size
-from torch._export.functionalize_assertions import functionalize
+from torch._export.functionalize_assertions import _functionalize_side_effectful_ops
 from torch._export import dynamic_dim
 from torch.testing import FileCheck
 
@@ -57,7 +57,7 @@ class TestFunctionalization(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        gm = functionalize(gm)
+        gm = _functionalize_side_effectful_ops(gm)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -97,7 +97,7 @@ class TestFunctionalization(TestCase):
                 dynamic_dim(inp, 0) >= 3,
             ],
         )
-        gm = functionalize(ep.graph_module)
+        gm = _functionalize_side_effectful_ops(ep.graph_module)
         with self.assertRaisesRegex(
             RuntimeError,
             r"Input arg0_1.shape\[0\] is outside of specified dynamic range \[3, 9\]",

@@ -247,7 +247,6 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten.lerp,
             aten.linspace,
             aten.logaddexp,
-            aten.logaddexp2,
             aten.logit,
             aten.logit_backward,
             aten.log_sigmoid_backward,
