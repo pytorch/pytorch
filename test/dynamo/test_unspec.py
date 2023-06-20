@@ -20,7 +20,7 @@ from torch._dynamo.testing import same
 # test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
 
 
-@torch._dynamo.config.patch(dynamic_shapes=True, assume_static_by_default=False)
+@torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
@@ -296,6 +296,14 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         z = fn(x)
         self.assertEqual(z._dynamo_weak_dynamic_indices, {0})
+
+    def test_rshift_dynamic(self):
+        def shift_right(tensor: torch.Tensor) -> torch.Tensor:
+            return (tensor >> 2).to(torch.long)
+
+        opt_fn = torch.compile(shift_right, fullgraph=True, dynamic=True)
+        sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
+        opt_fn(sample_input)
 
 
 if __name__ == "__main__":

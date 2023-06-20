@@ -1112,7 +1112,7 @@ class FakeTensor(torch.Tensor):
 # different operators. While this will keep all freshly allocated
 # tensors alive during `FakeTensorMode`, there will no be no
 # new allocations of Tensors which have non-meta storage so
-# memory should not significantly incraese.
+# memory should not significantly increase.
 
 
 class FakeTensorMode(TorchDispatchMode):
