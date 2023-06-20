@@ -1275,7 +1275,10 @@ class GraphModule(torch.nn.Module):
         actual = wrapper_fn(x)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(dict(counters["graph_break"]), {"list was mutated.": 2})
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"NYI - torch.func.grad(f) where there are side effects in f": 2},
+        )
         self.assertEqual(actual, expected)
 
     def test_grad_pytree(self):
