@@ -318,6 +318,7 @@ def sym_constrain_range(size, min, max):
 
 @register_meta(aten.functional_sym_constrain_range.default)
 def functional_sym_constrain_range(size, min, max, dep_token):
+    constrain_range(size, min=min, max=max)
     return dep_token
 
 
