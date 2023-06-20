@@ -321,11 +321,16 @@ class CodeGen:
         """
         return []
 
-    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+    def _gen_python_code(self, graph, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+        nodes = graph.nodes
+
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
         wrapped_fns: Dict[str, None] = {}
+
+        if hasattr(graph, '_co_fields'):
+            globals_['__torch_fx_original_co_fields__'] = graph._co_fields
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
@@ -730,6 +735,7 @@ class Graph:
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
+        self._co_fields = {}
 
     @property
     def owning_module(self):
@@ -1265,7 +1271,7 @@ class Graph:
             return self._python_code(root_module, namespace, verbose=verbose)
 
     def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
-        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
+        return self._codegen._gen_python_code(self, root_module, namespace, verbose=verbose)
 
 
     def __str__(self) -> str:

@@ -42,6 +42,8 @@ class _EvalCacheLoader:
         """
 
         key = self._get_key()
+        if co_fields := globals.get('__torch_fx_original_co_fields__'):
+            key += f" from {co_fields['co_filename']}:{co_fields['co_firstlineno']} in {co_fields['co_name']}"
         self.eval_cache[key] = src
 
         # Don't mutate globals so that this loader is only used
