@@ -543,7 +543,7 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(inp.grad, torch.zeros_like(inp))
         self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
 
-    @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/103854
+    @expectedFailureIf(TEST_CUDA)  # https://github.com/pytorch/pytorch/issues/103854
     @slowTest
     @onlyNativeDeviceTypes
     @skipCUDAIfRocm
