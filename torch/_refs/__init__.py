@@ -3119,7 +3119,7 @@ def renorm(
         not isinstance(maxnorm, complex), lambda: "renorm: maxnorm must be real-valued"
     )
     utils.check(
-        maxnorm > 0, lambda: f"renorm: expected maxnorm to be >= but got {maxnorm}"
+        maxnorm >= 0, lambda: f"renorm: expected maxnorm to be >= 0 but got {maxnorm}"
     )
     ndim = input.dim()
     utils.check(
@@ -3134,7 +3134,6 @@ def renorm(
     # For half and bfloat16, calculate norm in float precision then cast
     # normalization factor to half
     acc_type = utils.get_computation_dtype(input.dtype)
-    extra_kwargs = {}
     if acc_type != input.dtype:
         norm = torch.linalg.vector_norm(
             input, p, reduce_dims, keepdim=True, dtype=acc_type
