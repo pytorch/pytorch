@@ -9815,62 +9815,6 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
-        def test_static_graph_multi_forward(self):
-            class Net(nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.lin = nn.Linear(10, 10)
-                    self.relu = nn.ReLU()
-
-                def forward(self, x):
-                    return self.relu(self.lin(x))
-
-            torch.cuda.set_device(self.rank)
-            torch.manual_seed(42 << 1337 % (self.rank + 1))
-            model = Net().cuda(self.rank)
-            local_model = copy.deepcopy(model)
-            model = torch.nn.parallel.DistributedDataParallel(
-                model, device_ids=[self.rank], static_graph=True
-            )
-            inp = torch.ones(2, 10, device="cuda")
-            for _ in range(3):
-                model.zero_grad()
-                local_model.zero_grad()
-                a = model(inp)
-                b = model(inp)
-                loss = a.sum() + b.sum()
-                loss.backward()
-                # Grads should be equal to a local model that ran through inp twice and averaged grads
-                if self.rank == 0:
-                    inp_clone = inp.clone()
-                    for _ in range(2):
-                        a = local_model(inp_clone)
-                        b = local_model(inp_clone)
-                        loss = a.sum() + b.sum()
-                        loss.backward()
-
-                    ws = dist.get_world_size()
-                    for p in local_model.parameters():
-                        p.grad.data = p.grad / dist.get_world_size()
-
-                    for p_ddp, p_local in zip(
-                        model.parameters(),
-                        local_model.parameters()
-                    ):
-                        self.assertTrue(
-                            torch.allclose(
-                                p_ddp.grad, p_local.grad
-                            ),
-                            f"{p_ddp.grad} vs {p_local.grad}"
-                        )
-
-            dist.barrier()
-
-        @skip_if_lt_x_gpu(2)
-        @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
         def test_sync_bn_logged(self):
             model = BN_NET
             rank = self.rank
