@@ -2051,20 +2051,31 @@ class ShapeEnv:
         if result.success:
             return
 
-        assert (
-            result.model is not None
-            and result.failed_source_expr is not None
-            and result.target_exprs is not None
-        )
-        oneline_model = {sym: result.model[sym] for sym in result.model}
-        failed_source_exprs = "\n".join(f"==>> {inp}" for inp in result.failed_source_expr)
-        target_exprs = "\n".join(f"==>> {out}" for out in result.outputs)
-        raise RuntimeError(f"""translation validation failed with model: {oneline_model}
-Target Guards:
-{target_exprs}
+        if result.model is None:
+            reason = "no answer"
+            source_exprs = self.validator._source_exprs
+            failed = ""
+        else:
+            assert result.failed_source_expr is not None
+            reason = "model: %s" % {sym: result.model[sym] for sym in result.model}
+            source_exprs = result.failed_source_expr
+            failed = "Failed "
 
-Failed Source Guards:
-{failed_source_exprs}""")
+        def exprs_to_str(exprs):
+            return "\n".join(f"==> {e}" for e in exprs)
+
+        assertions = self.validator._assertions
+        target_exprs = self.validator._target_exprs
+
+        raise RuntimeError(f"""translation validation failed with {reason}.
+Assertions:
+{exprs_to_str(assertions)}
+
+Target Guards:
+{exprs_to_str(target_exprs)}
+
+{failed}Source Guards:
+{exprs_to_str(source_exprs)}""")
 
     def create_fx_call_function(
             self,
