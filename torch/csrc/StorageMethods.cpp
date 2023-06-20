@@ -123,6 +123,8 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
     at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
 #endif
+  } else if (device_type == at::kMeta) {
+    at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
   } else if (device_type == at::kPrivateUse1) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
@@ -538,6 +540,50 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 1, "tuple of 1 item expected");
+  PyObject* _elem_size = PyTuple_GET_ITEM(args, 0);
+  THPUtils_assert(
+      THPUtils_checkLong(_elem_size), "_byteswap(): arg must be an 'int'");
+  auto elem_size = THPUtils_unpackLong(_elem_size);
+  THPUtils_assert(
+      elem_size == 1 || elem_size == 2 || elem_size == 4 || elem_size == 8,
+      "elem_size must be 1, 2, 4, or 8");
+
+  const auto& storage = THPStorage_Unpack(self);
+  const auto nbytes = static_cast<uint64_t>(storage.nbytes());
+  const uint64_t count = nbytes / elem_size;
+
+  if (elem_size == 1) {
+    Py_RETURN_NONE;
+  }
+  THPUtils_assert(
+      nbytes % elem_size == 0,
+      "the length of data is not a multiple of %ld",
+      elem_size);
+
+  if (elem_size == 2) {
+    auto buffer = static_cast<uint16_t*>(storage.mutable_data());
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap16(*buffer);
+    }
+  } else if (elem_size == 4) {
+    auto buffer = static_cast<uint32_t*>(storage.mutable_data());
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap32(*buffer);
+    }
+  } else if (elem_size == 8) {
+    auto buffer = static_cast<uint64_t*>(storage.mutable_data());
+    for (uint64_t i = 0; i < count; i++, buffer++) {
+      *buffer = thp_bswap64(*buffer);
+    }
+  }
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_methods[] = {
     {"copy_",
@@ -565,6 +611,7 @@ static PyMethodDef THPStorage_methods[] = {
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_set_cdata", THPStorage__setCdata, METH_O, nullptr},
+    {"_byteswap", THPStorage_byteswap, METH_VARARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THPStorage_getMethods() {

@@ -207,6 +207,16 @@ class TestMetaConverter(TestCase):
 
         self.assertMetadataMatches(m, x)
 
+    def test_view_mutate(self):
+        x = torch.zeros(4)
+        y = x.view(2, 2)
+
+        to_meta = MetaConverter()
+        m = to_meta(y)
+
+        y.add_(torch.randn(2, 2, requires_grad=True))
+        m.add_(torch.randn(2, 2, device='meta', requires_grad=True))
+
     def test_non_leaf_torture(self):
         x = torch.empty(20, requires_grad=True)
         with torch.no_grad():
@@ -329,6 +339,12 @@ CHECK_STRIDES_SKIPS = {
     # aten.view.default,  # repro with test_dispatch_symbolic_meta_outplace_all_strides_unflatten_cuda_float32
 }
 
+CHECK_CONJ_SKIPS = {
+    # The conj bit is not copied, see:
+    # https://github.com/pytorch/pytorch/pull/101836
+    aten.linalg_lu_solve.out,
+}
+
 class CheckStrides(Enum):
     NONE = 0
     SIGNIFICANT = 1
@@ -377,7 +393,8 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
             meta_r.storage_offset() == r.storage_offset(),
             f"but real storage_offset was {r.storage_offset()}")
         test_assert(meta_r.requires_grad == r.requires_grad, f"but real requires_grad was {r.requires_grad}")
-        test_assert(meta_r.is_conj() == r.is_conj(), f"but real is_conj was {r.is_conj()}")
+        if func not in CHECK_CONJ_SKIPS:
+            test_assert(meta_r.is_conj() == r.is_conj(), f"but real is_conj was {r.is_conj()}")
         test_assert(meta_r.is_neg() == r.is_neg(), f"but real is_neg was {r.is_neg()}")
 
 
@@ -598,7 +615,6 @@ meta_function_expected_failures = {
     torch.functional.istft : {f64, c64, c128, f32},
     torch.geqrf : {f64, c64, c128, f32},
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
-    torch.matrix_exp : {f64, c128, c64, bf16, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.ormqr : {f64, c64, c128, f32},
@@ -661,9 +677,7 @@ meta_function_skips = {
     torch.functional.einsum : {bf16, c128, f64, f32, f16, c64},
     torch.functional.tensordot : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
     torch.inner : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
-    torch.linalg.lu_solve : {c128, c64},
     torch.linalg.matrix_norm : {c128, f32, c64, f64},
-    torch.linalg.matrix_power : {c128, c64},
     torch.linalg.matrix_rank : {c128, c64},
     torch.linalg.svd : {c128, c64},
     torch.matmul : {bf16, c128, f64, f32, f16, c64},
@@ -683,9 +697,7 @@ meta_function_skips = {
     torch.nn.functional.cross_entropy : {bf16, f64, f32},
     torch.nn.functional.interpolate : {bf16, f64, f32, u8},
     torch.nn.functional.nll_loss : {bf16, f64, f32},
-    torch.linalg.pinv : {f64, f32},
     torch.linalg.cond : {c128, c64, f32, f64},
-    torch.linalg.vander: {c128, c64, f32, f64, i16, i32, i64, i8, u8},
     torch.linalg.vecdot : {bf16, f64, f32, f16},
     torch.empty : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
@@ -713,7 +725,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
-    torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -737,7 +748,6 @@ meta_function_device_skips['cpu'] = {
 meta_function_device_skips['cuda'] = {
     torch.functional.tensordot: {f16},
     torch.inner: {f16},
-    torch.linalg.matrix_power: {f32, f64},
     torch.linalg.matrix_rank: {f32, f64},
     torch.linalg.svd: {f32, f64},
     torch.nn.functional.cross_entropy: {f16},
@@ -819,7 +829,6 @@ meta_dispatch_expected_failures = {
     aten.geqrf.default : {c64, c128, f64, f32},
     aten.linalg_eig.default : {c64, c128, f64, f32},
     aten.linalg_lstsq.default : {c64, c128, f64, f32},
-    aten.linalg_matrix_exp.default : {c64, bf16, f32, f64, c128},
     aten.masked_select.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.masked_select.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.nonzero.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
@@ -867,10 +876,6 @@ meta_dispatch_skips = {
     aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32, c64, c128},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
-    aten.linalg_lu_solve.default: {c32, c64, c128},
-    aten.linalg_lu_solve.out: {c32, c64, c128},
-    aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
-    aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
     aten.addbmm_.default: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
@@ -910,7 +915,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
-    aten.linalg_matrix_exp.default: {f16},  # aten::linalg_matrix_exp
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
     aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices

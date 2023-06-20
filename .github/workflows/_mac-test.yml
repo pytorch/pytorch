@@ -131,6 +131,12 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           # shellcheck disable=SC1090
           set -ex
@@ -207,21 +213,6 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
-
-      - name: Archive conda environments
-        if: failure()
-        shell: bash
-        run: |
-          zip -1 -r runner_temp.zip "${RUNNER_TEMP}/"
-
-      - name: Store conda environments on GHA for debugging
-        uses: actions/upload-artifact@v3
-        if: failure()
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}-${{ steps.get-job-id.outputs.job-id }}-temp
-          retention-days: 14
-          if-no-files-found: warn
-          path: runner_temp.zip
 
       - name: Clean up disk space
         if: always()

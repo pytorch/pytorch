@@ -4,10 +4,9 @@ import unittest
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
-from torch._export import export, dynamic_dim, _export
+from torch._export import export, dynamic_dim
 from torch._export.constraints import constrain_as_value
 from torch._export.passes import (
-    ConstPropPass,
     ReplaceViewOpsWithViewCopyOpsPass,
 )
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
@@ -34,42 +33,14 @@ class TestPasses(TestCase):
         def f(inp: torch.Tensor) -> torch.Tensor:
             return model(inp)
 
-        gm = export(f, (x,)).find_method("forward")
-
-        new_gm = ReplaceViewOpsWithViewCopyOpsPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_gm = new_gm.graph_module
+        ep = export(f, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
 
         count_after = 0
-        for node in new_gm.graph.nodes:
+        for node in ep.graph.nodes:
             if node.target == torch.ops.aten.view.default:
                 count_after += 1
         self.assertEqual(count_after, 0)
-        self.assertTrue(torch.allclose(gm(x), f(x)))
-
-    def test_const_prop_pass(self) -> None:
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = torch.nn.Parameter(torch.ones(1, 2, 3))
-
-            def forward(self, x):
-                b = self.a + self.a
-                c = torch.cat([self.a, b])
-                return (c + c) + x
-
-        def count_additions(gm) -> int:
-            return sum(
-                (node.target == torch.ops.aten.add.Tensor) for node in gm.graph.nodes
-            )
-
-        gm = export(M(), (torch.zeros(2, 2, 3),)).find_method("forward")
-        self.assertEqual(count_additions(gm), 3)
-
-        new_gm = ConstPropPass()(gm)
-        self.assertIsNotNone(new_gm)
-        new_gm = new_gm.graph_module
-        self.assertEqual(count_additions(new_gm), 1)
+        self.assertTrue(torch.allclose(ep(x), f(x)))
 
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
@@ -81,7 +52,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(2, 2, 3)
 
-        ep = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6]).add_runtime_assertions()
+        ep = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6])
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -89,7 +60,7 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 3)
         self.assertEqual(num_scalar_tensor, 3)
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(2, 7, 3))
 
         self.assertEqual(ep(torch.ones(2, 4, 3)), M().forward(torch.ones(2, 4, 3)))
@@ -112,19 +83,19 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        gm = export(M(), (x, y), constraints=constraints).add_runtime_assertions().find_method("forward")
+        ep = export(M(), (x, y), constraints=constraints)
 
-        num_assert = count_call_function(gm.graph, torch.ops.aten._assert_async.msg)
-        num_scalar_tensor = count_call_function(gm.graph, torch.ops.aten.scalar_tensor.default)
+        num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
+        num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
 
         self.assertEqual(num_assert, 6)
         self.assertEqual(num_scalar_tensor, 6)
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
-            gm(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
+            ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg1"):
-            gm(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, "Input arg1_1"):
+            ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
     def test_runtime_assert_some_dims_not_specified(self) -> None:
         class M(torch.nn.Module):
@@ -143,7 +114,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
+        ep = export(M(), (x, y), constraints=constraints)
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -152,11 +123,11 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 6)
         self.assertEqual(num_scalar_tensor, 6)
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, "Input arg1's dimension #0 size is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -181,7 +152,7 @@ class TestPasses(TestCase):
             dynamic_dim(y, 1) <= 6,
         ]
 
-        ep = export(M(), (x, y), constraints=constraints).add_runtime_assertions()
+        ep = export(M(), (x, y), constraints=constraints)
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -190,11 +161,11 @@ class TestPasses(TestCase):
         self.assertEqual(num_assert, 7)
         self.assertEqual(num_scalar_tensor, 7)
 
-        with self.assertRaisesRegex(RuntimeError, "Input arg0"):
+        with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
 
         # y is specialized to 5
-        with self.assertRaisesRegex(RuntimeError, "Input arg1's dimension #0 size is specialized at 5"):
+        with self.assertRaisesRegex(RuntimeError, r"Input arg1_1.shape\[0\] is specialized at 5"):
             ep(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
         # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
@@ -214,25 +185,25 @@ class TestPasses(TestCase):
 
         x = torch.zeros(4, 2, 3)
 
-        gm = _export(M(), (x,))
-        self.assertEqual(count_call_function(gm.graph, torch.ops.aten.view.default), 1)
+        ep = export(M(), (x,))
+        self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 1)
 
-        pass_result = ReplaceViewOpsWithViewCopyOpsPass()(gm)
-        self.assertTrue(pass_result.modified)
-        self.assertEqual(count_call_function(pass_result.graph_module.graph, torch.ops.aten.view.default), 0)
+        ep = ep.transform(ReplaceViewOpsWithViewCopyOpsPass())
+        self.assertEqual(count_call_function(ep.graph, torch.ops.aten.view.default), 0)
 
     def test_functionalization_with_view_copy(self) -> None:
         def foo(x):
-            x.add_(4)
-            y = x.view(x.shape)
-            return x.cos() + y.cos()
+            y = x + 4
+            y.add_(4)
+            z = y.view(y.shape)
+            return x.cos() + z.cos()
 
         x = torch.zeros(4, 2, 3)
 
         ep = export(foo, (x,)).transform(ReplaceViewOpsWithViewCopyOpsPass())
         # After this pass, there shouldn't be any view nodes in the graph
-        self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view.default) == 0)
-        self.assertTrue(count_call_function(ep.module.graph, torch.ops.aten.view_copy.default) > 0)
+        self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view.default) == 0)
+        self.assertTrue(count_call_function(ep.graph, torch.ops.aten.view_copy.default) > 0)
 
     def test_views_op_having_view_copy(self) -> None:
         schemas = torch._C._dispatch_get_registrations_for_dispatch_key("")
@@ -265,7 +236,7 @@ class TestPasses(TestCase):
 
         x = torch.tensor([2])
         mod = M()
-        ep = export(mod, (x,)).add_runtime_assertions()
+        ep = export(mod, (x,))
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -292,14 +263,14 @@ class TestPasses(TestCase):
         x = torch.tensor([2, 1, 2, 3, 5, 0])
 
         mod = M()
-        ep = export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2]).add_runtime_assertions()
+        ep = export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2])
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
 
-        # 2 constraints for b
-        self.assertEqual(num_assert, 2)
-        self.assertEqual(num_scalar_tensor, 2)
+        # TODO: De-duplicate assertions for same symbol.
+        self.assertEqual(num_assert, 4)
+        self.assertEqual(num_scalar_tensor, 4)
 
         with self.assertRaisesRegex(RuntimeError, r"nonzero_default.shape\[0\] is outside of inline constraint \[3, 5\]."):
             ep(torch.tensor([1, 1, 0, 0, 0]))
@@ -332,9 +303,37 @@ class TestPasses(TestCase):
         x = torch.tensor([2])
         y = torch.tensor([5])
         mod = M()
-        ep = export(mod, (torch.tensor(True), x, y)).add_runtime_assertions()
+        ep = export(mod, (torch.tensor(True), x, y))
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint \\[2, 5\\]."):
             ep(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
+
+    def test_runtime_assert_equality_constraint(self):
+        class Adder(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x + y
+
+        m = Adder()
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        exported = torch._export.export(
+            m, (x, y), constraints=[dynamic_dim(x, 1) == dynamic_dim(y, 1)]
+        )
+
+        x = torch.rand(3, 5)
+        y = torch.rand(3, 6)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Input arg0_1.shape\[1\] is not equal to input arg1_1.shape\[1\]"
+        ):
+            exported(x, y)
+
+        y = torch.rand(3, 5)
+        dynamo_result = exported(x, y)
+        real_result = m(x, y)
+        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
 
 if __name__ == '__main__':

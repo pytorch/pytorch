@@ -16,8 +16,6 @@
 #include <ATen/ops/_histogramdd_from_bin_tensors.h>
 #include <ATen/ops/_histogramdd_from_bin_tensors_native.h>
 #include <ATen/ops/aminmax.h>
-#include <ATen/ops/amin.h>
-#include <ATen/ops/amax.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/histc_native.h>
 #include <ATen/ops/histogram_native.h>
@@ -196,9 +194,8 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
         // non-empty input
         AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
             if (input.is_mps()) {
-                // aminmax has not been implemented on mps.
-                Tensor min = at::amin(input, 0);
-                Tensor max = at::amax(input, 0);
+                Tensor min, max;
+                std::tie(min, max) = at::aminmax(input, 0);
 
                 for (const auto i : c10::irange(N)) {
                     leftmost_edges[i] = min[i].item().to<scalar_t>();
@@ -239,18 +236,9 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
     double rightmost_edge = max.to<double>();
 
     if (leftmost_edge == rightmost_edge && input.numel() > 0) {
-        if (input.is_mps()) {
-            // aminmax has not been implemented on mps.
-            Tensor min = at::amin(input);
-            Tensor max = at::amax(input);
-
-            leftmost_edge = min.item<double>();
-            rightmost_edge = max.item<double>();
-        } else {
-            auto extrema = aminmax(input);
-            leftmost_edge = std::get<0>(extrema).item<double>();
-            rightmost_edge = std::get<1>(extrema).item<double>();
-        }
+        auto extrema = aminmax(input);
+        leftmost_edge = std::get<0>(extrema).item<double>();
+        rightmost_edge = std::get<1>(extrema).item<double>();
     }
 
     if (leftmost_edge == rightmost_edge) {
@@ -269,7 +257,7 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
 
 } // namespace
 
-std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
+static std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
     TORCH_CHECK(self.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions");
     const int64_t N = self.size(-1);
     std::vector<Tensor> bin_edges_out(N);
@@ -281,7 +269,7 @@ std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
 
 /* Versions of histogramdd in which bins is a Tensor[] defining the sequences of bin edges.
  */
-Tensor& histogramdd_out(const Tensor& self, TensorList bins,
+static Tensor& histogramdd_out(const Tensor& self, TensorList bins,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, TensorList& bin_edges) {
     histogramdd_check_inputs(self, bins, weight);
@@ -308,7 +296,7 @@ Tensor _histogramdd(const Tensor& self, TensorList bins,
 /* Versions of histogramdd in which bins is an int[]
  * defining the number of bins in each dimension.
  */
-std::vector<Tensor>& histogramdd_bin_edges_out(const Tensor& self, IntArrayRef bin_ct,
+static std::vector<Tensor>& histogramdd_bin_edges_out(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density,
         std::vector<Tensor>& bin_edges_out) {
@@ -340,7 +328,7 @@ std::vector<Tensor> histogramdd_bin_edges(const Tensor& self, IntArrayRef bin_ct
     return histogramdd_bin_edges_out(self, bin_ct, range, weight, density, bin_edges_out);
 }
 
-Tensor& histogramdd_out(const Tensor& self, IntArrayRef bin_ct,
+static Tensor& histogramdd_out(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, TensorList& bin_edges) {

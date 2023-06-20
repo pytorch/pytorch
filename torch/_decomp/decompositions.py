@@ -90,7 +90,7 @@ pw_cast_for_int_to_real = partial(
 
 
 # This expands x until x.dim() == dim. Might be useful as an operator
-def _unsqueeze_to_dim(x: Tensor, dim: int):
+def _unsqueeze_to_dim(x: Tensor, dim: int) -> Tensor:
     for _ in range(dim - x.dim()):
         x = x.unsqueeze(-1)
     return x
@@ -360,6 +360,19 @@ def mse_loss_backward(
 ):
     norm = 2.0 / input.numel() if reduction == Reduction.MEAN.value else 2.0
     return norm * (input - target) * grad_output
+
+
+@register_decomposition(aten.smooth_l1_loss)
+@pw_cast_for_opmath
+def smooth_l1_loss(
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+    beta: float = 1.0,
+):
+    loss = (self - target).abs()
+    loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
+    return apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(aten.smooth_l1_loss_backward.default)
@@ -936,7 +949,7 @@ def col2im(
         [shape[0], shape[1] // prod(kernel_size)] + output_padded_size
     )
     idx = (None, None, indices_row, indices_col)
-    output = aten.index_put(output, idx, input, accumulate=True)
+    output = aten._unsafe_index_put(output, idx, input, accumulate=True)
     output = F.pad(output, (-padding_w, -padding_w, -padding_h, -padding_h))
 
     if not batched_input:
@@ -972,7 +985,8 @@ def unfold_backward(
     # It could potentially be fused into one call to scatter_reduce,
     # in the case step <= size provided scatter_reduce generates 1 kernel
     grad_input = grad.new_zeros(input_size)
-    return torch.index_add(grad_input, dim, idx, grad)
+    index = (None,) * dim + (idx,)
+    return aten._unsafe_index_put(grad_input, index, grad, accumulate=True).contiguous()
 
 
 @register_decomposition(aten.logit_backward.default)
@@ -998,7 +1012,9 @@ def logit_backward(
 
 @register_decomposition(aten.native_dropout)
 def native_dropout(input: Tensor, p: float, train: Optional[bool]):
-    if train:
+    if train and p != 0:
+        if p == 1:
+            return (torch.zeros_like(input), torch.zeros_like(input, dtype=torch.bool))
         bool_mask = torch.rand_like(input) > p
         res = bool_mask * input * float(1.0 / (1.0 - p))
         return (res, bool_mask)
@@ -1099,7 +1115,7 @@ def embedding_dense_backward(
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
-        counts = counts.index_put([indices], ones, accumulate=True)
+        counts = aten._unsafe_index_put(counts, [indices], ones, accumulate=True)
         grad_weights_scale = counts[indices]
         grad_output = grad_output / grad_weights_scale.unsqueeze(-1)
 
@@ -1108,7 +1124,9 @@ def embedding_dense_backward(
     grad_weight = grad_output.new_zeros(
         (num_weights,) + grad_output.shape[indices.ndim :]
     )
-    return grad_weight.index_put([indices], grad, accumulate=True).to(result_dtype)
+    return aten._unsafe_index_put(grad_weight, [indices], grad, accumulate=True).to(
+        result_dtype
+    )
 
 
 def prod(x: List[int]):
@@ -3434,8 +3452,13 @@ register_inplace(aten.gelu_, aten.gelu)
 register_inplace(aten.hardswish_, aten.hardswish)
 register_inplace(aten.hardtanh_, aten.hardtanh)
 register_inplace(aten.hardsigmoid_, aten.hardsigmoid)
+register_inplace(aten.__iand__, aten.__and__)
+register_inplace(aten.__ilshift__, aten.__lshift__)
 register_inplace(aten.index_put_, aten.index_put)
 register_inplace(aten.index_reduce_, aten.index_reduce)
+register_inplace(aten.__ior__, aten.__or__)
+register_inplace(aten.__irshift__, aten.__rshift__)
+register_inplace(aten.__ixor__, aten.__xor__)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.logit_, aten.logit)
 register_inplace(aten.relu_, aten.relu)

@@ -166,7 +166,7 @@ class ExprPrinterTests(TorchTestCase):
         s2 = sympy.Symbol("bar", integer=True)
         s3 = sympy.Symbol("baz", integer=True)
 
-        cases = (
+        common_cases = [
             # expr, result
             # Test exprs.
             (
@@ -183,24 +183,63 @@ class ExprPrinterTests(TorchTestCase):
                 sympy.Pow(s1 + s2, -3),
                 lambda c, _: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
             ),
-            (sympy.Pow(s1 + s2, 2), lambda c, L: "(bar + foo)*(bar + foo)"),
-        )
+        ]
 
-        for expr, result in cases:
-            self.assertEqual(cexpr(expr), result(1.0, "L"))  # 1.0 for FP div
+        gpu_cases = common_cases + [
+            (sympy.Pow(s1 + s2, 2), lambda c, L: "(bar + foo)*(bar + foo)")
+        ]
+        cpu_cases = common_cases + [
+            (
+                sympy.Pow(s1 + s2, 2),
+                lambda c, L: "static_cast<long>((bar + foo)*(bar + foo))",
+            )
+        ]
+        for expr, result in gpu_cases:
             self.assertEqual(texpr(expr), result(1, ""))
             self.assertEqual(pexpr(expr), result(1, ""))
+        for expr, result in cpu_cases:
+            self.assertEqual(cexpr(expr), result(1.0, "L"))  # 1.0 for FP div
 
     def test_print_floor(self):
-        s1 = sympy.Symbol("s1", integer=False)
-        expr = sympy.floor(s1)
-        self.assertEqual(texpr(expr), "tl.math.floor(s1)")
-        self.assertEqual(pexpr(expr), "math.floor(s1)")
+        for integer in [True, False]:
+            s1 = sympy.Symbol("s1", integer=integer)
+            expr = sympy.floor(s1 / 2)
+            if integer:
+                self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
+                self.assertEqual(
+                    cexpr(expr), "static_cast<long>(std::floor((1.0/2.0)*s1))"
+                )
+            else:
+                self.assertEqual(pexpr(expr), "math.floor((1/2)*s1)")
+                self.assertEqual(texpr(expr), "tl.math.floor(((1/2)*s1))")
+                self.assertEqual(cexpr(expr), "std::floor((1.0/2.0)*s1)")
 
     def test_print_ceil(self):
-        s1 = sympy.Symbol("s1", integer=False)
-        expr = sympy.ceiling(s1)
-        self.assertEqual(pexpr(expr), "math.ceil(s1)")
+        for integer in [True, False]:
+            s1 = sympy.Symbol("s1", integer=integer)
+            expr = sympy.ceiling(s1 / 2)
+            if integer:
+                self.assertEqual(pexpr(expr), "math.ceil((1/2)*s1)")
+                self.assertEqual(
+                    cexpr(expr), "static_cast<long>(std::ceil((1.0/2.0)*s1))"
+                )
+            else:
+                self.assertEqual(pexpr(expr), "math.ceil((1/2)*s1)")
+                self.assertEqual(cexpr(expr), "std::ceil((1.0/2.0)*s1)")
+
+    def test_print_floor_div(self):
+        for integer in [True, False]:
+            s1 = sympy.Symbol("s1", integer=integer)
+            s2 = sympy.Symbol("s2", integer=integer)
+            expr = FloorDiv(s1, s2)
+            self.assertEqual(pexpr(expr), "(s1 // s2)")
+            if integer:
+                self.assertEqual(cexpr(expr), "at::native::div_floor_integer(s1, s2)")
+            else:
+                self.assertEqual(
+                    cexpr(expr),
+                    "at::native::div_floor_floating(static_cast<double>(s1), static_cast<double>(s2))",
+                )
 
 
 if __name__ == "__main__":

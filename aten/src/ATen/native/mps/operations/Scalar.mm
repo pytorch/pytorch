@@ -21,10 +21,10 @@ Scalar _local_scalar_dense_mps(const Tensor& self) {
                                          self.scalar_type(),
                                          "_local_scalar_dense_mps",
                                          [&] {
-                                           Tensor output = at::empty_like(self, kCPU);
+                                           Tensor output = at::empty({1}, TensorOptions(at::CPU(self.scalar_type())));
 
-                                           Tensor cpu_output = mps::mps_copy_(output, self, false);
-                                           scalar_t value = *cpu_output.data_ptr<scalar_t>();
+                                           mps::mps_copy_(output, self, false);
+                                           scalar_t value = *output.data_ptr<scalar_t>();
                                            r = Scalar(value);
                                          });
 
