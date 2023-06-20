@@ -1,6 +1,6 @@
 import logging
 log = logging.getLogger(__name__)
-
+from heapq import heappush, heappop
 
 def temporary_log_path(temp_log_path):
     # Store original configuration
@@ -62,7 +62,13 @@ class SSGraph:
         self.reverse_level = {}
         self.reverse_level_predecessors = {}
         self.critical_path = []
+        # how many extra CUDA streams used to allocate
+        # TODO: it's better to use the max number of nodes in the same level in reverse_level
+        self.stream_pool_size = 3
+        self.stream_pool = []
+        self.stream_allocate_index = 0
         self.build_graph(nodes)
+        self.stream_scheduling()
 
 
     def build_graph(self, nodes):
@@ -125,33 +131,41 @@ class SSGraph:
         while(cur_node.get_name() != "OUTPUT"):
             self.critical_path.append(cur_node)
             cur_node = self.reverse_level_predecessors[cur_node]
+        self.critical_path.append(cur_node)
 
-    def stream_pool_pop(self):
-        return 0
+    # Yueming TODO: need a better stream allocation algorithm
+    def stream_pool_pop(self, predecessor=None):
+        if predecessor is not None and len(predecessor.successors) == 1:
+            self.stream_pool[predecessor.stream_id] += 1
+            return predecessor.stream_id
+        else:
+            # get the min value and its corresponding key in self.stream_pool
+            min_value = min(self.stream_pool)
+            min_stream = self.stream_pool.index(min_value)
+            self.stream_pool[min_stream] += 1
+        return min_stream
 
     def dig_node(self, cur_node:SSNode):
         for predecessor in cur_node.predecessors.values():
             if predecessor.stream_id == -1:
                 self.dig_node(predecessor)
         if cur_node.stream_id == -1:
-            cur_node.stream_id = self.stream_pool_pop()
-            log.info(f"assign stream id {cur_node.stream_id} to node {cur_node.get_name()}")
-        # find one successor to assign it to critical path
-        # path_to_output = {}
-        # for successor in cur_node.successors.values():
-        #     path_to_output[successor] = [successor,]
-            # if successor.get_name() == "OUTPUT":
-            #     continue
-            # tmp_successor = successor.successors.values()[0]
-            # while tmp_successor.get_name() != "OUTPUT":
-            #     path_to_output[successor].append(tmp_successor)
-            #     tmp_successor = tmp_successor.successors.values()[0]
-        # find the latest common successor
-        
-
-            # get the number of trasitive successors between cur_node and the last common successor
+            if cur_node in self.critical_path:
+                cur_node.stream_id = 0
+            elif len(cur_node.predecessors) == 1:
+                predecessor = list(cur_node.predecessors.values())[0]
+                cur_node.stream_id = self.stream_pool_pop(predecessor)
+            else:
+                cur_node.stream_id = self.stream_pool_pop()
+        for successor in cur_node.successors.values():
+            if successor.stream_id == -1:
+                self.dig_node(successor)
 
     def stream_scheduling(self):
+        assert "buf0" in self.ssnodes[0].get_name()
+        # breakpoint()
+        for i in range(self.stream_pool_size + 1):
+            self.stream_pool.append(0)
         self.dig_node(self.ssnodes[0])
     
     def print_graph(self):
@@ -193,6 +207,12 @@ class SSGraph:
         for node in self.critical_path:
             log.info(f"{node.get_name()}")
         log.info("=====findhao debug critical path end=====")
+        log.info("=====findhao debug stream allocation=====")
+        for node in self.ssnodes:
+            log.info(f"{node.get_name()} {node.stream_id}")
+        log.info("=====findhao debug stream allocation end=====")
+
+
         reset_log_path()
 
 
