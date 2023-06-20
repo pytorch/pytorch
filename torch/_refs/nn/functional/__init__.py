@@ -25,34 +25,43 @@ from torch._refs import _make_inplace
 __all__ = [
     "alpha_dropout",
     "celu",
+    "celu_",
     "dropout",
     "elu",
+    "elu_",
+    "gelu",
+    "glu",
+    "group_norm",
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
     "huber_loss",
     "l1_loss",
-    "smooth_l1_loss",
+    "layer_norm",
+    "leaky_relu",
     "log_softmax",
     "margin_ranking_loss",
     "mish",
-    "nll_loss",
+    "mish_",
     "mse_loss",
+    "nll_loss",
+    "pairwise_distance",
+    "pdist",
     "poisson_nll_loss",
     "prelu",
     "relu",
     "relu6",
     "selu",
+    "selu_",
+    "smooth_l1_loss",
     "softmax",
     "softmin",
     "softplus",
     "softshrink",
     "tanhshrink",
     "threshold",
+    "threshold_",
     "triplet_margin_loss",
-    "glu",
-    "pairwise_distance",
-    "pdist",
 ]
 
 Tensor = torch.Tensor
@@ -116,7 +125,7 @@ def alpha_dropout(
     return self * dropout_mask + b
 
 
-def inplace_wrapper(fn):
+def _inplace_wrapper(fn):
     """
     Given a nn.functional non-linearity, implements its `inplace: bool` argument
     """
@@ -139,7 +148,7 @@ def inplace_wrapper(fn):
 # celu is implemented specially because it has an alpha argument
 # celu is very similar to elu
 @register_decomposition(aten.celu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -173,7 +182,7 @@ def celu(
 
 
 @register_decomposition(aten.dropout)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 def dropout(
     a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
@@ -202,7 +211,7 @@ def dropout(
 
 
 @register_decomposition(aten.elu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -240,7 +249,7 @@ def elu(
 
 
 @register_decomposition(aten.relu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -311,7 +320,7 @@ def layer_norm(
 
 
 @register_decomposition(aten.leaky_relu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -335,7 +344,7 @@ def leaky_relu(
 
 
 @register_decomposition(aten.mish)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -352,7 +361,7 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
 
 @register_decomposition(aten.selu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -406,7 +415,7 @@ def softmin(
 
 # softplus is implemented specially because it has beta and threshold arguments
 @register_decomposition(aten.softplus)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -855,7 +864,7 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(aten.threshold)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -956,7 +965,7 @@ def _triplet_margin_with_distance_loss(
 
 
 @register_decomposition(aten.hardtanh)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
@@ -1100,7 +1109,7 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(aten.relu6)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
