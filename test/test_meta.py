@@ -836,8 +836,8 @@ meta_dispatch_expected_failures = {
     aten.ormqr.default : {c64, c128, f64, f32},
     aten.ormqr.out : {c64, c128, f64, f32},
     aten.tensordot.out : {c64, i8, f64, c128, i64, bf16, f32, i32, i16, u8},
-    aten.to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
+    aten._to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
+    aten._to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten._ctc_loss.default : {f32, f64},  # Shape of second output depends on data.
     aten._ctc_loss.Tensor : {f32, f64},  # Shape of second output depends on data.
     aten._histogramdd_bin_edges.default : {f32, f64},
