@@ -780,15 +780,10 @@ class GraphLowering(torch.fx.Interpreter):
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
                 self.disable_cpp_wrapper("unsupported inputs dtype")
 
-    def check_constant_for_cpp_buffer(self):
-        if self.constants:
-            self.disable_cpp_wrapper("Constants")
-
     def check_cpp_wrapper(self):
         self.check_cpp_codegen_disabled()
         self.check_platform()
         self.check_input_for_cpp_buffer()
-        self.check_constant_for_cpp_buffer()
 
     def init_wrapper_code(self):
         self.cuda = "cuda" in self.device_types
