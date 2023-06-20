@@ -9739,10 +9739,11 @@ class DistributedTest:
             os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
             dist.destroy_process_group()
             timeout = timedelta(seconds=1)
+            world_size=int(os.environ["WORLD_SIZE"])
             dist.init_process_group(
                 init_method=INIT_METHOD,
                 backend=BACKEND,
-                world_size=int(os.environ["WORLD_SIZE"]),
+                world_size=world_size,
                 rank=self.rank,
                 timeout=timeout,
             )
@@ -9750,15 +9751,15 @@ class DistributedTest:
             # Abort pg in background thread.
             running = True
 
-            def abort():
+            def abort(device):
                 pg = _get_default_group()
                 while running:
-                    pg._get_backend(torch.device(0))._abort()
+                    pg._get_backend(torch.device(device))._abort()
                     time.sleep(1)
 
             if self.rank != 1:
                 import threading
-                t = threading.Thread(target=abort)
+                t = threading.Thread(target=abort, args=(self.rank,))
                 t.start()
                 with self.assertRaises(RuntimeError):
                     # First collective triggers initialization via ncclCommInitRank.
@@ -9766,7 +9767,18 @@ class DistributedTest:
                 running = False
                 t.join()
 
-
+                # Now try to reinitialize process group with smaller world size.
+                dist.destroy_process_group()
+                new_world_size = world_size - 1
+                new_rank = self.rank if self.rank < 1 else self.rank - 1
+                dist.init_process_group(
+                    init_method=INIT_METHOD,
+                    backend=BACKEND,
+                    world_size=new_world_size,
+                    rank=new_rank,
+                    timeout=timeout,
+                )
+                torch.distributed.barrier(device_ids=[self.rank])
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(
