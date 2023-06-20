@@ -43,7 +43,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     @staticmethod
-    def __new__(cls, custom_shape: torch.Size, compressed_tensor: torch.Tensor, transposed: bool = False) -> torch.Tensor:
+    def __new__(cls, custom_shape: torch.Size, compressed_tensor: torch.Tensor, transposed: Optional[bool] = False):
         """
         Create a new instance of the class.
 
@@ -358,5 +358,5 @@ def to_sparse_semi_structured(
     compressed_tensor[m * n // 2 :] = meta.view(original_tensor.dtype).view(-1)
 
     return SparseSemiStructuredTensor(
-        original_tensor.shape, compressed_tensor, transposed
+        original_tensor.shape, compressed_tensor, transposed=transposed
     )
