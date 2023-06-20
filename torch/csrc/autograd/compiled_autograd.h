@@ -301,10 +301,9 @@ class CompiledNodeArgs {
   }
 
   CacheKey key() const {
+    Node* node = _node_call.node.get();
     return CacheKey(
-        typeid(*_node_call.node.get()),
-        _specialization_key,
-        _specialization_key_size);
+        typeid(*node), _specialization_key, _specialization_key_size);
   }
 
   void add_tensor_pre_hook(PyObject* obj, int index) {
@@ -319,7 +318,6 @@ class CompiledNodeArgs {
     _node_call.post_hooks.emplace_back(obj);
   }
 
- protected:
   void collect_size(size_t s) {
     // we expect sizes to be small, so try to cram them into a single byte
     // shorter keys, means faster caches
@@ -344,6 +342,7 @@ class CompiledNodeArgs {
     }
   }
 
+ protected:
   template <typename T>
   void specialize_on_bytes(const T& t) {
     TORCH_CHECK(
@@ -396,7 +395,7 @@ class SwapSavedVariables {
     stashed_variables.emplace_back(std::move(t));
     if (defined) {
       TORCH_CHECK(state.index < state.proxy_inputs.size());
-      t = std::move(SavedVariable(state.proxy_inputs[state.index++], false));
+      t = SavedVariable(state.proxy_inputs[state.index++], false);
     }
   }
 

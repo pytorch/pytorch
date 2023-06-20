@@ -208,11 +208,13 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
   if (!pykey)
     throw_python_error();
-  auto key = PyLong_AsLong(pykey);
-  if (PyErr_Occurred())
+  ssize_t key = PyLong_AsSsize_t(pykey);
+  if (C10_UNLIKELY(key < 0)) {
+    TORCH_CHECK(PyErr_Occurred(), "key must be positive");
     throw_python_error();
+  }
   // will contain the unique ID of the AotAutograd graph
-  args.collect(key);
+  args.collect_size(static_cast<size_t>(key));
 
   auto f = (THPFunction*)obj;
   args.collect(f->saved_variables);

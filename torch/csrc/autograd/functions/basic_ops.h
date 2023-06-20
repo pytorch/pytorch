@@ -103,9 +103,7 @@ struct TORCH_API ImplicitAdd : public Node {
 
   variable_list apply_with_saved(
       const variable_list& inputs,
-      SwapSavedVariables& saved) override {
-    return apply(std::move(variable_list(inputs)));
-  }
+      SwapSavedVariables& saved) override;
 };
 
 } // namespace autograd

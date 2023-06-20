@@ -58,10 +58,16 @@ auto Identity::apply(variable_list&& grads) -> variable_list {
 
 auto ImplicitAdd::apply(variable_list&& grads) -> variable_list {
   auto result = grads[0];
-  for (size_t i = 1; i < grads.size(); ++i) {
+  for (const auto i : c10::irange(1, grads.size())) {
     result = result + grads[i];
   }
   return tensor_list{result};
+}
+
+variable_list ImplicitAdd::apply_with_saved(
+    const variable_list& inputs,
+    SwapSavedVariables& saved) {
+  return apply(variable_list(inputs));
 }
 
 void GraphRoot::compiled_args(CompiledNodeArgs& args) {
