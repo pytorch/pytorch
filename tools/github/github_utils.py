@@ -4,6 +4,8 @@ import json
 import os
 
 from typing import Any, Callable, cast, Dict, Optional, Tuple
+
+from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -51,6 +53,7 @@ def gh_fetch_url(
         url, headers=headers, data=data, reader=json.load, method=method
     )[1]
 
+
 def _gh_fetch_json_any(
     url: str,
     params: Optional[Dict[str, Any]] = None,
@@ -63,6 +66,7 @@ def _gh_fetch_json_any(
         )
     return gh_fetch_url(url, headers=headers, data=data, reader=json.load)
 
+
 def gh_fetch_json_dict(
     url: str,
     params: Optional[Dict[str, Any]] = None,
@@ -71,9 +75,7 @@ def gh_fetch_json_dict(
     return cast(Dict[str, Any], _gh_fetch_json_any(url, params, data))
 
 
-def gh_fetch_commit(
-    org: str, repo: str, sha: str
-) -> Dict[str, Any]:
+def gh_fetch_commit(org: str, repo: str, sha: str) -> Dict[str, Any]:
     return gh_fetch_json_dict(
         f"https://api.github.com/repos/{org}/{repo}/commits/{sha}"
     )
