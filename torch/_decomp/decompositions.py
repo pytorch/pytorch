@@ -153,7 +153,7 @@ def fill_tensor(self, value: Tensor):
         value.dim() == 0,
         lambda: f"fill only supports 0-dimension value tensor but got tensor with {value.dim()} dimensions",
     )
-    return torch.full_like(self, value.item())
+    return aten.copy(self, value)
 
 
 @register_decomposition(aten.hardsigmoid)
