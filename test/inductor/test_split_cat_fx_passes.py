@@ -9,7 +9,6 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 def patch(f):
     f = torch._inductor.config.patch(split_cat_fx_passes=True)(f)
-    f = torch._dynamo.config.patch(dynamic_shapes=True)(f)
     return f
 
 
