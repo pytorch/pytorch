@@ -2967,28 +2967,29 @@ TEST_F(VulkanAPITest, sigmoid_) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, softmax) {
+void test_softmax_4d(int64_t dim) {
   c10::InferenceMode mode;
 
   at::Tensor test_in[] = {
-    at::rand({1, 196, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 197, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 198, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 199, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({1, 3, 4, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({4, 8, 5, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({9, 11, 12, 12}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
   };
-
   for (auto in_cpu : test_in) {
-    const auto out_cpu = at::softmax(in_cpu, 1);
+      const auto out_cpu = at::softmax(in_cpu, dim);
+      const auto in_vulkan = in_cpu.vulkan();
+      const auto out_vulkan = at::softmax(in_vulkan, dim);
+      const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+      if (!check) {
+        showRtol(out_cpu, out_vulkan.cpu());
+      }
+      ASSERT_TRUE(check);
+  }
+}
 
-    const auto in_vulkan = in_cpu.vulkan();
-    const auto out_vulkan = at::softmax(in_vulkan, 1);
-
-    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-    if (!check) {
-      showRtol(out_cpu, out_vulkan.cpu());
-    }
-
-    ASSERT_TRUE(check);
+TEST_F(VulkanAPITest, softmax_4d) {
+  for (int dim = 0; dim < 4; dim++) {
+    test_softmax_4d(dim);
   }
 }
 
@@ -4311,6 +4312,24 @@ TEST_F(VulkanAPITest, cat_4d_dim3_diffwidth_success) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, cat_3d_dim0_mult4ch_success) {
+  // Arrange
+  const auto in_cpu1 = at::rand({4, 193, 113}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({4, 193, 113}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({4, 193, 113}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 0);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
 
 TEST_F(VulkanAPITest, cat_3d_dim0_diff_channel_success) {
   // Arrange
