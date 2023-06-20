@@ -15,9 +15,8 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
 
-from typing import Any, List, NamedTuple, Set
+from typing import Any, NamedTuple
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -84,6 +83,7 @@ CI_SKIP = collections.defaultdict(list)
 CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
+    "hf_BigBird",  # fail_accuracy
     # TypeError: pad_center() takes 1 positional argument but 2 were given
     "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
@@ -250,6 +250,9 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
+    # https://github.com/pytorch/pytorch/issues/103760
+    "dlrm",
+    "hf_T5_generate",
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -291,42 +294,6 @@ CI_SKIP_OPTIMIZER = {
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
 }
-
-
-# Model Groups
-@dataclass(frozen=True)
-class ModelGroup:
-    name: str
-    models: Set[str]
-
-
-BLUEBERRY_MODELS = ModelGroup("Blueberries", {"llama", "nanogpt_generate"})
-
-
-@dataclass(frozen=True)
-class GroupMap:
-    groups: List[ModelGroup]
-
-    def model_group(self, model_name):
-        for group in self.groups:
-            if model_name in group.models:
-                return group.name
-        return None
-
-    @classmethod
-    def assert_single_group(cls, groups: List[ModelGroup]):
-        model_to_group = {}
-        for group in groups:
-            for model in group.models:
-                if model in model_to_group:
-                    raise ValueError(
-                        f"Model {model} appears in multiple groups, {model_to_group[model]} and {group.name}"
-                    )
-                model_to_group[model] = group.name
-        return cls(groups)
-
-
-ALL_MODEL_GROUPS = GroupMap.assert_single_group([BLUEBERRY_MODELS])
 
 
 def model_specified_by_path(path_and_class_str):
@@ -731,9 +698,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    current_group = ALL_MODEL_GROUPS.model_group(current_name)
-    first_headers = ["dev", "name", "group", "batch_size"]
-    first_fields = [current_device, current_name, current_group, current_batch_size]
+    first_headers = ["dev", "name", "batch_size"]
+    first_fields = [current_device, current_name, current_batch_size]
     if "tag" in kwargs:
         first_headers.append("tag")
         first_fields.append(kwargs["tag"])
@@ -1266,6 +1232,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def force_amp_for_fp16_bf16_models(self):
+        return set()
+
+    @property
     def skip_not_suitable_for_training_models(self):
         return set()
 
@@ -1275,10 +1245,6 @@ class BenchmarkRunner:
 
     @property
     def failing_fx2trt_models(self):
-        return set()
-
-    @property
-    def failing_dynamic_shape_models(self):
         return set()
 
     @property
@@ -1315,19 +1281,41 @@ class BenchmarkRunner:
     def deepcopy_model(self, model):
         return copy.deepcopy(model)
 
+    def cast_based_on_args(self, model, example_inputs):
+        if self.args.float32 or self.args.only in self.fp32_only_models:
+            if not self.args.float32:
+                log.warning("Model %s supports float32 only", self.args.only)
+            model, example_inputs = cast_to_fp32(model, example_inputs)
+        elif self.args.float16:
+            if self.args.only in self.force_amp_for_fp16_bf16_models:
+                log.warning(
+                    "Model %s does not support float16, running with amp instead",
+                    self.args.only,
+                )
+                self.args.amp = True
+                self.setup_amp()
+            else:
+                model, example_inputs = cast_to_fp16(model, example_inputs)
+        elif self.args.bfloat16:
+            if self.args.only in self.force_amp_for_fp16_bf16_models:
+                log.warning(
+                    "Model %s does not support bfloat16, running with amp instead",
+                    self.args.only,
+                )
+                self.args.amp = True
+                self.setup_amp()
+            else:
+                model, example_inputs = cast_to_bf16(model, example_inputs)
+
+        return model, example_inputs
+
     def validate_model(self, model, example_inputs):
         """
         Runs the eager model with example inputs to ensure that eager passes.
         """
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
-        if self.args.float32:
-            model, example_inputs = cast_to_fp32(model, example_inputs)
-        elif self.args.float16:
-            model, example_inputs = cast_to_fp16(model, example_inputs)
-        elif self.args.bfloat16:
-            model, example_inputs = cast_to_bf16(model, example_inputs)
-
+        model, example_inputs = self.cast_based_on_args(model, example_inputs)
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
@@ -1336,12 +1324,7 @@ class BenchmarkRunner:
     def maybe_cast(self, model, example_inputs):
         model = self.deepcopy_model(model)
         example_inputs = clone_inputs(example_inputs)
-        if self.args.float32:
-            model, example_inputs = cast_to_fp32(model, example_inputs)
-        elif self.args.float16:
-            model, example_inputs = cast_to_fp16(model, example_inputs)
-        elif self.args.bfloat16:
-            model, example_inputs = cast_to_bf16(model, example_inputs)
+        model, example_inputs = self.cast_based_on_args(model, example_inputs)
         return model, example_inputs
 
     def decay_batch_exp(self, batch_size, factor=0.5, divisor=2):
@@ -2172,7 +2155,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--timeout",
         type=int,
-        default=1800,
+        default=2000,
         help="timeout (second) for benchmarking.",
     )
 
@@ -2341,7 +2324,6 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.assume_static_by_default = True
         torch._dynamo.config.automatic_dynamic_shapes = True
     if args.dynamic_shapes:
-        torch._dynamo.config.dynamic_shapes = True
         torch._dynamo.config.automatic_dynamic_shapes = True
         if not args.dynamic_batch_only:
             torch._dynamo.config.assume_static_by_default = False
@@ -2416,13 +2398,7 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         if args.only in {"hf_T5_generate"}:
-            # See https://github.com/pytorch/pytorch/issues/102814
-            if torch._dynamo.config.dynamic_shapes:
-                torch._dynamo.config.assume_static_by_default = False
-            if not torch._dynamo.config.automatic_dynamic_shapes:
-                log.warning(
-                    "hf_T5_generate compiles extremely slowly without dynamic shapes; consider lowering cache_size_limit"
-                )
+            torch._dynamo.config.automatic_dynamic_shapes = True
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
@@ -2476,10 +2452,6 @@ def run(runner, args, original_dir=None):
         )
         if args.training:
             runner.skip_models.add("hf_T5")
-
-    if torch._dynamo.config.dynamic_shapes:
-        # TODO(jansel): fix bugs in these
-        runner.skip_models.update(runner.failing_dynamic_shape_models)
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)
@@ -2720,13 +2692,6 @@ def run(runner, args, original_dir=None):
             current_batch_size = batch_size
             set_model_name(name)
 
-            if args.float32:
-                model, example_inputs = cast_to_fp32(model, example_inputs)
-            elif args.float16:
-                model, example_inputs = cast_to_fp16(model, example_inputs)
-            elif args.bfloat16:
-                model, example_inputs = cast_to_bf16(model, example_inputs)
-
             # Look for stuff that looks like batch size, and mark it dynamic.
             # Better integration would integrate directly with benchmark suite
             # but cannot conveniently do this
@@ -2758,6 +2723,7 @@ def run(runner, args, original_dir=None):
                     args.per_process_memory_fraction
                 )
 
+            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.run_one_model(
                 name,
                 model,
