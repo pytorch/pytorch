@@ -1,7 +1,7 @@
 import contextlib
 
 import functools
-from typing import Callable, Dict, Iterator, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, Union
 
 import torchgen.local as local
 from torchgen.model import (
@@ -32,6 +32,8 @@ F2 = TypeVar(
     bool,
     str,
 )
+
+F3 = TypeVar("F3", Tuple[NativeFunction, Any], List[NativeFunction])
 
 
 @contextlib.contextmanager
@@ -85,6 +87,17 @@ def method_with_native_function(func: Callable[[S, F], T]) -> Callable[[S, F], T
     @functools.wraps(func)
     def wrapper(slf: S, f: F) -> T:
         with native_function_manager(f):
+            return func(slf, f)
+
+    return wrapper
+
+
+def method_with_nested_native_function(
+    func: Callable[[S, F3], T]
+) -> Callable[[S, F3], T]:
+    @functools.wraps(func)
+    def wrapper(slf: S, f: F3) -> T:
+        with native_function_manager(f[0]):
             return func(slf, f)
 
     return wrapper
