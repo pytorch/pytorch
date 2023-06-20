@@ -27,7 +27,8 @@ from torch.testing._internal.common_utils import (
 
 SEMI_STRUCTURED_SUPPORTED_DTYPES = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG.keys()
 
-_IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
+if torch.cuda.is_available():
+    _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 def rand_sparse_semi_structured_mask(
     r, c, dtype=torch.float16, device="cuda", choice=None
