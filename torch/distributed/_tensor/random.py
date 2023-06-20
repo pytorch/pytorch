@@ -44,6 +44,12 @@ def manual_seed(seed: int, device_mesh: DeviceMesh, tp_dim: int = 0) -> None:
         `manual_seed` will not set its GPU device's generator seed.
         Current implementation only supports a GPU device mesh.
     """
+    device_handle = _get_device_handle(device_mesh.device_type)
+    if not device_handle:
+        raise NotImplementedError(
+            f"DTensor randomness only supports cuda/cuda-like device type, but got {device_mesh.device_type}"
+        )
+
     # allgather the seed over the default PG
     object_list = [seed] * dist.get_world_size()
     dist.all_gather_object(object_list, seed)
@@ -71,6 +77,9 @@ class CudaRNGStateTracker:
     # we assume that the caller of all the methods would already
     # check if the current device is a CUDA device
     def __init__(self):
+        if not torch.cuda.is_available():
+            raise RuntimeError(f"{self.__class__.__name__} instantiation requires the presence of CUDA device")
+
         self._states = {}
         self._devices = [torch.cuda.current_device()]
         self._use_distribute_region = True
