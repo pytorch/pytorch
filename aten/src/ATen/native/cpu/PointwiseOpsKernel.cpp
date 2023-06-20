@@ -32,7 +32,8 @@ static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
           return convert_float_bfloat16(self_vec0, self_vec1);
         });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcmul_cpu_out", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::ComplexHalf, at::ScalarType::Half,
+                                           dtype, "addcmul_cpu_out", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
       auto scalar_vec = Vectorized<scalar_t>(scalar_val);
       cpu_kernel_vec(
