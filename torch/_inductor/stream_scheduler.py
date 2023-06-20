@@ -61,6 +61,7 @@ class SSGraph:
         # It records the levels back from the OUTPUT node. {ssnode: level, }
         self.reverse_level = {}
         self.reverse_level_predecessors = {}
+        self.critical_path = []
         self.build_graph(nodes)
 
 
@@ -110,10 +111,20 @@ class SSGraph:
                 for successor in list(cur_node.successors.values())[1:]:
                     if self.reverse_level[successor] > max_value:
                         max_value = self.reverse_level[successor]
+                        # the 1 here could be changed later for weighted graph
                         self.reverse_level[cur_node] = max_value + 1
                         self.reverse_level_predecessors[cur_node] = successor
                 for predecessor in cur_node.predecessors.values():
                     tmp_queue.append(predecessor)
+        max_key = max(self.reverse_level, key=self.reverse_level.get)
+        max_value = self.reverse_level[max_key]
+        log.info(f"max level is {max_value}, and the node is {max_key.get_name()}")
+        if 'buf0' not in max_key.get_name():
+            log.warning(f"buf0's level is {self.reverse_level[self.name_mapping['buf0']]}")
+        cur_node = self.name_mapping["buf0"]
+        while(cur_node.get_name() != "OUTPUT"):
+            self.critical_path.append(cur_node)
+            cur_node = self.reverse_level_predecessors[cur_node]
 
     def stream_pool_pop(self):
         return 0
@@ -140,7 +151,7 @@ class SSGraph:
 
             # get the number of trasitive successors between cur_node and the last common successor
 
-    def stream_scheduler(self):
+    def stream_scheduling(self):
         self.dig_node(self.ssnodes[0])
     
     def print_graph(self):
@@ -178,32 +189,12 @@ class SSGraph:
             for node in missing:
                 log.error(f"missing node:{node.get_name()}")
         log.info("=====findhao debug reverse level end=====")
-
+        log.info("=====findhao debug critical path=====")
+        for node in self.critical_path:
+            log.info(f"{node.get_name()}")
+        log.info("=====findhao debug critical path end=====")
         reset_log_path()
 
-# import deepcopy
-from copy import deepcopy
-
-class Original_Node:
-    def __init__(self, original_node) -> None:
-        self.name = deepcopy(original_node.get_name())
-        self.original_user_names = []
-        self.snode_names = []
-        # to avoid cyclic import, we use hasattr instead of isinstance
-        if hasattr(original_node, "snodes"):
-            self.is_snode = True
-            for snode in original_node.snodes:
-                self.snode_names.append(deepcopy(snode.get_name()))
-                for user in snode.users:
-                    self.original_user_names.append(deepcopy(user.get_name()))
-        else:
-            self.is_snode = False
-            if original_node is not None:
-                for user in original_node.users:
-                    self.original_user_names.append(deepcopy(user.get_name()))
-    
-    def get_name(self):
-        return self.name
 
 def stream_schedule(snodes):
     pass
