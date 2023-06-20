@@ -2,8 +2,7 @@
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/NumericUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 #ifdef CPU_CAPABILITY
 inline namespace CPU_CAPABILITY {
@@ -91,5 +90,4 @@ void topk_impl_loop(
 }
 
 } // namespace CPU_CAPABILITY
-} // namespace native
-} // namespace at
+} // namespace at::native
