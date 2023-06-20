@@ -50,7 +50,7 @@ from torch.types import (
 
 # This module is defined in torch/csrc/Module.cpp
 
-from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions
+from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu
 
 T = TypeVar("T")
 S = TypeVar("S", bound="torch.Tensor")
