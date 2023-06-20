@@ -171,9 +171,6 @@ class Test2dParallelIntegration(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_2d_with_ddp(self) -> None:
         model_tp = init_model(use_ddp=True)[0]
-        ddp = DDP(SimpleModel().cuda(), device_ids=[torch.cuda.current_device()])
-
-        optim_ddp = torch.optim.Adam(ddp.parameters(), lr=0.0001)
         optim = torch.optim.Adam(model_tp.parameters(), lr=0.0001)
 
         # Create Input
@@ -183,8 +180,19 @@ class Test2dParallelIntegration(DTensorTestBase):
 
         model_tp(input).sum().backward()
         optim.step()
+        sd = model_tp.state_dict()
+        load_tp = init_model(use_ddp=True)[0]
+        from torch.distributed._tensor import DTensor
+        for p in load_tp.parameters():
+            if isinstance(p, DTensor):
+                p._local_tensor.data.zero_()
+            else:
+                p.data.zero_()
 
-        inp_clone = input.clone()
+        load_tp.load_state_dict(sd)
+        for p1, p2 in zip(model_tp.parameters(), load_tp.parameters()):
+            self.assertEqual(p1, p2)
+
 
 
     def _compare_params(self, m1, m2):
