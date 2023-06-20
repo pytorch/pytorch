@@ -1863,7 +1863,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   case kSparseBsr:
     return sparse_compressed_to_sparse_bsr(self, blocksize_, dense_dim_opt);
   case kSparseBsc:
-    return sparse_compressed_to_sparse_bsr(self, blocksize_, dense_dim_opt);
+    return sparse_compressed_to_sparse_bsc(self, blocksize_, dense_dim_opt);
   default:
     break;
   }
