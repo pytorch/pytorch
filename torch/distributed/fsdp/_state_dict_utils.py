@@ -20,12 +20,13 @@ import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint
 
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,
     Shard,
     ShardedTensor,
 )
+
+from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
     _has_fsdp_params,
@@ -612,8 +613,9 @@ def _sharded_pre_load_state_dict_hook(
         )
         if len(shards) == 1:
             local_tensor = shards[0].tensor.flatten()
-            if not local_tensor.is_cuda:
-                local_tensor = local_tensor.cuda()
+            pg_device = _get_pg_default_device(fsdp_state.process_group)
+            if local_tensor.device.type != pg_device.type:
+                local_tensor = local_tensor.to(pg_device)
             num_padding = chunk_size - local_tensor.numel()
             if num_padding > 0:
                 local_tensor = F.pad(local_tensor, [0, num_padding])
@@ -622,9 +624,15 @@ def _sharded_pre_load_state_dict_hook(
         tensor = torch.empty(
             chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
         )
-        dist.all_gather_into_tensor(
-            tensor, local_tensor, group=fsdp_state.process_group
-        )
+        if local_tensor.is_cpu:
+            tensor_list = list(
+                torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))
+            )
+            dist.all_gather(tensor_list, local_tensor, group=fsdp_state.process_group)
+        else:
+            dist.all_gather_into_tensor(
+                tensor, local_tensor, group=fsdp_state.process_group
+            )
         tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
         state_dict[fqn_from_global_root] = tensor
 

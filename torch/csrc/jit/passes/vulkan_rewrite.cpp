@@ -399,12 +399,12 @@ void vulkanFoldPrePackingOps(script::Module& m) {
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
-void vulkanRemoveMutation(script::Module& module) {
+static void vulkanRemoveMutation(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   RemoveTensorMutation(graph);
 }
 
-void vulkanRunCanonicalOptimizations(script::Module& module) {
+static void vulkanRunCanonicalOptimizations(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   for (const auto& method : module.get_methods()) {
     auto method_graph = method.graph();
