@@ -34,6 +34,7 @@ from torch._guards import ShapeGuard, Source, TracingContext, detect_fake_mode
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._traceback import format_frame
+from torch._utils_internal import signpost_event
 
 InputList = List
 DimList = List
@@ -1955,6 +1956,7 @@ class ShapeEnv:
         duck_shape=True,
         # For debugging
         frame_id=None,
+        co_fields=None,
     ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
@@ -1995,6 +1997,10 @@ class ShapeEnv:
         self.log.info("create_env")
         self.frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
+        self.counter = collections.Counter()
+        # A selection of important fields on co_field; solely used for
+        # signpost_event
+        self.co_fields = co_fields if co_fields else {}
 
     def freeze(self):
         self.frozen = True
@@ -2141,18 +2147,21 @@ class ShapeEnv:
 
     def create_unbacked_symfloat(self):
         symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges.unknown()
         return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return self.create_symintnode(symbol, hint=None)
 
     def create_unbacked_symbool(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = traceback.extract_stack()[:-1]
         self.var_to_range[symbol] = ValueRanges(0, 1)
         return self.create_symboolnode(sympy.Eq(symbol, 1))
@@ -2195,6 +2204,7 @@ class ShapeEnv:
             # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
+            self.counter["create_symbol"] += 1
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
@@ -2608,6 +2618,17 @@ class ShapeEnv:
             elif len(warn_msgs) > 0:
                 log.debug("%s Warning only constraints violated", len(warn_msgs))
 
+        signpost_event(
+            "dynamic",
+            "produce_guards",
+            {
+                **self.co_fields,
+                **self.counter,
+                "num_guards": len(exprs),
+                "free_symbols": sum(1 for v in symbol_to_source.values() if v),
+            },
+        )
+
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args, *, ignore_static=True):
@@ -2721,6 +2742,7 @@ class ShapeEnv:
             new_expr = replace(expr, new_shape_env)
         except RecursionError:
             log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
+            self.counter["sympy_recursion_error"] += 1
             return None
 
         floor_div_replace = {}
@@ -2896,6 +2918,7 @@ class ShapeEnv:
             except NotImplementedError:
                 pass
             except RecursionError:
+                self.counter["sympy_recursion_error"] += 1
                 self.log.warning("RecursionError in sympy.solve(%s - %s, %s)", lhs, rhs, free[0])
         if expr.has(sympy.Mod):
             mod_expr = tuple(expr.atoms(sympy.Mod))[0]
@@ -2959,6 +2982,15 @@ class ShapeEnv:
             concrete_val = sympy.sympify(hint)
 
         if self.frozen:
+            self.counter["ignored_backward_guard"] += 1
+            signpost_event(
+                "dynamic",
+                "evaluate_expr_frozen",
+                {
+                    **self.co_fields,
+                    "ignored_guard": f"{expr} == {concrete_val}",
+                },
+            )
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
         if isinstance(expr, (sympy.Eq, sympy.Ne)):
