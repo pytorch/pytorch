@@ -313,7 +313,7 @@ ALLOW_LIST = [
 ]
 
 ALLOW_LIST_COMPILED = [
-    (x
+    (
         re.compile(item[0]),
         item[1],
         re.compile(item[2]) if len(item) > 2 else None,
