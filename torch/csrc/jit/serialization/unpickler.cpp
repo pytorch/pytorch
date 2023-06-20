@@ -188,7 +188,9 @@ bool is(const Type& type) {
 }
 } // namespace
 
-void restoreContainerTypeTags(const IValue& ivalue, const TypePtr& type) {
+static void restoreContainerTypeTags(
+    const IValue& ivalue,
+    const TypePtr& type) {
   if (is<DictType>(*type)) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(type->containedType(0));
@@ -362,6 +364,12 @@ PickleOpCode Unpickler::readInstruction() {
       size_t start = marks_.back();
       marks_.pop_back();
       std::vector<IValue> elements;
+      TORCH_CHECK(
+          stack_.size() >= start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       const auto tupleSize = stack_.size() - start;
       switch (tupleSize) {
         case 3: {
@@ -434,7 +442,10 @@ PickleOpCode Unpickler::readInstruction() {
       size_t start = marks_.back();
       TORCH_CHECK(
           start > 0 && start <= stack_.size(),
-          "Parsing error: wrong start index for stack_");
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ of size ",
+          stack_.size());
       auto list_ivalue = stack_.at(start - 1);
       readList(list_ivalue);
     } break;
@@ -447,6 +458,12 @@ PickleOpCode Unpickler::readInstruction() {
       TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
+      TORCH_CHECK(
+          stack_.size() > start,
+          "Parsing error: wrong start index ",
+          start,
+          " for stack_ which of size ",
+          stack_.size());
       auto dict = c10::impl::GenericDict(AnyType::get(), AnyType::get());
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
@@ -511,17 +528,6 @@ PickleOpCode Unpickler::readInstruction() {
           "Parsing error: stack_ contains ",
           stack_.size(),
           " elements, at least 2 expected");
-
-      // In the OrderedDict case, the id has already been materialized
-      // and added to the stack, thus there's no <functor_idx> but a Dict
-      // there, in this case we can just pop the functor args and break.
-      // The functor args in this case contain some other metadata like
-      // '{_metadata: {: {version: 1}}}' which seem to be safe to ignore.
-      if (stack_.at(stack_.size() - 2).isGenericDict()) {
-        stack_.pop_back();
-        break;
-      }
-
       std::swap(*(stack_.end() - 2), *(stack_.end() - 1));
       size_t idx = stack_.back().toInt();
       stack_.pop_back();
@@ -591,7 +597,7 @@ PickleOpCode Unpickler::readInstruction() {
       }
 
       if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
-          device.is_hpu() || device.is_privateuseone()) {
+          device.is_hpu() || device.is_mps() || device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
@@ -658,7 +664,6 @@ void Unpickler::readGlobal(
       TORCH_CHECK(false, "INVALID VALUES")
     }
   }
-
   // TODO [unpickler refactor] __main__ isn't used by the pickler anymore, this
   // is only here for bc-compatibility reasons
   if (module_name == "__main__") {
@@ -766,12 +771,11 @@ void Unpickler::readGlobal(
   } else if (module_name == "collections" && class_name == "OrderedDict") {
     // collections.OrderedDict is used in tensor serialization for a tensor's
     // backward hooks (but they are not actually saved with this Pickler)
-    // Python's model.state_dict() is an OrderedDict, but this is not used
-    // for model loading.
     globals_.emplace_back([this] {
-      // The OrderedDict becomes a GenericDict. The inputs which are in
-      // stack.back() are fully ignored, but they are empty anyways.
-      stack_.back() = c10::impl::GenericDict(AnyType::get(), AnyType::get());
+      // drop the Tuple that was argument to OrderedDict, and replace it
+      // with None OrderedDicts only appear in tensor deserialization and
+      // their value is never used
+      stack_.back() = IValue();
     });
   } else if (module_name == "torch" && class_name == "device") {
     globals_.emplace_back([this] {
@@ -1070,6 +1074,11 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
 std::string Unpickler::readBytes(size_t length) {
   std::string data;
   static const size_t kSmallString = 64;
+  TORCH_CHECK(
+      length <= data.max_size(),
+      "Parsing error: can't read ",
+      length,
+      " bytes to a string");
   if (length <= buffer_remaining_) {
     // Fast-path: entirely in buffer.
     data.assign(buffer_.data() + buffer_pos_, length);

@@ -39,7 +39,7 @@ pass_patterns = [
 ]
 
 
-def post_grad_passes(gm: torch.fx.GraphModule):
+def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -50,8 +50,7 @@ def post_grad_passes(gm: torch.fx.GraphModule):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if config.reordering:
-        # has some issues with mutation in inference mode
+    if locality_reorder:
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
@@ -61,15 +60,20 @@ def post_grad_passes(gm: torch.fx.GraphModule):
             patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
+    gm.recompile()
     gm.graph.lint()
 
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
+
+    from .quantization import register_quantization_lowerings
+
+    register_quantization_lowerings()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -83,8 +87,27 @@ def reorder_for_locality(graph: torch.fx.Graph):
             node.prepend(other_node)
 
     seen_nodes = set()
+
+    # only reorder nodes before the first copy_ in the graph.
+    # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
+    # and this reordering doesnt work well with mutation
+    first_copy = next(
+        (
+            node
+            for node in graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.aten.copy_.default
+        ),
+        None,
+    )
+    past_mutating_epilogue = True if first_copy is None else False
+
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
+        if not past_mutating_epilogue:
+            past_mutating_epilogue = node is first_copy
+            continue
+
         torch.fx.map_arg((node.args, node.kwargs), visit)
 
 
@@ -120,35 +143,32 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     CallFunction(
         aten.cumsum.default,
         CallFunction(
-            prims.convert_element_type.default,
-            CallFunction(
-                torch.ops.aten.full.default,
-                [Arg(), Arg()],
-                1,
-                dtype=Ignored(),
-                layout=Ignored(),
-                device=KeywordArg("device"),
-                pin_memory=False,
-                _users=MULTIPLE,
-            ),
-            KeywordArg("dtype"),
+            torch.ops.aten.full.default,
+            [Arg(), Arg()],
+            1,
+            dtype=KeywordArg("dtype"),
+            layout=Ignored(),
+            device=KeywordArg("device"),
+            pin_memory=False,
             _users=MULTIPLE,
         ),
         1,
+        _users=MULTIPLE,
     ),
     pass_dict=pass_patterns[1],
 )
 def pointless_cumsum_replacement(match: Match, size0, size1, device, dtype):
     """Based on a pattern in OPTForCausalLM"""
 
-    def repl():
+    def repl(size0, size1):
         return torch.arange(1, size1 + 1, device=device, dtype=dtype).expand(
             size0, size1
         )
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    match.replace_by_example(repl, [])
+    with V.fake_mode:
+        match.replace_by_example(repl, [size0, size1])
 
 
 def shape_of_mm(a, b):
@@ -377,3 +397,12 @@ def is_valid_splitwithsizes_cat(match):
 )
 def splitwithsizes_cat_replace(match, input_):
     return input_
+
+
+def view_to_reshape(gm):
+    """
+    Replace view ops in the GraphModule to reshape ops.
+    """
+    for nd in gm.graph.nodes:
+        if nd.target == torch.ops.aten.view.default:
+            nd.target = torch.ops.aten.reshape.default

@@ -973,18 +973,28 @@ class OpInfo:
         # corresponding layout support implies the layout support:
         if self.supports_sparse is None:
             self.supports_sparse = self.sample_inputs_sparse_coo_func is not None
+        if self.sample_inputs_sparse_coo_func is None:
+            self.sample_inputs_sparse_coo_func = self._sample_inputs_unspecified
 
         if self.supports_sparse_csr is None:
             self.supports_sparse_csr = self.sample_inputs_sparse_csr_func is not None
+        if self.sample_inputs_sparse_csr_func is None:
+            self.sample_inputs_sparse_csr_func = self._sample_inputs_unspecified
 
         if self.supports_sparse_csc is None:
             self.supports_sparse_csc = self.sample_inputs_sparse_csc_func is not None
+        if self.sample_inputs_sparse_csc_func is None:
+            self.sample_inputs_sparse_csc_func = self._sample_inputs_unspecified
 
         if self.supports_sparse_bsr is None:
             self.supports_sparse_bsr = self.sample_inputs_sparse_bsr_func is not None
+        if self.sample_inputs_sparse_bsr_func is None:
+            self.sample_inputs_sparse_bsr_func = self._sample_inputs_unspecified
 
         if self.supports_sparse_bsc is None:
             self.supports_sparse_bsc = self.sample_inputs_sparse_bsc_func is not None
+        if self.sample_inputs_sparse_bsc_func is None:
+            self.sample_inputs_sparse_bsc_func = self._sample_inputs_unspecified
 
         # We run the sampling functions without tracking the gradiends of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(self.sample_inputs_func)
@@ -1227,6 +1237,21 @@ class OpInfo:
             self,
             sample_inputs_mth(device, dtype, requires_grad=requires_grad, **kwargs),
         )
+
+    def _sample_inputs_unspecified(self, *args, **kwargs):
+        """Raises an NotImplemented exception in a OpInfo instance creation
+        that specifies supports_sparse(|_csr|_csc|_bsr|_bsc)=True
+        without specifying the corresponding sample function as
+        sample_inputs_sparse_(coo|csr|csc|bsr|bsc)_func.
+
+        To avoid this, either define the corresponding sample function,
+        or re-map unsupported samples to error inputs in an appropiate
+
+          opinfo/definitions/sparse.py:_validate_sample_input_sparse_<op>
+
+        function.
+        """
+        raise NotImplementedError("no sample function specified")
 
     def sample_inputs_sparse_coo(self, device, dtype, requires_grad=False, **kwargs):
         """Returns an iterable of SampleInputs that contain inputs with sparse
@@ -2657,28 +2682,38 @@ class ForeachFuncInfo(OpInfo):
         sample_inputs_func=sample_inputs_foreach,
         supports_autograd=False,
         supports_scalar_self_arg=False,
+        supports_forward_ad=False,
         **kwargs,
     ):
-        super().__init__(
-            "_foreach_" + name,
-            dtypes=dtypes,
-            dtypesIfCUDA=dtypesIfCUDA,
-            dtypesIfROCM=dtypesIfROCM,
-            sample_inputs_func=sample_inputs_func,
-            supports_autograd=supports_autograd,
-            **kwargs,
-        )
-        self.supports_scalar_self_arg = supports_scalar_self_arg
-
         (
             foreach_method,
             foreach_method_inplace,
             torch_ref_method,
             torch_ref_inplace,
         ) = get_foreach_method_names(name)
-        self.method_variant = foreach_method
-        self.inplace_variant = foreach_method_inplace
-        self.ref = torch_ref_method
+        if name == "zero":
+            # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
+            # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
+            # is not defined at the moment. Thus to skip the qualification, set a similar torch
+            # function.
+            assert foreach_method is None
+            foreach_method = torch.zero_
+        super().__init__(
+            name="_foreach_" + name,
+            op=foreach_method,
+            ref=torch_ref_method,
+            method_variant=foreach_method,
+            inplace_variant=foreach_method_inplace,
+            dtypes=dtypes,
+            dtypesIfCUDA=dtypesIfCUDA,
+            dtypesIfROCM=dtypesIfROCM,
+            sample_inputs_func=sample_inputs_func,
+            supports_autograd=supports_autograd,
+            supports_forward_ad=supports_forward_ad,
+            **kwargs,
+        )
+        self.supports_scalar_self_arg = supports_scalar_self_arg
+
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
 

@@ -693,7 +693,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(tensors, outputs)
                 self.assertEqual(result, outputs)
 
-    @skip_but_pass_in_sandcastle("intermittent failures on Windows, in CI")
     @requires_gloo()
     def test_sparse_allreduce_basics(self):
         self._test_sparse_allreduce_basics(lambda t: t)
@@ -2354,16 +2353,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         if self.world_size < 4:
             return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("gloo")
-
-    @requires_gloo()
-    def test_gloo_barrier_device_ids(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo", rank=self.rank, world_size=self.world_size, store=store
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
-            c10d.barrier(device_ids=[self.rank])
 
     @skip_if_lt_x_gpu(2)
     @requires_gloo()

@@ -65,7 +65,15 @@ struct TORCH_API MPSHooksInterface {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
 
-  #undef FAIL_MPSHOOKS_FUNC
+  virtual void profilerStartTrace(const std::string& mode, bool waitUntilCompleted) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+
+  virtual void profilerStopTrace() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+
+    #undef FAIL_MPSHOOKS_FUNC
 };
 
 struct TORCH_API MPSHooksArgs {};

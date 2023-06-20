@@ -41,7 +41,7 @@ def manual_seed(seed: int) -> None:
     # torch.manual_seed() in torch/random.py. So we need to make
     # sure mps is available (otherwise we just return without
     # erroring out)
-    if not torch.has_mps:
+    if not torch._C._has_mps:
         return
     seed = int(seed)
     _get_default_mps_generator().manual_seed(seed)
@@ -98,7 +98,9 @@ def driver_allocated_memory() -> int:
     """
     return torch._C._mps_driverAllocatedMemory()
 
+from . import profiler
+
 __all__ = [
     'get_rng_state', 'manual_seed', 'seed', 'set_rng_state', 'synchronize',
     'empty_cache', 'set_per_process_memory_fraction', 'current_allocated_memory',
-    'driver_allocated_memory']
+    'driver_allocated_memory', 'profiler']

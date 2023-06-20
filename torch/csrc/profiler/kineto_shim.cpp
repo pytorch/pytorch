@@ -26,7 +26,6 @@ const std::set<libkineto::ActivityType> kCpuTypes{
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
     libkineto::ActivityType::PYTHON_FUNCTION,
-    libkineto::ActivityType::MTIA_CCP_EVENTS,
 };
 
 const std::set<libkineto::ActivityType> kCudaTypes = {
@@ -44,8 +43,9 @@ const std::set<libkineto::ActivityType> kXpuTypes = {
     // XPU_RUNTIME appears in both kCpuTypes and kXpuTypes.
     libkineto::ActivityType::XPU_RUNTIME,
 };
-const std::set<libkineto::ActivityType> mtiaTypes = {
+const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_CCP_EVENTS,
+    libkineto::ActivityType::MTIA_RUNTIME,
 };
 } // namespace
 #endif // USE_KINETO
@@ -231,7 +231,7 @@ void prepareTrace(
     k_activities.insert(kXpuTypes.begin(), kXpuTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::MTIA)) {
-    k_activities.insert(mtiaTypes.begin(), mtiaTypes.end());
+    k_activities.insert(kMtiaTypes.begin(), kMtiaTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
     k_activities.insert(kCudaTypes.begin(), kCudaTypes.end());
@@ -331,6 +331,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::CUDA_RUNTIME:
     case libkineto::ActivityType::CPU_INSTANT_EVENT:
     case libkineto::ActivityType::GLOW_RUNTIME:
+    case libkineto::ActivityType::MTIA_RUNTIME:
     case libkineto::ActivityType::PYTHON_FUNCTION:
     case libkineto::ActivityType::CUDA_DRIVER:
       return c10::DeviceType::CPU;

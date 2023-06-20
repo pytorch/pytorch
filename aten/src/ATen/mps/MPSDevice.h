@@ -66,7 +66,7 @@ class TORCH_API MPSDevice {
    */
   bool isMacOS13Plus(MacOSVersion version) const;
 
-  MTLComputePipelineState_t metalIndexingFunction(const std::string &kernel);
+  MTLComputePipelineState_t metalIndexingPSO(const std::string &kernel);
   MTLLibrary_t getMetalIndexingLibrary();
 
   ~MPSDevice();

@@ -48,7 +48,7 @@ id<MTLLibrary> MPSDevice::getMetalIndexingLibrary() {
   return _mtl_indexing_library;
 }
 
-id<MTLComputePipelineState> MPSDevice::metalIndexingFunction(const std::string& kernel) {
+id<MTLComputePipelineState> MPSDevice::metalIndexingPSO(const std::string& kernel) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
   NSError* error = nil;
   static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;

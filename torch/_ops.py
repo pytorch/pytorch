@@ -242,17 +242,31 @@ class HigherOrderOperator(OperatorBase):
         return kernel(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        flat_args = _to_flat_tuple(args, kwargs)
-        if torch.overrides.has_torch_function(flat_args):
-            return torch.overrides.handle_torch_function(
-                self, flat_args, *args, **kwargs
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo
+        from torch._dynamo.eval_frame import disable
+
+        @disable
+        def wrapper():
+            flat_args = _to_flat_tuple(args, kwargs)
+            if torch.overrides.has_torch_function(flat_args):
+                return torch.overrides.handle_torch_function(
+                    self, flat_args, *args, **kwargs
+                )
+
+            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+            return self.dispatch(
+                dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
             )
 
-        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-        return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
+        return wrapper()
+
+    def __str__(self):
+        return f"{self.name()}"
 
     def name(self):
-        return self.name
+        return self._name
 
 
 def _to_flat_tuple(args, kwargs):
@@ -776,7 +790,7 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
-        if sys.executable == "torch_deploy":
+        if torch._running_with_deploy():
             return
 
         path = _utils_internal.resolve_library_path(path)

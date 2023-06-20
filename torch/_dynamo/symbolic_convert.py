@@ -103,6 +103,7 @@ from .variables.torch import TorchVariable
 from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
+graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 @functools.lru_cache(None)
@@ -323,29 +324,33 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             )
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
-            if truth_fn(value):
+            mod = self.output.get_submodule(value.module_key)
+            if truth_fn(mod):
                 push and self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
             x = value.var_getattr(self, "__bool__")
-            # __bool__ is function
+            # if __bool__ is missing, trying __len__ to infer a truth value.
+            if x.is_python_constant() and x.as_python_constant() is None:
+                x = value.var_getattr(self, "__len__")
+            # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
                 state = self.copy_graphstate()
                 result = x.call_function(self, [], {})
                 if isinstance(result, ConstantVariable) and isinstance(
-                    result.value, bool
+                    result.value, (bool, int)
                 ):
                     self.output.guards.update(result.guards)
                     if truth_fn(result.value):
                         push and self.push(value)
                         self.jump(inst)
                 else:
-                    # rollback to the state before the __bool__ inline
+                    # rollback to the state before the __bool__ or __len__ inline
                     self.restore_graphstate(state)
                     unimplemented(
                         "generic_jump on UserDefined with __bool__ returning non-constant"
                     )
-            # __bool__ is non-function or not existed in the user defined object
+            # __bool__ or __len__ is non-function or not existed in the user defined object
             else:
                 if truth_fn(True):
                     push and self.push(value)
@@ -413,11 +418,11 @@ def break_graph_if_unsupported(*, push):
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
                 # more actionable user code pointer
                 if (
-                    config.print_graph_breaks
+                    graph_break_log.isEnabledFor(logging.DEBUG)
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
-                    log.warning(
+                    graph_break_log.debug(
                         "Graph break: %s from user code at %s",
                         excp,
                         user_stack_formatted,
@@ -781,7 +786,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable(value=inst.argval))
 
     def get_global_source(self, name):
-        if self.output.root_globals is self.f_globals:
+        if self.output.global_scope is self.f_globals:
             source = GlobalSource(name)
         else:
             if "__name__" in self.f_globals:
@@ -790,7 +795,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 )
             else:
                 mangled_name = f"___unnamed_scope_{id(self.f_globals)}"
-                if mangled_name not in self.output.root_globals:
+                if mangled_name not in self.output.global_scope:
                     self.output.install_global(mangled_name, self.f_globals)
                 source = GetItemSource(GlobalSource(mangled_name), name)
         return source
@@ -848,7 +853,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             value = importlib.import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
-        f_globals = self.output.root_globals
+        f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
         f_globals[alias] = value
         self.output.update_co_names(alias)
@@ -888,9 +893,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             log.warning(
                 "can't resolve package from __spec__ or __package__, "
                 "falling back on __name__ and __path__",
-                ImportWarning,
                 stacklevel=3,
-            )  # type: ignore[call-arg]
+            )
             package = self.f_globals["__name__"]
             if "__path__" not in self.f_globals:
                 package = package.rpartition(".")[0]
@@ -1060,6 +1064,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     supported_const_comparison_ops[op](object(), right.value), **options
                 )
             )
+
         elif (
             left.is_python_constant()
             and right.is_python_constant()
@@ -1275,7 +1280,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         result = dict()
         for k, v in zip(items[::2], items[1::2]):
-            assert isinstance(k, (ConstantVariable, EnumVariable)) or (
+            assert isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable)) or (
                 isinstance(k, TensorVariable) and k.specialized_value is not None
             )
 
@@ -1818,7 +1823,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.output.guards.add(
             GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
         )
-        if name not in self.output.root_globals:
+        if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
 
     @property
@@ -1830,6 +1835,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if value is tensor_variable:
                 return key
         return None
+
+    @contextlib.contextmanager
+    def strict_translation_mode(self):
+        self.strict_checks_enabled = True
+        try:
+            yield
+        finally:
+            self.strict_checks_enabled = False
 
     def __init__(
         self,
@@ -1887,6 +1900,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.checkpoint = None
         self.random_calls = []
 
+        self.strict_checks_enabled = False
+
         if sys.version_info >= (3, 10):
             from .resume_execution import (
                 CO_ASYNC_GENERATOR,
@@ -1923,13 +1938,14 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         super().__init__(
             output=OutputGraph(
-                f_globals,
                 code_options,
                 compiler_fn,
                 self,
                 export,
                 export_constraints,
                 frame_state,
+                local_scope=f_locals,
+                global_scope=f_globals,
             ),
             instructions=instructions,
             f_locals=f_locals,
@@ -2131,6 +2147,21 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if skipfiles.check(
             func.get_filename()
         ) and not skipfiles.is_torch_inline_allowed(func.get_filename()):
+            from torch._dynamo.variables.misc import (
+                produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
+                produce_trampoline_autograd_fwd,
+            )
+
+            # _origin marks this as coming from an internal dynamo known function that is safe to
+            # trace through.
+            if hasattr(func.fn, "_origin") and func.fn._origin in [
+                produce_trampoline_autograd_fwd,
+                produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
+            ]:
+                # Known sound
+                return
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
@@ -2189,8 +2220,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent, code, sub_locals, parent.symbolic_globals, closure_cells, func
             )
 
+        strict_ctx: Any = contextlib.nullcontext()
+        if parent.strict_checks_enabled:
+            strict_ctx = tracer.strict_translation_mode()
         try:
-            tracer.run()
+            with strict_ctx:
+                tracer.run()
         except exc.SkipFrame as e:
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)

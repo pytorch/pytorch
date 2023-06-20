@@ -15,7 +15,7 @@ ancestor=$(git merge-base "${BASE}" "${HEAD}")
 echo "INFO: Checking aginst the following stats"
 (
     set -x
-    git diff --stat "$ancestor" "${HEAD}" | sed '$d' > "${TMPFILE}"
+    git diff --stat=10000 "$ancestor" "${HEAD}" | sed '$d' > "${TMPFILE}"
 )
 
 while read -r git_attribute; do
