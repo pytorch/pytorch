@@ -15,6 +15,7 @@ import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
+    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -833,7 +834,9 @@ def get_fast_op_impls():
 def init_cuda_context():
     # Backward will error with cuda Fake Tensors if no cuda tensors have been initialized first
     if torch.cuda.is_available():
-        torch.empty(1, device="cuda")
+        torch.empty(1, device="cuda") if torch.version.hip is None else torch.zeros(
+            1, device="cuda"
+        )
 
 
 @contextlib.contextmanager
@@ -938,15 +941,17 @@ class FakeTensor(torch.Tensor):
         # on
         if not fake_mode.allow_meta:
             assert device.type != "meta"
-        # normalize cuda device.
+        # normalize device.
         if device.type == "cuda":
             init_cuda_context()
-            if device.index is None:
-                device = torch.device(f"cuda:{torch.cuda.current_device()}")
 
-        # normalize hpu device.
-        if device.type == "hpu" and device.index is None:
-            device = torch.device(f"hpu:{torch.hpu.current_device()}")
+        if (
+            device.type in ["cuda", "hpu", torch._C._get_privateuse1_backend_name()]
+            and device.index is None
+        ):
+            device = torch.device(
+                f"{device.type}:{getattr(torch, device.type).current_device()}"
+            )
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
@@ -1107,7 +1112,7 @@ class FakeTensor(torch.Tensor):
 # different operators. While this will keep all freshly allocated
 # tensors alive during `FakeTensorMode`, there will no be no
 # new allocations of Tensors which have non-meta storage so
-# memory should not significantly incraese.
+# memory should not significantly increase.
 
 
 class FakeTensorMode(TorchDispatchMode):
@@ -1377,6 +1382,22 @@ class FakeTensorMode(TorchDispatchMode):
                 if op_impl_out != NotImplemented:
                     return op_impl_out
 
+        def can_fallback(func: OpOverload):
+            if not self.allow_fallback_kernels:
+                return False
+            # It's OK to try the fallback for built-in ops (e.g. aten, prims)
+            # because we control and test these but the fallback leads to unexpected behavior
+            # in user-defined custom ops
+            return func.namespace in {
+                "debugprims",
+                "prims",
+                "aten",
+                "xla",
+                "vision",
+                "torchtext",
+                "torchaudio",
+            }
+
         # run kernel registered to meta for func, which include
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         try:
@@ -1384,7 +1405,7 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
-            if has_symbolic_sizes or not self.allow_fallback_kernels:
+            if has_symbolic_sizes or not can_fallback(func):
                 raise UnsupportedOperatorException(func)
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
@@ -1467,14 +1488,14 @@ class FakeTensorMode(TorchDispatchMode):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
 
-            if common_device is None:
+            if isinstance(e, torch.Tensor) and common_device is None:
                 (
                     common_device,
                     has_scalar_only_inputs,
                 ) = FakeTensor._find_common_device(func, args, kwargs)
 
             if isinstance(e, FakeTensor):
-                torch._check(
+                check(
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
