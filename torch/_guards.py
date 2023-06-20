@@ -449,7 +449,7 @@ having to plumb complex subsystems across multiple verticals.
 Ex: A common example is guard accumulation between dynamo, shape_env, aot_autograd, and inductor.
 Accessing the current tracing context via
 TracingContext.get() allows users to accumulate their own guards for processing, without needing to know how
-to plumb objects back up to where frame interpretation happend.
+to plumb objects back up to where frame interpretation happened.
 """
 
 
@@ -612,3 +612,17 @@ def detect_fake_mode(inputs: Any = None):
         return fake_mode
     else:
         return None
+
+
+EXPORT_FAKE_MODE = None
+
+
+@contextlib.contextmanager
+def export_fake_mode(fake_mode):
+    global EXPORT_FAKE_MODE
+    assert EXPORT_FAKE_MODE is None
+    EXPORT_FAKE_MODE = fake_mode
+    try:
+        yield
+    finally:
+        EXPORT_FAKE_MODE = None

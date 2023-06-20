@@ -35,7 +35,9 @@ cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
-# inputs
+# inputs.  Note that assume_static_by_default will also cause ints to get
+# specialized, so this is mostly useful for export, where we want inputs
+# to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
 
 # Assume these functions return constants
@@ -49,8 +51,8 @@ constant_functions = {
     torch._utils.is_compiling: True,
 }
 
-# don't specialize on shapes and strides and put shape ops in graph
-dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
+# legacy config, does nothing now!
+dynamic_shapes = True
 
 # This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
 # When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
