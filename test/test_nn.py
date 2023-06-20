@@ -2582,6 +2582,123 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(m.state_dict(), m2.state_dict())
             self.assertEqual(m.foo, m2.foo)
 
+    def test_load_state_dict_assign_meta(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(3, 5)
+                self.bn = nn.BatchNorm1d(5)
+
+            def forward(self, input):
+                return self.bn(self.fc1(input))
+
+        net = MyModule()
+        state_dict = net.state_dict(keep_vars=True)
+
+        with torch.device('meta'):
+            net_meta = MyModule()
+
+        net_meta.load_state_dict(state_dict, assign=True)
+
+        # Make sure parameters and persistent buffers were assigned
+        net_meta_state_dict = net_meta.state_dict(keep_vars=True)
+        for key in state_dict.keys():
+            if isinstance(state_dict[key], torch.nn.Parameter):
+                self.assertTrue(state_dict[key] is net_meta_state_dict[key])
+
+        # Make sure that ordering of parameters and buffers is preserved
+        net_named_parameters = net.named_parameters()
+        net_named_buffers = net.named_buffers()
+        net_meta_named_parameters = net_meta.named_parameters()
+        net_meta_named_buffers = net_meta.named_buffers()
+
+        for p1, p2 in zip(net_named_parameters, net_meta_named_parameters):
+            n1, _ = p1
+            n2, _ = p2
+            self.assertEqual(n1, n2)
+
+        for p1, p2 in zip(net_named_buffers, net_meta_named_buffers):
+            n1, _ = p1
+            n2, _ = p2
+            self.assertEqual(n1, n2)
+
+        # Make sure outputs are the same
+        t = torch.randn(4, 3)
+        out_net = net(t)
+        out_net_meta = net_meta(t.clone())
+
+        self.assertEqual(out_net, out_net_meta)
+
+    def test_load_state_dict_assign_with_optimizer(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(3, 5)
+                self.bn = nn.BatchNorm1d(5)
+
+            def forward(self, input):
+                return self.bn(self.fc1(input))
+
+        net = MyModule()
+        opt = torch.optim.Adam(net.parameters(), lr=1000)
+        x = torch.randn(4, 3)
+        num_iters = 3
+
+        for i in range(num_iters):
+            opt.zero_grad()
+            out = net(x)
+            out.sum().backward()
+            opt.step()
+
+        opt_state_dict = deepcopy(opt.state_dict())
+        net_state_dict = deepcopy(net.state_dict())
+
+        with torch.device('meta'):
+            net_meta = MyModule()
+
+        net_meta.load_state_dict(net_state_dict, assign=True)
+        # must create optimizer only after loading state_dict when assign=True
+        opt2 = torch.optim.Adam(net_meta.parameters(), lr=1000)
+        opt2.load_state_dict(opt_state_dict)
+
+        y = x.clone()
+        for i in range(num_iters):
+            opt.zero_grad()
+            out = net(x)
+            out.sum().backward()
+            opt.step()
+
+            opt2.zero_grad()
+            out2 = net_meta(y)
+            out2.sum().backward()
+            opt2.step()
+
+        self.assertEqual(opt.state_dict(), opt2.state_dict())
+        self.assertEqual(net.state_dict(), net_meta.state_dict())
+
+    def test_load_state_dict_assign_shape_stride(self):
+        # Assigned tensor is allowed to have different properties than initial
+        # tensor except for shape
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(3, 5)
+                self.bn = nn.BatchNorm1d(5)
+
+            def forward(self, input):
+                return self.bn(self.fc1(input))
+
+        net = MyModule()
+        state_dict = net.state_dict()
+        # loading should be ok if stride is different
+        state_dict['fc1.weight'] = torch.randn(3, 5).transpose(0, 1)
+        net2 = MyModule()
+        net2.load_state_dict(state_dict, strict=False, assign=True)
+
+        state_dict['fc1.weight'] = torch.randn(2, 4)
+        with self.assertRaisesRegex(RuntimeError, "size mismatch for fc1.weight: copying a param with shape"):
+            net2.load_state_dict(state_dict, strict=False, assign=True)
+
     def test_extra_state_missing_set_extra_state(self):
 
         class MyModule(torch.nn.Module):
@@ -9698,11 +9815,8 @@ class TestNNDeviceType(NNTestCase):
             if dtype in (torch.uint8, ) + floating_types():
                 should_raise_runtime_error = False
 
-        elif mode == "bilinear":
+        elif mode in ("bilinear", "bicubic"):
             if dtype in floating_types() or (device == "cpu" and dtype == torch.uint8):
-                should_raise_runtime_error = False
-        elif mode == "bicubic":
-            if dtype in floating_types():
                 should_raise_runtime_error = False
 
         if should_raise_runtime_error:
@@ -9728,6 +9842,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(expected_out, t_out)
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("mode", ["bilinear", "bicubic"])
     @parametrize_test("antialias", [True, False])
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("num_channels", [3, 5])
@@ -9735,10 +9850,11 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("check_as_unsqueezed_3d_tensor", [True, False])
     @parametrize_test("non_contig", [False, "sliced", "restrided"])
     @parametrize_test("batch_size", [1, 5])
-    def test_upsamplingBiLinear2d_consistency(
+    def test_upsamplingBiMode2d_consistency(
         self,
         device,
         memory_format,
+        mode,
         antialias,
         align_corners,
         num_channels,
@@ -9747,12 +9863,12 @@ class TestNNDeviceType(NNTestCase):
         non_contig,
         batch_size,
     ):
+        # Check output value consistency between resized_input_uint8 and resized input_float
         if torch.device(device).type == "cuda":
             raise SkipTest("CUDA implementation is not yet supporting uint8")
 
-        mode = "bilinear"
-        # Check if Max Abs Error between resized input_uint8 and resized input_float is
-        # smaller than a tolerated value, e.g. 1.0
+        torch.manual_seed(0)
+
         input_ui8 = torch.randint(0, 256, size=(batch_size, num_channels, 400, 400), dtype=torch.uint8, device=device)
         input_ui8 = input_ui8.contiguous(memory_format=memory_format)
 
@@ -9769,7 +9885,7 @@ class TestNNDeviceType(NNTestCase):
 
         output_f32 = F.interpolate(
             input_f32, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
-        )
+        ).round().clip(0, 255)
         output_ui8 = F.interpolate(
             input_ui8, size=(output_size, output_size), mode=mode, align_corners=align_corners, antialias=antialias
         )
@@ -9787,17 +9903,37 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
             self.assertTrue(output_f32.is_contiguous(memory_format=memory_format))
 
-        mae_tol = 0.5
-        max_abs_err_tol = 1.0
-        num_wrong_pixels_tol = 5
+        diff = (output_f32 - output_ui8.float()).abs()
+        if mode == "bilinear":
+            torch.testing.assert_close(output_f32, output_ui8.float(), rtol=0, atol=1)
+        else:
+            # - tolerances for bicubic mode are in general higher than for
+            #   bilinear mode, because the bicubic kernel may create
+            #   [intermediate] values outside of the [0, 255] range, which need
+            #   to be clipped in uint8 path, but not in float path. This isn't
+            #   an issue with bilinear kernel.
+            # - Also in bicubic mode, when antialias=False, we have to use
+            #   bigger tolerances than when antialias=True. This is partially
+            #   due to the fact that when False, the float path uses the -0.75
+            #   constant while the uint8 path uses the -0.5 constant in the
+            #   bicubic kernel (when True, they both use -0.5). This difference
+            #   in constants exists for historical reasons. Should both paths
+            #   use the -0.5 constant, we would have closer results and we would
+            #   be able to lower the tolerances.
 
-        abs_diff = torch.abs(output_f32.round() - output_ui8.float())
-        mae = torch.mean(abs_diff)
-        max_abs_err = torch.max(abs_diff)
-        num_wrong_pixels = (abs_diff > max_abs_err_tol).sum()
-        self.assertTrue(mae < mae_tol, msg=f"mae={mae}")
-        self.assertTrue(max_abs_err < max_abs_err_tol + 1e-5, msg=f"max ae={max_abs_err}")
-        self.assertTrue(num_wrong_pixels < num_wrong_pixels_tol, msg=f"num_wrong_pixels={num_wrong_pixels}")
+            max_diff = 30 if antialias else 44
+            assert diff.max() < max_diff
+
+            threshold = 2
+            percent = 3 if antialias else 40
+            assert (diff > threshold).float().mean() < (percent / 100)
+
+            threshold = 5
+            percent = 1 if antialias else 20
+            assert (diff > threshold).float().mean() < (percent / 100)
+
+            mae = .4 if antialias else 3
+            assert diff.mean() < mae
 
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("align_corners", [True, False])
