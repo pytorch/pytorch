@@ -84,7 +84,7 @@ class TestFunctionalization(TestCase):
         )
         self.assertEqual(constrain_node.kwargs["dep_token"], dep_token_node)
 
-    def test_input_constraints(self) -> None:
+    def test_functionalize_input_constraints(self) -> None:
         def f(x):
             return x * 2
 
