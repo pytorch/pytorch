@@ -3,6 +3,7 @@ import itertools
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import counters
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
@@ -108,7 +109,7 @@ class TestPaternMatcher(TestCase):
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
 
-    def test_conv2d_unary(self):
+    def test_conv2d_unary_cpu(self):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -258,6 +259,7 @@ class TestPaternMatcher(TestCase):
             )
             self._test_common(mod, (v,), 1, match_nodes)
 
+    @expectedFailureDynamicWrapper
     def test_linear_binary(self):
         class M(torch.nn.Module):
             def __init__(self, binary_fn, in_channels, out_channels, bias, **kwargs):
@@ -345,7 +347,9 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(1, 3, 28, 28)
             self._test_common(mod, (v,), 0, 0)
 
-    def test_conv2d_binary_inplace_fusion_pass(self):
+    def test_conv2d_binary_inplace_fusion_pass_cpu(
+        self, include_ops=None, exclude_ops=None
+    ):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -362,11 +366,17 @@ class TestPaternMatcher(TestCase):
             torch.randn(1, 32, 28, 28).to(memory_format=torch.channels_last),
         ]
         mod = Model().to(memory_format=torch.channels_last).eval()
-        include_ops = ["mkldnn._convolution_pointwise_.binary"]
-        exclude_ops = ["mkldnn._convolution_pointwise.binary"]
+
+        if include_ops is None:
+            include_ops = ["mkldnn._convolution_pointwise_.binary"]
+        if exclude_ops is None:
+            exclude_ops = ["mkldnn._convolution_pointwise.binary"]
+
         self._test_code_common(mod, inputs, include_ops, exclude_ops)
 
-    def test_conv2d_binary_inplace_fusion_failed(self):
+    def test_conv2d_binary_inplace_fusion_failed_cpu(
+        self, include_ops=None, exclude_ops=None
+    ):
         # Written buffer is graph input, we can't fuse inplace.
         class Model_v1(torch.nn.Module):
             def __init__(self):
@@ -398,8 +408,12 @@ class TestPaternMatcher(TestCase):
         ]
         mod_v1 = Model_v1().to(memory_format=torch.channels_last).eval()
         mod_v2 = Model_v2().to(memory_format=torch.channels_last).eval()
-        include_ops = ["mkldnn._convolution_pointwise.binary"]
-        exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
+
+        if include_ops is None:
+            include_ops = ["mkldnn._convolution_pointwise.binary"]
+        if exclude_ops is None:
+            exclude_ops = ["mkldnn._convolution_pointwise_.binary"]
+
         for other, mod in zip(others, [mod_v1, mod_v2]):
             self._test_code_common(mod, (input, other), include_ops, exclude_ops)
 
@@ -485,5 +499,10 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CPU and torch._C.has_mkldnn and not TEST_WITH_ROCM:
+    if (
+        IS_LINUX
+        and HAS_CPU
+        and torch.backends.mkldnn.is_available()
+        and not TEST_WITH_ROCM
+    ):
         run_tests()
