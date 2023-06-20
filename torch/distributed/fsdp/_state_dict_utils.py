@@ -28,8 +28,8 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
-    _has_fsdp_params,
     _get_module_fsdp_state_if_fully_sharded_module,
+    _has_fsdp_params,
     _is_composable,
     _module_handles,
     clean_tensor_name,
