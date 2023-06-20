@@ -17,6 +17,9 @@ class Net(torch.nn.Module):
 x = torch.randn((32, 64), device="cuda")
 y = torch.randn((32, 64), device="cuda")
 
+# FIXME: re-enable dynamic shape after we add dynamic shape support to the
+# AOTInductor runtime
+torch._dynamo.config.dynamic_shapes = False
 torch._dynamo.reset()
 
 with torch.no_grad():

@@ -33,6 +33,9 @@ from torch._inductor import config, cuda_properties, exc
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 
+_HERE = os.path.abspath(__file__)
+_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+
 if config.is_fbcode():
     from torch._inductor.fb.logging import global_cache_log
 else:
@@ -523,6 +526,11 @@ def cpp_flags():
 
 def optimization_flags():
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
+    if config.is_fbcode():
+        # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
+        # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
+        # We will fix it later by exposing the lib path.
+        return base_flags
 
     if sys.platform == "darwin":
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
@@ -537,8 +545,15 @@ def use_custom_generated_macros():
     return "-D C10_USING_CUSTOM_GENERATED_MACROS"
 
 
+def use_fb_internal_macros():
+    if config.is_fbcode():
+        return "-D C10_USE_GLOG -D C10_USE_MINIMAL_GLOG -D C10_MOBILE"
+    else:
+        return ""
+
+
 def get_include_and_linking_paths(
-    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False
+    include_pytorch=False, vec_isa: VecISA = invalid_vec_isa, cuda=False, aot_mode=False
 ):
     from torch.utils import cpp_extension
 
@@ -553,22 +568,32 @@ def get_include_and_linking_paths(
         # to do to enable OMP build on darwin where PyTorch is built with IOMP
         # and we need a way to link to what PyTorch links.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        if aot_mode:
+            ipaths += [os.path.join(_TORCH_PATH, "_inductor", "aot_cpp_include")]
         lpaths = cpp_extension.library_paths(cuda) + [
             sysconfig.get_config_var("LIBDIR")
         ]
-        libs = ["c10", "torch", "torch_cpu", "torch_python"]
-        libs += ["gomp"]
+        libs = []
+        # No need to manually specify libraries in fbcode.
+        if not config.is_fbcode():
+            libs += ["c10", "torch", "torch_cpu", "torch_python"]
+            libs += ["gomp"]
         macros = vec_isa.build_macro()
         if macros:
             macros = f"-D{macros}"
         if cuda:
-            libs += ["c10_cuda", "cuda", "torch_cuda"]
+            if config.is_fbcode():
+                libs += ["cuda"]
+            else:
+                libs += ["c10_cuda", "cuda", "torch_cuda"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
         # For those cases, include the lpath and libs command as we do for pytorch above.
         # This approach allows us to only pay for what we use.
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
+        if aot_mode:
+            ipaths += [os.path.join(_INDUCTOR_PATH, "aot_cpp_include")]
         lpaths = []
         if sys.platform == "darwin":
             # GNU OpenMP generally is not available on MacOS
@@ -601,9 +626,10 @@ def cpp_compile_command(
     include_pytorch=False,
     vec_isa: VecISA = invalid_vec_isa,
     cuda=False,
+    aot_mode=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
-        include_pytorch, vec_isa, cuda
+        include_pytorch, vec_isa, cuda, aot_mode
     )
 
     return re.sub(
@@ -615,6 +641,7 @@ def cpp_compile_command(
             {ipaths} {lpaths} {libs} {macros}
             {optimization_flags()}
             {use_custom_generated_macros()}
+            {use_fb_internal_macros()}
             -o {output}
         """,
     ).strip()
@@ -647,7 +674,15 @@ class AotCodeCache:
             source_code,
             "cpp",
             code_hash(
-                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
+                repr(
+                    cpp_compile_command(
+                        "i",
+                        "o",
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                        aot_mode=graph.aot_mode,
+                    )
+                )
             ),
         )
         if key not in cls.cache:
@@ -663,7 +698,10 @@ class AotCodeCache:
                         output=output_so,
                         vec_isa=picked_vec_isa,
                         cuda=cuda,
+                        aot_mode=graph.aot_mode,
                     ).split(" ")
+                    print("aot compilation command: %s" % " ".join(cmd))
+                    log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
