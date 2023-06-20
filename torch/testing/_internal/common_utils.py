@@ -1457,17 +1457,6 @@ def suppress_warnings(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def expectedFailureIf(condition):
-    """
-    The test is marked as an expectedFailure if the condition is satisfied
-    """
-    def wrapper(func):
-        if condition:
-            return unittest.expectedFailure(func)
-        else:
-            return func
-    return wrapper
-
 def to_gpu(obj, type_map=None):
     if type_map is None:
         type_map = {}
