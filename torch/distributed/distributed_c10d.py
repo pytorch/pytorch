@@ -1624,7 +1624,7 @@ class _CoalescingManager:
         for work in self.works:
             work.wait()
 
-    def get_future(self) -> Future:
+    def get_future(self) -> Future[List[Future]]:
         return collect_all([work.get_future() for work in self.works])
 
 

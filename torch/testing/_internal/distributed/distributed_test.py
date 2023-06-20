@@ -1314,6 +1314,47 @@ class DistributedTest:
 
             self._barrier()
 
+            # Coalescing manager (Future API)
+            @skip_if_no_gpu
+            @skip_but_pass_in_sandcastle_if(
+                BACKEND != "nccl" or IS_FBCODE or IS_SANDCASTLE,
+                "Coalescing manager currently tests with NCCL only; internal test flaky"
+            )
+            def test_coalescing_manager_future(self):
+                self._barrier()
+                rank = dist.get_rank()
+                world_size = dist.get_world_size()
+                rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+                device_id = rank_to_GPU[rank][0]
+                torch.cuda.set_device(device_id)
+                num_colls = 2
+                size_per_coll = 8
+                small_tensors = [
+                    torch.ones(size_per_coll, device=device_id) for _ in range(num_colls)
+                ]
+
+                with dist._coalescing_manager(async_ops=True) as cm:
+                    for i in range(num_colls):
+                        dist.all_reduce(small_tensors[i])
+                future = cm.get_future()
+                assert isinstance(future, torch.futures.Future)
+                future.wait()
+
+                big_tensor = torch.ones(num_colls * size_per_coll, device=device_id)
+                dist.all_reduce(big_tensor)
+
+                for i, small_future in enumerate(future.value()):
+                    self.assertEqual(
+                        small_tensors[i],
+                        small_future.value()
+                    )
+                    self.assertEqual(
+                        small_tensors[i],
+                        big_tensor[i * size_per_coll: (i + 1) * size_per_coll]
+                    )
+
+                self._barrier()
+
         # NCCL Batch SEND RECV
         @skip_if_no_gpu
         @skip_but_pass_in_sandcastle_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
