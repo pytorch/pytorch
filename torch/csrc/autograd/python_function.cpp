@@ -230,7 +230,7 @@ variable_list PyNode::apply_with_saved(
   TORCH_CHECK(!f->compiled_autograd_tracing);
   saved.before(f->saved_variables);
   f->compiled_autograd_tracing = true;
-  auto result = apply(std::move(variable_list(inputs)));
+  auto result = apply(variable_list(inputs));
   f->compiled_autograd_tracing = false;
   saved.after(f->saved_variables);
   return result;
