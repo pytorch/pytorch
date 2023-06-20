@@ -2771,6 +2771,84 @@ TEST_F(VulkanAPITest, reflection_pad2d) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, repeat_invalid_inputs_outputs_exceptions) {
+  // Arrange: Vulkan repeat only supports input of dims <= 4
+  {
+    const auto in_cpu =
+        at::rand({3, 9, 11, 7, 3}, at::device(at::kCPU).dtype(at::kFloat));
+    const at::IntArrayRef repeats = {5, 7, 3, 9, 2};
+
+    // Act
+    EXPECT_THROW(
+        { const auto out_vulkan = in_cpu.vulkan().repeat(repeats); },
+        ::c10::Error);
+  }
+
+  // Arrange: Number of dimensions of repeat dims can not be smaller than
+  // number of dimensions of tensor
+  {
+    const auto in_cpu =
+        at::rand({3, 5, 11, 13}, at::device(at::kCPU).dtype(at::kFloat));
+    const at::IntArrayRef repeats = {5, 7};
+
+    // Act
+    EXPECT_THROW(
+        { const auto out_vulkan = in_cpu.vulkan().repeat(repeats); },
+        ::c10::Error);
+  }
+
+  // Arrange: Vulkan repeat only supports output of dims <= 4
+  {
+    const auto in_cpu =
+        at::rand({3, 9, 11, 7}, at::device(at::kCPU).dtype(at::kFloat));
+    const at::IntArrayRef repeats = {5, 7, 3, 9, 2};
+
+    // Act
+    EXPECT_THROW(
+        { const auto out_vulkan = in_cpu.vulkan().repeat(repeats); },
+        ::c10::Error);
+  }
+}
+
+void test_repeat(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef repeats) {
+  c10::InferenceMode mode;
+
+  at::Tensor in_cpu;
+  at::Tensor out_cpu;
+  at::Tensor in_vulkan;
+  at::Tensor out_vulkan;
+  at::IntArrayRef repeat;
+  bool check = true;
+  for (int idx_input = 1; (unsigned)idx_input < input_shape.size() + 1; ++idx_input) {
+    for (int idx_repeat = idx_input; (unsigned)idx_repeat < repeats.size() + 1;
+          ++idx_repeat) {
+      in_cpu = at::rand(
+          input_shape.slice(0, idx_input),
+          at::device(at::kCPU).dtype(at::kFloat));
+      repeat = repeats.slice(0, idx_repeat);
+      out_cpu = in_cpu.repeat(repeats);
+      in_vulkan = in_cpu.vulkan();
+      out_vulkan = in_vulkan.repeat(repeats);
+      bool local_check = almostEqual(out_cpu, out_vulkan.cpu());
+      if (!local_check) {
+        check = false;
+        std::cout << "Repeat test failed when input is of shape "
+                  << input_shape.slice(0, idx_input) << " and repeat of "
+                  << repeat << std::endl;
+        showRtol(out_cpu, out_vulkan.cpu());
+      }
+    }
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, repeat) {
+  test_repeat({13, 5, 13, 7}, {7, 2, 3, 5});
+}
+
 TEST_F(VulkanAPITest, replication_pad2d) {
   const auto a_cpu = at::rand({2, 3, 47, 63}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
