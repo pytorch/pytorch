@@ -1230,11 +1230,23 @@ class BuiltinVariable(VariableTracker):
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
         if (
-            isinstance(left, NNModuleVariable)
-            and isinstance(right, NNModuleVariable)
-            and op in supported_const_comparison_ops
+            all(
+                isinstance(x, (NNModuleVariable, ConstantVariable))
+                for x in [left, right]
+            )
+            and op in supported_const_comparison_ops.values()
         ):
-            self.push(ConstantVariable(op(left, right)))
+            left = (
+                tx.output.get_submodule(left.module_key)
+                if isinstance(left, NNModuleVariable)
+                else left.as_python_constant()
+            )
+            right = (
+                tx.output.get_submodule(right.module_key)
+                if isinstance(right, NNModuleVariable)
+                else right.as_python_constant()
+            )
+            return ConstantVariable(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():
