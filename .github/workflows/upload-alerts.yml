@@ -8,6 +8,7 @@ on:
 
 jobs:
   upload-alerts:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       - name: Checkout repo

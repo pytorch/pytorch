@@ -1696,8 +1696,10 @@ import torch.fx.experimental.symbolic_shapes
 from torch import func as func
 from torch.func import vmap
 
+
 # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
 from torch import onnx as onnx  # ONNX depends on a bunch of Dynamo stuff
+
 
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
@@ -1714,6 +1716,8 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
 torch.backends.mps._init()
 
 if not _running_with_deploy():
+    from torch import compiler as compiler
+
     class _TritonLibrary(object):
         lib = torch.library.Library("triton", "DEF")
         ops_table: Dict[Tuple[str, str], Callable] = {}
