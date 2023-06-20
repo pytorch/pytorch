@@ -631,13 +631,13 @@ def _is_packable_convolution(node, constant_nodes):
         is_transposed = node.args[-3]
         if is_transposed:
             groups = node.args[-1]
-            in_channels = weight_meta_value.meta.get("val").size()[1]
+            in_channels = weight_meta_value.size(0)
             # doesn't support group_depthwise_conv_transpose.
             if groups > 1 and groups == in_channels:
                 return False
             # Port from: aten/src/ATen/native/Convolution.cpp:is_output_padding_big
             output_paddings = node.args[-2]
-            strides = node.args[-3]
+            strides = node.args[3]
             if any(
                 output_padding >= stride
                 for output_padding, stride in zip(output_paddings, strides)
@@ -673,7 +673,7 @@ def _is_packable_linear(node, constant_nodes):
                     bias_meta_value is None
                     or device_hint(bias_meta_value) != "cpu"
                     or bias_meta_value.dim() != 1
-                    or bias_meta_value.size()[0] != weight_meta_value.size()[1]
+                    or bias_meta_value.size(0) != weight_meta_value.size(1)
                 ):
                     return False
             if (
@@ -694,22 +694,25 @@ def _insert_packed_convolution(gm, conv_node):
             "call_method", "to_mkldnn", (conv_node.args[1],)
         )
         bias = conv_node.args[2]
-        padding = conv_node.args[4]
         stride = conv_node.args[3]
+        padding = conv_node.args[4]
         dilation = conv_node.args[5]
         groups = conv_node.args[-1]
         output_padding = conv_node.args[-2]
         is_transposed = conv_node.args[-3]
+        constant_args = [padding, stride, dilation, groups]
+        packed_weight_op = torch._C._nn.mkldnn_reorder_conv2d_weight
+        packed_conv_op = torch.ops.mkldnn._convolution_pointwise.default
+        if is_transposed:
+            constant_args.insert(1, output_padding)
+            packed_conv_op = torch.ops.mkldnn._convolution_transpose_pointwise.default
         if free_symbols(input_size):
             # TODO: support symbolic input size
             return
         else:
             packed_weight_inputs = (
-                (mkldnn_tensor_node, output_padding)
-                if is_transposed
-                else (mkldnn_tensor_node,)
+                (mkldnn_tensor_node,) + tuple(constant_args) + (input_size,)
             )
-            packed_weight_inputs += (padding, stride, dilation, groups, input_size)
             packed_weight_op = (
                 torch.ops.mkldnn._reorder_convolution_transpose_weight
                 if is_transposed
@@ -718,37 +721,11 @@ def _insert_packed_convolution(gm, conv_node):
             packed_weight_node = gm.graph.create_node(
                 "call_function", packed_weight_op, args=packed_weight_inputs
             )
-        if is_transposed:
-            packed_conv_inputs = (
-                input,
-                packed_weight_node,
-                bias,
-                padding,
-                output_padding,
-                stride,
-                dilation,
-                groups,
-                "none",
-                [],
-                "",
-            )
-            packed_conv_op = torch.ops.mkldnn._convolution_transpose_pointwise.default
-        else:
-            packed_conv_inputs = (
-                input,
-                packed_weight_node,
-                bias,
-                padding,
-                stride,
-                dilation,
-                groups,
-                "none",
-                [],
-                "",
-            )
-            packed_conv_op = torch.ops.mkldnn._convolution_pointwise.default
+        packed_conv_inputs = (
+            (input, packed_weight_node, bias) + tuple(constant_args) + ("none", [], "")
+        )
         packed_conv_node = gm.graph.create_node(
-            "call_function", packed_conv_op, packed_conv_inputs
+            "call_function", packed_conv_op, tuple(packed_conv_inputs)
         )
         conv_node.replace_all_uses_with(packed_conv_node)
         packed_conv_node.meta.update(conv_node.meta)
@@ -761,6 +738,7 @@ def _insert_packed_linear(gm, linear_node):
     batch_size = input.meta.get("val").shape[0]
     permute_node = linear_node.args[weight_idx]
     linear_weight = permute_node.args[0]
+    linear_bias = linear_node.args[0] if weight_idx == 2 else None
     with gm.graph.inserting_before(linear_node):
         mkldnn_tensor_node = gm.graph.create_node(
             "call_method", "to_mkldnn", (linear_weight,)
@@ -783,19 +761,10 @@ def _insert_packed_linear(gm, linear_node):
             )
         packed_linear_inputs = (input, packed_weight_node)
         if is_bf16_weight:
-            packed_linear_inputs += (
-                linear_node.args[0] if weight_idx == 2 else None,
-                "none",
-                [],
-                "",
-            )
+            packed_linear_inputs += (linear_bias, "none", [], "")
             packed_linear_op = torch.ops.mkldnn._linear_pointwise.default
         else:
-            packed_linear_inputs += (
-                linear_weight,
-                linear_node.args[0] if weight_idx == 2 else None,
-                batch_size,
-            )
+            packed_linear_inputs += (linear_weight, linear_bias, batch_size)
             packed_linear_op = torch.ops.mkl._mkl_linear
         packed_linear_node = gm.graph.create_node(
             "call_function", packed_linear_op, packed_linear_inputs
