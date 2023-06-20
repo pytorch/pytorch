@@ -264,6 +264,7 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     is supported.
     """
 
+    # TODO: rename observer to observer_ctr
     def __init__(self, observer):
         super().__init__(observer=observer)
         assert type(self.activation_post_process) == FixedQParamsObserver,\

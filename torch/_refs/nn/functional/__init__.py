@@ -25,33 +25,43 @@ from torch._refs import _make_inplace
 __all__ = [
     "alpha_dropout",
     "celu",
+    "celu_",
     "dropout",
     "elu",
+    "elu_",
+    "gelu",
+    "glu",
+    "group_norm",
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
     "huber_loss",
     "l1_loss",
+    "layer_norm",
+    "leaky_relu",
     "log_softmax",
     "margin_ranking_loss",
     "mish",
-    "nll_loss",
+    "mish_",
     "mse_loss",
+    "nll_loss",
+    "pairwise_distance",
+    "pdist",
     "poisson_nll_loss",
     "prelu",
     "relu",
     "relu6",
     "selu",
+    "selu_",
+    "smooth_l1_loss",
     "softmax",
     "softmin",
     "softplus",
     "softshrink",
     "tanhshrink",
     "threshold",
+    "threshold_",
     "triplet_margin_loss",
-    "glu",
-    "pairwise_distance",
-    "pdist",
 ]
 
 Tensor = torch.Tensor
@@ -115,7 +125,7 @@ def alpha_dropout(
     return self * dropout_mask + b
 
 
-def inplace_wrapper(fn):
+def _inplace_wrapper(fn):
     """
     Given a nn.functional non-linearity, implements its `inplace: bool` argument
     """
@@ -138,7 +148,7 @@ def inplace_wrapper(fn):
 # celu is implemented specially because it has an alpha argument
 # celu is very similar to elu
 @register_decomposition(aten.celu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -172,7 +182,7 @@ def celu(
 
 
 @register_decomposition(aten.dropout)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 def dropout(
     a: TensorLikeType, p: float = 0.5, training: bool = True, inplace: bool = False
@@ -201,7 +211,7 @@ def dropout(
 
 
 @register_decomposition(aten.elu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -239,7 +249,7 @@ def elu(
 
 
 @register_decomposition(aten.relu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -310,7 +320,7 @@ def layer_norm(
 
 
 @register_decomposition(aten.leaky_relu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -334,7 +344,7 @@ def leaky_relu(
 
 
 @register_decomposition(aten.mish)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -351,7 +361,7 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
 
 @register_decomposition(aten.selu)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -405,7 +415,7 @@ def softmin(
 
 # softplus is implemented specially because it has beta and threshold arguments
 @register_decomposition(aten.softplus)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -487,9 +497,9 @@ def _reduction_int_to_str(reduction: int) -> str:
 
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
     if reduction == "sum":
-        return refs.sum(loss)
+        return torch.sum(loss)
     elif reduction == "mean":
-        return refs.mean(loss)
+        return torch.mean(loss)
     else:  # reduction == "none"
         return loss
 
@@ -542,6 +552,38 @@ def l1_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
+def smooth_l1_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+    beta: float = 1.0,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.smooth_l1_loss
+    """
+    if size_average is not None or reduce is not None:
+        # TODO: Raise exception instead of converting value.  This is only for
+        # primTorch since it can drop support for deprecated arguments.
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+    _check_reduction_value(reduction)
+
+    if beta == 0.0:
+        return torch.nn.functional.l1_loss(
+            input, target, size_average=size_average, reduce=reduce, reduction=reduction
+        )
+    else:
+        loss = torch.abs(input - target)
+        loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
+        return _apply_loss_reduction(loss, reduction)
+
+
 # Forwarding alias: the functional variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def log_softmax(
@@ -566,7 +608,6 @@ def margin_ranking_loss(
     margin: float = 0.0,
     reduction: str = "mean",
 ) -> TensorLikeType:
-    # Formula of loss (implementation gets confusing with all the refs.foo)
     # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
@@ -578,14 +619,14 @@ def margin_ranking_loss(
             )
         )
     _check_reduction_value(reduction)
-    neg_target = refs.neg(target)
-    input_diff = refs.sub(input1, input2)
-    mul_target_input = refs.mul(neg_target, input_diff)
-    add_margin = refs.add(mul_target_input, margin)
-    loss = refs.maximum(add_margin, 0)
+    loss = torch.clamp_min(-target * (input1 - input2) + margin, 0)
     return _apply_loss_reduction(loss, reduction)
 
 
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 def mse_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -610,14 +651,13 @@ def hinge_embedding_loss(
     margin: float = 1.0,
     reduction: str = "mean",
 ) -> TensorLikeType:
-    # Formula of loss (implementation gets confusing with all the refs.foo)
     # loss_without_reduction = input if y == 1
     #                        = max(0, margin - input) if y == -1
     _check_reduction_value(reduction)
-    margin_clamp = refs.maximum(refs.sub(margin, input), 0)
-    output_margin = refs.where(refs.ne(target, 1), margin_clamp, 0)
-    output_self = refs.where(refs.ne(target, -1), input, 0)
-    loss = refs.add(output_margin, output_self)
+    margin_clamp = torch.clamp_min(margin - input, 0)
+    output_margin = torch.where(target != 1, margin_clamp, 0)
+    output_self = torch.where(target != -1, input, 0)
+    loss = output_margin + output_self
     return _apply_loss_reduction(loss, reduction)
 
 
@@ -820,11 +860,11 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
         raise RuntimeError(
             "Expected a tensor input for an elementwise unary operation!"
         )
-    return refs.sub(a, refs.tanh(a))
+    return a - torch.tanh(a)
 
 
 @register_decomposition(aten.threshold)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -925,7 +965,7 @@ def _triplet_margin_with_distance_loss(
 
 
 @register_decomposition(aten.hardtanh)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
@@ -1065,11 +1105,11 @@ def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
             weight, a.shape, tuple() if weight.ndim == 0 else (0 if a.ndim == 1 else 1,)
         )
 
-    return refs.where(a > 0, a, a * weight)
+    return torch.where(a > 0, a, a * weight)
 
 
 @register_decomposition(aten.relu6)
-@inplace_wrapper
+@_inplace_wrapper
 @out_wrapper()
 def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
@@ -1081,7 +1121,7 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     # See https://github.com/pytorch/pytorch/pull/81142#discussion_r918220126
     # It may be better to use clamp here, but we use hardtanh to replicate
     # the behavior of the existing implementation
-    return refs.nn.functional.hardtanh(a, 0, 6)
+    return torch.nn.functional.hardtanh(a, 0, 6)
 
 
 @register_decomposition(aten.glu)
