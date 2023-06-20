@@ -239,12 +239,12 @@ class _BufferCommHook:
 # is completed.
 class _DDPSink(Function):
     @staticmethod
-    def forward(ctx, reducer, ddp_state, *inputs):
+    def forward(ctx, reducer, state_dict, *inputs):
         # set_materialize_grads(False) will ensure that None gradients stay as
         # None and are not filled with zeros.
         ctx.set_materialize_grads(False)
         ctx.reducer = reducer
-        ctx.ddp_state = ddp_state
+        ctx.state_dict = state_dict
         ret = tuple(
             inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
         )
@@ -254,7 +254,7 @@ class _DDPSink(Function):
     def backward(ctx, *grad_outputs):
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
-        if ctx.ddp_state["static_graph"] and ctx.ddp_state["num_iterations"] == 1:
+        if ctx.state_dict["static_graph"] and ctx.state_dict["num_iterations"] == 1:
             Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 ctx.reducer._delay_all_reduce
             )
@@ -1468,7 +1468,7 @@ class DistributedDataParallel(Module, Joinable):
         if (self.find_unused_parameters and not self.static_graph) or (
             self.static_graph and self.num_iterations == 1
         ):
-            ddp_state = {
+            state_dict = {
                 "static_graph": self.static_graph,
                 "num_iterations": self.num_iterations,
             }
@@ -1492,7 +1492,7 @@ class DistributedDataParallel(Module, Joinable):
             # param.grad field is not touched and we don't error out.
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
-                ddp_state,
+                state_dict,
                 *output_tensor_list,
             )
             for i in range(len(output_placeholders)):
