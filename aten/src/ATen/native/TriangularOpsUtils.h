@@ -1,8 +1,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 /*
  * Given batches of matrices with arbitrary batch dim,
@@ -55,5 +54,4 @@ static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor
   return std::make_tuple(true, tensor);
 }
 
-}  // namespace native
-}  // namespace at
+}  // namespace at::native
