@@ -9,9 +9,9 @@ from difflib import SequenceMatcher
 from typing import Any, Dict, List, Set, Tuple
 
 import requests
-from setuptools import distutils
+from setuptools import distutils  # type: ignore[import]
 
-from tools.github.github_utils import gh_fetch_commit  # type: ignore[import]
+from tools.github.github_utils import gh_fetch_commit
 
 ALL_SKIPPED_THRESHOLD = 100
 SIMILARITY_THRESHOLD = 0.75
