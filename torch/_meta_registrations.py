@@ -33,7 +33,6 @@ from torch._refs import _broadcast_shapes
 from torch.fx.experimental.symbolic_shapes import constrain_range
 from torch.utils._pytree import tree_map
 
-
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
@@ -4140,6 +4139,9 @@ import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
 
+_QUANTIZED_DECOMPOSED_LIB = torch.library.Library(
+    "quantized_decomposed", "IMPL", "Meta"
+)
 
 def activate_meta():
     activate_meta_table = {}
@@ -4192,6 +4194,8 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta_for_mkldnn.impl(op_overload, fn)
             elif "mkl::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
+            elif "quantized_decomposed::" in op_overload.name():
+                _QUANTIZED_DECOMPOSED_LIB.impl(op_overload, fn)
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 

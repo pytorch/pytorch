@@ -71,6 +71,19 @@ from torch.ao.quantization import (
     default_dynamic_qconfig,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
+import unittest
+
+from torch._decomp import get_decompositions
+from torch.fx.experimental.proxy_tensor import make_fx
+
+quant_decomp = get_decompositions(
+    [
+        torch.ops.quantized_decomposed.quantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor,
+        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+    ]
+)
 
 # TODO: Move to common utils or use existing quant utils to fetch model instances
 class TestHelperModules:
@@ -1571,6 +1584,131 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._verify_symmetric_qnnpack_qat_numerics(
             m, example_inputs, is_per_channel=True, verify_convert=True,
         )
+
+    def test_q_dq_decomposition(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x
+
+        with override_quantized_engine("qnnpack"):
+            m = M().eval()
+            example_inputs = (torch.randn(1, 1, 3, 3),)
+
+            # program capture
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
+
+            quantizer = QNNPackQuantizer()
+            quantizer.set_global(
+                get_symmetric_quantization_config(
+                    is_per_channel=False, is_qat=False
+                )
+            )
+            m = prepare_pt2e_quantizer(m, quantizer)
+            m(*example_inputs)
+            m = convert_pt2e(m)
+            m(*example_inputs)
+            node_occurrence = {
+                # two for input and weight of the conv, one for output for the conv
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 3,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 3,
+            }
+            node_list = [
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
+                ns.call_function(torch.ops.aten.convolution.default),
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default),
+            ]
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=node_list,
+                expected_node_occurrence=node_occurrence
+            )
+            m = make_fx(m, decomposition_table=quant_decomp)(*copy.deepcopy(example_inputs))
+            node_occurrence = {
+                # check both q/dq are decomposed
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 0,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 0,
+            }
+            node_list = [
+                # ops in quantize
+                ns.call_function(torch.ops.aten.mul.Tensor),
+                ns.call_function(torch.ops.aten.round.default),
+                ns.call_function(torch.ops.aten.add.Tensor),
+                ns.call_function(torch.ops.aten.clamp.default),
+                # ops in dequantize
+                ns.call_function(torch.ops.aten.sub.Tensor),
+                ns.call_function(torch.ops.aten.mul.Tensor),
+                # conv op
+                ns.call_function(torch.ops.aten.convolution.default),
+            ]
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=node_list,
+                expected_node_occurrence=node_occurrence
+            )
+
+    def test_decomp_and_lowering(self):
+        # make sure lowering works on the decomposed representation
+        from torch._subclasses.fake_tensor import (
+            FakeTensorMode,
+        )
+
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x + x)
+
+        with override_quantized_engine("qnnpack"):
+            example_inputs = (torch.randn(1, 3, 224, 224),)
+            m = Mod().eval()
+            # program capture
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
+
+            quantizer = QNNPackQuantizer()
+            quantizer.set_global(
+                get_symmetric_quantization_config(
+                    is_per_channel=False, is_qat=False
+                )
+            )
+            m = prepare_pt2e_quantizer(m, quantizer)
+            m(*example_inputs)
+            m = convert_pt2e(m)
+
+            # this does not work if we use torch.ops.quantized_decomposed.quantize_per_tensor op,
+            # I think it is something related to
+            # FakeTensorMode not being able to work with overloaded ops properly
+            # e.g. op torch.ops.quantized_decomposed.quantize_per_tensor is an overloaded
+            # op that accepts both float scale and Tensor scale, the scale argument in the
+            # graph is a Tensor, but the op we are using is torch.ops.quantized_decomposed.quantize_per_tensor
+            # and it is being traced as torch.ops.quantized_decomopsed.quantize_per_tensor.tensor
+            with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+                fake_x = mode.from_tensor(torch.rand((1, 3, 224, 224)).to(memory_format=torch.channels_last))
+                out = m(fake_x)
+
+            def compile_fx(m: torch.fx.GraphModule, example_inputs: Any):
+                return m
+
+            run = torch._dynamo.optimize(compile_fx, nopython=False)(m)
+            run(*example_inputs)
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EOps(QuantizationTestCase):
