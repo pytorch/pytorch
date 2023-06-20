@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
     suppress_warnings,
-    TEST_WITH_ASAN,
     run_tests,
     skipIfTorchDynamo,
 )
@@ -32,7 +31,6 @@ from torch._ops import DispatchKey
 import itertools
 import functools
 from functools import partial
-import unittest
 
 aten = torch.ops.aten
 
