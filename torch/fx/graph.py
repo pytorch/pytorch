@@ -394,6 +394,10 @@ class CodeGen:
                     qualified_name = _get_qualified_name(type(arg))
                     global_name = add_global(qualified_name, type(arg))
                     return f"{global_name}{repr(tuple(arg))}"
+                elif isinstance(arg, torch._ops.OpOverload):
+                    qualified_name = _get_qualified_name(arg)
+                    global_name = add_global(qualified_name, arg)
+                    return f"{global_name}"
                 return repr(arg)
             args_s = ', '.join(_get_repr(a) for a in args)
             kwargs_s = ', '.join(f'{k} = {_get_repr(v)}' for k, v in kwargs.items())
