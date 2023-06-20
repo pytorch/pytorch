@@ -71,17 +71,18 @@ class TensorVariable(VariableTracker):
     def __init__(
         self,
         proxy: torch.fx.Proxy,
-        dtype=None,
-        device=None,
-        layout=None,
-        ndim=None,
+        *,
+        dtype,
+        device,
+        layout,
+        ndim,
+        requires_grad,
+        is_quantized,
+        is_sparse,
+        class_type,
         size=None,
         stride=None,
-        requires_grad=None,
-        is_quantized=None,
         is_contiguous=None,
-        is_sparse=None,
-        class_type=torch.Tensor,
         specialized_value=None,
         **kwargs,
     ):
@@ -552,7 +553,6 @@ class TensorVariable(VariableTracker):
                 name == "new"
                 and len(args) == 1
                 and isinstance(args[0], (SizeVariable, ShapeVariable))
-                and not config.dynamic_shapes
             ):
                 name = "new_empty"
             return wrap_fx_proxy(
