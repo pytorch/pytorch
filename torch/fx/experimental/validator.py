@@ -362,9 +362,6 @@ try:
             # List of the source expressions that failed due to the assignment.
             failed_source_expr: Optional[List[z3.BoolRef]] = None
 
-            # List of the target expressions.
-            target_exprs: Optional[Set[z3.BoolRef]] = None
-
         def validate(self) -> "TranslationValidator.Result":
             from torch._dynamo.utils import dynamo_timed
 
@@ -391,7 +388,6 @@ try:
                     success=False,
                     model=model,
                     failed_source_expr=[inp for inp in self._source_exprs if not model.evaluate(inp)],
-                    target_exprs=self._target_exprs,
                 )
             else:
                 if r == z3.unknown:
@@ -399,11 +395,12 @@ try:
                     # didn't succeed. Canceling the validation execution (keyboard
                     # interrupt) also gets to this branch.
                     log.warning("translation validation: could not validate")
+                    return self.Result(success=True)
                 else:
                     # Target expressions are sound.
                     assert r == z3.unsat
                     log.debug("translation validation: success")
-                return self.Result(success=True)
+                    return self.Result(success=False)
 except ImportError:
     _HAS_Z3 = False
 else:
