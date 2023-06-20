@@ -1850,6 +1850,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "sparse_compressed_to_sparse: unexpected same input and output layout");
   _to_sparse_check_arguments("sparse_compressed_to_sparse", self, layout_to, blocksize, dense_dim_opt);
 
+  auto blocksize_ = blocksize.value_or((self.layout() == kSparseBsr || self.layout() == kSparseBsc) ? at::sparse_csr::getBlockSize(self) : at::DimVector({1, 1}));
   switch (layout_to) {
   case kStrided:
     return sparse_compressed_to_dense(self, /*dtype=*/c10::nullopt, /*masked_grad=*/c10::nullopt);
@@ -1860,19 +1861,9 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   case kSparseCsc:
     return sparse_compressed_to_sparse_csc(self, dense_dim_opt);
   case kSparseBsr:
-    return sparse_compressed_to_sparse_bsr(
-              self,
-              (self.layout() == kSparseBsc) ?
-                  blocksize.value_or(at::sparse_csr::getBlockSize(self)) :
-                  *blocksize,
-              dense_dim_opt);
+    return sparse_compressed_to_sparse_bsr(self, blocksize_, dense_dim_opt);
   case kSparseBsc:
-    return sparse_compressed_to_sparse_bsc(
-               self,
-               (self.layout() == kSparseBsr) ?
-                   blocksize.value_or(at::sparse_csr::getBlockSize(self)) :
-                   *blocksize,
-               dense_dim_opt);
+    return sparse_compressed_to_sparse_bsr(self, blocksize_, dense_dim_opt);
   default:
     break;
   }
