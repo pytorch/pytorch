@@ -1891,7 +1891,7 @@ void cpu_upsample_genNd_backward_aa(
   auto grad_input = grad_input_.contiguous();
 
   auto grad_output_data = grad_output.data_ptr<scalar_t>();
-  auto grad_input_data = grad_input.data_ptr<scalar_t>();
+  auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
   auto ndim = input_sizes.size();
