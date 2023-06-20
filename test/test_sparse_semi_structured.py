@@ -108,7 +108,7 @@ class TestSparseSemiStructured(TestCase):
 
         with self.assertRaisesRegex(
             NotImplementedError,
-            r"arg0: SparseSemiStructuredTensor\(.*transposed=True\)",
+            r"arg0: SparseSemiStructuredTensor\(.*transposed=True",
         ):
             torch.mm(A_sparse.t(), B)
 
@@ -144,7 +144,7 @@ class TestSparseSemiStructured(TestCase):
 
         with self.assertRaisesRegex(
             NotImplementedError,
-            r"arg1: SparseSemiStructuredTensor\(.*transposed=False\)",
+            r"arg1: SparseSemiStructuredTensor\(.*transposed=False",
         ):
             sparse_result = torch.mm(A, B_sparse)
 
