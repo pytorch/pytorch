@@ -25,6 +25,7 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
+from torch.distributed._tensor import DTensor
 
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
@@ -685,10 +686,20 @@ def _post_state_dict_hook(
         logger.info("FSDP finished processing state_dict(), prefix=%s", prefix)
         for key, tensor in sorted(processed_state_dict.items()):
             if key.startswith(prefix) and isinstance(tensor, torch.Tensor):
+                local_shape = tensor.shape
+                if isinstance(tensor, ShardedTensor):
+                    local_shape = None
+                    shards = tensor.local_shards()
+                    if shards:
+                        local_shape = shards[0].tensor.shape
+                elif isinstance(tensor, DTensor):
+                    local_shape = tensor.to_local().shape
                 logger.info(
-                    "%s: type=%s, shape=%s, dtype=%s, device=%s",
+                    "FQN=%s: type=%s, shape=%s, local_shape=%s, dtype=%s, device=%s",
                     key,
                     type(tensor),
+                    tensor.shape,
+                    local_shape,
                     tensor.dtype,
                     tensor.device,
                 )
