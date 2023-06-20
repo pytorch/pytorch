@@ -23,7 +23,6 @@ from torch._export.verifier import (
 def capture(f, args):
     torchdynamo.config.capture_scalar_outputs = True
     torchdynamo.config.guard_nn_modules = True
-    torchdynamo.config.dynamic_shapes = True
     torchdynamo.config.allow_rnn = True
     torchdynamo.config.verbose = True
     torchdynamo.reset()
