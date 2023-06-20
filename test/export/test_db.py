@@ -110,5 +110,6 @@ class ExampleTests(TestCase):
 
 instantiate_parametrized_tests(ExampleTests)
 
+
 if __name__ == "__main__":
     run_tests()
