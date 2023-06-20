@@ -60,6 +60,7 @@ DTYPE_TO_CPP = {
     torch.uint8: "unsigned char",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
+    torch.complex64: "complex64",
 }
 
 DTYPE_TO_ATEN = {
@@ -73,6 +74,7 @@ DTYPE_TO_ATEN = {
     torch.uint8: "at::kByte",
     torch.bool: "at::kBool",
     torch.bfloat16: "at::kBFloat16",
+    torch.complex64: "at::kComplexFloat",
 }
 
 DEVICE_TO_ATEN = {
@@ -97,6 +99,12 @@ PYTHON_TO_CPP = {
     "int": "long",
     "float": "double",
     "bool": "bool",
+    "ScalarType": "c10::ScalarType",
+}
+
+CONTAINER_PYTHON_TO_CPP = {
+    "List": "std::vector",
+    "Optional": "c10::optional",
 }
 
 
@@ -169,19 +177,23 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     if reduction_type == "argmax":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmax : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmax : {struct_name} :\\",
                 "    omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     elif reduction_type == "argmin":
         prefix.extend(
             [
-                f"#pragma omp declare reduction(argmin : struct {struct_name} :\\",
+                "#if !defined(__clang_major__) || __clang_major__ > 9",
+                f"#pragma omp declare reduction(argmin : {struct_name} :\\",
                 "    omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\\",
                 "    omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\\",
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
+                "#endif",
             ]
         )
     return prefix
@@ -245,8 +257,9 @@ class CppPrinter(ExprPrinter):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
-        if exp == 0.5:
-            r = f"std::sqrt({base})"
+
+        if exp == 0.5 or exp == -0.5:
+            r = f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
             return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
         assert exp.is_integer
         exp = int(exp)
@@ -1541,8 +1554,15 @@ class CppTile2DKernel(CppVecKernel):
         return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
-        return stride_at(self.itervars[self.outer_idx], index) == 1 and index.has(
-            self.itervars[self.tiling_idx]
+        return (
+            stride_at(self.itervars[self.outer_idx], index) == 1
+            and index.has(self.itervars[self.tiling_idx])
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.tiling_idx]
+            )
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.outer_idx]
+            )
         )
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
@@ -1619,7 +1639,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
-                line = f"{value}.store({storebuf}, {self.tiling_factor})"
+                line = f"{value}.store({storebuf}, {self.tiling_factor});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
