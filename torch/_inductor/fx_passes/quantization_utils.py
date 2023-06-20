@@ -17,8 +17,8 @@ from torch.fx.passes.shape_prop import ShapeProp
 def is_quantized_graph_module(gm: torch.fx.GraphModule):
     found_quantize = False
     quantize_ops = (
-        torch.ops.quantized_decomposed.quantize_per_tensor,
-        torch.ops.quantized_decomposed.quantize_per_channel,
+        torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        torch.ops.quantized_decomposed.quantize_per_channel.default,
         torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
     )
     for node in gm.graph.nodes:
@@ -47,7 +47,7 @@ def _quantize_and_replace_weight(
     q_arg_list = list(quantize_args)
     q_arg_tuple = tuple(q_arg_list)
     weight_int8 = torch.nn.parameter.Parameter(
-        torch.ops.quantized_decomposed.quantize_per_channel(*q_arg_tuple),
+        torch.ops.quantized_decomposed.quantize_per_channel.default(*q_arg_tuple),
         requires_grad=False,
     )
 
@@ -71,7 +71,7 @@ def pre_quantize_weights(gm: torch.fx.GraphModule):
             dq_per_channel_node = node.args[1]
         if dq_per_channel_node is not None:
             assert (
-                dq_per_channel_node.target == decomposed.dequantize_per_channel
+                dq_per_channel_node.target == decomposed.dequantize_per_channel.default
             ), "Cannot find the dequantize op for weight"
             _quantize_and_replace_weight(gm, dq_per_channel_node)
     gm.graph.lint()
@@ -91,9 +91,9 @@ def fuse_reference_quantized_conv_unary(gm: torch.fx.GraphModule):
     convolution = aten.convolution.default
     relu = aten.relu.default
     relu_ = aten.relu_.default
-    quantize_per_tensor = quantized_decomposed.quantize_per_tensor
-    dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor
-    dequantize_per_channel = quantized_decomposed.dequantize_per_channel
+    quantize_per_tensor = quantized_decomposed.quantize_per_tensor.default
+    dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor.default
+    dequantize_per_channel = quantized_decomposed.dequantize_per_channel.default
 
     unary_post_ops = {
         "relu": relu,
@@ -221,9 +221,9 @@ def fuse_reference_quantized_conv_binary(gm: torch.fx.GraphModule):
     add_ = aten.add_.Tensor
     relu = aten.relu.default
     relu_ = aten.relu_.default
-    quantize_per_tensor = quantized_decomposed.quantize_per_tensor
-    dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor
-    dequantize_per_channel = quantized_decomposed.dequantize_per_channel
+    quantize_per_tensor = quantized_decomposed.quantize_per_tensor.default
+    dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor.default
+    dequantize_per_channel = quantized_decomposed.dequantize_per_channel.default
 
     binary_post_ops = {
         "add": [add],
@@ -400,9 +400,9 @@ def fuse_single_reference_quantized_conv(gm: torch.fx.GraphModule):
     aten = torch.ops.aten
     quantized_decomposed = torch.ops.quantized_decomposed
     convolution = aten.convolution.default
-    quantize_per_tensor = quantized_decomposed.quantize_per_tensor
-    dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor
-    dequantize_per_channel = quantized_decomposed.dequantize_per_channel
+    quantize_per_tensor = quantized_decomposed.quantize_per_tensor.default
+    dequantize_per_tensor = quantized_decomposed.dequantize_per_tensor.default
+    dequantize_per_channel = quantized_decomposed.dequantize_per_channel.default
 
     for node in gm.graph.nodes:
         if node.target is convolution:
@@ -537,8 +537,11 @@ def _prepack_conv_weight(gm: torch.fx.GraphModule):
             # Prepack weight into an MKLDNN tensor of dtype int8
             w_scales = getattr(gm, node.args[4].target)
             x_shape = node.args[0].meta.get("tensor_meta").shape
-            x_scale = getattr(gm, node.args[1].target)
-            x_zp = getattr(gm, node.args[2].target)
+            # x_scale = getattr(gm, node.args[1].target)
+            # x_zp = getattr(gm, node.args[2].target)
+            x_scale = node.args[1]
+            x_zp = node.args[2]
+
             bias = getattr(gm, bias_node.target) if bias_node is not None else None
             stride = node.args[8]
             padding = node.args[9]
@@ -575,8 +578,12 @@ def _prepack_conv_weight(gm: torch.fx.GraphModule):
             # Prepack weight into an MKLDNN tensor of dtype int8
             w_scales = getattr(gm, node.args[7].target)
             x_shape = node.args[0].meta.get("tensor_meta").shape
-            x_scale = getattr(gm, node.args[1].target)
-            x_zp = getattr(gm, node.args[2].target)
+            # x_scale = getattr(gm, node.args[1].target)
+            # x_zp = getattr(gm, node.args[2].target)
+
+            x_scale = node.args[1]
+            x_zp = node.args[2]
+
             bias = getattr(gm, bias_node.target) if bias_node is not None else None
             stride = node.args[11]
             padding = node.args[12]
@@ -635,13 +642,13 @@ def prepare_dequant_for_fusion(gm: torch.fx.GraphModule):
     # fusion pattern: dequant-node-quant, respectively for
     # node1 and node2.
     for node in gm.graph.nodes:
-        if node.target == torch.ops.quantized_decomposed.dequantize_per_tensor:
+        if node.target == torch.ops.quantized_decomposed.dequantize_per_tensor.default:
             user_list = list(node.users)
             if user_list.__len__() > 1:
                 # q_node, scale, zp, min, max, dtype
                 assert (
-                    node.all_input_nodes.__len__() == 3
-                ), "we assume the dq per tensor node:{0} only has 3 input but get {1}".format(
+                    node.all_input_nodes.__len__() == 1
+                ), "we assume the dq per tensor node:{0} only has 1 input but get {1}".format(
                     node, node.all_input_nodes.__len__()
                 )
                 node_before_dq_node = node.all_input_nodes[0]
@@ -651,7 +658,7 @@ def prepare_dequant_for_fusion(gm: torch.fx.GraphModule):
                     # step2: connect new dq node of input and output
                     with gm.graph.inserting_before(user_node):
                         new_dq_node = gm.graph.call_function(
-                            torch.ops.quantized_decomposed.dequantize_per_tensor,
+                            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                             args=node.args,
                         )
                         new_dq_node.meta = copy.copy(node.meta)

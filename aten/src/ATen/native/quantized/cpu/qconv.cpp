@@ -1815,8 +1815,8 @@ class ConvUnary final {
  public:
   static Tensor run_with_packed_weight_bias(
       Tensor qx, // contains quantized values but not QTensor
-      Tensor input_scale,
-      Tensor input_zero_point,
+      double input_scale,
+      int64_t input_zero_point,
       Tensor qw,
       Tensor weight_scale,
       Tensor weight_zero_point,
@@ -1826,47 +1826,47 @@ class ConvUnary final {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      Tensor output_scale,
-      Tensor output_zero_point,
+      double output_scale,
+      int64_t output_zero_point,
       c10::string_view unary_post_op) {
 #if AT_MKLDNN_ENABLED()
-    TORCH_CHECK(
-        (input_scale.ndimension() == 0) && (input_scale.dtype() == at::kFloat),
-        "expected input_scale to be a 0d scalar tensor but got: ",
-        input_scale.ndimension(),
-        "expected input_scale of data type float but got: ",
-        input_scale.dtype());
-    TORCH_CHECK(
-        (input_zero_point.ndimension() == 0) && (input_zero_point.dtype() == at::kLong),
-        "expected input_zero_point to be a 0d scalar tensor but got: ",
-        input_zero_point.ndimension(),
-        "expected input_zero_point of data type float but got: ",
-        input_zero_point.dtype());
-    TORCH_CHECK(
-        (output_scale.ndimension() == 0) && (output_scale.dtype() == at::kFloat),
-        "expected output_scale to be a 0d scalar tensor but got: ",
-        output_scale.ndimension(),
-        "expected output_scale of data type float but got: ",
-        output_scale.dtype());
-    TORCH_CHECK(
-        (output_zero_point.ndimension() == 0) && (output_zero_point.dtype() == at::kLong),
-        "expected output_zero_point to be a 0d scalar tensor but got: ",
-        output_zero_point.ndimension(),
-        "expected output_zero_point of data type float but got: ",
-        output_zero_point.dtype());
+    // TORCH_CHECK(
+    //     (input_scale.ndimension() == 0) && (input_scale.dtype() == at::kFloat),
+    //     "expected input_scale to be a 0d scalar tensor but got: ",
+    //     input_scale.ndimension(),
+    //     "expected input_scale of data type float but got: ",
+    //     input_scale.dtype());
+    // TORCH_CHECK(
+    //     (input_zero_point.ndimension() == 0) && (input_zero_point.dtype() == at::kLong),
+    //     "expected input_zero_point to be a 0d scalar tensor but got: ",
+    //     input_zero_point.ndimension(),
+    //     "expected input_zero_point of data type float but got: ",
+    //     input_zero_point.dtype());
+    // TORCH_CHECK(
+    //     (output_scale.ndimension() == 0) && (output_scale.dtype() == at::kFloat),
+    //     "expected output_scale to be a 0d scalar tensor but got: ",
+    //     output_scale.ndimension(),
+    //     "expected output_scale of data type float but got: ",
+    //     output_scale.dtype());
+    // TORCH_CHECK(
+    //     (output_zero_point.ndimension() == 0) && (output_zero_point.dtype() == at::kLong),
+    //     "expected output_zero_point to be a 0d scalar tensor but got: ",
+    //     output_zero_point.ndimension(),
+    //     "expected output_zero_point of data type float but got: ",
+    //     output_zero_point.dtype());
     if ((unary_post_op == "relu") || (unary_post_op == "relu_")) {
       return ConvInt8CpuTensor<PostOp::ReLU>::run_with_packed_weight_bias(
-        qx, input_scale.item().toDouble(), input_zero_point.item().toLong(),
+        qx, input_scale, input_zero_point,
         qw, weight_scale, weight_zero_point, bias,
         stride, padding, dilation, groups,
-        output_scale.item().toDouble(), output_zero_point.item().toLong()
+        output_scale, output_zero_point
       );
     } else {
       return ConvInt8CpuTensor<PostOp::None>::run_with_packed_weight_bias(
-        qx, input_scale.item().toDouble(), input_zero_point.item().toLong(),
+        qx, input_scale, input_zero_point,
         qw, weight_scale, weight_zero_point, bias,
         stride, padding, dilation, groups,
-        output_scale.item().toDouble(), output_zero_point.item().toLong()
+        output_scale, output_zero_point
       );
     }
 #endif
@@ -1878,11 +1878,11 @@ class ConvBinary final {
  public:
   static Tensor run_with_packed_weight_bias(
       Tensor qx, // contains quantized values but not QTensor
-      Tensor input_scale,
-      Tensor input_zero_point,
+      double input_scale,
+      int64_t input_zero_point,
       Tensor qaccum,
-      Tensor accum_scale,
-      Tensor accum_zp,
+      double accum_scale,
+      int64_t accum_zp,
       Tensor qw,
       Tensor weight_scale,
       Tensor weight_zero_point,
@@ -1892,61 +1892,61 @@ class ConvBinary final {
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-      Tensor output_scale,
-      Tensor output_zero_point,
+      double output_scale,
+      int64_t output_zero_point,
       c10::string_view binary_post_op) {
 #if AT_MKLDNN_ENABLED()
-    TORCH_CHECK(
-        (input_scale.ndimension() == 0) && (input_scale.dtype() == at::kFloat),
-        "expected input_scale to be a 0d scalar tensor but got: ",
-        input_scale.ndimension(),
-        "expected input_scale of data type float but got: ",
-        input_scale.dtype());
-    TORCH_CHECK(
-        (input_zero_point.ndimension() == 0) && (input_zero_point.dtype() == at::kLong),
-        "expected input_zero_point to be a 0d scalar tensor but got: ",
-        input_zero_point.ndimension(),
-        "expected input_zero_point of data type float but got: ",
-        input_zero_point.dtype());
-    TORCH_CHECK(
-        (accum_scale.ndimension() == 0) && (accum_scale.dtype() == at::kFloat),
-        "expected accum_scale to be a 0d scalar tensor but got: ",
-        accum_scale.ndimension(),
-        "expected accum_scale of data type float but got: ",
-        accum_scale.dtype());
-    TORCH_CHECK(
-        (accum_zp.ndimension() == 0) && (accum_zp.dtype() == at::kLong),
-        "expected accum_zp to be a 0d scalar tensor but got: ",
-        accum_zp.ndimension(),
-        "expected accum_zp of data type float but got: ",
-        accum_zp.dtype());
-    TORCH_CHECK(
-        (output_scale.ndimension() == 0) && (output_scale.dtype() == at::kFloat),
-        "expected output_scale to be a 0d scalar tensor but got: ",
-        output_scale.ndimension(),
-        "expected output_scale of data type float but got: ",
-        output_scale.dtype());
-    TORCH_CHECK(
-        (output_zero_point.ndimension() == 0) && (output_zero_point.dtype() == at::kLong),
-        "expected output_zero_point to be a 0d scalar tensor but got: ",
-        output_zero_point.ndimension(),
-        "expected output_zero_point of data type float but got: ",
-        output_zero_point.dtype());
+    // TORCH_CHECK(
+    //     (input_scale.ndimension() == 0) && (input_scale.dtype() == at::kFloat),
+    //     "expected input_scale to be a 0d scalar tensor but got: ",
+    //     input_scale.ndimension(),
+    //     "expected input_scale of data type float but got: ",
+    //     input_scale.dtype());
+    // TORCH_CHECK(
+    //     (input_zero_point.ndimension() == 0) && (input_zero_point.dtype() == at::kLong),
+    //     "expected input_zero_point to be a 0d scalar tensor but got: ",
+    //     input_zero_point.ndimension(),
+    //     "expected input_zero_point of data type float but got: ",
+    //     input_zero_point.dtype());
+    // TORCH_CHECK(
+    //     (accum_scale.ndimension() == 0) && (accum_scale.dtype() == at::kFloat),
+    //     "expected accum_scale to be a 0d scalar tensor but got: ",
+    //     accum_scale.ndimension(),
+    //     "expected accum_scale of data type float but got: ",
+    //     accum_scale.dtype());
+    // TORCH_CHECK(
+    //     (accum_zp.ndimension() == 0) && (accum_zp.dtype() == at::kLong),
+    //     "expected accum_zp to be a 0d scalar tensor but got: ",
+    //     accum_zp.ndimension(),
+    //     "expected accum_zp of data type float but got: ",
+    //     accum_zp.dtype());
+    // TORCH_CHECK(
+    //     (output_scale.ndimension() == 0) && (output_scale.dtype() == at::kFloat),
+    //     "expected output_scale to be a 0d scalar tensor but got: ",
+    //     output_scale.ndimension(),
+    //     "expected output_scale of data type float but got: ",
+    //     output_scale.dtype());
+    // TORCH_CHECK(
+    //     (output_zero_point.ndimension() == 0) && (output_zero_point.dtype() == at::kLong),
+    //     "expected output_zero_point to be a 0d scalar tensor but got: ",
+    //     output_zero_point.ndimension(),
+    //     "expected output_zero_point of data type float but got: ",
+    //     output_zero_point.dtype());
     if ((binary_post_op == "add") || (binary_post_op == "add_")) {
       return ConvAddInt8CpuTensor<PostOp::Add>::run_with_packed_weight_bias(
-        qx, input_scale.item().toDouble(), input_zero_point.item().toLong(),
-        qaccum, accum_scale.item().toDouble(), accum_zp.item().toLong(),
+        qx, input_scale, input_zero_point,
+        qaccum, accum_scale, accum_zp,
         qw, weight_scale, weight_zero_point, bias,
         stride, padding, dilation, groups,
-        output_scale.item().toDouble(), output_zero_point.item().toLong()
+        output_scale, output_zero_point
       );
     } else if ((binary_post_op == "add_relu") || (binary_post_op == "add__relu") || (binary_post_op == "add_relu_") || (binary_post_op == "add__relu_")) {
       return ConvAddInt8CpuTensor<PostOp::AddReLU>::run_with_packed_weight_bias(
-        qx, input_scale.item().toDouble(), input_zero_point.item().toLong(),
-        qaccum, accum_scale.item().toDouble(), accum_zp.item().toLong(),
+        qx, input_scale, input_zero_point,
+        qaccum, accum_scale, accum_zp,
         qw, weight_scale, weight_zero_point, bias,
         stride, padding, dilation, groups,
-        output_scale.item().toDouble(), output_zero_point.item().toLong()
+        output_scale, output_zero_point
       );
     } else {
       TORCH_CHECK(false, "Unsupport binary post op of ConvBinary");
