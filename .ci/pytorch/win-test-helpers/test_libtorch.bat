@@ -1,3 +1,5 @@
+echo on
+
 :: Skip LibTorch tests when building a GPU binary and testing on a CPU machine
 :: because LibTorch tests are not well designed for this use case.
 if "%USE_CUDA%" == "0" IF NOT "%CUDA_VERSION%" == "cpu" exit /b 0

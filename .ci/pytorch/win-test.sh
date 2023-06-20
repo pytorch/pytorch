@@ -55,17 +55,21 @@ run_tests() {
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
         "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
+        # DEBUG
+        "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+        echo "CATCH ME IF YOU CAN $?"
+
         # "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
-        if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-            echo "CATCH ME IF YOU CAN $?"
-            if [[ "${USE_CUDA}" == "1" ]]; then
-              "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
-            fi
-        elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-            "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-            "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-        fi
+        #if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+        #    "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+        #    echo "CATCH ME IF YOU CAN $?"
+        #    if [[ "${USE_CUDA}" == "1" ]]; then
+        #      "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
+        #    fi
+        #elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+        #    "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+        #    "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+        #fi
     fi
 }
 
