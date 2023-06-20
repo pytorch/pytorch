@@ -7,6 +7,7 @@ import torch
 
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
+import torch.distributed._tensor.random as random
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     ArgsType,
@@ -16,16 +17,13 @@ from torch.distributed._tensor.op_schema import (
     OutputSpecType,
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.distributed._tensor.random import (
-    _parallel_rng_style,
-    is_rng_supported_mesh,
-)
+from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_dtensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
-def is_random_op(op):
+def _is_random_op(op):
     aten = torch.ops.aten
     random_ops = [
         aten.native_dropout.default,
@@ -232,8 +230,18 @@ def _operator_dispatch(
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
         # For DTensor random operator, run it within a parallel region
         assert isinstance(mesh, DeviceMesh)
-        if is_random_op(op_call) and is_rng_supported_mesh(mesh):
-            with _parallel_rng_style._parallel_region(arg_list[0]._spec):
+        if _is_random_op(op_call) and is_rng_supported_mesh(mesh):
+            if not random._rng_tracker:
+                raise RuntimeError(
+                    "A CudaRNGStateTracker instance must be instantiated "
+                    "before executing a random op over a DTensor."
+                )
+
+            if random._rng_tracker.distribute_region_enabled:
+                assert random._rng_tracker is not None
+                with random._rng_tracker._distribute_region(arg_list[0]._spec):
+                    local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
+            else:
                 local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
         else:
             local_results = op_call(*local_tensor_args, **local_tensor_kwargs)

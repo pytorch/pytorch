@@ -9725,6 +9725,47 @@ class DistributedTest:
                 ddp._check_reducer_finalized()
                 ddp(input)
 
+        @skip_if_lt_x_gpu(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND != "nccl",
+            "TORCH_NCCL_USE_COMM_NONBLOCKING only applies to NCCL"
+        )
+        def test_nccl_init_abort(self):
+            """
+            Tests that we can abort a NCCL communicator during initialization and
+            recover appropriately.
+            """
+            # Reinitialize global process group with TORCH_NCCL_USE_COMM_NONBLOCKING=1
+            os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+            dist.destroy_process_group()
+            timeout = timedelta(seconds=1)
+            dist.init_process_group(
+                init_method=INIT_METHOD,
+                backend=BACKEND,
+                world_size=int(os.environ["WORLD_SIZE"]),
+                rank=self.rank,
+                timeout=timeout,
+            )
+
+            # Abort pg in background thread.
+            running = True
+
+            def abort():
+                pg = _get_default_group()
+                while running:
+                    pg._get_backend(torch.device(0))._abort()
+                    time.sleep(1)
+
+            if self.rank != 1:
+                import threading
+                t = threading.Thread(target=abort)
+                t.start()
+                with self.assertRaises(RuntimeError):
+                    # First collective triggers initialization via ncclCommInitRank.
+                    torch.distributed.barrier()
+                running = False
+                t.join()
+
 
 
         @skip_if_lt_x_gpu(2)
@@ -9918,7 +9959,7 @@ class DistributedTest:
             }
 
             if rank == 0:
-                with self.assertLogs() as captured:
+                with self.assertLogs("torch.distributed") as captured:
                     torch.save(state, chkpt_file)
 
                 # Check that the logger has only one entry
@@ -9931,7 +9972,7 @@ class DistributedTest:
 
             dist.barrier()
             map_location = {"cuda:%d" % 0: "cuda:%d" % rank}
-            with self.assertLogs() as captured:
+            with self.assertLogs("torch.distributed") as captured:
                 checkpoint = torch.load(chkpt_file, map_location=map_location)
 
             # Check that the logger has only one entry

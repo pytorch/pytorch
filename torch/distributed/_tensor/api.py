@@ -6,6 +6,7 @@ from typing import Callable, cast, Optional, Sequence, Tuple
 import torch
 
 import torch.distributed._tensor.dispatch as op_dispatch
+import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
@@ -15,6 +16,7 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.distributed._tensor.random import OffsetBasedRNGTracker
 from torch.distributed._tensor.redistribute import Redistribute
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -188,8 +190,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
         # TODO: populate all tensor meta fields properly
+        # NOTE: memory_format is non-pickable so we intentionally skip it
         tensor_meta = TensorMetadata(
-            shape, dtype, requires_grad, stride, torch.contiguous_format, False, {}
+            shape, dtype, requires_grad, stride, None, False, {}
         )
         # deepcopy and set spec
         r._spec = DTensorSpec(
@@ -395,6 +398,14 @@ def distribute_tensor(
 
     # get default device mesh if there's nothing specified
     device_mesh = device_mesh or mesh_resources.get_current_mesh()
+
+    # instantiate a RNG tracker if haven't. By default DTensor uses an
+    # OffsetBasedRNGTracker to perform random operators.
+    # TODO: the value assignment to global variable is not the ideal solution
+    # we can replace it in future.
+    if not random._rng_tracker:
+        random._rng_tracker = OffsetBasedRNGTracker()
+
     # convert tensor to the corresponding device type if it's not in that device type
     if not tensor.is_meta:
         tensor = tensor.to(device_mesh.device_type)
