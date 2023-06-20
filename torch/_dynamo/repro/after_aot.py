@@ -35,7 +35,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
+from torch.fx.experimental.symbolic_shapes import free_symbols, fx_placeholder_targets
 from torch.hub import tqdm
 
 from .. import config
@@ -201,6 +201,7 @@ from torch import tensor, device
 import torch.fx as fx
 from torch._dynamo.testing import rand_strided
 from math import inf
+import torch._inductor.inductor_prims
 
 {generate_config_string(stable_output=stable_output)}
 
@@ -262,7 +263,7 @@ def save_graph_repro(
     if accuracy is None:
         accuracy = "_accuracy" in compiler_name
     tracing_mode = "real"
-    if config.dynamic_shapes:
+    if any(free_symbols(a) for a in args):
         tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
@@ -608,7 +609,7 @@ def repro_analyze(options, mod, load_args):
     # NB: the module cast doesn't actually do anything, since there are no
     # parameters/buffers on the module
     if not options.skip_saving_float64_intermediates:
-        new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
         with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
             WriterInterp(new_mod, "float64").boxed_run(new_args)
         assert not new_args
@@ -629,7 +630,7 @@ def repro_analyze(options, mod, load_args):
     # TODO: check eager determinism
 
     if not options.skip_check_deterministic:
-        new_mod, new_args = cast_to_fp64(mod, clone_inputs(args))
+        new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))
         with tqdm(desc="Checking float64 determinism", total=total) as pbar:
             ExactReaderInterp(new_mod).boxed_run(new_args)
             assert not new_args

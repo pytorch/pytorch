@@ -18,14 +18,20 @@ from typing import (
     Generic,
     Iterator,
     List,
-    NamedTuple,
     Optional,
     Set,
     Tuple,
     Type,
     TypeVar,
     Union,
+    TYPE_CHECKING
 )
+if not TYPE_CHECKING:
+    # pyre isn't treating this the same as a typing.NamedTuple
+    from typing_extensions import NamedTuple
+else:
+    from typing import NamedTuple
+
 from unittest import skipIf
 
 import numpy as np

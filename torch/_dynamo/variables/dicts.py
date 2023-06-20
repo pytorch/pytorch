@@ -2,7 +2,11 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
+
+import torch
+
+from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -10,7 +14,7 @@ from ..eval_frame import skip_code
 from ..exc import unimplemented
 from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name, istensor
-from .base import MutableLocal, VariableTracker
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
@@ -199,7 +203,7 @@ class ConstDictVariable(VariableTracker):
             items=items, recursively_contains=recursively_contains, **options
         )
 
-    def unpack_var_sequence(self, tx):
+    def unpack_var_sequence(self, tx, recursive=False):
         options = VariableTracker.propagate([self])
         val = self.items
         result = [ConstDictVariable._key_to_var(tx, k, **options) for k in val.keys()]
@@ -218,6 +222,8 @@ class ConstDictVariable(VariableTracker):
             key.is_python_constant()
             or isinstance(key, TensorVariable)
             and key.specialized_value is not None
+            or isinstance(key, ConstantVariable)
+            and key.python_type() is torch.dtype
         )
 
     @classmethod
@@ -244,6 +250,13 @@ class DefaultDictVariable(ConstDictVariable):
             return False
         return super().is_python_constant()
 
+    @staticmethod
+    def is_supported_arg(arg):
+        if isinstance(arg, variables.BuiltinVariable):
+            return arg.fn in [list, tuple, dict]
+        else:
+            return isinstance(arg, variables.functions.BaseUserFunctionVariable)
+
     def call_method(
         self,
         tx,
@@ -251,8 +264,6 @@ class DefaultDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ListVariable, TupleVariable
-
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if name == "__getitem__":
@@ -267,18 +278,7 @@ class DefaultDictVariable(ConstDictVariable):
                     if istensor(k):
                         tx.store_dict_key(global_key_name(k), k)
                     new_val = collections.OrderedDict(self.items)
-                    if self.default_factory is list:
-                        default_var = ListVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is tuple:
-                        default_var = TupleVariable([], mutable_local=MutableLocal())
-                    elif self.default_factory is dict:
-                        default_var = ConstDictVariable(
-                            {}, dict, mutable_local=MutableLocal()
-                        )
-                    else:
-                        unimplemented(
-                            f"defaultdict with default_factory = {self.default_factory}"
-                        )
+                    default_var = self.default_factory.call_function(tx, [], {})
                     new_val[k] = default_var
                     new_rec_contains = self.recursively_contains.union(
                         default_var.recursively_contains
@@ -459,3 +459,25 @@ class HFPretrainedConfigVariable(VariableTracker):
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         return variables.ConstantVariable(hasattr(self.obj, name)).add_options(self)
+
+
+def _dictvariable_flatten(d: ConstDictVariable) -> Tuple[List[Any], pytree.Context]:
+    return list(d.items.values()), list(d.items.keys())
+
+
+def _dictvariable_unflatten(
+    values: List[Any], context: pytree.Context
+) -> ConstDictVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    return ConstDictVariable(dict(zip(context, values)), user_cls=dict)
+
+
+def _register_dynamo_dict_to_tree_spec():
+    pytree._register_pytree_node(
+        ConstDictVariable,
+        _dictvariable_flatten,
+        _dictvariable_unflatten,
+        pytree._dict_to_str,
+        pytree._maybe_str_to_dict,
+    )

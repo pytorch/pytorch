@@ -1,8 +1,10 @@
+"""Module for handling op-level validation during exporting."""
+
 from __future__ import annotations
 
 import warnings
 
-from typing import Callable, Dict, List, Sequence, Tuple, Union
+from typing import Dict, List, Sequence, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript import evaluator  # type: ignore[import]
@@ -11,8 +13,7 @@ import torch
 import torch.fx
 from torch.onnx import _constants, _type_utils
 from torch.onnx._internal import _beartype, onnx_proto_utils
-from torch.onnx._internal.fx import diagnostics
-from torch.onnx._internal.fx.passes import fx_to_onnxscript
+from torch.onnx._internal.fx import diagnostics, fx_onnx_interpreter
 from torch.utils import _pytree
 
 
@@ -20,7 +21,7 @@ from torch.utils import _pytree
 def validate_op_between_ort_torch(
     diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
-    symbolic_fn: Union[onnxscript.OnnxFunction, Callable],
+    symbolic_fn: Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction],
     torch_args: tuple,
     torch_kwargs: dict,
 ):
@@ -28,7 +29,7 @@ def validate_op_between_ort_torch(
 
     The function will run the op in ONNX Runtime and PyTorch and compare the
     results. It doesn't break the exporting process, but saves each op validated
-    result into SARIF, under the section of `fx_to_onnxscript` pass.
+    result into SARIF, under the section of `fx_onnx_interpreter`.
 
     There are three signs can be found:
     1. Blue: Pass
@@ -37,18 +38,13 @@ def validate_op_between_ort_torch(
 
     Args:
         node (torch.fx.Node): The validated fx.node
-        symbolic_fn (Union[onnxscript.OnnxFunction, Callable]): The corresponded ONNX node
+        symbolic_fn (Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction]): The corresponded ONNX node
         torch_args (tuple): torch argument inputs
         torch_kwargs (dict): torch keyword argument inputs
     """
     # op-level validation
     # Symbolic_fn should have the same output as node.target (torch ops)
-    # trace_only function is regular python function
-    function_name = (
-        symbolic_fn.name
-        if isinstance(symbolic_fn, onnxscript.OnnxFunction)
-        else symbolic_fn.__name__
-    )
+    function_name = symbolic_fn.name
 
     # TODO(bowbao, titaiwang): Diagnostics.
     # - Add dedicated diagnostic for op-level validation.
@@ -98,7 +94,7 @@ def validate_op_between_ort_torch(
             else x
             for x in torch_args
         ]
-        kwargs_onnx = fx_to_onnxscript.filter_incompatible_and_dtype_convert_kwargs(
+        kwargs_onnx = fx_onnx_interpreter.filter_incompatible_and_dtype_convert_kwargs(
             torch_kwargs
         )
         try:
@@ -234,7 +230,7 @@ def _fx_args_to_torch_args(
                 )
         elif isinstance(arg, Sequence):
             wrapped_args.append(_fx_args_to_torch_args(arg))
-        elif isinstance(arg, (int, float, torch.dtype)):
+        elif isinstance(arg, (int, float, torch.dtype)) or arg is None:
             wrapped_args.append(arg)
         else:
             raise ValueError(
