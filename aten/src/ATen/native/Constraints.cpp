@@ -18,7 +18,7 @@ Tensor functional_sym_constrain_range_cpu(
     c10::optional<int64_t> min = c10::nullopt,
     c10::optional<int64_t> max = c10::nullopt,
     const c10::optional<Tensor>& dep_token = c10::nullopt) {
-  return c10::value_or_else(dep_token, [] {return at::empty({});});
+  return c10::value_or_else(dep_token, [] { return at::empty({}); });
 }
 
 } // namespace native
