@@ -120,6 +120,7 @@ def export(
     constraints: Optional[List[Constraint]] = None,
     *,
     _add_runtime_assertions=True,
+    _functionalize_runtime_assertions=False,
 ) -> ExportedProgram:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
@@ -235,7 +236,9 @@ def export(
             )
 
             if _add_runtime_assertions:
-                exported_program = exported_program._add_runtime_assertions()
+                exported_program = exported_program._add_runtime_assertions(
+                    functionalize_assertions=_functionalize_runtime_assertions,
+                )
 
             return exported_program.transform(_ReplaceSymSizeOpPass())
 

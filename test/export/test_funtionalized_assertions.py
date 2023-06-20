@@ -3,8 +3,11 @@ import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._export.constraints import constrain_as_size
 from torch._export.functionalize_assertions import functionalize
+from torch._export.exported_program import ExportGraphSignature
 from torch._export import dynamic_dim
 from torch.testing import FileCheck
+
+_DEP_TOKEN = torch.empty(0)
 
 
 class TestFuntionalAssertions(TestCase):
@@ -43,7 +46,7 @@ class TestFuntionalAssertions(TestCase):
 
 
 class TestFunctionalization(TestCase):
-    def test_functionalize_inline_contraints(self) -> None:
+    def test_inline_contraints(self) -> None:
         def f(x):
             a = x.item()
             constrain_as_size(a, 4, 7)
@@ -57,7 +60,9 @@ class TestFunctionalization(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        gm = functionalize(gm)
+        functionalized = functionalize(gm)
+        self.assertEqual(functionalized.dep_token_output, "dep_token_7")
+        gm = functionalized.graph_module
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -97,7 +102,10 @@ class TestFunctionalization(TestCase):
                 dynamic_dim(inp, 0) >= 3,
             ],
         )
-        gm = functionalize(ep.graph_module)
+        functionalized = functionalize(ep.graph_module)
+        self.assertEqual(functionalized.dep_token_output, "dep_token_4")
+        gm = functionalized.graph_module
+
         with self.assertRaisesRegex(
             RuntimeError,
             r"Input arg0_1.shape\[0\] is outside of specified dynamic range \[3, 9\]",
@@ -111,6 +119,88 @@ class TestFunctionalization(TestCase):
         FileCheck().check_count(
             "torch.ops.aten._assert_async.msg", 0, exactly=True
         ).run(gm.code)
+
+    def test_functionalization(self) -> None:
+        def f(x, y):
+            a = x.item()
+            constrain_as_size(a, 4, 7)
+            return x + 4, x + y * 2
+
+        inps = (torch.tensor([5]), torch.zeros((3, 4)))
+        ep = torch._export.export(
+            f,
+            inps,
+            constraints=[dynamic_dim(inps[1], 1) < 6],
+            _functionalize_runtime_assertions=True,
+        )
+        inps = (torch.tensor([7]), torch.ones((3, 5)))
+        self.assertTrue(torch._dynamo.utils.same(ep(*inps), (f(*inps), _DEP_TOKEN)))
+
+    def test_functionalization_with_mutated_buffer(self) -> None:
+        buf = torch.ones(6, 2)
+        weight = 0.01
+        bias = 0.2
+        d_in = 3
+        d_out = 4
+
+        class Foo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buf", buf)
+
+                self.linear = torch.nn.Linear(d_in, d_out)
+                self.linear.weight.data.fill_(weight)
+                self.linear.bias.data.fill_(bias)
+
+            def forward(self, x):
+                self.buf.add_(5)
+                return self.linear(x).cos() + self.buf.sum()
+
+        inp = torch.ones(4, 3)
+        ep = torch._export.export(
+            Foo(),
+            (inp,),
+            constraints=[dynamic_dim(inp, 0) >= 3],
+            _functionalize_runtime_assertions=True,
+        )
+
+        self.assertEqual(
+            ep.graph_signature,
+            ExportGraphSignature(
+                parameters=["L__self___linear.weight", "L__self___linear.bias"],
+                buffers=["L__self___buf"],
+                user_inputs=["arg3_1"],
+                user_outputs=["add_tensor_1"],
+                inputs_to_parameters={
+                    "arg0_1": "L__self___linear.weight",
+                    "arg1_1": "L__self___linear.bias",
+                },
+                inputs_to_buffers={"arg2_1": "L__self___buf"},
+                buffers_to_mutate={"add_tensor": "L__self___buf"},
+                backward_signature=None,
+                assertion_dep_token_otuput="dep_token_8",
+            ),
+        )
+        output_node = next(n for n in ep.graph.nodes if n.op == "output")
+        self.assertEqual(
+            [str(arg) for arg in output_node.args[0]],
+            ["add_tensor", "add_tensor_1", "dep_token_8"],
+        )
+        inp = torch.randn(5, 3)
+        self.assertTrue(
+            torch._dynamo.utils.same(
+                # Run `ep.graph_module(...)` instead of `ep(...)` to avoid
+                # using cached buffer values stored in ep through `state_dict`.
+                ep.graph_module(
+                    torch.full((d_out, d_in), weight),
+                    torch.full((d_out,), bias),
+                    buf.clone(),
+                    inp,
+                ),
+                (buf.add(5), Foo()(inp), _DEP_TOKEN),
+            )
+        )
+        self.assertEqual(ep(inp)[1], _DEP_TOKEN)
 
 
 if __name__ == "__main__":

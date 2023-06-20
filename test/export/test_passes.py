@@ -335,6 +335,5 @@ class TestPasses(TestCase):
         real_result = m(x, y)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
-
 if __name__ == '__main__':
     run_tests()

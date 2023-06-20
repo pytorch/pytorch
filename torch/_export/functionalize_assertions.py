@@ -2,6 +2,8 @@ import torch
 import copy
 from typing import Dict
 from torch._ops import OpOverload
+from dataclasses import dataclass
+from torch._functorch.aot_autograd import FQN
 
 aten = torch.ops.aten
 
@@ -12,7 +14,15 @@ _NON_FUNCTION_TO_FUNCTIONAL_ASSERTION_FUNCS: Dict[OpOverload, OpOverload] = {
 }
 
 
-def functionalize(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+@dataclass
+class FunctionalizedGraphModule:
+    # Graph module with assertions functionalized.
+    graph_module: torch.fx.GraphModule
+    # FQN of assertion dependency token in output.
+    dep_token_output: FQN
+
+
+def functionalize(gm: torch.fx.GraphModule) -> FunctionalizedGraphModule:
     gm = copy.deepcopy(gm)
     graph = gm.graph
 
@@ -44,9 +54,20 @@ def functionalize(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
         graph.erase_node(n)
 
     output_node = next(n for n in graph.nodes if n.op == "output")
+    # Always appending `dep_token` node to the end of outputs. If `gm` is after
+    # AOT export, the outputs will be in format (updated_inputs, user_outputs, dep_token).
+    # NOTE: extra change might be needed if `trace_joint` is enabled while calling
+    # `aot_export_module` (since `param_gradients` will be added as well). However
+    # ignore this case for now since:
+    # - It's always disabled in current export logic as
+    #   https://github.com/pytorch/pytorch/blob/def1b57151687abd585e3000dd10907b8be01266/torch/_export/__init__.py#L188
+    # - Extra callsites like
+    #   https://github.com/pytorch/pytorch/blob/def1b57151687abd585e3000dd10907b8be01266/torch/_export/exported_program.py#L119
+    #   will need to be changed.
     graph.output(output_node.args[0] + (dep_token,))
     graph.erase_node(output_node)
 
     graph.lint()
     gm.recompile()
-    return gm
+
+    return FunctionalizedGraphModule(graph_module=gm, dep_token_output=str(dep_token))

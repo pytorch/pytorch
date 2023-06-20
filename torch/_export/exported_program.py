@@ -4,6 +4,7 @@ import dataclasses
 import sympy
 from typing import Any, Dict, List, Optional, Tuple, Union
 from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
+from torch._export.functionalize_assertions import functionalize, FunctionalizedGraphModule
 
 
 import torch
@@ -67,6 +68,8 @@ class ExportGraphSignature:
     buffers_to_mutate: Dict[GraphOutputName, FQN]
 
     backward_signature: Optional[ExportBackwardSignature]
+
+    assertion_dep_token_otuput: Optional[FQN] = None
 
 
 class ExportedProgram:
@@ -164,10 +167,115 @@ class ExportedProgram:
         )
         return transformed_ep
 
-    def _add_runtime_assertions(self) -> "ExportedProgram":
-        return self.transform(
-            _AddRuntimeAssertionsForConstraintsPass(self.range_constraints, self.equality_constraints)
+    def _add_runtime_assertions(
+        self, functionalize_assertions: bool,
+    ) -> "ExportedProgram":
+        ep = self.transform(
+            _AddRuntimeAssertionsForConstraintsPass(
+                self.range_constraints,
+                self.equality_constraints,
+            ),
         )
+        if functionalize_assertions:
+            # Ideally `_update_after_adding_runtime_assertions` should run
+            # whenever `_AddRuntimeAssertionsForConstraintsPass` runs, here
+            # bundle it with `functionalize_assertions` for safety.
+            ep = _update_after_adding_runtime_assertions(self, ep)
+            ep = _update_after_functionalizing_runtime_assertions(
+                ep,
+                functionalized=functionalize(gm=ep.graph_module),
+            )
+
+        return ep
+
+
+def _update_after_functionalizing_runtime_assertions(
+    ep: ExportedProgram,
+    functionalized: FunctionalizedGraphModule,
+) -> ExportedProgram:
+    graph_signature = dataclasses.replace(
+        copy.deepcopy(ep.graph_signature),
+        assertion_dep_token_otuput=functionalized.dep_token_output,
+    )
+
+    # Update output spec so dep token will always be bundled with original output
+    # within a tuple if the exported program is called directly. For example,
+    # if original output is `(x, y)`, the output with dep token included will be
+    # like `((x, y), dep_token)`.
+    out_spec = pytree.TreeSpec(
+        type=tuple,
+        context=None,
+        children_specs=[copy.deepcopy(ep.call_spec.out_spec), pytree.LeafSpec()],
+    )
+    call_spec = dataclasses.replace(copy.deepcopy(ep.call_spec), out_spec=out_spec)
+    return _update_exported_program(
+        ep,
+        graph_module=functionalized.graph_module,
+        graph_signature=graph_signature,
+        call_spec=call_spec,
+    )
+
+
+def _update_after_adding_runtime_assertions(
+    ep: ExportedProgram,
+    new_ep: ExportedProgram,
+) -> ExportedProgram:
+    def _get_output_FQNs(gm: torch.fx.GraphModule) -> List[FQN]:
+        output_node = next(n for n in gm.graph.nodes if n.op == "output")
+        return [str(arg) for arg in output_node.args[0]]
+
+    # The assumption here is that `_AddRuntimeAssertionsForConstraintsPass`:
+    # - Won't change graph outputs order semantically so it's possible to create
+    #   map from old to new output FQNs based on position.
+    # - Will keep input FQNs unchanged so no need to update inputs related
+    #   fields (`user_inputs`, `inputs_to_parameters`, `inputs_to_buffers`, ...)
+    output_map = dict(
+        zip(
+            _get_output_FQNs(ep.graph_module),
+            _get_output_FQNs(new_ep.graph_module),
+            strict=True,
+        )
+    )
+    gs = ep.graph_signature
+    new_user_outputs = [output_map[u] for u in gs.user_outputs]
+    new_buffers_to_mutate = {output_map[u]: b for u, b in gs.buffers_to_mutate.items()}
+
+    return _update_exported_program(
+        ep=new_ep,
+        graph_signature=dataclasses.replace(
+            copy.deepcopy(new_ep.graph_signature),
+            user_outputs=new_user_outputs,
+            buffers_to_mutate=new_buffers_to_mutate,
+        )
+    )
+
+
+def _update_exported_program(
+    ep: ExportedProgram,
+    *,
+    graph_module: Optional[torch.fx.GraphModule] = None,
+    graph_signature: Optional[ExportGraphSignature] = None,
+    call_spec: Optional[CallSpec] = None,
+) -> ExportedProgram:
+    if graph_module is None and graph_signature is None:
+        return ep
+
+    gm = copy.deepcopy(ep.graph_module) if graph_module is None else graph_module
+    gs = (
+        copy.deepcopy(ep.graph_signature)
+        if graph_signature is None
+        else graph_signature
+    )
+    call_spec = copy.deepcopy(ep.call_spec) if call_spec is None else call_spec
+    return ExportedProgram(
+        root=gm,
+        graph=gm.graph,
+        graph_signature=gs,
+        call_spec=call_spec,
+        state_dict=ep.state_dict,
+        range_constraints=copy.deepcopy(ep.range_constraints),
+        equality_constraints=copy.deepcopy(ep.equality_constraints),
+    )
 
 
 def _process_constraints(
