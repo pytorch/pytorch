@@ -51,7 +51,7 @@ namespace torch {
 namespace autograd {
 
 namespace {
-static compiled_autograd_fn the_compiled_autograd = nullptr;
+static Engine::compiled_autograd_fn the_compiled_autograd = nullptr;
 
 static bool in_bad_autograd_fork =
     false; // True for children forked after engine's thread pool init
@@ -1163,7 +1163,8 @@ auto Engine::execute(
   // initialize a new thread local ready queue on CPU or reuse the existing one
   // (if there is one allocated already, i.e. consecutive backward calls,
   // re-entrant backward calls), then memoize the local_ready_queue in GraphTask
-  init_local_ready_queue();
+  if (the_compiled_autograd == nullptr)
+    init_local_ready_queue();
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 
   // Store root nodes so we can traverse through the graph later
@@ -1192,14 +1193,11 @@ auto Engine::execute(
   compute_dependencies(graph_root.get(), *graph_task, min_topo_nr);
 
   if (the_compiled_autograd != nullptr) {
-    if (skip_dummy_node) {
-      // TODO(jansel): avoid the dummy node we forced above
-      throw std::runtime_error("todo");
-    } else {
-      (*the_compiled_autograd)(graph_root, *graph_task);
-      // TODO(jansel): handle outputs
-      return variable_list();
-    }
+    TORCH_CHECK(!keep_graph, "compiled_autograd does not support keep_graph");
+    TORCH_CHECK(
+        !create_graph, "compiled_autograd does not support create_graph");
+    return (*the_compiled_autograd)(
+        graph_root, *graph_task, accumulate_grad, outputs);
   }
 
   if (!outputs.empty()) {
@@ -1339,7 +1337,7 @@ Engine& Engine::get_default_engine() {
   return engine_stub.load()();
 }
 
-void Engine::set_compiled_autograd(compiled_autograd_fn fn) {
+void Engine::set_compiled_autograd(Engine::compiled_autograd_fn fn) {
   the_compiled_autograd = fn;
 }
 

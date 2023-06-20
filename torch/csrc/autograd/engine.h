@@ -36,12 +36,6 @@ struct ReadyQueue;
 namespace torch {
 namespace autograd {
 
-typedef void (*compiled_autograd_fn)(
-    const std::shared_ptr<Node>& graph_root,
-    GraphTask& graph_task);
-
-compiled_autograd_fn get_compiled_autograd();
-
 // Maximum reentrant backward depth before switching to a new thread
 // This limit is based on the TSAN's deadlock detector, where it will
 // fail if a program hold more than 65 locks in one thread at once.
@@ -141,6 +135,13 @@ struct TORCH_API Engine {
 
   static Engine& get_base_engine();
 
+  // compiled_autograd needs to live in a different .so file so that it
+  // has python symbols, so we add a layer of indirection
+  typedef variable_list (*compiled_autograd_fn)(
+      const std::shared_ptr<Node>& graph_root,
+      GraphTask& graph_task,
+      bool accumulate_grad,
+      const edge_list& outputs);
   static void set_compiled_autograd(compiled_autograd_fn fn);
 
   Engine(const Engine&) = delete;

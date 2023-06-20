@@ -12,6 +12,35 @@ namespace torch {
 namespace dynamo {
 using namespace torch::autograd;
 
+static PyObject* wrap_variable_list(const variable_list& inputs) {
+  PyObject* pyinput = PyList_New(inputs.size());
+  for (const auto i : c10::irange(inputs.size())) {
+    PyList_SET_ITEM(pyinput, i, THPVariable_Wrap(inputs[i]));
+  }
+  return pyinput;
+}
+
+static variable_list unwrap_variable_list(PyObject* pyresult) {
+  TORCH_CHECK(PyList_CheckExact(pyresult));
+  auto result_len = PyList_GET_SIZE(pyresult);
+  variable_list result;
+  result.reserve(result_len);
+  for (const auto i : c10::irange(result_len)) {
+    result.emplace_back(THPVariable_Unpack(PyList_GET_ITEM(pyresult, i)));
+  }
+  return result;
+}
+
+static PyObject* check(PyObject* pyresult) {
+  if (C10_UNLIKELY(pyresult == nullptr)) {
+    // see https://github.com/pytorch/pytorch/pull/34845
+    python_error err;
+    err.persist();
+    throw err;
+  }
+  return pyresult;
+}
+
 struct CacheNode {
   static CacheNode* root() {
     static CacheNode _root;
@@ -54,8 +83,7 @@ struct CacheNode {
   THPObjectPtr compiled_fn;
 };
 
-static PyObject* _autograd_compiler = nullptr;
-
+static PyObject* the_autograd_compiler = nullptr;
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args);
 
 static PyObject* clear_cache(PyObject* dummy, PyObject* args) {
@@ -83,33 +111,6 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
-static PyObject* wrap_variable_list(const variable_list& inputs) {
-  PyObject* pyinput = PyList_New(inputs.size());
-  for (const auto i : c10::irange(inputs.size())) {
-    PyList_SET_ITEM(pyinput, i, THPVariable_Wrap(inputs[i]));
-  }
-  return pyinput;
-}
-
-static variable_list unwrap_variable_list(PyObject* pyresult) {
-  TORCH_CHECK(PyList_CheckExact(pyresult));
-  auto result_len = PyList_GET_SIZE(pyresult);
-  variable_list result;
-  result.reserve(result_len);
-  for (const auto i : c10::irange(result_len)) {
-    result.emplace_back(THPVariable_Unpack(PyList_GET_ITEM(pyresult, i)));
-  }
-  return result;
-}
-
-static PyObject* check(PyObject* pyresult) {
-  if (C10_UNLIKELY(pyresult == nullptr)) {
-    PyErr_Print();
-    throw python_error();
-  }
-  return pyresult;
-}
-
 static variable_list call_begin_capture(
     PyObject* self,
     const variable_list& inputs) {
@@ -126,24 +127,42 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
   return check(PyObject_CallMethodOneArg(self, method_name, pyinput.get()));
 }
 
-void compiled_autograd(
+variable_list compiled_autograd(
     const std::shared_ptr<Node>& graph_root,
-    GraphTask& graph_task) {
+    GraphTask& graph_task,
+    bool accumulate_grad,
+    const edge_list& output_edges) {
+  TORCH_CHECK(
+      output_edges.empty() || !accumulate_grad,
+      "outputs with accumulate_grad not yet implemented")
   pybind11::gil_scoped_acquire gil;
   NoGradGuard no_grad; // TODO(jansel): double backward
 
   std::unordered_map<Node*, int> dependencies =
       std::move(graph_task.dependencies_);
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
-  std::map<Node*, NodeCall> node_inputs;
+  worklist.reserve(dependencies.size());
+  std::unordered_map<Node*, NodeCall> node_inputs;
   node_inputs.emplace(graph_root.get(), std::move(NodeCall(graph_root)));
   std::vector<NodeCall> calls;
   calls.reserve(dependencies.size() + 8);
-  AutogradCompilerCall compiler_call;
+  AutogradCompilerCall compiler_call(accumulate_grad);
   CacheNode* cache = CacheNode::root();
 
+  for (const auto i : c10::irange(output_edges.size())) {
+    auto inp = node_inputs.find(output_edges[i].function.get());
+    if (inp == node_inputs.end()) {
+      inp = node_inputs
+                .emplace(
+                    output_edges[i].function.get(),
+                    std::move(NodeCall(output_edges[i].function)))
+                .first;
+    }
+    inp->second.mark_output(output_edges[i].input_nr, i);
+  }
+
   while (!worklist.empty()) {
-    std::shared_ptr<Node> fn = worklist.back();
+    std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
 
     auto node_input_iter = node_inputs.find(fn.get());
@@ -152,7 +171,7 @@ void compiled_autograd(
 
     { // update cache and gather args into `compiler_call`
       CompiledNodeArgs node_args(compiler_call, node_call);
-      node_args.collect(node_call.input_refs);
+      node_args.collect(node_call);
       fn->compiled_args(node_args);
       node_args.collect_hooks_from(fn.get());
       cache = cache->lookup(node_args.key());
@@ -168,7 +187,7 @@ void compiled_autograd(
       if (!edges[output_id].is_valid()) {
         continue;
       }
-      std::shared_ptr<Node> edge_node = edges[output_id].function;
+      const std::shared_ptr<Node>& edge_node = edges[output_id].function;
       uint32_t input_nr = edges[output_id].input_nr;
 
       auto inp = node_inputs.find(edge_node.get());
@@ -201,14 +220,15 @@ void compiled_autograd(
       TORCH_CHECK(it != dependencies.end());
       if (--it->second == 0) {
         dependencies.erase(it);
-        worklist.emplace_back(std::move(edge_node));
+        worklist.emplace_back(edge_node);
       }
     }
   }
 
   if (!cache->compiled_fn) {
-    THPObjectPtr py_compiler(PyObject_CallNoArgs((_autograd_compiler)));
-    TORCH_CHECK(py_compiler);
+    // cache miss, need to capture FX graph
+    THPObjectPtr py_compiler(
+        check(PyObject_CallNoArgs((the_autograd_compiler))));
 
     variable_list proxy_inputs =
         call_begin_capture(py_compiler, compiler_call.inputs);
@@ -216,7 +236,7 @@ void compiled_autograd(
     std::vector<variable_list> node_outputs;
     node_outputs.reserve(calls.size() + 1);
     node_outputs.emplace_back(proxy_inputs);
-    TraceState state(proxy_inputs);
+    TraceState state(proxy_inputs, accumulate_grad, output_edges.size());
     for (auto& call : calls) {
       // TODO(jansel): consider adding some of this stuff:
       // at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
@@ -237,8 +257,17 @@ void compiled_autograd(
         if (ref.is_set()) {
           inputs.emplace_back(node_outputs[ref.node_id][ref.index]);
         } else {
-          inputs.emplace_back(std::move(at::Tensor()));
+          // TODO(jansel): do we need to construct zeros here?
+          inputs.emplace_back();
         }
+      }
+
+      for (const auto& graph_output : call.graph_output) {
+        int input_nr = graph_output.first;
+        int output_index = graph_output.second;
+        TORCH_CHECK(output_index < static_cast<int>(state.outputs.size()));
+        TORCH_CHECK(!state.outputs[output_index].defined());
+        state.outputs[output_index] = inputs[input_nr];
       }
 
       if (call.tensor_pre_hooks.size() + call.pre_hooks.size() > 0) {
@@ -296,12 +325,18 @@ void compiled_autograd(
     THPObjectPtr pyresult(
         check(PyObject_CallOneArg(cache->compiled_fn, inputs)));
     variable_list outputs = unwrap_variable_list(pyresult);
-    TORCH_CHECK(outputs.size() == compiler_call.set_grad_targets.size());
-    for (const auto i : c10::irange(outputs.size())) {
-      // TODO(jansel): does this one need to be an inplace copy?  if so it
-      // should go in the graph
-      at::Tensor& grad = compiler_call.set_grad_targets[i].mutable_grad();
-      grad = outputs[i];
+    if (accumulate_grad) {
+      TORCH_CHECK(outputs.size() == compiler_call.set_grad_targets.size());
+      for (const auto i : c10::irange(outputs.size())) {
+        // TODO(jansel): does this one need to be an inplace copy?  if so it
+        // should go in the graph
+        at::Tensor& grad = compiler_call.set_grad_targets[i].mutable_grad();
+        grad = outputs[i];
+      }
+      return variable_list();
+    } else {
+      TORCH_CHECK(outputs.size() == output_edges.size());
+      return outputs;
     }
   }
 }
@@ -312,13 +347,13 @@ static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
     return nullptr;
   }
 
-  PyObject* prior = _autograd_compiler;
-  if (obj == Py_None) {
-    _autograd_compiler = nullptr;
+  PyObject* prior = the_autograd_compiler;
+  if (obj == Py_None) { // disable
+    the_autograd_compiler = nullptr;
     Engine::set_compiled_autograd(nullptr);
-  } else {
+  } else { // enable
     Py_INCREF(obj);
-    _autograd_compiler = obj;
+    the_autograd_compiler = obj;
     Engine::set_compiled_autograd(&compiled_autograd);
   }
 

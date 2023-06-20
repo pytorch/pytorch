@@ -1,4 +1,5 @@
 import contextlib
+import functools
 
 import torch
 from torch._dynamo.source import ConstantSource
@@ -17,7 +18,8 @@ from torch.fx.experimental.proxy_tensor import (
 
 
 class AutogradCompilerInstance:
-    def __init__(self) -> None:
+    def __init__(self, compiler_fn) -> None:
+        self.compiler_fn = compiler_fn
         self.stack = contextlib.ExitStack()
         self.fake_tensor_mode = FakeTensorMode(
             allow_fallback_kernels=True,
@@ -95,8 +97,8 @@ class AutogradCompilerInstance:
         )
         print(self.fx_tracer.graph)
         print("END_CAPTURE", len(outputs))
-        return GraphModule(
-            self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
+        return self.compiler_fn(
+            GraphModule(self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd")
         )
 
     def to_proxy(self, t):
@@ -118,9 +120,9 @@ class AutogradCompilerInstance:
 
 
 @contextlib.contextmanager
-def enable():
+def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-        AutogradCompilerInstance
+        functools.partial(AutogradCompilerInstance, compiler_fn)
     )
     yield
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)

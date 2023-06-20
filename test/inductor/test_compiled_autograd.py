@@ -1,9 +1,20 @@
 # Owner(s): ["module: inductor"]
 import torch
+from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import HAS_CPU
+
+
+def compiler_fn(gm):
+    """Same as torch.compile() but counts number of compiles"""
+
+    def inner_compiler(gm_, example_inputs_):
+        counters["compiled_autograd"]["compiles"] += 1
+        return inductor.compile(gm_, example_inputs_)
+
+    return torch.compile(gm, backend=inner_compiler, fullgraph=True)
 
 
 class TestCompiledAutograd(TestCase):
@@ -14,10 +25,11 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with compiled_autograd.enable():
+            with compiled_autograd.enable(compiler_fn):
                 actual = list(fn())
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+            self.assertEqual(counters["compiled_autograd"]["compiles"], 1)
 
     def test_basic(self):
         def fn():
@@ -143,6 +155,26 @@ class TestCompiledAutograd(TestCase):
                 yield result
                 yield y.grad
                 y.grad = None
+
+        self._common(fn)
+
+    def test_output_nodes(self):
+        def fn():
+            y = torch.randn(1, 4, requires_grad=True)
+            z = torch.randn(1, 4, requires_grad=True)
+
+            def model(x):
+                return torch.sigmoid(x * z + torch.sin(y) + torch.cos(y))
+
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = model(x).sum()
+                gy, gz = torch.autograd.grad(result, [y, z])
+                assert y.grad is None
+                assert z.grad is None
+                yield gy
+                yield gz
 
         self._common(fn)
 

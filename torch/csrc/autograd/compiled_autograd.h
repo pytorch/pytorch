@@ -80,6 +80,14 @@ struct NodeCall {
     return input_refs[pos];
   }
 
+  size_t size() const {
+    return input_refs.size();
+  }
+
+  void mark_output(int input_nr, int output_idx) {
+    graph_output.emplace_back(std::make_pair(input_nr, output_idx));
+  }
+
   std::shared_ptr<Node> node;
   // at::SmallVector??
   std::vector<OutputRef> input_refs;
@@ -88,9 +96,13 @@ struct NodeCall {
   std::vector<std::pair<PyObject*, int>> tensor_pre_hooks;
   std::vector<PyObject*> pre_hooks;
   std::vector<PyObject*> post_hooks;
+  std::vector<std::pair<int, int>> graph_output;
 };
 
 struct AutogradCompilerCall {
+  AutogradCompilerCall(bool accumulate_grad_)
+      : accumulate_grad(accumulate_grad_) {}
+
   void add_tensor_input(const at::Tensor& tensor) {
     inputs.emplace_back(tensor);
   }
@@ -106,6 +118,7 @@ struct AutogradCompilerCall {
   std::vector<int64_t> size_inputs;
   std::vector<at::Tensor> inputs;
   std::vector<at::Tensor> set_grad_targets;
+  bool accumulate_grad;
 };
 
 class CompiledNodeArgs {
@@ -159,6 +172,12 @@ class CompiledNodeArgs {
     }
   }
 
+  template <typename A, typename B>
+  void collect(const std::pair<A, B>& t) {
+    collect(t.first);
+    collect(t.second);
+  }
+
   void collect(const c10::ScalarType& t) {
     specialize_on_bytes(t);
   }
@@ -199,6 +218,11 @@ class CompiledNodeArgs {
     // +1 is for undefined encoded as -1
     collect_size(t.node_id + 1);
     collect_size(t.index + 1);
+  }
+
+  void collect(const NodeCall& t) {
+    collect(t.input_refs);
+    collect(t.graph_output);
   }
 
   void collect(int8_t t) {
@@ -246,7 +270,9 @@ class CompiledNodeArgs {
   }
 
   void set_grad_target(const at::Tensor& tensor) {
-    _compiler.add_set_grad_target(tensor);
+    collect(_compiler.accumulate_grad);
+    if (_compiler.accumulate_grad)
+      _compiler.add_set_grad_target(tensor);
   }
 
   void collect_hooks_from(Node* fn) {
@@ -334,7 +360,11 @@ class CompiledNodeArgs {
 };
 
 struct TraceState {
-  TraceState(const variable_list& pi) : index(0), proxy_inputs(pi) {}
+  TraceState(const variable_list& pi, bool accumulate_grad_, size_t num_outputs)
+      : index(0),
+        proxy_inputs(pi),
+        outputs(num_outputs),
+        accumulate_grad(accumulate_grad_) {}
   ~TraceState() {
     if (C10_UNLIKELY(index != proxy_inputs.size())) {
       TORCH_WARN("not all proxy_inputs consumed")
@@ -343,6 +373,7 @@ struct TraceState {
   size_t index;
   const variable_list& proxy_inputs;
   variable_list outputs;
+  bool accumulate_grad;
 };
 
 class SwapSavedVariables {
@@ -448,7 +479,8 @@ class SwapSavedVariables {
   void after(double t) {}
 
   void set_grad_value(const at::Tensor& tensor) {
-    state.outputs.emplace_back(tensor);
+    if (state.accumulate_grad)
+      state.outputs.emplace_back(tensor);
   }
 
   SwapSavedVariables(TraceState& s, const std::shared_ptr<Node> n)
