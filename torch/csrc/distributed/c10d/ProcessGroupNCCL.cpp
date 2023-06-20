@@ -26,6 +26,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <torch/csrc/cuda/nccl.h>
+#include <torch/torch.h>
 
 namespace c10d {
 
@@ -1580,8 +1581,18 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
       //
       // See [Sync Streams].
       if (!avoidRecordStreams_) {
-        c10::cuda::CUDACachingAllocator::recordStream(
-            inputs[i].storage().data_ptr(), ncclStream);
+        // TODO: fix for sparse tensors
+        // C++ exception with description "Cannot access storage of
+        // SparseTensorImpl
+        if (!inputs[i].is_sparse()) {
+          c10::cuda::CUDACachingAllocator::recordStream(
+              inputs[i].storage().data_ptr(), ncclStream);
+        } else {
+          c10::cuda::CUDACachingAllocator::recordStream(
+              inputs[i].values().storage().data_ptr(), ncclStream);
+          c10::cuda::CUDACachingAllocator::recordStream(
+              inputs[i].indices().storage().data_ptr(), ncclStream);
+        }
       }
 #ifndef NCCL_HAS_COMM_NONBLOCKING
       C10D_NCCL_CHECK(
@@ -1838,6 +1849,77 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
       [](std::vector<at::cuda::CUDAStream>&) {},
       profilingTitle);
+}
+
+// Sparse allreduce (note: ProcessGroupGloo.cpp::AsyncSparseAllreduceWork)
+c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceOptions& opts) {
+  // TODO: we are allocating new memory for output tensors
+  std::vector<at::Tensor> outputTensors(tensors.size());
+  for (int i = 0; i < tensors.size(); i++) {
+    tensors[i] = tensors[i].coalesce();
+    outputTensors[i] = torch::zeros(
+        tensors[i].sizes(), tensors[i].options().layout(torch::kStrided));
+  }
+  int dev_in_group = 0;
+  auto work = collective(
+      tensors,
+      outputTensors,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, dev_in_group++);
+
+        size_t num_elements = output.numel();
+        auto indices = input.indices();
+        auto sizes = input.sizes();
+        int colSize = sizes[1];
+        auto rows = indices[0];
+        size_t blockCount = rows.sizes()[0];
+        auto recvIndices = indices[0] * colSize;
+
+        // prevent output and recvIndices from being freed
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data_ptr(), stream);
+        c10::cuda::CUDACachingAllocator::recordStream(
+          recvIndices.storage().data_ptr(), stream);
+        auto result = ncclAllReduceSparseBlock(
+            input._values().data_ptr(), // sendbuff
+            recvIndices.data_ptr<int64_t>(), // recv_indices
+            blockCount, // block_count
+            colSize, // block_length
+            output.data_ptr(), // recvbuff
+            output.numel(), // recv_count
+            ncclDataType,
+            ncclReduceOp,
+            comm,
+            stream.stream());
+        return result;
+      },
+      [](std::vector<at::cuda::CUDAStream>& ncclStreams,
+         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [&](std::vector<at::cuda::CUDAStream>& ncclStreams,
+          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
+        // Convert output tensors to sparse and back into tensors.
+        for (const auto i : c10::irange(outputTensors.size())) {
+          at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
+          if (opts.sparseIndices.has_value()) {
+            tensors[i] = at::sparse_coo_tensor(opts.sparseIndices.value(), outputTensors[i], tensors[i].sizes());
+          } else {
+            tensors[i] = outputTensors[i].to_sparse();
+            // int num_rows = tensors[i].numel() / tensors[i].sizes()[1];
+            // tensors[i] = at::sparse_coo_tensor(tensors[i].indices(), outputTensors[i].reshape({num_rows, -1}), tensors[i].sizes());
+          }
+          LOG(INFO) << tensors[i];
+        }
+      },
+      OpType::ALLREDUCE,
+      "nccl:all_reduce");
+  return work;
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(

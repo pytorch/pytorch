@@ -2231,3 +2231,6 @@ class DistributedDataParallel(Module, Joinable):
         reducer not finalizing backward.
         """
         self.reducer._check_reducer_finalized()
+
+    def _set_sparse_metadata(self, global_unique_ids):
+        self.reducer._set_sparse_metadata(global_unique_ids)

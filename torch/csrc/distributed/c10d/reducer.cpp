@@ -440,6 +440,16 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
         logger_,
         "Expected variable to have sparse gradient.");
 
+    // Copy the indices of sparse metadata
+    if (sparse_metadata_) {
+      grad = grad.coalesce();
+      std::string& param_name = param_names_[variable_index];
+      bucket.global_unique_id = (*sparse_metadata_)[param_name].to(at::kLong).unsqueeze(0).to(grad.device());
+      auto indices = at::searchsorted(bucket.global_unique_id.value(), grad.indices(), false, false);
+      // For indices we are using the ones set by sparse_metadata
+      grad = at::sparse_coo_tensor(indices, grad.values(), grad.sizes());
+    }
+
     // Sparse tensors cannot be grouped together with other sparse tensors in a
     // single reduction operation like we can for dense tensors. Therefore, the
     // `offsets` and `lengths` vectors in the bucket struct are empty, and
@@ -464,6 +474,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
   for (const auto i : c10::irange(buckets_.size())) {
     auto& bucket = buckets_[i];
     auto variables_for_bucket = get_variables_for_bucket(i, bucket);
+    c10::optional<at::Tensor> unused = c10::nullopt;
     gradBuckets.emplace_back(
         i,
         buckets_.size(),
@@ -472,6 +483,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
         bucket.offsets,
         bucket.lengths,
         bucket.sizes_vec,
+        unused,
         variables_for_bucket);
   }
   return gradBuckets;
@@ -902,7 +914,7 @@ c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_allreduce_hook(
     GradBucket& grad_bucket) {
   _AllReduceBySumCommHook allreduce_hook(process_group_);
-  return allreduce_hook.runHook(grad_bucket);
+    return allreduce_hook.runHook(grad_bucket);
 }
 
 void Reducer::all_reduce_bucket(Bucket& bucket) {
@@ -924,6 +936,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       bucket.offsets,
       bucket.lengths,
       bucket.sizes_vec,
+      bucket.global_unique_id,
       variables_for_bucket);
   bucket.future_work = run_comm_hook(grad_bucket);
 }
@@ -1546,7 +1559,13 @@ void Reducer::finalize_backward() {
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
     if (bucket.expect_sparse_gradient) {
-      bucket.gradients.copy_(future_result);
+      if (!bucket.global_unique_id.has_value()) {
+        bucket.gradients.copy_(future_result);
+      } else {
+        // sparse metadata is set and there is a global unique id
+        auto sparse_result = at::sparse_coo_tensor(bucket.global_unique_id.value(), future_result, bucket.gradients.sizes());
+        bucket.gradients.copy_(sparse_result);
+      }
     } else {
       // Reinitialize only `bucket_views_out` with the future_result by
       // following the same logic in `initialize_buckets`.
@@ -1593,6 +1612,8 @@ void Reducer::finalize_backward() {
   if (should_collect_runtime_stats()) {
     record_backward_comm_end_time();
   }
+
+  sparse_metadata_.reset();
 }
 
 void Reducer::runGradCallbackForVariable(
@@ -1777,6 +1798,10 @@ bool Reducer::rebuild_buckets() {
   initialize_buckets(std::move(rebuilt_bucket_indices));
 
   return true;
+}
+
+void Reducer::setSparseMetadata(std::map<std::string, torch::Tensor>& metadata) {
+  sparse_metadata_ = std::make_unique<std::map<std::string, torch::Tensor>>(metadata);
 }
 
 // See Note [DDP Communication Hook]

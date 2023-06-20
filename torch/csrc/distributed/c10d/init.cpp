@@ -519,6 +519,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           [](::c10d::Reducer& reducer) { reducer.set_optimizer_in_backward(); },
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "_set_sparse_metadata",
+          &::c10d::Reducer::setSparseMetadata,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "_set_mixed_precision_param_dtype",
           [](::c10d::Reducer& reducer, py::object data_type_obj) {
             auto scalar_type =

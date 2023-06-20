@@ -25,6 +25,7 @@ class TORCH_API GradBucket {
       std::vector<size_t> offsets,
       std::vector<size_t> lengths,
       std::vector<c10::IntArrayRef> sizes_vec,
+      c10::optional<at::Tensor>& global_unique_id,
       std::vector<at::Tensor> parameters)
       : index_(index),
         bucket_count_(bucket_count),
@@ -32,6 +33,7 @@ class TORCH_API GradBucket {
         offsets_(std::move(offsets)),
         lengths_(std::move(lengths)),
         sizes_vec_(std::move(sizes_vec)),
+        global_unique_id_(global_unique_id),
         parameters_(std::move(parameters)) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
@@ -70,6 +72,10 @@ class TORCH_API GradBucket {
     return index_ == bucket_count_ - 1;
   }
 
+  c10::optional<at::Tensor>& getGlobalUniqueId() {
+    return global_unique_id_;
+  }
+
  private:
   size_t index_;
   size_t bucket_count_;
@@ -79,6 +85,10 @@ class TORCH_API GradBucket {
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
+
+  // Global unique id for this bucket (only used for sparse tensors).
+  c10::optional<at::Tensor>& global_unique_id_;
+
   // Model parameters for this bucket.
   const std::vector<at::Tensor> parameters_;
 };

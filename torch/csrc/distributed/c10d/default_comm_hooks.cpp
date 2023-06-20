@@ -46,7 +46,14 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
 c10::intrusive_ptr<c10::ivalue::Future> _AllReduceBySumCommHook::runHook(
     GradBucket& bucket) {
   std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
-  return state_->allreduce(tensors)->getFuture();
+  if (bucket.getGlobalUniqueId().has_value()) {
+    // sparse gradient indices update case
+    AllreduceOptions opts = AllreduceOptions();
+    opts.sparseIndices = bucket.getGlobalUniqueId().value();
+    return state_->allreduce_sparse(tensors, opts)->getFuture();
+  } else {
+    return state_->allreduce(tensors)->getFuture();
+  }
 }
 
 } // namespace c10d

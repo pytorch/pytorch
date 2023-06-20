@@ -151,13 +151,24 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     at::TensorList,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                    const c10::optional<at::Tensor>& sparse_indices,
                     int64_t)>();
 
     return std::get<1>(op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
+        opts.sparseIndices,
         opts.timeout.count()));
+  }
+
+  virtual c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts) {
+    // bypass the dispatcher for now
+    auto work = getBackend(c10::DeviceType::CUDA)
+        ->allreduce_sparse(tensors, opts);
+    return work;
   }
 
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
