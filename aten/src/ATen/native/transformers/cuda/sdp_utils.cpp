@@ -8,7 +8,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
-#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/native/transformers/sdp_utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>

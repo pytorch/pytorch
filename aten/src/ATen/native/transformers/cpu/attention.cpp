@@ -1,4 +1,5 @@
 #include <ATen/native/transformers/cpu/attention.h>
+#include <ATen/native/transformers/cpu/add_softmax.h>
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
@@ -20,7 +21,6 @@
 #include <utility>
 #if AT_MKL_ENABLED()
 #include <mkl.h>
-#endif
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -307,3 +307,5 @@ _scaled_dot_product_flash_attention_cpu(
 
 } // namespace native
 } // namespace at
+
+#endif // AT_MKL_ENABLED

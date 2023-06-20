@@ -14,7 +14,6 @@
 
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
-#include <ATen/native/transformers/cpu/add_softmax.h>
 #include <ATen/native/transformers/sdp_utils.h>
 
 namespace at {
