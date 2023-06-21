@@ -28,6 +28,7 @@ from torch._prims_common import (
     is_weakly_lesser_type,
     Number,
     NumberType,
+    RealNumberType,
     REDUCTION_OUTPUT_TYPE_KIND,
     ShapeType,
     StrideType,
@@ -1505,7 +1506,7 @@ def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     supports_rhs_python_scalar=False,
 )
 def logaddexp2(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
-    utils.check(
+    torch._check(
         not (utils.is_complex_dtype(a.dtype) or utils.is_complex_dtype(b.dtype)),
         lambda: "logaddexp2 doesn't support complex dtypes",
     )
@@ -3135,18 +3136,18 @@ def permute(a: TensorLikeType, *dims) -> TensorLikeType:
 @register_decomposition(aten.renorm)
 @out_wrapper()
 def renorm(
-    input: TensorLikeType, p: NumberType, dim: int, maxnorm: NumberType
+    input: TensorLikeType, p: RealNumberType, dim: int, maxnorm: RealNumberType
 ) -> TensorLikeType:
-    utils.check(not isinstance(p, complex), lambda: "renorm: p must be real-valued")
-    utils.check(p > 0, lambda: "renorm: non-positive norm not supported")
-    utils.check(
+    torch._check(not isinstance(p, complex), lambda: "renorm: p must be real-valued")
+    torch._check(p > 0, lambda: "renorm: non-positive norm not supported")
+    torch._check(
         not isinstance(maxnorm, complex), lambda: "renorm: maxnorm must be real-valued"
     )
-    utils.check(
+    torch._check(
         maxnorm >= 0, lambda: f"renorm: expected maxnorm to be >= 0 but got {maxnorm}"
     )
     ndim = input.ndim
-    utils.check(
+    torch._check(
         ndim > 1,
         lambda: f"renorm: input needs at least 2 dimensions, got {ndim} dimensions",
     )
