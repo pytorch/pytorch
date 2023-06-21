@@ -203,7 +203,7 @@ filegroup(
 filegroup(
     name = "aten_native_eigen_cpp",
     srcs = glob([
-        "aten/src/ATen/native/eigen/*.cpp",
+        "aten/src/ATen/native/sparse/eigen/*.cpp",
     ]),
 )
 

@@ -1,4 +1,4 @@
-#include <ATen/native/eigen/SparseBlasImpl.h>
+#include <ATen/native/sparse/eigen/SparseBlasImpl.h>
 
 #include <ATen/Tensor.h>
 #include <ATen/Dispatch.h>

@@ -21,7 +21,7 @@
 #if !AT_USE_MKL_SPARSE()
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/eigen/SparseBlasImpl.h>
+#include <ATen/native/sparse/eigen/SparseBlasImpl.h>
 #endif
 
 

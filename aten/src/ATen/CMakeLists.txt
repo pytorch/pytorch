@@ -89,7 +89,7 @@ file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 file(GLOB vulkan_cpp "vulkan/*.cpp")
 file(GLOB native_vulkan_cpp "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
 
-file(GLOB native_eigen_cpp "native/eigen/*.cpp")
+file(GLOB native_eigen_cpp "native/sparse/eigen/*.cpp")
 
 # Metal
 file(GLOB metal_h "metal/*.h")
