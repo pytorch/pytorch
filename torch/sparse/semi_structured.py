@@ -245,7 +245,6 @@ def to_sparse_semi_structured(
         RuntimeError: If original_tensor is not a supported dtype, dim, shape, or device.
 
     Example:
-        >>> from torch.sparse import to_sparse_semi_structured
         >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()
         tensor([[0., 0., 1.,  ..., 0., 1., 1.],
                 [0., 0., 1.,  ..., 0., 1., 1.],
