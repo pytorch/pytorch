@@ -426,7 +426,6 @@ class ForeachTests(TestCase):
 
     @requires_cuda()
     @bin_ops
-    @torch._dynamo.config.patch("dynamic_shapes", True)
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     def test_dynamic_shapes_fallback(self, op):

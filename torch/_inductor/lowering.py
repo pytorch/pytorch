@@ -1828,7 +1828,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    if isinstance(data, sympy.Symbol):
+    if isinstance(data, sympy.Expr):
         ranges = []
 
         def inner_fn(index):
@@ -4270,6 +4270,11 @@ try:
     @register_lowering(c10d_functional.all_reduce_coalesced)
     def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
         return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+
+    @register_lowering(c10d_functional.all_gather_into_tensor_coalesced)
+    def all_gather_into_tensor_coalesced(self, tag, ranks, group_size):
+        result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
+        return list(map(TensorBox.create, result))
 
 except ImportError:
     log.info(

@@ -595,15 +595,17 @@ def clone_inputs(example_inputs):
 
 @contextmanager
 def preserve_rng_state():
-    rng = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    with torch.utils._python_dispatch._disable_current_modes():
+        rng_state = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
-        torch.random.set_rng_state(rng)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng)
+        with torch.utils._python_dispatch._disable_current_modes():
+            torch.random.set_rng_state(rng_state)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
 
 
 def is_jit_model(model0):
@@ -778,6 +780,15 @@ def check_unspec_python_args(args, kwargs):
             pass
 
     return unspec_count > 0
+
+
+def check_numpy_ndarray_args(args, kwargs):
+    from .variables.tensor import NumpyNdarrayVariable
+
+    return any(
+        isinstance(x, NumpyNdarrayVariable)
+        for x in itertools.chain(args, kwargs.values())
+    )
 
 
 def specialize_args_kwargs(tx, args, kwargs):

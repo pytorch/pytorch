@@ -181,11 +181,6 @@ TRT_NOT_YET_WORKING = {
     "resnext50_32x4d",
 }
 
-DYNAMIC_SHAPES_NOT_YET_WORKING = {
-    "demucs",
-    "timm_nfnet",
-}
-
 DONT_CHANGE_BATCH_SIZE = {
     "demucs",
     "pytorch_struct",
@@ -213,6 +208,13 @@ SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "hf_GPT2": 2,
     "pytorch_unet": 2,
+}
+
+FORCE_AMP_FOR_FP16_BF16_MODELS = {
+    "doctr_det_predictor",
+    "doctr_reco_predictor",
+    "Super_SloMo",
+    "tts_angular",
 }
 
 
@@ -255,8 +257,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return TRT_NOT_YET_WORKING
 
     @property
-    def failing_dynamic_shape_models(self):
-        return DYNAMIC_SHAPES_NOT_YET_WORKING
+    def force_amp_for_fp16_bf16_models(self):
+        return FORCE_AMP_FOR_FP16_BF16_MODELS
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):
