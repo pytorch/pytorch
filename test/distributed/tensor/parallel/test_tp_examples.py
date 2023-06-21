@@ -11,7 +11,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
     TensorParallelMultiheadAttention,
 )
-from torch.distributed.tensor.parallel.recompute_wrapper import tp_checkpoint_wrapper
+from torch.distributed.tensor.parallel.input_reshard import input_reshard_wrapper
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -41,6 +41,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         for name, param_m2 in m2.named_parameters():
             if self.rank != 0 and name in rank0_only_params:
                 continue
+            if name not in named_parameters:
+                print(name)
             self.assertTrue(name in named_parameters)
             param_m1 = named_parameters[name]
             if check_grad:
@@ -74,8 +76,17 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         parallel_style = SequenceParallel() if is_seq_parallel else PairwiseParallel()
         model_tp = parallelize_module(model_tp, device_mesh, parallel_style)
         if recompute_activation:
-            model_tp = tp_checkpoint_wrapper(
-                model_tp, device_mesh, None if is_seq_parallel else 0
+            from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+                checkpoint_wrapper,
+                CheckpointImpl,
+            )
+
+            model_tp = input_reshard_wrapper(
+                checkpoint_wrapper(
+                    model_tp, checkpoint_impl=CheckpointImpl.NO_REENTRANT
+                ),
+                device_mesh,
+                None if is_seq_parallel else 0,
             )
         optim = torch.optim.SGD(model.parameters(), lr=LR)
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)

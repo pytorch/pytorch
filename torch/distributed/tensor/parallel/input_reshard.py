@@ -1,23 +1,19 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 from functools import partial
-from typing import Any, Optional
+from typing import Any, Iterator, Optional, Tuple
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    CheckpointImpl,
-    CheckpointWrapper,
-)
 
 __all__ = [
-    "tp_checkpoint_wrapper",
+    "input_reshard_wrapper",
 ]
 
 
-class TPCheckpointWrapper(CheckpointWrapper):
+class InputReshard(torch.nn.Module):
     """
-    An nn.Module that wraps another nn.Module with checkpointing.
+    An nn.Module that wraps another nn.Module with input resharding.
     This is a wrapper created dedicated for Tensor Parallel so that
     replicate input can be sharded after forward to save memory.
     To shard and restore the input, we use
@@ -30,9 +26,22 @@ class TPCheckpointWrapper(CheckpointWrapper):
         tp_device_mesh: DeviceMesh,
         input_reshard_dim: Optional[int] = None,
     ):
-        super().__init__(mod, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
+        super(InputReshard, self).__init__()
+        self.inner_module = mod
         self.mesh = tp_device_mesh
         self.input_reshard_dim = input_reshard_dim
+
+    def named_parameters(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """
+        Overrides :meth:`named_parameters()` to intercept parameter names and
+        remove all occurrences of ``module.``.
+        """
+        for param_name, param in self.inner_module.named_parameters(*args, **kwargs):
+            yield param_name, param
 
     def forward(self, *args, **kwargs):
         cx = (
@@ -44,16 +53,16 @@ class TPCheckpointWrapper(CheckpointWrapper):
             else contextlib.suppress()
         )
         with cx:  # type: ignore[attr-defined]
-            return super().forward(*args, **kwargs)
+            return self.inner_module.forward(*args, **kwargs)
 
 
-def tp_checkpoint_wrapper(
+def input_reshard_wrapper(
     module: torch.nn.Module,
     tp_device_mesh: DeviceMesh,
     input_reshard_dim: Optional[int] = None,
 ) -> torch.nn.Module:
     """
-    Wrap an nn.Module with activation checkpointing so that we can shard
+    Wrap an nn.Module with input resharding so that we can shard
     per the given `tp_device_mesh` and `input_reshard_dim` and restore the
     input back when recomputing the activations in the backward. The reason
     why we can do this is that for Tensor Parallel(TP), the input are same
@@ -73,7 +82,7 @@ def tp_checkpoint_wrapper(
     Return:
         A :class:`nn.Module` object wrapped with TP activation checkpointing.
     """
-    return TPCheckpointWrapper(module, tp_device_mesh, input_reshard_dim)
+    return InputReshard(module, tp_device_mesh, input_reshard_dim)
 
 
 def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> Any:
