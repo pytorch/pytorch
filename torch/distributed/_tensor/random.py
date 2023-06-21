@@ -80,7 +80,9 @@ class CudaRNGStateTracker:
     # check if the current device is a CUDA device
     def __init__(self):
         if not torch.cuda.is_available():
-            raise RuntimeError(f"{self.__class__.__name__} instantiation requires the presence of CUDA device")
+            raise RuntimeError(
+                f"{self.__class__.__name__} instantiation requires the presence of CUDA device"
+            )
 
         self._states = {}
         self._devices = [torch.cuda.current_device()]
@@ -114,14 +116,9 @@ class CudaRNGStateTracker:
         return int(seed_tensor.item())
 
     def set_seed(self, name: str, seed: int) -> None:
-        if name not in self.rng_states:
-            with torch.random.fork_rng(self._devices):
-                torch.cuda.manual_seed(seed)
-                self.rng_states[name] = torch.cuda.get_rng_state()
-        else:
-            seed_tensor = torch.tensor([seed]).view(torch.uint8)
-            offset = (self.rng_states[name])[8:]
-            self.rng_states[name] = torch.cat([seed_tensor, offset])
+        seed_tensor = torch.tensor([seed]).view(torch.uint8)
+        offset_tensor = torch.tensor([0]).view(torch.uint8)
+        self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def get_offset(self, name: str) -> int:
         if name not in self.rng_states:
@@ -138,9 +135,9 @@ class CudaRNGStateTracker:
                 f"{self.__class__.__name__} does not have random state for {name}"
             )
 
-        seed = (self.rng_states[name])[0:8]
+        seed_tensor = (self.rng_states[name])[0:8]
         offset_tensor = torch.tensor([offset]).view(torch.uint8)
-        self.rng_states[name] = torch.cat([seed, offset_tensor])
+        self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _distribute_region(self, spec: DTensorSpec):
         pass
@@ -166,15 +163,18 @@ class OffsetBasedRNGTracker(CudaRNGStateTracker):
                 "before entering into a distribute region!"
             )
 
-        old_offset = self.get_offset("parallel-rng")
-        self._set_pre_op_offset(spec)
-        with torch.random.fork_rng(self._devices):
-            torch.cuda.set_rng_state(self.rng_states["parallel-rng"])
-            try:
-                yield  # execute the region code
-            finally:
-                # update offset to synchronize among ranks
-                self._set_post_op_offset(spec, old_offset)
+        if self.distribute_region_enabled:
+            old_offset = self.get_offset("parallel-rng")
+            self._set_pre_op_offset(spec)
+            with torch.random.fork_rng(self._devices):
+                torch.cuda.set_rng_state(self.rng_states["parallel-rng"])
+                try:
+                    yield  # execute the region code
+                finally:
+                    # update offset to synchronize among ranks
+                    self._set_post_op_offset(spec, old_offset)
+        else:
+            yield
 
     def _set_pre_op_offset(self, spec: DTensorSpec) -> None:
         """Set the starting RNG offset for current device's local shard before actual
@@ -264,7 +264,7 @@ class OffsetBasedRNGTracker(CudaRNGStateTracker):
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
-        self.set_seed("parallel-rng", current_offset + offset_incr)
+        self.set_offset("parallel-rng", current_offset + offset_incr)
 
     def _set_post_op_offset(self, spec: DTensorSpec, old_offset: int) -> None:
         """Sets the RNG to a synchronized state after running the local random op. Every
@@ -326,12 +326,15 @@ class TensorParallelRNGTracker(CudaRNGStateTracker):
                 "before entering into a distribute region!"
             )
 
-        with torch.random.fork_rng(self._devices):
-            torch.cuda.set_rng_state(self.rng_states["tensor-parallel-rng"])
-            try:
-                yield
-            finally:
-                self.rng_states["tensor-parallel-rng"] = torch.cuda.get_rng_state()
+        if self.distribute_region_enabled:
+            with torch.random.fork_rng(self._devices):
+                torch.cuda.set_rng_state(self.rng_states["tensor-parallel-rng"])
+                try:
+                    yield
+                finally:
+                    self.rng_states["tensor-parallel-rng"] = torch.cuda.get_rng_state()
+        else:
+            yield
 
 
 _rng_tracker: Optional[CudaRNGStateTracker] = None
