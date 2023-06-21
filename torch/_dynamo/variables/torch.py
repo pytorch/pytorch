@@ -903,7 +903,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             if self.source.guard_source().is_fsdp_module():
                 src = FSDPNNModuleSource(GetItemSource(self.source, next_name))
             else:
-                assert self.source.guard_source().is_nn_module()
                 src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
             tx.output.register_attr_or_module(gm, next_name, source=src)
@@ -1231,7 +1230,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             example_value = deepcopy_to_fake_tensor(example_res, tx.fake_mode)
 
             p_args = (lowered_node,) + p_args
-        elif self.value.__name__ in ("wrap", "wrap_activation_checkpoint"):
+        elif self.value.__name__ in (
+            "wrap",
+            "wrap_activation_checkpoint",
+            "tag_activation_checkpoint",
+        ):
             # See NOTE [HigherOrderOperator tracing design] for more details
             checkpoint = tx.copy_graphstate()
             graph_checkpoint = tx.output.graph

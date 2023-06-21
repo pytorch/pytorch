@@ -47,7 +47,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     """
 
     def __init__(self):
-        super().__init__("wrap_activation_checkpoint")
+        super().__init__("tag_activation_checkpoint")
 
     def tag_nodes(self, gmod):
         # TODO - This needs major investigation. Currently, we are tagging all

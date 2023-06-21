@@ -19,6 +19,7 @@ from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
 from torch._inductor.utils import has_triton
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, lambda_auto_wrap_policy
+from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import (
@@ -89,6 +90,13 @@ def get_toy_model_for_activation_checkpointing(device):
     m.apply(init_weights)
     inputs = torch.rand(100, 100).to(device)
     return m, inputs
+
+
+def find_first_node(gm, func):
+    for node in gm.graph.nodes:
+        if node.target is func:
+            return node
+    return None
 
 
 def get_custom_model(device):
@@ -351,9 +359,14 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             wrap_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_inner)
             model = apply_fsdp(model, wrap_policy, is_inner)
             correct_outputs = model(inputs)
-            opt_model = torch.compile(model)
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+            opt_model = torch.compile(model, backend=cnt)
             outputs = opt_model(inputs)
             self.assertTrue(same(correct_outputs, outputs))
+            # Each FSDP module is a separate graph
+            self.assertEqual(cnt.frame_count, 2)
+            self.assertTrue(find_first_node(cnt.graphs[0], tag_activation_checkpoint) is not None)
+
 
 
     @import_transformers_or_skip()
