@@ -53,9 +53,7 @@ struct CacheNode {
       // caller's key is in temporary memory, must copy it
       CacheKeyBuffer buffer(key.key, key.key_size);
       CacheKey key_with_storage(key.node_type, buffer.data, key.key_size);
-      it = next.emplace(
-                   key_with_storage, std::move(std::make_unique<CacheNode>()))
-               .first;
+      it = next.emplace(key_with_storage, std::make_unique<CacheNode>()).first;
       key_storage.emplace_back(std::move(buffer));
     }
     return it->second.get();
@@ -143,7 +141,7 @@ variable_list compiled_autograd(
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   worklist.reserve(dependencies.size());
   std::unordered_map<Node*, NodeCall> node_inputs;
-  node_inputs.emplace(graph_root.get(), std::move(NodeCall(graph_root)));
+  node_inputs.emplace(graph_root.get(), NodeCall(graph_root));
   std::vector<NodeCall> calls;
   calls.reserve(dependencies.size() + 8);
   AutogradCompilerCall compiler_call(accumulate_grad);
@@ -155,7 +153,7 @@ variable_list compiled_autograd(
       inp = node_inputs
                 .emplace(
                     output_edges[i].function.get(),
-                    std::move(NodeCall(output_edges[i].function)))
+                    NodeCall(output_edges[i].function))
                 .first;
     }
     inp->second.mark_output(output_edges[i].input_nr, i);
@@ -192,9 +190,7 @@ variable_list compiled_autograd(
 
       auto inp = node_inputs.find(edge_node.get());
       if (inp == node_inputs.end()) {
-        inp =
-            node_inputs.emplace(edge_node.get(), std::move(NodeCall(edge_node)))
-                .first;
+        inp = node_inputs.emplace(edge_node.get(), NodeCall(edge_node)).first;
       }
       NodeCall& input_buffer = inp->second;
       if (!input_buffer[input_nr].is_set()) {
