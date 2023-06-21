@@ -133,11 +133,78 @@ def logcumsumexp(self, dim):
     return torch.empty_like(self).contiguous()
 
 
+# Stride-related code from _exec_fft in aten/src/ATen/native/cuda/SpectralOps.cpp
+def _exec_fft(out, self, out_sizes, dim, forward):
+    ndim = self.ndim
+    signal_ndim = len(dim)
+    batch_dims = ndim - signal_ndim
+
+    # Permute dimensions so batch dimensions come first, and in stride order
+    dim_permute = list(range(ndim))
+
+    is_transformed_dim = [False for _ in range(ndim)]
+    for d in dim:
+        is_transformed_dim[d] = True
+
+    # std::partition
+    left, right = [], []
+    for d in dim_permute:
+        if not is_transformed_dim[d]:
+            left.append(d)
+        else:
+            right.append(d)
+    dim_permute = left + right
+    batch_end = len(left)
+
+    self_strides = self.stride()
+    tmp = dim_permute[:batch_end]
+    tmp.sort(key=lambda x: self_strides[x], reverse=True)
+    dim_permute = tmp + dim_permute[batch_end:]
+    input = self.permute(dim_permute)
+
+    # Collapse batch dimensions into a single dimension
+    batched_sizes = [-1] + list(input.shape[batch_dims:])
+    input = input.reshape(batched_sizes)
+
+    batch_size = input.size(0)
+    batched_sizes[0] = batch_size
+    batched_out_sizes = batched_sizes
+    for i in range(len(dim)):
+        batched_out_sizes[i + 1] = out_sizes[dim[i]]
+    out = out.reshape(batched_out_sizes)
+
+    # Reshaping to original batch shape and inverting the dimension permutation
+    out_strides = [0 for _ in range(ndim)]
+    batch_numel = 1
+    i = batch_dims - 1
+    while i >= 0:
+        out_strides[dim_permute[i]] = batch_numel * out.stride(0)
+        batch_numel *= out_sizes[dim_permute[i]]
+        i -= 1
+    for i in range(batch_dims, ndim):
+        out_strides[dim_permute[i]] = out.stride(1 + (i - batch_dims))
+    return out.as_strided(out_sizes, out_strides, out.storage_offset())
+
+
+# See _fft_c2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
+# and _fft_c2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
 @register_meta([aten._fft_c2c.default, aten._fft_c2c.out])
 @out_wrapper()
 def meta_fft_c2c(self, dim, normalization, forward):
     assert self.dtype.is_complex
-    return self.new_empty(self.size())
+
+    out_sizes = self.shape
+    output = self.new_empty(out_sizes)
+
+    if not dim:
+        return output
+
+    sorted_dims = dim[:]
+    self_strides = self.stride()
+    sorted_dims.sort(key=lambda x: self_strides[x], reverse=True)
+    output = _exec_fft(output, self, out_sizes, sorted_dims, forward)
+
+    return output
 
 
 @register_meta([aten._fft_r2c.default, aten._fft_r2c.out])
