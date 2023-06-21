@@ -21,9 +21,9 @@ from typing import (
 import torch
 import torch._ops
 import torch.fx
-from torch.onnx import _constants, _type_utils
+from torch.onnx import _constants
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import diagnostics, registration
+from torch.onnx._internal.fx import _type_utils, diagnostics, registration
 
 
 if TYPE_CHECKING:

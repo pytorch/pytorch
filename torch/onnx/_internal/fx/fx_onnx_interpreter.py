@@ -14,9 +14,13 @@ from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
 
 import torch
 from torch._subclasses import fake_tensor
-from torch.onnx import _type_utils
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher, op_validation
+from torch.onnx._internal.fx import (
+    _type_utils,
+    diagnostics,
+    onnxfunction_dispatcher,
+    op_validation,
+)
 from torch.utils import _pytree
 
 

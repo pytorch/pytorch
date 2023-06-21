@@ -11,9 +11,9 @@ from onnxscript import evaluator  # type: ignore[import]
 
 import torch
 import torch.fx
-from torch.onnx import _constants, _type_utils
+from torch.onnx import _constants
 from torch.onnx._internal import _beartype, onnx_proto_utils
-from torch.onnx._internal.fx import diagnostics, fx_onnx_interpreter
+from torch.onnx._internal.fx import _type_utils, diagnostics, fx_onnx_interpreter
 from torch.utils import _pytree
 
 
