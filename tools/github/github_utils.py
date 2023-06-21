@@ -74,6 +74,7 @@ def gh_fetch_json_dict(
 ) -> Dict[str, Any]:
     return cast(Dict[str, Any], _gh_fetch_json_any(url, params, data))
 
+
 def gh_fetch_commit(org: str, repo: str, sha: str) -> Dict[str, Any]:
     return gh_fetch_json_dict(
         f"https://api.github.com/repos/{org}/{repo}/commits/{sha}"
