@@ -100,7 +100,7 @@ class FuncTorchTLS : public FuncTorchTLSBase {
   }
 
   void checkSupportsCppAutogradFunction() const override {
-    TORCH_INTERNAL_ASSERT(dynamicLayerStack.empty(),
+    TORCH_CHECK(dynamicLayerStack.empty(),
         "functorch functions (vmap, grad, vjp, etc.) incorrectly used with ",
         "C++ Function. ",
         "This is not expected, please file a bug.");
