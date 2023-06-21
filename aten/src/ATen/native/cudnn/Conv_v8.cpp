@@ -31,8 +31,6 @@ C10_DIAGNOSTIC_POP()
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <mutex>
-#include <optional>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
