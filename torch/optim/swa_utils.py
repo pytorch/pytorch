@@ -262,7 +262,7 @@ def update_bn(loader, model, device=None):
     model.train()
     for module in momenta.keys():
         module.momentum = None
-        
+
     for input in loader:
         if isinstance(input, (list, tuple)):
             input = input[0]
