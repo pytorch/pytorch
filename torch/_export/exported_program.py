@@ -86,7 +86,7 @@ class ExportGraphSignature:
 
         if self.assertion_dep_token_index is not None:
             assert (
-                len(self.user_inputs) + len(self.buffers_to_mutate)
+                len(self.user_outputs) + len(self.buffers_to_mutate)
                 == self.assertion_dep_token_index
             )
 
