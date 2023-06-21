@@ -1,8 +1,15 @@
-from typing import List, Any
-import rockset # type: ignore[import]
 import os
+from typing import Any, List, Union
 
-def run_rockset_query(collection_name: str, lambda_function_name: str, version: str, query_parameters: List[Any] = []) -> Any:
+import rockset  # type: ignore[import]
+
+
+def run_rockset_query(
+    collection_name: str,
+    lambda_function_name: str,
+    version: str,
+    query_parameters: Union[List[Any], None] = None,
+) -> Any:
     rs = rockset.RocksetClient(
         host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )

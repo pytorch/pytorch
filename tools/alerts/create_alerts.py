@@ -5,11 +5,9 @@ import json
 import os
 import re
 from collections import defaultdict
-from datetime import datetime, time
+from datetime import datetime, time, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Set, Tuple
-
-import pytz
 
 import requests
 from setuptools import distutils  # type: ignore[import]
@@ -300,11 +298,9 @@ def generate_viable_strict_lag_alert() -> List[Dict[str, Any]]:
         return api_response["results"][0]["strict_lag_sec"]
 
     def during_weekend() -> bool:
-        # Define the timezone
-        pst = pytz.timezone("US/Pacific")
-
-        # Get the current datetime
-        now = datetime.now(pst)
+        # Get the pst datetime
+        PST_OFFSET = -8
+        now = datetime.now(timezone(offset=timedelta(hours=PST_OFFSET)))
 
         # Define the time interval
         start_time_fri = time(17, 0, 0)  # 5:00:00 PM
