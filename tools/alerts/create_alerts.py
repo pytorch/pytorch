@@ -338,7 +338,9 @@ def generate_viable_strict_lag_alert() -> List[Dict[str, Any]]:
             "AlertObject": "Viable Strict Lag",
             "OncallTeams": [],
             "OncallIndividuals": [],
-            "Flags": [above_or_below, {"lag": lag}],
+            "Flags": [above_or_below],
+            "measurement_name": "Viable Strict Lag",
+            "measurement_value": lag,
         }
     ]
     return entry
