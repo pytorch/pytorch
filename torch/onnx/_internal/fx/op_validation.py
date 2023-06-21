@@ -13,7 +13,11 @@ import torch
 import torch.fx
 from torch.onnx import _constants
 from torch.onnx._internal import _beartype, onnx_proto_utils
-from torch.onnx._internal.fx import _type_utils, diagnostics, fx_onnx_interpreter
+from torch.onnx._internal.fx import (
+    diagnostics,
+    fx_onnx_interpreter,
+    type_utils as fx_type_utils,
+)
 from torch.utils import _pytree
 
 
@@ -201,10 +205,10 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
 
 @_beartype.beartype
 def _fx_args_to_torch_args(
-    complete_args: List[_type_utils.Argument],
-) -> List[_type_utils.Argument]:
+    complete_args: List[fx_type_utils.Argument],
+) -> List[fx_type_utils.Argument]:
     """Recursively convert fx args to torch args"""
-    wrapped_args: List[_type_utils.Argument] = []
+    wrapped_args: List[fx_type_utils.Argument] = []
     for arg in complete_args:
         if isinstance(arg, torch.fx.Node):
             # NOTE(titaiwang): The arg type here should align to the type handled in
@@ -245,12 +249,12 @@ def _fx_args_to_torch_args(
 
 @_beartype.beartype
 def wrap_fx_args_as_torch_args(
-    complete_args: List[_type_utils.Argument],
-    complete_kwargs: Dict[str, _type_utils.Argument],
+    complete_args: List[fx_type_utils.Argument],
+    complete_kwargs: Dict[str, fx_type_utils.Argument],
 ) -> Tuple[tuple, dict]:
     """Prepare torch format args and kwargs for op-level validation by using fake tensor to create real tensor to feed in ops"""
 
     # NOTE: This function only supports FakeTensor with concrete shapes
-    torch_args: List[_type_utils.Argument] = _fx_args_to_torch_args(complete_args)
+    torch_args: List[fx_type_utils.Argument] = _fx_args_to_torch_args(complete_args)
     torch_kwargs = complete_kwargs
     return tuple(torch_args), torch_kwargs
