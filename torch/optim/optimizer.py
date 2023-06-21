@@ -36,6 +36,9 @@ def _use_grad_for_differentiable(func):
             torch.set_grad_enabled(self.defaults['differentiable'])
             ret = func(self, *args, **kwargs)
         finally:
+            # Graph break to ensure AOT correctly runs this
+            # as an inference graph
+            torch._dynamo.graph_break()
             torch.set_grad_enabled(prev_grad)
         return ret
     functools.update_wrapper(_use_grad, func)
