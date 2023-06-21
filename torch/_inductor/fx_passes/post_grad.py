@@ -66,7 +66,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
 
 @init_once_fakemode
 def lazy_init():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
@@ -143,35 +143,32 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     CallFunction(
         aten.cumsum.default,
         CallFunction(
-            prims.convert_element_type.default,
-            CallFunction(
-                torch.ops.aten.full.default,
-                [Arg(), Arg()],
-                1,
-                dtype=Ignored(),
-                layout=Ignored(),
-                device=KeywordArg("device"),
-                pin_memory=False,
-                _users=MULTIPLE,
-            ),
-            KeywordArg("dtype"),
+            torch.ops.aten.full.default,
+            [Arg(), Arg()],
+            1,
+            dtype=KeywordArg("dtype"),
+            layout=Ignored(),
+            device=KeywordArg("device"),
+            pin_memory=False,
             _users=MULTIPLE,
         ),
         1,
+        _users=MULTIPLE,
     ),
     pass_dict=pass_patterns[1],
 )
 def pointless_cumsum_replacement(match: Match, size0, size1, device, dtype):
     """Based on a pattern in OPTForCausalLM"""
 
-    def repl():
+    def repl(size0, size1):
         return torch.arange(1, size1 + 1, device=device, dtype=dtype).expand(
             size0, size1
         )
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    match.replace_by_example(repl, [])
+    with V.fake_mode:
+        match.replace_by_example(repl, [size0, size1])
 
 
 def shape_of_mm(a, b):
