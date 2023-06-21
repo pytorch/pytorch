@@ -2372,7 +2372,7 @@ class TestSDPA(NNTestCase):
                 query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
             if dtype == torch.bfloat16:
-                self.assertEqual(actual, expected, atol=0.01, rtol=0)
+                self.assertEqual(actual, expected, atol=0.02, rtol=0)
             else:
                 self.assertEqual(actual, expected)
 

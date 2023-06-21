@@ -847,6 +847,7 @@ def define_buck_targets(
             ("aten/src", "ATen/native/quantized/*.h"),
             ("aten/src", "ATen/native/quantized/cpu/*.h"),
             ("aten/src", "ATen/native/transformers/*.h"),
+            ("aten/src", "ATen/native/transformers/cpu/*.h"),
             ("aten/src", "ATen/native/ufunc/*.h"),
             ("aten/src", "ATen/native/utils/*.h"),
             ("aten/src", "ATen/native/vulkan/ops/*.h"),

@@ -616,6 +616,7 @@ Tensor scaled_dot_product_attention(
   if (query_.device().type() == DeviceType::CPU) {
     choice_int = _fused_sdp_choice_cpp(
         query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+    choice_int = 0;
   } else if (query_.device().type() == DeviceType::CUDA){
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);

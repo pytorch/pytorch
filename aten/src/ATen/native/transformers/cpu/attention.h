@@ -67,5 +67,22 @@ _scaled_dot_product_flash_attention_cpu(
     bool return_debug_mask,
     float scale);
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attention_backward_cpu(
+    const at::Tensor& grad_out_,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& out,
+    const at::Tensor& logsumexp,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
+    c10::optional<double> scale);
+
 } // namespace native
 } // namespace at
