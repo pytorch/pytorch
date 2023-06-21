@@ -22,7 +22,11 @@ import torch
 import torch._ops
 import torch.fx
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import _type_utils, diagnostics, registration
+from torch.onnx._internal.fx import (
+    diagnostics,
+    registration,
+    type_utils as fx_type_utils,
+)
 
 
 if TYPE_CHECKING:
@@ -85,7 +89,7 @@ class OnnxFunctionDispatcher:
         self,
         node: torch.fx.Node,
         onnx_args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
-        onnx_kwargs: Dict[str, _type_utils.Argument],
+        onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]:
         """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
@@ -125,14 +129,12 @@ class OnnxFunctionDispatcher:
         all_functions: Set[registration.SymbolicFunction],
         custom_functions: Optional[Set[registration.SymbolicFunction]],
         onnx_args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
-        onnx_kwargs: Dict[str, _type_utils.Argument],
+        onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
         """Find the perfect/nearest matched OnnxFunction for the given FX node, arguments, and keyword arguments."""
         # TODO(justinchuby): Cache the OpSchemaWrapper so we don't need to run the init logic everytime
-        overload_match_ranking: Dict[
-            Union[onnxscript.OnnxFunction, onnxscript.TracedOnnxFunction], int
-        ] = {}
+        overload_match_ranking: Dict[registration.SymbolicFunction, int] = {}
 
         # If there are custom functions, we will try to find the perfect match first
         if custom_functions is not None:
@@ -152,7 +154,7 @@ class OnnxFunctionDispatcher:
                 # If the perfect match is found, return the function
                 return overload_func
             # Record the match score for the nearest match if it's not the perfect match
-            overload_match_ranking[overload_func] = function_opschema.match_score
+            overload_match_ranking[symbolic_function] = function_opschema.match_score
 
         # TODO(titaiwang): Change inflight_diagnostic to a new rule. Do we need to handle
         # the special case where the same scores happended?
@@ -169,7 +171,13 @@ class OnnxFunctionDispatcher:
             unsupported_fx_node=node,
         )
         diagnostic_context.log(diagnostic)
-        return max(overload_match_ranking, key=overload_match_ranking.get)  # type: ignore[arg-type]
+        # Tie breaker: if there are multiple nearest matches, we will choose the one
+        # that is custom first
+        return sorted(
+            overload_match_ranking,
+            key=lambda k: (overload_match_ranking[k], k.is_custom),
+            reverse=True,
+        )
 
     @_beartype.beartype
     def get_aten_name(
@@ -411,7 +419,7 @@ class _OpSchemaWrapper:
     def perfect_match_inputs(
         self,
         args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
-        kwargs: Dict[str, _type_utils.Argument],
+        kwargs: Dict[str, fx_type_utils.Argument],
     ) -> bool:
         """Check if the inputs perfectly match the OpSchema requirements.
 
@@ -453,7 +461,7 @@ class _OpSchemaWrapper:
     def _record_matching_score(
         self,
         args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
-        kwargs: Dict[str, _type_utils.Argument],
+        kwargs: Dict[str, fx_type_utils.Argument],
     ):
         """Calculate the inputs matching score of the OpSchema requirements to find the nearest match.
 
@@ -495,13 +503,9 @@ def _find_onnx_data_type(
 ) -> Set[str]:
     """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
     if isinstance(torch_input, _TensorLike) and torch_input.dtype is not None:
-        return _type_utils.TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[
-            torch_input.dtype
-        ]
+        return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(torch_input.dtype)
     if isinstance(torch_input, (int, float, bool, str)):
-        return _type_utils.TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[
-            type(torch_input)
-        ]
+        return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(type(torch_input))
     if isinstance(torch_input, (list, tuple)) and torch_input:  # [Tensor, Tensor]
         set_dtype = _find_onnx_data_type(torch_input[0])
         if any(isinstance(input, _TensorLike) for input in torch_input):
