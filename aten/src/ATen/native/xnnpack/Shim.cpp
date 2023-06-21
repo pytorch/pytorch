@@ -1,4 +1,4 @@
-#ifndef USE_XNNPACK
+#ifdef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/core/Tensor.h>
