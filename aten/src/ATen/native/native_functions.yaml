@@ -170,10 +170,6 @@
     CPU: _assert_async_cpu
     CUDA: _assert_async_cuda
 
-- func: _functional_assert_async(Tensor self, Tensor dep_token) -> Tensor
-  dispatch:
-    CPU: _functional_assert_async_cpu
-
 - func: _assert_async.msg(Tensor self, str assert_msg) -> ()
   dispatch:
     CPU: _assert_async_msg_cpu

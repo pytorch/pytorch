@@ -313,9 +313,14 @@ def assert_async_meta(val, assert_msg):
 
 @register_meta(aten.make_dep_token.default)
 def make_dep_token(
-    *, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+    memory_format=None,
 ):
-    return torch.empty(0)
+    return torch.empty([])
 
 
 @register_meta(aten.sym_constrain_range.default)
@@ -326,11 +331,6 @@ def sym_constrain_range(size, min, max):
 @register_meta(aten.functional_sym_constrain_range.default)
 def functional_sym_constrain_range(size, min, max, dep_token):
     constrain_range(size, min=min, max=max)
-    return dep_token
-
-
-@register_meta(aten._functional_assert_async.default)
-def functional_assert_async(val, dep_token):
     return dep_token
 
 
