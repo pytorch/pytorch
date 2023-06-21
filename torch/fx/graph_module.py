@@ -29,7 +29,7 @@ class _EvalCacheLoader:
         self.eval_cache = {}
         self.next_id = 0
 
-    def cache(self, src: str, globals: Dict[str, Any]):
+    def cache(self, src: str, globals: Dict[str, Any], co_fields=None):
         """Store the source in a private cache, and add a lazy entry in linecache
         that allows the source to be retrieved by 'filename'.
 
@@ -42,7 +42,7 @@ class _EvalCacheLoader:
         """
 
         key = self._get_key()
-        if co_fields := globals.get('__torch_fx_original_co_fields__'):
+        if co_fields:
             key += f" from {co_fields['co_filename']}:{co_fields['co_firstlineno']} in {co_fields['co_name']}"
         self.eval_cache[key] = src
 
@@ -72,15 +72,15 @@ class _EvalCacheLoader:
 _loader = _EvalCacheLoader()
 
 
-def _exec_with_source(src: str, globals: Dict[str, Any]):
-    key = _loader.cache(src, globals)
+def _exec_with_source(src: str, globals: Dict[str, Any], co_fields=None):
+    key = _loader.cache(src, globals, co_fields)
     exec(compile(src, key, 'exec'), globals)
 
 
-def _forward_from_src(src: str, globals: Dict[str, Any]):
+def _forward_from_src(src: str, globals: Dict[str, Any], co_fields=None):
     # avoid mutating the passed in dict
     globals_copy = globals.copy()
-    _exec_with_source(src, globals_copy)
+    _exec_with_source(src, globals_copy, co_fields)
     forward_fn = globals_copy['forward']
     del globals_copy['forward']
     return forward_fn
@@ -647,7 +647,7 @@ class {module_name}(torch.nn.Module):
         self._code = python_code.src
 
         cls = type(self)
-        cls.forward = _forward_from_src(self._code, python_code.globals)
+        cls.forward = _forward_from_src(self._code, python_code.globals, self._graph._co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation
         # to wrap. If it does, save it in order to have wrapped_call invoke it.
