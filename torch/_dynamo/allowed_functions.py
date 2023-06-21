@@ -192,10 +192,6 @@ def _allowed_function_ids():
 
                 if isinstance(obj, torch._ops.HigherOrderOperator):
                     continue
-                # We want to trace through `grad`
-                if obj is torch.func.grad:
-                    continue
-
                 if isinstance(obj, types.ModuleType):
                     if obj.__name__.startswith("torch.") and _is_allowed_module_prefix(
                         obj
