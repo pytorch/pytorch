@@ -194,7 +194,7 @@
   dispatch:
     CPU: functional_sym_constrain_range_cpu
 
-- func: make_dep_token(Tensor? dep_token) -> Tensor
+- func: make_dep_token(*, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
     CPU: make_dep_token_cpu
 
