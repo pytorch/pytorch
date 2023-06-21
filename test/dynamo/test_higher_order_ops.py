@@ -909,6 +909,8 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(actual, expected)
 
     def test_grad_freevar_tensor(self):
+        # NOTE: Captured variable is treated as side-effect since
+        #       PR https://github.com/pytorch/pytorch/pull/103386
         counters.clear()
         y = torch.randn(3, 3)
 
@@ -919,33 +921,14 @@ class GraphModule(torch.nn.Module):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
-
-        # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
-            return
-
-        expected = """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor, L_fn_closure_0_cell_contents : torch.Tensor):
-        l_x_ = L_x_
-        l_fn_closure_0_cell_contents = L_fn_closure_0_cell_contents
-
-        grad_body_0 = self.grad_body_0
-        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, l_fn_closure_0_cell_contents);  grad_proxy = l_x_ = l_fn_closure_0_cell_contents = None
-        contiguous = call.contiguous();  call = None
-        return (contiguous,)
-
-    class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_fn_closure_0_cell_contents):
-            sin = l_x_.sin();  l_x_ = None
-            add = sin + l_fn_closure_0_cell_contents;  sin = l_fn_closure_0_cell_contents = None
-            sum_1 = add.sum();  add = None
-            return sum_1
-"""
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+        expected = wrapper_fn(x)
+        actual = torch.compile(wrapper_fn, backend="aot_eager")(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"NYI - torch.func.grad(f) where there are side effects in f": 2},
+        )
+        self.assertEqual(actual, expected)
 
     def test_grad_freevar_python_scalar(self):
         counters.clear()
