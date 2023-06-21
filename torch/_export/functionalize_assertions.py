@@ -27,7 +27,7 @@ def _functionalize_side_effectful_ops(gm: torch.fx.GraphModule) -> torch.fx.Grap
     Will be transformed to:
     ```
     def f(x):
-        dep_token = torch.empty()
+        dep_token = make_dep_token(torch.empty(0))
         dep_token_2 = functional_sym_constrain_range(
             x.shape[0], min=1, max=3, dep_token=dep_token
         )
@@ -42,8 +42,10 @@ def _functionalize_side_effectful_ops(gm: torch.fx.GraphModule) -> torch.fx.Grap
     inputs_node = next(n for n in graph.nodes if n.op == "placeholder")
 
     with graph.inserting_after(inputs_node):
-        dep_token = graph.call_function(torch.empty, args=(0,))
-        dep_token.name = "dep_token"
+        empty_tensor = graph.call_function(torch.empty, args=(0,))
+        with graph.inserting_after(empty_tensor):
+            dep_token = graph.call_function(aten.make_dep_token, args=(empty_tensor,))
+            dep_token.name = "dep_token"
 
     non_functional_assertions = [
         n

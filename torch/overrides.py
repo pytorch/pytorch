@@ -159,6 +159,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.kaiser_window,
         torch.linspace,
         torch.logspace,
+        torch.make_dep_token,
         torch.mkldnn_adaptive_avg_pool2d,
         torch.mkldnn_convolution,
         torch.mkldnn_max_pool2d,
