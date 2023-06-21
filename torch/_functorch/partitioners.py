@@ -451,6 +451,9 @@ def reordering_to_mimic_autograd_engine(gm):
         if node in env:
             return env[node]
 
+        if node.op == "output":
+            return
+
         # Bias traversal towards the nodes that have higher depth - prioritizes
         # critical path first.
         for arg, _ in sort_depths(node.all_input_nodes, depths):

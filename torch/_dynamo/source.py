@@ -16,6 +16,8 @@ _GUARD_SOURCE_NN_MODULE = {
     GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
     GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
+    # Recheck why is code even reaching here
+    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
 }
 
 _GUARD_SOURCE_FSDP_MODULE = {

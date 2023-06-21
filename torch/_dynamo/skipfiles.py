@@ -105,8 +105,13 @@ SKIP_DIRS = [
     )
 ]
 
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, lambda_auto_wrap_policy
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
+    torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__,
+    # torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__,
     torch.set_rng_state.__code__.co_filename,
     torch._inductor.test_operators.__file__,
     torch.utils._content_store.__file__,

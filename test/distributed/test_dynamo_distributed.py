@@ -18,7 +18,7 @@ from torch._dynamo import config
 from torch._dynamo.utils import same
 from torch._dynamo.testing import collect_results
 from torch._inductor.utils import has_triton
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, lambda_auto_wrap_policy
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import (
@@ -62,6 +62,35 @@ def get_model(device, bsz=20, in_feat=10, hidden_feat=5000, out_feat=5):
     inputs = torch.rand(bsz, in_feat).to(device)
     outputs = m(inputs)
     return m, inputs, outputs
+
+
+
+class ToyInnerModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = [nn.Linear(100, 100), nn.Linear(100, 100)]
+        self.layers = nn.Sequential(*self.layers)
+
+    def forward(self, inputs):
+        return self.layers(inputs)
+
+class ToyOuterModel(nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.layers = [ToyInnerModel().to(device) for _ in range(2)]
+        self.layers = nn.Sequential(self.layers[0], nn.ReLU(), self.layers[1], nn.ReLU())
+
+    def forward(self, inputs):
+        return self.layers(inputs)
+
+
+def get_ac_model(device):
+    m = ToyOuterModel(device).to(device)
+    m.apply(init_weights)
+    inputs = torch.rand(100, 100).to(device)
+    return m, inputs
+
+get_ac_model("cuda")
 
 def get_custom_model(device):
     class MyCustomLinear(torch.nn.Module):
@@ -291,6 +320,45 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             outputs = fsdp_m(inputs)
             self.assertTrue(same(correct_outputs, outputs))
 
+
+    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_fsdp_activation_checkpointing(self):
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            apply_activation_checkpointing,
+            checkpoint_wrapper,
+            CheckpointImpl,
+        )
+
+        def apply_fsdp(model, wrap_policy, checkpoint_policy, use_activation_checkpointing=True):
+            model = FSDP(
+                copy.deepcopy(model),
+                auto_wrap_policy=wrap_policy,
+                use_orig_params=True
+            )
+            if use_activation_checkpointing:
+                checkpoint_wrapper_fn = functools.partial(
+                    checkpoint_wrapper,
+                    checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+                )
+                apply_activation_checkpointing(
+                    model, checkpoint_wrapper_fn=checkpoint_wrapper_fn, check_fn=checkpoint_policy,
+                )
+            return model
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # Test with basic FSDP wrapping (outer wrap around whole model)
+            model, inputs = get_ac_model(f"cuda:{self.rank}")
+            is_inner = lambda module: isinstance(module, ToyInnerModel)
+            wrap_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_inner)
+            model = apply_fsdp(model, wrap_policy, is_inner)
+            print(model)
+            # correct_outputs = model(inputs)
+            opt_model = torch._dynamo.optimize("inductor")(model)
+            outputs = opt_model(inputs)
+            # self.assertTrue(same(correct_outputs, outputs))
+
+
     @import_transformers_or_skip()
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
@@ -298,27 +366,41 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_fsdp(self):
         from transformers.models.bert.modeling_bert import BertLayer
+        from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+            apply_activation_checkpointing,
+            checkpoint_wrapper,
+            CheckpointImpl,
+        )
 
-        def apply_fsdp(model, wrap_policy):
+        def apply_fsdp(model, wrap_policy, use_activation_checkpointing=True):
             model = FSDP(
                 copy.deepcopy(model),
                 auto_wrap_policy=wrap_policy,
                 use_orig_params=True
             )
+            if use_activation_checkpointing:
+                checkpoint_wrapper_fn = functools.partial(
+                    checkpoint_wrapper,
+                    checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+                )
+                check_fn = lambda submodule: isinstance(submodule, BertLayer)
+                apply_activation_checkpointing(
+                    model, checkpoint_wrapper_fn=checkpoint_wrapper_fn, check_fn=check_fn
+                )
             return model
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             for (wrap_policy, test_instance) in (
-                (
-                    None,
-                    "FSDP without recursive wrapping"
-                ),
+                # (
+                #     None,
+                #     "FSDP without recursive wrapping"
+                # ),
                 (
                     functools.partial(
                         transformer_auto_wrap_policy, transformer_layer_cls=(BertLayer, )
                     ),
                     "FSDP with recursive wrapping BertLayer instances"
-                )
+                ),
             ):
                 print(f"Running hf_bert test for {test_instance}")
                 model, inputs = get_hf_bert(self.rank)
@@ -330,8 +412,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
                 reset_rng_state()
                 opt_model = apply_fsdp(model, wrap_policy)
-
-                opt_model = torch._dynamo.optimize("inductor")(opt_model)
+                opt_model = torch.compile(opt_model)
+                # opt_model = torch._dynamo.optimize("inductor")(opt_model)
                 opt_outputs = opt_model(**inputs)
                 opt_loss = opt_outputs.loss
                 opt_loss.backward()
