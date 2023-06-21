@@ -109,8 +109,6 @@ Reducer::Reducer(
       gradient_as_bucket_view_(gradient_as_bucket_view),
       local_used_map_reduced_(false),
       num_iterations_(0),
-      num_bwd_calls_(0),
-      first_autograd_hook_called_(false),
       num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
@@ -269,11 +267,11 @@ bool Reducer::dynamic_graph_find_unused() {
 }
 
 bool Reducer::static_graph_first_iteration() {
-  return static_graph_ && num_bwd_calls_ == 1;
+  return static_graph_ && num_iterations_ == 1;
 }
 
 bool Reducer::static_graph_after_first_iteration() {
-  return static_graph_ && num_bwd_calls_ > 1;
+  return static_graph_ && num_iterations_ > 1;
 }
 
 bool Reducer::ddp_graph_static() {
@@ -615,10 +613,6 @@ void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
 // This function is only to be called from the autograd thread.
 void Reducer::autograd_hook(size_t index) {
   std::lock_guard<std::mutex> lock(this->mutex_);
-  if (!first_autograd_hook_called_) {
-    first_autograd_hook_called_ = true;
-    num_bwd_calls_++;
-  }
   // Ignore if we don't expect to be called.
   // This may be the case if the user wants to accumulate gradients
   // for number of iterations before reducing them.
@@ -1526,8 +1520,6 @@ void Reducer::finalize_backward() {
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
-  // reset for the next iteration
-  first_autograd_hook_called_ = false;
 
   // No longer require call to finalize after this function returns.
   TORCH_INTERNAL_ASSERT(require_finalize_);
