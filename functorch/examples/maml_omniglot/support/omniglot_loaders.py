@@ -271,10 +271,10 @@ class OmniglotNShot:
 
             # [b, setsz, 1, 84, 84]
             x_spts = np.array(x_spts).astype(np.float32).reshape(self.batchsz, setsz, 1, self.resize, self.resize)
-            y_spts = np.array(y_spts).astype(np.int).reshape(self.batchsz, setsz)
+            y_spts = np.array(y_spts).astype(int).reshape(self.batchsz, setsz)
             # [b, qrysz, 1, 84, 84]
             x_qrys = np.array(x_qrys).astype(np.float32).reshape(self.batchsz, querysz, 1, self.resize, self.resize)
-            y_qrys = np.array(y_qrys).astype(np.int).reshape(self.batchsz, querysz)
+            y_qrys = np.array(y_qrys).astype(int).reshape(self.batchsz, querysz)
 
             x_spts, y_spts, x_qrys, y_qrys = [
                 torch.from_numpy(z).to(self.device) for z in

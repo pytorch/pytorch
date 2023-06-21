@@ -1312,7 +1312,7 @@ inline Vectorized<uint8_t> operator~(const Vectorized<uint8_t>& a) {
       const Vectorized<typex>& a,                                 \
       const Vectorized<typex>& min,                               \
       const Vectorized<typex>& max) {                             \
-    return clamp_min(clamp_max(a, max), min);                     \
+    return clamp_max(clamp_min(a, min), max);                     \
   }
 
 DEFINE_CLAMP_MAXMIN_FUNCS(int8_t)
@@ -2370,11 +2370,11 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
 
   vinner_data abs_() const {
     auto ret = abs_2_();
-    return Vectorized<T>{ret}.sqrt().data();
+    return Vectorized<T>{ret}.real().sqrt().data();
   }
 
   Vectorized<T> abs() const {
-    return Vectorized<T>{abs_()}.real();
+    return Vectorized<T>{abs_()};
   }
 
   Vectorized<T> exp() const {
