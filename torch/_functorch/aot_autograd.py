@@ -3194,6 +3194,7 @@ def create_aot_dispatcher_function(
             any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
             and torch.is_grad_enabled()
         )
+        breakpoint()
 
         with enable_python_dispatcher():
             # Patch set_rng_state as set_rng_state with fake tensors is
