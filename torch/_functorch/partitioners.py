@@ -783,8 +783,12 @@ def min_cut_rematerialization_partition(
             # modification appears to have made this heuristic a lot less critical
             # for performance.
             # TODO: Investigate why this hack helps.
-            if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
-                return True
+            # TODO: Investigate the interaction with compiler assisted
+            # activation checkpointing. Removing the heuristic improves both
+            # memory footprint and speedup.
+            if not graph_has_recomputable_ops:
+                if compiler == "inductor" and node.dist_from_bw > config.max_dist_from_bw:
+                    return True
             # If the output of an op is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
             input_tensors_size = sum(_size_of(i) for i in node.args if isinstance(i, fx.Node))
