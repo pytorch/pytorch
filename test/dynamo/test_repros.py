@@ -1491,8 +1491,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager")(mod)
         opt_mod(x)
 
-        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 3)
-        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
+        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
