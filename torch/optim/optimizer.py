@@ -30,7 +30,9 @@ required = _RequiredParameter()
 
 
 def _use_grad_for_differentiable(func):
+
     def _use_grad(self, *args, **kwargs):
+        import torch._dynamo
         prev_grad = torch.is_grad_enabled()
         try:
             # Note on graph break below:
