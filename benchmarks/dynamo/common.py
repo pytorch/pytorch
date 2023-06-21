@@ -31,8 +31,12 @@ from typing import (
     Optional,
     Tuple,
     Type,
+    TYPE_CHECKING,
 )
 from unittest.mock import MagicMock
+
+if TYPE_CHECKING:
+    from torch.onnx._internal.fx import diagnostics
 
 import numpy as np
 import pandas as pd
@@ -50,7 +54,6 @@ from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.onnx._internal.fx import diagnostics
 
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
@@ -1457,6 +1460,8 @@ class OnnxExportErrorParser(object):
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Generator[OnnxExportErrorRow, Any, Any]:
+        from torch.onnx._internal.fx import diagnostics
+
         for diagnostic in diagnostic_context.diagnostics:
             if diagnostic.level >= diagnostics.levels.ERROR:
                 yield OnnxExportErrorRow(
