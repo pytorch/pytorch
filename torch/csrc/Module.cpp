@@ -1739,8 +1739,8 @@ Call this whenever a new thread is created in order to propagate values from
   //   #include <type_traits>
   //   #include <string>
   //   static_assert(std::is_standard_layout_v<std::string>, "Oh noes");
-  // But if this conditon is not met, VC++ raises a very cryptic compilation
-  // errors See
+  // But if this condition is not met, VC++ raises a very cryptic compilation
+  // error. See
   // https://github.com/pytorch/pytorch/pull/100007#discussion_r1227116292 for
   // more detail
   struct _DeviceDtypeHasher {
