@@ -145,6 +145,7 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, ())
         assert compiled([])[0].device.type == "cuda"
 
+    @skipIfRoc
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):
@@ -187,6 +188,7 @@ class CudaReproTests(TestCase):
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
+    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(
         automatic_dynamic_shapes=True,
