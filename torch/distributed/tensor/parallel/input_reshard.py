@@ -70,7 +70,7 @@ def input_reshard_wrapper(
 
     Args:
         module (:class:`nn.Module`):
-            Module to be wrapped with checkpointing.
+            Module to be wrapped with input resharding.
         tp_device_mesh (:class:`DeviceMesh`):
             Object which describes the mesh topology
             of devices for Tensor Parallel.
@@ -80,7 +80,7 @@ def input_reshard_wrapper(
             Default: None
 
     Return:
-        A :class:`nn.Module` object wrapped with TP activation checkpointing.
+        A :class:`nn.Module` object wrapped with TP input resharding.
     """
     return InputReshard(module, tp_device_mesh, input_reshard_dim)
 
