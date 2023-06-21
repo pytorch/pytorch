@@ -1233,7 +1233,11 @@ class Scheduler:
 
     def free_buffers(self):
         """Free any buffers that are no longer needed"""
-        for name in sorted(self.buffer_names_to_free - V.graph.removed_buffers):
+        for name in sorted(
+            self.buffer_names_to_free
+            - V.graph.removed_buffers
+            - V.graph.wrapper_code.freed
+        ):
             if name in self.name_to_node:
                 node = self.name_to_node[name]
                 if node.can_free():
