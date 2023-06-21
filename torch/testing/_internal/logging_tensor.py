@@ -5,8 +5,7 @@ import logging
 import contextlib
 import itertools
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.weak import WeakIdRef
-import weakref
+from torch.utils.weak import WeakTensorKeyDictionary
 import functools
 from torch._C._profiler import gather_traceback, symbolize_tracebacks
 
@@ -94,9 +93,6 @@ class LoggingTensorMode(TorchDispatchMode):
 class LoggingTensorReentrant(LoggingTensor):
     context = torch.overrides.enable_reentrant_dispatch
 
-def _maybe_repr(a):
-    return a if isinstance(a, str) else repr(a)
-
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
 class LoggingTensorHandler(logging.Handler):
     def __init__(
@@ -106,25 +102,15 @@ class LoggingTensorHandler(logging.Handler):
         self.log_list = log_list
         self.use_shortid_for_all_tensors = use_shortid_for_all_tensors
         self.tracebacks_list = tracebacks_list
-        self.memo = {}
+        self.memo = WeakTensorKeyDictionary()
         self.next_id = 0
         self.with_type = with_type
 
     def _shortid(self, t: torch.Tensor) -> int:
-        o = WeakIdRef(t)
-        weak_self = weakref.ref(self)
-
-        def del_memo():
-            self = weak_self()
-            if self is None:
-                return
-            self.memo.pop(o, None)
-
-        weakref.finalize(t, del_memo)
-        if o not in self.memo:
-            self.memo[o] = self.next_id
+        if t not in self.memo:
+            self.memo[t] = self.next_id
             self.next_id += 1
-        return self.memo[o]
+        return self.memo[t]
 
     def _fmt(self, a: object, with_type: bool = False) -> str:
         cond_cls = torch.Tensor if self.use_shortid_for_all_tensors else LoggingTensor
@@ -140,8 +126,8 @@ class LoggingTensorHandler(logging.Handler):
     def emit(self, record):
         fmt_args = ", ".join(
             itertools.chain(
-                (_maybe_repr(tree_map(self._fmt, a)) for a in record.args[0]),
-                (f"{k}={_maybe_repr(tree_map(self._fmt, v))}" for k, v in record.args[1].items()),
+                (str(tree_map(self._fmt, a)) for a in record.args[0]),
+                (f"{k}={str(tree_map(self._fmt, v))}" for k, v in record.args[1].items()),
             )
         )
         fmt_rets = tree_map(functools.partial(self._fmt, with_type=True), record.args[2])
@@ -191,6 +177,6 @@ def capture_logs(is_mode=False, python_tb=False, script_tb=False, cpp_tb=False) 
         logger.removeHandler(handler)
 
 @contextlib.contextmanager
-def capture_logs_with_logging_tensor_mode():
-    with LoggingTensorMode(), capture_logs(True) as logs:
+def capture_logs_with_logging_tensor_mode(python_tb=False, script_tb=False, cpp_tb=False):
+    with LoggingTensorMode(), capture_logs(True, python_tb, script_tb, cpp_tb) as logs:
         yield logs
