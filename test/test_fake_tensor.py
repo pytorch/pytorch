@@ -571,6 +571,13 @@ class FakeTensorTest(TestCase):
         with patch.object(torch._functorch.config, "fake_tensor_allow_meta", False):
             self.assertRaises(Exception, run_meta)
 
+    def test_untyped_storage_size(self):
+        with FakeTensorMode():
+            x = torch.rand((4, 1))
+            storage_size = x.untyped_storage().size()
+            expected_size = x.element_size() * 4
+            self.assertEqual(storage_size, expected_size)
+
     def test_mixed_real_and_fake_inputs(self):
         class _TestPattern(torch.nn.Module):
             def __init__(self):
