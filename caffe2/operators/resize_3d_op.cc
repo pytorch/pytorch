@@ -9,7 +9,7 @@
 
 namespace caffe2 {
 
-void resizeNearest3DNCHW2x(
+static void resizeNearest3DNCHW2x(
     int batch_size,
     int num_channels,
     int temporal_scale,

@@ -15,24 +15,24 @@ using namespace vec;
 #define AT_DISPATCH_REDUCTION_TYPES(op, ...)                                   \
   [&] {                                                                        \
     switch (op) {                                                              \
-      case SUM: {                                                              \
-        static constexpr ReductionType reduce = SUM;                           \
+      case ReductionType::SUM: {                                               \
+        static constexpr auto reduce = ReductionType::SUM;                     \
         return __VA_ARGS__();                                                  \
       }                                                                        \
-      case MEAN: {                                                             \
-        static constexpr ReductionType reduce = MEAN;                          \
+      case ReductionType::MEAN: {                                              \
+        static constexpr auto reduce = ReductionType::MEAN;                    \
         return __VA_ARGS__();                                                  \
       }                                                                        \
-      case MIN: {                                                              \
-        static constexpr ReductionType reduce = MIN;                           \
+      case ReductionType::MIN: {                                               \
+        static constexpr auto reduce = ReductionType::MIN;                     \
         return __VA_ARGS__();                                                  \
       }                                                                        \
-      case MAX: {                                                              \
-        static constexpr ReductionType reduce = MAX;                           \
+      case ReductionType::MAX: {                                               \
+        static constexpr auto reduce = ReductionType::MAX;                     \
         return __VA_ARGS__();                                                  \
       }                                                                        \
-      case PROD: {                                                             \
-        static constexpr ReductionType reduce = PROD;                          \
+      case ReductionType::PROD: {                                              \
+        static constexpr auto reduce = ReductionType::PROD;                    \
         return __VA_ARGS__();                                                  \
       }                                                                        \
     }                                                                          \

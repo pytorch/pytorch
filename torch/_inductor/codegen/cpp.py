@@ -257,8 +257,9 @@ class CppPrinter(ExprPrinter):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
-        if exp == 0.5:
-            r = f"std::sqrt({base})"
+
+        if exp == 0.5 or exp == -0.5:
+            r = f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
             return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
         assert exp.is_integer
         exp = int(exp)
@@ -1553,8 +1554,15 @@ class CppTile2DKernel(CppVecKernel):
         return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
-        return stride_at(self.itervars[self.outer_idx], index) == 1 and index.has(
-            self.itervars[self.tiling_idx]
+        return (
+            stride_at(self.itervars[self.outer_idx], index) == 1
+            and index.has(self.itervars[self.tiling_idx])
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.tiling_idx]
+            )
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.outer_idx]
+            )
         )
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
@@ -1631,7 +1639,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
-                line = f"{value}.store({storebuf}, {self.tiling_factor})"
+                line = f"{value}.store({storebuf}, {self.tiling_factor});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
