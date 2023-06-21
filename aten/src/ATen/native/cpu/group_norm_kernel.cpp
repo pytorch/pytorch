@@ -600,8 +600,8 @@ ComputeInternalGradients(
       }
       ds_vec.store(ds_arr.data());
       db_vec.store(db_arr.data());
-      opmath_t ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), float(0));
-      opmath_t db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), float(0));
+      opmath_t ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), opmath_t(0));
+      opmath_t db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), opmath_t(0));
       for (const auto j : c10::irange(inner_size, HxW)) {
         ds_val += opmath_t(dY_ptr[j]) * opmath_t(X_ptr[j]);
         db_val += opmath_t(dY_ptr[j]);
@@ -1478,7 +1478,7 @@ void GroupNormBackwardKernelImplChannelsLastInternal(
       int64_t n{0}, m{0};
       data_index_init(begin, n, N, m, HxW);
       for (const auto i : c10::irange(begin, end)) {
-        opmath_t* ds_ptr = buffer_ptr +  n * 2 * C;
+        opmath_t* ds_ptr = buffer_ptr + n * 2 * C;
         opmath_t* db_ptr = ds_ptr + C;
         const T* X_ptr = X_data + i * C;
         const T* dY_ptr = dY_data + i * C;
