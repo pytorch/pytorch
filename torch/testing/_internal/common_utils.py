@@ -1442,12 +1442,14 @@ def skipCUDAMemoryLeakCheckIf(condition):
         return fn
     return dec
 
+
 def skipCUDANonDefaultStreamIf(condition):
     def dec(fn):
         if getattr(fn, '_do_cuda_non_default_stream', True):  # if current True
             fn._do_cuda_non_default_stream = not condition
         return fn
     return dec
+
 
 def suppress_warnings(fn):
     @wraps(fn)
@@ -1456,6 +1458,7 @@ def suppress_warnings(fn):
             warnings.simplefilter("ignore")
             fn(*args, **kwargs)
     return wrapper
+
 
 def to_gpu(obj, type_map=None):
     if type_map is None:
