@@ -1117,7 +1117,7 @@ class Scheduler:
         )
         if proximity_score > 32:
             return False
- 
+
         node1_is_foreach = isinstance(node1, ForeachKernelSchedulerNode)
         node2_is_foreach = isinstance(node2, ForeachKernelSchedulerNode)
         if node1_is_foreach is not node2_is_foreach:
