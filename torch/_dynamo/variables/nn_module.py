@@ -29,6 +29,7 @@ from ..utils import (
     nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
+    fake_tensor_exceptions,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
@@ -316,7 +317,10 @@ class NNModuleVariable(VariableTracker):
             if is_allowed(mod.__class__):
                 try:
                     return inline(args)
-                except Unsupported:
+                except Unsupported as e:
+                    if isinstance(e.__cause__, fake_tensor_exceptions):
+                        # We would've raised below anyway, but catch explicitly
+                        raise
                     if nnmodule_has_hooks(
                         mod, check_forward_hooks=True, check_backward_hooks=True
                     ):
