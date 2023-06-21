@@ -76,7 +76,7 @@ static bool EmbeddingLookupGenericSlow(
 // Proxy back to generic implementation
 #define EMBEDDING_SPECIALIZATION(                                                                  \
     IndexType, InTypeName, InType, OutType, IS_WEIGHT_POSITIONAL)                                  \
-  bool                                                                                             \
+  static bool                                                                                             \
       EmbeddingLookup_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base(     \
           const int64_t block_size,                                                                \
           const int64_t output_size,                                                               \
@@ -109,7 +109,7 @@ static bool EmbeddingLookupGenericSlow(
   decltype(                                                                                        \
       EmbeddingLookup_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base)     \
       EmbeddingLookup_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__avx2_fma; \
-  bool                                                                                             \
+  static bool                                                                                             \
       EmbeddingLookup_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL(             \
           const int64_t block_size,                                                                \
           const int64_t output_size,                                                               \

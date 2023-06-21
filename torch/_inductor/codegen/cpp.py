@@ -1639,7 +1639,7 @@ class CppTile2DKernel(CppVecKernel):
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
-                line = f"{value}.store({storebuf}, {self.tiling_factor})"
+                line = f"{value}.store({storebuf}, {self.tiling_factor});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))
