@@ -80,7 +80,7 @@ linear_binary_list = {
 }
 
 
-@config.patch({"freezing": True, "freezing_discard_parameters": True})
+@config.patch({"freezing": True})
 class TestPaternMatcher(TestCase):
     def _clone_inputs(self, inputs):
         def clone(x):
