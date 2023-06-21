@@ -741,6 +741,13 @@ class Tracer(TracerBase):
 
             tracer_cls: Optional[Type["Tracer"]] = getattr(self, "__class__", None)
             self.graph = Graph(tracer_cls=tracer_cls)
+            if hasattr(fn, '__code__'):
+                code = fn.__code__
+                self.graph._co_fields = {
+                    'co_name': code.co_name,
+                    'co_filename': code.co_filename,
+                    'co_firstlineno': code.co_firstlineno,
+                }
 
             # When we encounter a Tensor value that's not a parameter, we look if it
             # is some other attribute on the model. Construct a dict mapping Tensor

@@ -1312,7 +1312,7 @@ inline Vectorized<uint8_t> operator~(const Vectorized<uint8_t>& a) {
       const Vectorized<typex>& a,                                 \
       const Vectorized<typex>& min,                               \
       const Vectorized<typex>& max) {                             \
-    return clamp_min(clamp_max(a, max), min);                     \
+    return clamp_max(clamp_min(a, min), max);                     \
   }
 
 DEFINE_CLAMP_MAXMIN_FUNCS(int8_t)

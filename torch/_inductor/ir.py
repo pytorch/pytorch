@@ -113,6 +113,7 @@ def validate_ir(node_or_nodes):
                     TensorBox,
                     sympy.Symbol,
                     sympy.core.relational.Relational,
+                    sympy.core.relational.Unequality,
                     Expr,
                     torch._inductor.ir.ExpandView,
                 ),
