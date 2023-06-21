@@ -543,22 +543,56 @@ class TestPoolingNNDeviceType(NNTestCase):
         self.assertEqual(inp.grad, torch.zeros_like(inp))
         self.assertEqual(unpool_out, torch.zeros_like(unpool_out))
 
-    @expectedFailureCUDA  # https://github.com/pytorch/pytorch/issues/103854
     @slowTest
     @onlyNativeDeviceTypes
     @skipCUDAIfRocm
     @parametrize_test("module_name,module_size,output_size,test_index,should_error", [
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True), name='case1'),
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True), name='case2'),
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False), name='case3'),
-        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True), name='case4'),
-        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False), name='case5'),
-
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True), name='case6'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True), name='case7'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False), name='case8'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True), name='case9'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False), name='case10'),
+        # Some tests are failing in trunk https://github.com/pytorch/pytorch/issues/103854
+        subtest(
+            ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True),
+            name='case1',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True),
+            name='case2',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False),
+            name='case3'
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True),
+            name='case4',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False),
+            name='case5'
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True),
+            name='case6',
+            decorators=[expectedFailureCUDA]),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True),
+            name='case7',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False),
+            name='case8'
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True),
+            name='case9',
+            decorators=[expectedFailureCUDA]
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False),
+            name='case10'
+        ),
     ])
     def test_MaxUnpool_index_errors(self, device, module_name, module_size, output_size, test_index, should_error):
         # NOTE: CUDA tests need to be run in a subprocess because they cause device asserts
