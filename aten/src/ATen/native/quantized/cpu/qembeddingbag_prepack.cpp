@@ -103,8 +103,8 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
             const uint8_t* input_row = weight_data + row * embedding_cols;
             std::uint8_t* output_row = output_data + row * output_columns;
             auto output_row_scale_bias = output_row + embedding_cols;
-            memcpy(output_row_scale_bias, &(weight_scales[row]), sizeof(float));
-            memcpy(
+            std::memcpy(output_row_scale_bias, &(weight_scales[row]), sizeof(float));
+            std::memcpy(
                 output_row_scale_bias + sizeof(float),
                 &(weight_bias[row]),
                 sizeof(float));
