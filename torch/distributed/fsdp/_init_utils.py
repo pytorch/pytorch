@@ -367,10 +367,6 @@ def _init_core_state(
     state._use_orig_params = use_orig_params
     state.training_state = TrainingState.IDLE
     state._is_root = None
-    _streams: Dict[str, torch.cuda.Stream] = {}
-    state._streams = _streams
-    _stream_to_name: Dict[torch.cuda.Stream, str] = {}
-    state._stream_to_name = _stream_to_name
     state._free_event_queue = _FreeEventQueue()
     state._debug_level = dist.get_debug_level()
     state._exec_order_data = exec_order_utils._ExecOrderData(

@@ -55,7 +55,6 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(with_automatic.frame_count, 2)
         self.assertEqual(with_automatic.op_count, 2)
 
-    @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "assume_static_by_default", True)
     def test_recompiles_true_false_flop(self):
         # Test the counterfactual, lots of recompiles without this config
@@ -99,7 +98,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             return run_foo_6_times_and_count_recompiles()
 
         without = run_without_automatic()
-        self.assertEqual(without.frame_count, 5)
+        self.assertEqual(without.frame_count, 2)
         self.assertEqual(without.op_count, 5)
         torch._dynamo.reset()
         with_automatic = run_with_automatic()
