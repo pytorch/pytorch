@@ -284,25 +284,37 @@ _scaled_dot_product_flash_attention_cpu(
   output =
       output.reshape({batchSize, qSize, num_head, headSize}).transpose(1, 2);
 
-  at::Tensor logsumexp = at::empty((1));
-  at::Tensor cum_seq_q = at::empty((1));
-  at::Tensor cum_seq_k = at::empty((1));
-  int max_q = 0;
-  int max_k = 0;
-  at::Tensor philox_seed = at::empty((1));
-  at::Tensor philox_offset = at::empty((1));
-  at::Tensor debug_attn_mask = at::empty((1));
-
   return std::make_tuple(
       output,
-      logsumexp,
-      cum_seq_q,
-      cum_seq_k,
-      max_q,
-      max_k,
-      philox_seed,
-      philox_offset,
-      debug_attn_mask);
+      Tensor(),
+      Tensor(),
+      Tensor(),
+      0,
+      0,
+      Tensor(),
+      Tensor(),
+      Tensor());
+}
+
+// Backward to be implemented
+std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attention_backward_cpu(
+    const at::Tensor& grad_out_,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& out,
+    const at::Tensor& logsumexp,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
+    c10::optional<double> scale){
+  TORCH_CHECK(false, "FLASH ATTENTION BACKWARD CPU is not implemented now.");
+  return std::make_tuple(Tensor(), Tensor(), Tensor());
 }
 
 } // namespace native
