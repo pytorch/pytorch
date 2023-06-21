@@ -32,7 +32,7 @@ Caffe2InitializeRegistry* Caffe2InitializeRegistry::Registry() {
   return &gRegistry;
 }
 
-State& GlobalInitState() {
+static State& GlobalInitState() {
   static State state = State::Uninitialized;
   return state;
 }

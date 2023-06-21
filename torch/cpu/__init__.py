@@ -1,6 +1,17 @@
-from typing import Any, Optional
+from typing import Any, Optional, Union
+from contextlib import AbstractContextManager
 from . import amp
 import torch
+
+__all__ = [
+    "is_available",
+    "synchronize",
+    "current_stream",
+    "current_stream",
+    "stream",
+    "device_count",
+    "Stream",
+]
 
 def _is_cpu_support_vnni() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
@@ -15,13 +26,13 @@ def is_available() -> bool:
     """
     return True
 
-def synchronize(device=None) -> None:
+def synchronize(device: Optional[Union[torch.device, int]] = None) -> None:
     r"""Waits for all kernels in all streams on the CPU device to complete.
 
     Args:
         device (torch.device or int, optional): ignored, there's only one CPU device.
 
-    N.B. This function only exists to facilitate device-agnostic code
+    N.B. This function only exists to facilitate device-agnostic code.
     """
     pass
 
@@ -34,7 +45,7 @@ class Stream:
 _default_cpu_stream = Stream()
 _current_stream = _default_cpu_stream
 
-def current_stream(device=None) -> Stream:
+def current_stream(device: Optional[Union[torch.device, int]] = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -45,13 +56,13 @@ def current_stream(device=None) -> Stream:
     """
     return _current_stream
 
-class StreamContext:
+class _StreamContext(AbstractContextManager):
     r"""Context-manager that selects a given stream.
 
     N.B. This class only exists to facilitate device-agnostic code
 
     """
-    cur_stream : Optional['torch.cuda.Stream']
+    cur_stream : Optional[Stream]
 
     def __init__(self, stream):
         self.stream = stream
@@ -74,13 +85,13 @@ class StreamContext:
         global _current_stream
         _current_stream = self.prev_stream
 
-def stream(stream) -> StreamContext:
+def stream(stream: Stream) -> AbstractContextManager:
     r"""Wrapper around the Context-manager StreamContext that
     selects a given stream.
 
     N.B. This function only exists to facilitate device-agnostic code
     """
-    return StreamContext(stream)
+    return _StreamContext(stream)
 
 def device_count() -> int:
     r"""Returns number of CPU devices (not cores). Always 1.
