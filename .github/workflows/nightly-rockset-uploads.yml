@@ -11,7 +11,7 @@ on:
       - '.github/workflows/nightly-rockset-uploads.yml'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
