@@ -8625,8 +8625,17 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         decorators=(
-                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
-                                     'TestForeach', 'test_unary_op', device_type='cuda'),)
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
+                    }
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'asin',
@@ -8634,8 +8643,17 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         decorators=(
-                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
-                                     'TestForeach', 'test_unary_op', device_type='cuda'),)
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
+                    }
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'atan',
@@ -8680,8 +8698,17 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_forward_ad=True,
         backward_requires_result=True,
         decorators=(
-                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
-                                     'TestForeach', 'test_unary_op', device_type='cuda'),)
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
+                    }
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'tanh',
@@ -8690,8 +8717,15 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_forward_ad=True,
         backward_requires_result=True,
         decorators=(
-                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=5e-03, rtol=1e-04)}),
-                                     'TestForeach', 'test_unary_op', device_type='cuda'),)
+            DecorateInfo(
+                toleranceOverride(
+                    {torch.complex64: tol(atol=5e-03, rtol=1e-04)}
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'sin',
