@@ -23,129 +23,54 @@ namespace {
 
 template <typename scalar_t, typename index_t, ReductionType reduce>
 inline void _update(scalar_t* out_ptr, int64_t row_start, int64_t row_end, const TensorAccessor<index_t, 1>& col_data, const TensorAccessor<scalar_t, 1>& val_data, scalar_t* other_data, int64_t K) {
-  using Vec = vec::Vectorized<scalar_t>;
-  using fVec = vec::Vectorized<float>;
-  constexpr int64_t kVecSize = Vec::size();
+  constexpr int64_t kVecSize = vec::Vectorized<scalar_t>::size();
   constexpr int64_t kVLEN = kVecSize * 4;
   constexpr int64_t CHUNK_SIZE = 16;
 
-  if constexpr (!is_reduced_floating_point_v<scalar_t>) {
-    for (int64_t e0 = row_start; e0 < row_end; e0 += CHUNK_SIZE) {
-      int64_t e1 = std::min(e0 + CHUNK_SIZE, row_end);
+  using acc_t = vec_scalar_t<scalar_t>;
+  for (int64_t e0 = row_start; e0 < row_end; e0 += CHUNK_SIZE) {
+    int64_t e1 = std::min(e0 + CHUNK_SIZE, row_end);
 
-      int64_t k = 0, c;
-      for (; k < K - (K % kVLEN); k += kVLEN) {
-        Vec out_vec0 = Vec::loadu(out_ptr + k);
-        Vec out_vec1 = Vec::loadu(out_ptr + k + kVecSize);
-        Vec out_vec2 = Vec::loadu(out_ptr + k + kVecSize * 2);
-        Vec out_vec3 = Vec::loadu(out_ptr + k + kVecSize * 3);
-        for (const auto e : c10::irange(e0, e1)) {
-          c = col_data[e];
-          scalar_t val = val_data[e];
-          scalar_t* other_ptr = other_data + c * K + k;
+    int64_t k = 0, c;
+    for (; k < K - (K % kVLEN); k += kVLEN) {
+      VecType<scalar_t> out_vec0 = VecType<scalar_t>::loadu(out_ptr + k);
+      VecType<scalar_t> out_vec1 = VecType<scalar_t>::loadu(out_ptr + k + kVecSize);
+      VecType<scalar_t> out_vec2 = VecType<scalar_t>::loadu(out_ptr + k + kVecSize * 2);
+      VecType<scalar_t> out_vec3 = VecType<scalar_t>::loadu(out_ptr + k + kVecSize * 3);
+      for (const auto e : c10::irange(e0, e1)) {
+        c = col_data[e];
+        acc_t val = acc_t(val_data[e]);
+        scalar_t* other_ptr = other_data + c * K + k;
 
-          out_vec0 = update<Vec, reduce>(out_vec0, Vec::loadu(other_ptr) * Vec(val));
-          out_vec1 = update<Vec, reduce>(out_vec1, Vec::loadu(other_ptr + kVecSize) * Vec(val));
-          out_vec2 = update<Vec, reduce>(out_vec2, Vec::loadu(other_ptr + kVecSize * 2) * Vec(val));
-          out_vec3 = update<Vec, reduce>(out_vec3, Vec::loadu(other_ptr + kVecSize * 3) * Vec(val));
-        }
-        out_vec0.store(out_ptr + k);
-        out_vec1.store(out_ptr + k + kVecSize);
-        out_vec2.store(out_ptr + k + kVecSize * 2);
-        out_vec3.store(out_ptr + k + kVecSize * 3);
+        out_vec0 = update<VecType<scalar_t>, reduce>(out_vec0, VecType<scalar_t>::loadu(other_ptr) * VecType<scalar_t>(val));
+        out_vec1 = update<VecType<scalar_t>, reduce>(out_vec1, VecType<scalar_t>::loadu(other_ptr + kVecSize) * VecType<scalar_t>(val));
+        out_vec2 = update<VecType<scalar_t>, reduce>(out_vec2, VecType<scalar_t>::loadu(other_ptr + kVecSize * 2) * VecType<scalar_t>(val));
+        out_vec3 = update<VecType<scalar_t>, reduce>(out_vec3, VecType<scalar_t>::loadu(other_ptr + kVecSize * 3) * VecType<scalar_t>(val));
       }
-      for (; k < K - (K % kVecSize); k += kVecSize) {
-        Vec out_vec = Vec::loadu(out_ptr + k);
-        for (const auto e : c10::irange(e0, e1)) {
-          c = col_data[e];
-          scalar_t val = val_data[e];
-          scalar_t* other_ptr = other_data + c * K;
-          out_vec = update<Vec, reduce>(out_vec, Vec::loadu(other_ptr + k) * Vec(val));
-        }
-        out_vec.store(out_ptr + k);
-      }
-      for (; k < K; k++) {
-        scalar_t out_val = out_ptr[k];
-        for (const auto e : c10::irange(e0, e1)) {
-          c = col_data[e];
-          scalar_t val = val_data[e];
-          scalar_t* other_ptr = other_data + c * K;
-          out_val = update<scalar_t, reduce>(out_val, other_ptr[k] * val);
-        }
-        out_ptr[k] = out_val;
-      }
+      out_vec0.store(out_ptr + k);
+      out_vec1.store(out_ptr + k + kVecSize);
+      out_vec2.store(out_ptr + k + kVecSize * 2);
+      out_vec3.store(out_ptr + k + kVecSize * 3);
     }
-  } else {
-    for (int64_t e0 = row_start; e0 < row_end; e0 += CHUNK_SIZE) {
-      int64_t e1 = std::min(e0 + CHUNK_SIZE, row_end);
-
-      int64_t k = 0, c;
-      for (; k < K - (K % kVLEN); k += kVLEN) {
-        Vec out_vec0 = Vec::loadu(out_ptr + k);
-        fVec out_vec0_0, out_vec0_1;
-        std::tie(out_vec0_0, out_vec0_1) = convert_to_float<scalar_t>(out_vec0);
-        Vec out_vec1 = Vec::loadu(out_ptr + k + kVecSize);
-        fVec out_vec1_0, out_vec1_1;
-        std::tie(out_vec1_0, out_vec1_1) = convert_to_float<scalar_t>(out_vec1);
-        Vec out_vec2 = Vec::loadu(out_ptr + k + kVecSize * 2);
-        fVec out_vec2_0, out_vec2_1;
-        std::tie(out_vec2_0, out_vec2_1) = convert_to_float<scalar_t>(out_vec2);
-        Vec out_vec3 = Vec::loadu(out_ptr + k + kVecSize * 3);
-        fVec out_vec3_0, out_vec3_1;
-        std::tie(out_vec3_0, out_vec3_1) = convert_to_float<scalar_t>(out_vec3);
-
-        for (const auto e : c10::irange(e0, e1)) {
-          c = col_data[e];
-          fVec val = fVec(float(val_data[e]));
-          scalar_t* other_ptr = other_data + c * K + k;
-
-          fVec other_vec0_0, other_vec0_1;
-          std::tie(other_vec0_0, other_vec0_1) = convert_to_float<scalar_t>(Vec::loadu(other_ptr));
-          out_vec0_0 = update<fVec, reduce>(out_vec0_0, other_vec0_0 * val);
-          out_vec0_1 = update<fVec, reduce>(out_vec0_1, other_vec0_1 * val);
-          fVec other_vec1_0, other_vec1_1;
-          std::tie(other_vec1_0, other_vec1_1) = convert_to_float<scalar_t>(Vec::loadu(other_ptr + kVecSize));
-          out_vec1_0 = update<fVec, reduce>(out_vec1_0, other_vec1_0 * val);
-          out_vec1_1 = update<fVec, reduce>(out_vec1_1, other_vec1_1 * val);
-          fVec other_vec2_0, other_vec2_1;
-          std::tie(other_vec2_0, other_vec2_1) = convert_to_float<scalar_t>(Vec::loadu(other_ptr + kVecSize * 2));
-          out_vec2_0 = update<fVec, reduce>(out_vec2_0, other_vec2_0 * val);
-          out_vec2_1 = update<fVec, reduce>(out_vec2_1, other_vec2_1 * val);
-          fVec other_vec3_0, other_vec3_1;
-          std::tie(other_vec3_0, other_vec3_1) = convert_to_float<scalar_t>(Vec::loadu(other_ptr + kVecSize * 3));
-          out_vec3_0 = update<fVec, reduce>(out_vec3_0, other_vec3_0 * val);
-          out_vec3_1 = update<fVec, reduce>(out_vec3_1, other_vec3_1 * val);
-        }
-        convert_from_float<scalar_t>(out_vec0_0, out_vec0_1).store(out_ptr + k);
-        convert_from_float<scalar_t>(out_vec1_0, out_vec1_1).store(out_ptr + k + kVecSize);
-        convert_from_float<scalar_t>(out_vec2_0, out_vec2_1).store(out_ptr + k + kVecSize * 2);
-        convert_from_float<scalar_t>(out_vec3_0, out_vec3_1).store(out_ptr + k + kVecSize * 3);
+    for (; k < K - (K % kVecSize); k += kVecSize) {
+      VecType<scalar_t> out_vec = VecType<scalar_t>::loadu(out_ptr + k);
+      for (const auto e : c10::irange(e0, e1)) {
+        c = col_data[e];
+        acc_t val = acc_t(val_data[e]);
+        scalar_t* other_ptr = other_data + c * K;
+        out_vec = update<VecType<scalar_t>, reduce>(out_vec, VecType<scalar_t>::loadu(other_ptr + k) * VecType<scalar_t>(val));
       }
-      for (; k < K - (K % kVecSize); k += kVecSize) {
-        Vec out_vec = Vec::loadu(out_ptr + k);
-        fVec out_vec_0, out_vec_1;
-        std::tie(out_vec_0, out_vec_1) = convert_to_float<scalar_t>(out_vec);
-        for (const auto e : c10::irange(e0, e1)) {
-          c = col_data[e];
-          fVec val = fVec(float(val_data[e]));
-          scalar_t* other_ptr = other_data + c * K;
-          fVec other_vec_0, other_vec_1;
-          std::tie(other_vec_0, other_vec_1) = convert_to_float<scalar_t>(Vec::loadu(other_ptr + k));
-          out_vec_0 = update<fVec, reduce>(out_vec_0, other_vec_0 * val);
-          out_vec_1 = update<fVec, reduce>(out_vec_1, other_vec_1 * val);
-        }
-        convert_from_float<scalar_t>(out_vec_0, out_vec_1).store(out_ptr + k);
+      out_vec.store(out_ptr + k);
+    }
+    for (; k < K; k++) {
+      acc_t out_val = acc_t(out_ptr[k]);
+      for (const auto e : c10::irange(e0, e1)) {
+        c = col_data[e];
+        acc_t val = acc_t(val_data[e]);
+        scalar_t* other_ptr = other_data + c * K;
+        out_val = update<acc_t, reduce>(out_val, acc_t(other_ptr[k]) * val);
       }
-      for (; k < K; k++) {
-        float out_val = float(out_ptr[k]);
-        for (const auto e : c10::irange(e0, e1)) {
-          c = col_data[e];
-          float val = float(val_data[e]);
-          scalar_t* other_ptr = other_data + c * K;
-          out_val = update<float, reduce>(out_val, float(other_ptr[k]) * val);
-        }
-        out_ptr[k] = scalar_t(out_val);
-      }
+      out_ptr[k] = scalar_t(out_val);
     }
   }
 }
