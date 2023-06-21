@@ -809,7 +809,7 @@ def permute(x, dims):
 
 
 @register_lowering(aten.slice, type_promotion_kind=None)
-def slice_(x, dim=0, start=0, end=2**63, step=1):
+def slice_(x, dim=0, start=0, end=2 ** 63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
@@ -3108,8 +3108,14 @@ def max_pool2d_with_indices_backward(
         except AttributeError:
             x_stride = None
 
-    is_channels_last = (x_stride is not None and x_stride[1] == 1) or (gO_stride is not None and gO_stride[1] == 1)
-    autotune = config.coordinate_descent_tuning or config.max_autotune or config.max_autotune_pointwise
+    is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
+        gO_stride is not None and gO_stride[1] == 1
+    )
+    autotune = (
+        config.coordinate_descent_tuning
+        or config.max_autotune
+        or config.max_autotune_pointwise
+    )
     if any(d != 1 for d in dilation) or (is_channels_last and not autotune):
         # don't codegen channels-last when autotune is not enabled, it's very slow
         return fallback_max_pool2d_with_indices_backward(
@@ -4269,6 +4275,7 @@ try:
     @register_lowering(c10d_functional.all_reduce_coalesced)
     def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
         return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+
 
 except ImportError:
     log.info(
