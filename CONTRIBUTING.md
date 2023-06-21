@@ -1,3 +1,7 @@
+Thank you for your interest in contributing to PyTorch!
+If you're a new contributor, please first take a read through our
+[Contributing Guidelines](https://docs.google.com/document/d/1oNhUeGE-8ajsYaMpoV6ZQANQZVeKrdFanI9VMbFzOzc/edit)
+
 # Table of Contents
 
 <!-- toc -->
