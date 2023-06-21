@@ -178,13 +178,20 @@ def serialize_metadata(node: torch.fx.Node) -> Dict[str, str]:
     ret = {}
     if stack_trace := node.meta.get("stack_trace"):
         ret["stack_trace"] = stack_trace
-    module_fqn = node.meta.get("module_fqn")
-    # Need an explicit None check instead of walrus operator, because
-    # module_fqn can be the empty string if the node belongs to the root.
-    # The walrus operator returns False on an empty string :(
-    if module_fqn is not None:
-        ret["module_fqn"] = module_fqn
-    # TODO(angelayi) add nn_module_stack and source_fn
+
+    if nn_module_stack := node.meta.get("nn_module_stack"):
+        # Serialize to "fx_node_name:(orig_ref,type_str)"
+        nn_module_list = [
+            f"{k}:({v[0]},{serialize_operator(v[1])})"
+            for k, v in nn_module_stack.items()
+        ]
+        ret["nn_module_stack"] = ";".join(nn_module_list)
+
+    if source_fn := node.meta.get("source_fn"):
+        # Serialize to "fx_node_name,op_str"
+        op = serialize_operator(source_fn[1])
+        ret["source_fn"] = f"{source_fn[0]},{op}"
+
     return ret
 
 
@@ -192,13 +199,47 @@ def deserialize_metadata(metadata) -> Dict[str, str]:
     ret = {}
     if stack_trace := metadata.get("stack_trace"):
         ret["stack_trace"] = stack_trace
-    # Need an explicit None check instead of walrus operator, because
-    # module_fqn can be the empty string if the node belongs to the root.
-    # The walrus operator returns False on an empty string :(
-    module_fqn = metadata.get("module_fqn")
-    if module_fqn is not None:
-        ret["module_fqn"] = module_fqn
-    # TODO(angelayi) add nn_module_stack and source_fn
+
+    def deserialize_meta_func(serialized_target: str):
+        module = None
+        if serialized_target.startswith("torch.nn"):
+            module = torch.nn
+            serialized_target_names = serialized_target.split(".")[2:]
+        elif serialized_target.startswith("torch"):
+            module = torch
+            serialized_target_names = serialized_target.split(".")[1:]
+        else:
+            return deserialize_operator(serialized_target)
+
+        target = module
+        for name in serialized_target_names:
+            if not hasattr(target, name):
+                return serialized_target
+            else:
+                target = getattr(target, name)
+        return target
+
+    if nn_module_stack_str := metadata.get("nn_module_stack"):
+        # Originally serialized to "fx_node_name:(orig_ref,type_str)"
+        nn_module_stack_list = nn_module_stack_str.split(";")
+        nn_module_stack = {}
+        for kv in nn_module_stack_list:
+            key_idx = kv.find(":")
+            key = kv[:key_idx]
+            assert kv[key_idx + 1] == "("
+            assert kv[-1] == ")"
+            values = kv[key_idx + 2: -1].split(",")
+            assert len(values) == 2
+            module = deserialize_meta_func(values[1])
+            nn_module_stack[key] = (values[0], module)
+        ret["nn_module_stack"] = nn_module_stack
+
+    if source_fn_str := metadata.get("source_fn"):
+        # Originally serializes to "fx_node_name,op_str"
+        source_fn = source_fn_str.split(",")
+        op = deserialize_meta_func(source_fn[1])
+        ret["source_fn"] = (source_fn[0], op)
+
     return ret
 
 
@@ -991,6 +1032,9 @@ class ExportedProgramDeserializer:
         range_constraints = self.deserialize_range_constraints(
             symbol_name_to_range, symbol_name_to_symbol,
         )
+        model_opset_version: Optional[Dict[str, int]] = serialized_exported_program.opset_version
+        self._validate_model_opset_version(model_opset_version)
+
         state_dict = deserialize_state_dict(serialized_state_dict)
         equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
 
@@ -1003,6 +1047,46 @@ class ExportedProgramDeserializer:
             range_constraints,
             equality_constraints,
         )
+
+    def _validate_model_opset_version(self, model_opset_version: Optional[Dict[str, int]]):
+        """Compare model_opset_version with expected_opset_version and raise error if we can't resolve the version
+        difference.
+        E.g., model_opset_version = {"aten": 3, "custom": 4}
+        expected_opset_version = {"aten": 4, "custom": 4}
+        This means we can use an upgrader for ATen to reconcile the deserialized model.
+
+        The logic of this method:
+
+        For common op namespaces:
+        1. if model version < expected version, this case can be handled by upgraders.
+        2. if model version > expected version, we need downgraders but not implemented yet.
+        3. if model version == expected version, we don't need extra handling.
+
+        For op namespace only in model_opset_version, we should give a warning because it is missing from
+        expected_opset_version.
+        """
+        if not model_opset_version:
+            raise RuntimeError("Serialized model should have opset version.")
+        common_namespaces = {key for key in model_opset_version if key in self.expected_opset_version}
+        for namespace in common_namespaces:
+            assert (
+                isinstance(model_version := model_opset_version[namespace], int)
+            ), f"model_opset_version value should be int, got {model_opset_version[namespace]}"
+
+            assert (
+                isinstance(compiler_version := self.expected_opset_version[namespace], int)
+            ), f"expected_opset_version value should be int, got {self.expected_opset_version[namespace]}"
+
+            # TODO(larryliu0820): Add support for upgrader & downgrader
+            if model_version != compiler_version:
+                raise NotImplementedError(
+                    f"Model opset version {model_opset_version} doesn't match to compiler opset version "
+                    f"{self.expected_opset_version}! Upgrader/downgrader is not implemented yet."
+                )
+        for namespace in model_opset_version:
+            if namespace in common_namespaces:
+                continue
+            log.warning("Compiler doesn't have a version table for op namespace: {ns}. ", extra={"ns": namespace})
 
 
 class EnumEncoder(json.JSONEncoder):
