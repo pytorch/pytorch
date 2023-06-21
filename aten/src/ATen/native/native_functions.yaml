@@ -194,6 +194,10 @@
   dispatch:
     CPU: functional_sym_constrain_range_cpu
 
+- func: make_dep_token(Tensor? dep_token=None) -> Tensor
+  dispatch:
+    CPU: make_dep_token_cpu
+
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
 
