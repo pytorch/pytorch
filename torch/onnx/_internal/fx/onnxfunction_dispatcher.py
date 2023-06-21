@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import operator
-
 import warnings
 from typing import (
     Any,
@@ -24,8 +23,8 @@ import torch._ops
 import torch.fx
 from torch.onnx import _constants, _type_utils
 from torch.onnx._internal import _beartype
-
 from torch.onnx._internal.fx import diagnostics, registration
+
 
 if TYPE_CHECKING:
     import onnx.defs  # type: ignore[import]
@@ -34,6 +33,8 @@ if TYPE_CHECKING:
 
 # Enable both TorchScriptTensor and torch.Tensor to be tested
 # for dtype in OpSchemaWrapper.
+
+
 @runtime_checkable
 class _TensorLike(Protocol):
     @property
@@ -41,17 +42,14 @@ class _TensorLike(Protocol):
         ...
 
 
-class OnnxDispatcher:
-    """
-    The OnnxDispatcher class finds the nearest matched function for a given aten operation
-    in the FX exporter. It uses the torch.ops name to find the function. If not found,
-    it falls back to default. Then, it finds the nearest match among all overloaded
-    functions. If the types match, it selects the function. Otherwise, it finds the
-    nearest one with matching score mechanism.
+class OnnxFunctionDispatcher:
+    """A dispatcher that finds the best ONNX Function for ATen operators.
 
-    method: dispatch
+    It uses the `torch.ops` name to find the function. If not found, it falls back to default.
+    Otherwise, the best match is found among all function overloads.
+    An exact match has higher precedence over the closest ones.
 
-    Steps for overloaded function dispatch:
+    Below is a breakdown on how the dispatch mechanism work:
 
     1. Use the torch.ops name to find the function:
         a. Check if the ATen overload exists.
@@ -60,35 +58,28 @@ class OnnxDispatcher:
     2. Find the nearest match among all overloaded functions:
         a. If the types match perfectly, select the function.
         b. Otherwise, find the nearest one with the highest matching score. Because of
-              the potential wronly annotated dtypes and attributes matching, we use
-              nearest match to find the best function once the aten name is targeted.
-              The nearest match `doesn't guarantee` a correct match, and a warning message
-              will be sent to SARIF.
+            the potential wrongly annotated dtypes and attributes matching, we use
+            nearest match to find the best function once the aten name is targeted.
+
+    NOTE: The nearest match `doesn't guarantee` a correct match, and a warning message is logged.
     """
 
     def __init__(
         self,
-        registry: registration.OnnxRegistry,
+        onnx_registry: registration.OnnxRegistry,
+        diagnostic_context: diagnostics.DiagnosticContext,
         opset_version: int = 18,
     ):
-        """Initialize the Dispatcher.
+        """Initialize the ONNX Function dispatcher.
 
         Args:
-            registry: The registration registry.
-            opset_version: The model opset version.
+            onnx_registry: The ONNX registry.
+            diagnostic_context: The diagnostic context to use for reporting errors.
+            opset_version: The ONNX opset version for the model.
         """
-        self._registry = registry
-        self._opset_version = opset_version
-
-    @property
-    def opset_version(self) -> int:
-        """Get the model opset version."""
-        return self._opset_version
-
-    @property
-    def registry(self) -> registration.OnnxRegistry:
-        """Get the registration registry."""
-        return self._registry
+        self.onnx_registry = onnx_registry
+        self.opset_version = opset_version
+        self.diagnostic_context = diagnostic_context
 
     @_beartype.beartype
     def dispatch(
@@ -99,23 +90,20 @@ class OnnxDispatcher:
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]:
         """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
-
         Args:
             node: The TorchFX node to dispatch the function for.
             onnx_args: The arguments of the ONNX function.
             onnx_kwargs: The keyword arguments of the ONNX function.
             diagnostic_context: The diagnostic context to use for reporting errors.
-
         Returns:
             Either an `onnxscript.OnnxFunction` or `onnxscript.TracedOnnxFunction` instance based on the dispatch algorithm.
-
         Raises:
             RuntimeError: If there are no overloaded functions available for the given FX node.
         """
-        aten_name = self._get_aten_name(node, diagnostic_context)
+        aten_name = self.get_aten_name(node, diagnostic_context)
         # If there are no overloaded functions available for the given FX node, raise an
         # unsupported error
-        function_overloads = self._get_function_overloads(
+        function_overloads = self.get_function_overloads(
             node, aten_name, diagnostic_context
         )
         # If there are overloaded functions available, we will find one that perfect or
@@ -172,10 +160,18 @@ class OnnxDispatcher:
         return max(overload_match_ranking, key=overload_match_ranking.get)  # type: ignore[arg-type]
 
     @_beartype.beartype
-    def _get_aten_name(
+    def get_aten_name(
         self, node: torch.fx.Node, diagnostic_context: diagnostics.DiagnosticContext
     ) -> str:
-        """Get the aten name from the target."""
+        """Get the aten name from the target.
+
+        Args:
+            node: The TorchFX node to get the aten name for.
+            diagnostic_context: The diagnostic context to use for reporting errors.
+
+        Returns:
+            The aten name of the given node.
+        """
         if node.target == operator.getitem:
             return "aten::getitem"
         if isinstance(node.target, torch._ops.OpOverloadPacket):
@@ -195,6 +191,7 @@ class OnnxDispatcher:
             # https://github.com/pytorch/pytorch/issues/97201
             aten_op_default = node.target.default
             return aten_op_default.name()  # type: ignore[attr-defined]
+
         if _symint_symfloat_builtin_to_exporter_key_table(node.target) is not None:
             # Make sure it's symint/symfloat consuming builtin ops.
             for node_arg in node.args:
@@ -209,7 +206,7 @@ class OnnxDispatcher:
                     diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
                         diagnostics.rules.no_symbolic_function_for_call_function,
                         diagnostics.levels.ERROR,
-                        f"Unsupported node arg: {node_arg} with builtin function: {node.target},"
+                        f"Unsupported node arg: {node_arg} (type {type(node_arg)}) with builtin function: {node.target},"
                         " only int/float/SymInt/SymFloat is supported with built-in ops!",
                         unsupported_fx_node=node,
                     )
@@ -231,24 +228,35 @@ class OnnxDispatcher:
         raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
     @_beartype.beartype
-    def _get_function_overloads(
+    def get_function_overloads(
         self,
         node: torch.fx.Node,
         aten_name: str,
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Set[Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]]:
-        """Get the function overloads from the registry."""
+        """Get the function overloads from the registry.
+
+        Args:
+            node: The node to get the function overloads for.
+            aten_name: The aten name of the node.
+            diagnostic_context: The diagnostic context to use for reporting errors.
+
+        Returns:
+            Set of function overloads.
+        """
         function_group = None
 
-        if self.registry.is_registered_op(aten_name, self.opset_version):
-            function_group = self.registry.get_function_group(aten_name)
+        if self.onnx_registry.is_registered_op(aten_name, self.opset_version):
+            function_group = self.onnx_registry.get_function_group(aten_name)
 
         # Fall back to overloadpacket name: eg: aten.add.Tensor -> aten::add
-        elif hasattr(node.target, "overloadpacket") and self.registry.is_registered_op(
+        elif hasattr(
+            node.target, "overloadpacket"
+        ) and self.onnx_registry.is_registered_op(
             node.target.overloadpacket._qualified_op_name,  # type: ignore[union-attr]
             self.opset_version,
         ):
-            function_group = self.registry.get_function_group(
+            function_group = self.onnx_registry.get_function_group(
                 node.target.overloadpacket._qualified_op_name  # type: ignore[union-attr]
             )
 
