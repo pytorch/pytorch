@@ -190,11 +190,11 @@
     CPU: sym_constrain_range_cpu
     CUDA: sym_constrain_range_cuda
 
-- func: functional_sym_constrain_range(Scalar size, int? min=None, int? max=None, Tensor? dep_token=None) -> Tensor
+- func: functional_sym_constrain_range(Scalar size, int? min, int? max, Tensor dep_token) -> Tensor
   dispatch:
     CPU: functional_sym_constrain_range_cpu
 
-- func: make_dep_token(Tensor? dep_token=None) -> Tensor
+- func: make_dep_token(Tensor? dep_token) -> Tensor
   dispatch:
     CPU: make_dep_token_cpu
 

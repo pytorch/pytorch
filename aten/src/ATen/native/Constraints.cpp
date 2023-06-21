@@ -16,19 +16,18 @@ namespace native {
 
 void sym_constrain_range_cpu(
     const Scalar& size,
-    c10::optional<int64_t> min = c10::nullopt,
-    c10::optional<int64_t> max = c10::nullopt) {}
+    c10::optional<int64_t> min,
+    c10::optional<int64_t> max) {}
 
 Tensor functional_sym_constrain_range_cpu(
     const Scalar& size,
-    c10::optional<int64_t> min = c10::nullopt,
-    c10::optional<int64_t> max = c10::nullopt,
-    const c10::optional<Tensor>& dep_token = c10::nullopt) {
-  return c10::value_or_else(dep_token, [] { return at::empty({0}); });
+    c10::optional<int64_t> min,
+    c10::optional<int64_t> max,
+    const Tensor& dep_token) {
+  return dep_token;
 }
 
-Tensor make_dep_token_cpu(
-    const c10::optional<Tensor>& dep_token = c10::nullopt) {
+Tensor make_dep_token_cpu(const c10::optional<Tensor>& dep_token) {
   return c10::value_or_else(dep_token, [] { return at::empty({0}); });
 }
 
