@@ -103,7 +103,9 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
             const uint8_t* input_row = weight_data + row * embedding_cols;
             std::uint8_t* output_row = output_data + row * output_columns;
             auto output_row_scale_bias = output_row + embedding_cols;
-            std::memcpy(output_row_scale_bias, &(weight_scales[row]), sizeof(float));
+            // don't use float* to avoid unaligned address access
+            std::memcpy(
+                output_row_scale_bias, &(weight_scales[row]), sizeof(float));
             std::memcpy(
                 output_row_scale_bias + sizeof(float),
                 &(weight_bias[row]),
@@ -123,10 +125,15 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
           for (const auto row : c10::irange(start_idx, end_idx)) {
             const uint8_t* input_row = weight_data + row * embedding_cols;
             std::uint8_t* output_row = output_data + row * output_columns;
-            at::Half* output_row_scale_bias =
-                reinterpret_cast<at::Half*>(output_row + embedding_cols);
-            output_row_scale_bias[0] = weight_scales[row];
-            output_row_scale_bias[1] = weight_bias[row];
+            auto output_row_scale_bias = output_row + embedding_cols;
+            at::Half weight_scale = weight_scales[row];
+            at::Half weight_bias_half = weight_bias[row];
+            // don't use at::Half* to avoid unaligned address access
+            std::memcpy(output_row_scale_bias, &weight_scale, sizeof(at::Half));
+            std::memcpy(
+                output_row_scale_bias + sizeof(at::Half),
+                &weight_bias_half,
+                sizeof(at::Half));
 
             for (const auto col : c10::irange(embedding_cols)) {
               // The weight values have already been packed, so here we just
