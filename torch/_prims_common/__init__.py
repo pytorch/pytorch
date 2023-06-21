@@ -7,6 +7,7 @@ from functools import reduce, cmp_to_key
 import operator
 import sympy
 import weakref
+import warnings
 import torch
 from torch import sym_float, sym_int, sym_max
 
@@ -268,7 +269,7 @@ _memory_formats = {
 
 
 def validate_memory_format(memory_format: torch.memory_format):
-    check(
+    torch._check(
         memory_format in _memory_formats,
         lambda: f"Received unknown memory format {memory_format}!",
     )
@@ -286,7 +287,7 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     if memory_format == torch.channels_last_3d:
         return is_channels_last_contiguous_3d(a)
 
-    check(
+    torch._check(
         False,
         lambda: f"is_contiguous received unsupported memory format {memory_format}",
     )
@@ -795,13 +796,13 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
     newsize = 1
     for i, d in enumerate(shape):
         if d == -1:
-            check(dim is None, lambda: "only one dimension can be inferred")
+            torch._check(dim is None, lambda: "only one dimension can be inferred")
             dim = i
         elif d >= 0:
             newsize *= d
         else:
-            check(False, lambda: f"invalid shape dimension {d}")
-    check(
+            torch._check(False, lambda: f"invalid shape dimension {d}")
+    torch._check(
         numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
         lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
     )
@@ -809,7 +810,7 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
         # Convert to list to produce a compatible error message with core
         # PyTorch, which prints sequences in square brackets.
         shape = list(shape)
-        check(
+        torch._check(
             newsize != 0,
             lambda: (f"cannot reshape tensor of 0 elements into shape {shape} because the "
                      f"unspecified dimension size -1 can be any value and is ambiguous"),
@@ -954,18 +955,18 @@ def check_fp_or_complex(
     Checks whether the input is floating point or complex.
     If allow_low_precision_dtypes is True, it allows having float16, bfloat16, and complex32
     """
-    check(
+    torch._check(
         is_float_dtype(dtype) or is_complex_dtype(dtype),
         lambda: f"{fn_name}: Expected a floating point or complex tensor as input. Got {dtype}",
     )
-    check(
+    torch._check(
         allow_low_precision_dtypes or not is_low_precision_dtype(dtype),
         lambda: f"{fn_name}: Half precision dtypes not supported. Got {dtype}",
     )
 
 
 def check_is_matrix(A: TensorLikeType, f_name: str, arg_name: str = "A"):
-    check(
+    torch._check(
         len(A.shape) >= 2,
         lambda: f"{f_name}: The input tensor {arg_name} must have at least 2 dimensions.",
     )
@@ -1060,11 +1061,11 @@ def get_higher_dtype(
 
 
 def check_pin_memory(pin_memory: bool):
-    check(not pin_memory, lambda: "PrimTorch does not support pinned memory", NotImplementedError)
+    torch._check_not_implemented(not pin_memory, lambda: "PrimTorch does not support pinned memory")
 
 
 def check_layout(layout: torch.layout):
-    check(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}", NotImplementedError)
+    torch._check_not_implemented(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}")
 
 
 # TODO: maybe unify with can_cast_to?
@@ -1485,7 +1486,7 @@ def make_contiguous_strides_for(
 
 
 def make_channels_last_1d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
-    check(
+    torch._check(
         len(shape) == 3,
         lambda: "Only tensors of rank 3 can use the channels_last_1d memory format",
     )
@@ -1503,7 +1504,7 @@ def make_channels_last_1d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
 
 def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
-    check(
+    torch._check(
         len(shape) == 4,
         lambda: "Only tensors of rank 4 can use the channels_last memory format",
     )
@@ -1520,7 +1521,7 @@ def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
 
 
 def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
-    check(
+    torch._check(
         len(shape) == 5,
         lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
     )
@@ -1654,6 +1655,9 @@ def check_in_bounds_for_storage(
         raise ValueError(msg)
 
 
+# NOTE: This function should ideally be removed, but some Meta internal models
+# packaged with `torch.package` are using it, so it will have to be removed
+# at some point in the future when those models no longer use this function.
 def check(
     b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
 ) -> None:
@@ -1662,9 +1666,14 @@ def check(
     Error message is a callable producing a string (to avoid wasting time
     string formatting in non-error case, and also to make it easier for torchdynamo
     to trace.)
+
+    .. note:: This function is planned for removal in the future. Please use
+        `torch._check*` functions instead.
     """
-    if not b:
-        raise exc_type(s())
+    warnings.warn(DeprecationWarning((
+        "'torch._prims_common.check' will be removed in the future. Please use "
+        "'torch._check*' functions instead")))
+    torch._check_with(exc_type, b, s)
 
 
 # This combines is_channels_last_strides_2d and is_channels_last_strides_3d in
