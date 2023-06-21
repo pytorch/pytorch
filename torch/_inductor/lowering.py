@@ -13,7 +13,9 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
+    canonicalize_dim,
     canonicalize_dims,
+    check,
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -898,11 +900,17 @@ def as_strided(x, size, stride, storage_offset=None):
     return TensorBox(ir.ReinterpretView(storage, new_layout))
 
 
-@register_lowering(aten.as_strided_)
+@register_lowering(aten.as_strided_, type_promotion_kind=None)
 def as_strided_(x, size, stride, storage_offset=None):
     assert isinstance(x, TensorBox)
     x.data = as_strided(x, size, stride, storage_offset).data
     return x
+
+
+@register_lowering(aten.as_strided_copy, type_promotion_kind=None)
+def as_strided_copy(x, size, stride, storage_offset=None):
+    result = as_strided(x, size, stride, storage_offset)
+    return clone(result)
 
 
 @register_lowering(aten.cat)
@@ -916,6 +924,65 @@ def cat(inputs, dim=0):
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
+
+
+@register_lowering(aten.diagonal, type_promotion_kind=None)
+def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    original_shape = input.get_size()
+    num_dims = len(original_shape)
+    dim1 = canonicalize_dim(idx=dim1, rank=num_dims)
+    dim2 = canonicalize_dim(idx=dim2, rank=num_dims)
+
+    check(
+        dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
+    )
+
+    evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
+    offset_negative = evaluate_expr(sympy.Lt(offset, 0))
+    if offset_negative:
+        diag_size = max(min(original_shape[dim1] + offset, original_shape[dim2]), 0)
+    else:
+        diag_size = max(min(original_shape[dim1], original_shape[dim2] - offset), 0)
+
+    base_idx = (0, 0)
+    if offset_negative:
+        base_idx = (-offset, 0)
+    else:
+        base_idx = (0, offset)
+
+    sizes = [s for i, s in enumerate(original_shape) if i not in (dim1, dim2)]
+    sizes.append(diag_size)
+
+    def reindexer(idx):
+        diag_idx = idx[-1]
+        original_idx = [0] * len(original_shape)
+        cur_dim = 0
+        for d in range(num_dims):
+            if d == dim1:
+                original_idx[d] = diag_idx + base_idx[0]
+            elif d == dim2:
+                original_idx[d] = diag_idx + base_idx[1]
+            else:
+                original_idx[d] = idx[cur_dim]
+                cur_dim += 1
+
+        assert cur_dim == len(original_shape) - 2
+        return original_idx
+
+    return TensorBox(ir.GenericView.create(input, sizes, reindexer))
+
+
+@register_lowering(aten.diagonal_copy, type_promotion_kind=None)
+def diagonal_copy(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    return clone(diagonal(input, offset, dim1, dim2))
+
+
+@register_lowering(aten.diagonal_scatter, type_promotion_kind=None)
+def diagonal_scatter(input, src, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    output = clone(input)
+    target = diagonal(output, offset, dim1, dim2)
+    mutate_to(target, src)
+    return output
 
 
 @register_lowering(aten.select, type_promotion_kind=None)
@@ -1535,8 +1602,6 @@ make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
 make_fallback(aten.cumprod, warn=False)
-make_fallback(aten.diagonal_copy, warn=False)
-make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -1626,7 +1691,6 @@ make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
 make_fallback(aten.avg_pool3d_backward)
 make_fallback(aten._cdist_backward)
-make_fallback(aten.diagonal_backward, warn=False)
 make_fallback(aten._embedding_bag_dense_backward)
 make_fallback(aten.fractional_max_pool2d_backward)
 make_fallback(aten.fractional_max_pool3d_backward)
