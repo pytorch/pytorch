@@ -1142,7 +1142,7 @@ struct vec_host_softmax_backward_lastdim {
     int64_t dim_size = grad.size(grad.ndimension() - 1);
     for (int64_t i = 0; i < grad.ndimension() - 1; ++i)
       outer_size *= grad.size(i);
-    scalar_t* grad_input_data_base = grad_input.data_ptr<scalar_t>();
+    scalar_t* grad_input_data_base = grad_input.mutable_data_ptr<scalar_t>();
     scalar_t* grad_data_base = grad.data_ptr<scalar_t>();
     scalar_t* output_data_base = output.data_ptr<scalar_t>();
     _vec_host_softmax_backward_lastdim<scalar_t, LogSoftMax>(
@@ -1170,7 +1170,7 @@ struct vec_host_softmax_backward {
     for (int64_t i = dim + 1; i < grad.dim(); ++i) {
       inner_size *= grad.size(i);
     }
-    scalar_t* grad_input_data_base = grad_input.data_ptr<scalar_t>();
+    scalar_t* grad_input_data_base = grad_input.mutable_data_ptr<scalar_t>();
     scalar_t* grad_output_data_base = grad.data_ptr<scalar_t>();
     scalar_t* output_data_base = output.data_ptr<scalar_t>();
     if (LogSoftMax) {
