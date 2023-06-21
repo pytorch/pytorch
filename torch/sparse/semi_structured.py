@@ -109,7 +109,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs) -> torch.Tensor:
-        """Overload __torch_dispatch__ to use torch._structred_sparse_linear.
+        """Overload __torch_dispatch__ to use torch._structured_sparse_linear.
 
         `torch.structured_sparse_linear` uses accelerated sparse CUTLASS kernels.
         In the future we plan to also add in support for cuSPARSELt kernels.

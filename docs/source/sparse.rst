@@ -235,9 +235,6 @@ Constructing Sparse Semi-Structured Tensors
 
 You can transform a dense tensor into a sparse semi-structured tensor by using the ``torch.sparse.to_sparse_semi_structured`` function.
 
-.. warning::
-    Note that PyTorch must be compiled with cuSPARSELt support for this function to work properly.
-
 Please also note that we only support CUDA tensors since hardware compatibility for semi-structured sparsity is limited to NVIDIA GPUs.
 
 
