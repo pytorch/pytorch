@@ -21,6 +21,7 @@ from typing import (
 
 import torch
 import torch._ops
+from torch._subclasses import fake_tensor
 
 from torch.onnx._internal import _beartype, io_adapter
 from torch.onnx._internal.diagnostics import infra
@@ -70,6 +71,9 @@ class ExportOptions:
     logger named "torch.onnx" under the current logger (as returned by
     :py:meth:`logging.getLogger`)."""
 
+    fake_mode: Optional[fake_tensor.FakeTensorMode] = None
+    """The fake tensor mode to use for symbolic tracing."""
+
     @_beartype.beartype
     def __init__(
         self,
@@ -78,11 +82,13 @@ class ExportOptions:
         dynamic_shapes: Optional[bool] = None,
         op_level_debug: Optional[bool] = None,
         logger: Optional[logging.Logger] = None,
+        fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
     ):
         self.opset_version = opset_version
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
         self.logger = logger
+        self.fake_mode = fake_mode
 
 
 class ResolvedExportOptions(ExportOptions):
@@ -96,6 +102,7 @@ class ResolvedExportOptions(ExportOptions):
     dynamic_shapes: bool
     op_level_debug: bool
     logger: logging.Logger
+    fake_mode: fake_tensor.FakeTensorMode
 
     # Private only attributes
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
@@ -130,6 +137,7 @@ class ResolvedExportOptions(ExportOptions):
             self.onnxfunction_dispatcher = options.onnxfunction_dispatcher
             self.decomposition_table = options.decomposition_table
             self.diagnostic_context = options.diagnostic_context
+            self.fake_mode = options.fake_mode
         else:
             T = TypeVar("T")
 
@@ -150,6 +158,7 @@ class ResolvedExportOptions(ExportOptions):
             self.logger = resolve(
                 options.logger, lambda: logging.getLogger().getChild("torch.onnx")
             )
+            self.fake_mode = resolve(options.fake_mode, None)
             # TODO(bowbao): This introduces onnxscript dependency once diagnostics is moved.
             # Options:
             #   - Add a shim and make it noop if onnxscript is not available.
@@ -451,6 +460,7 @@ class Exporter:
             *self.model_args, **self.model_kwargs
         )
 
+        # TODO: Symbolic tracing does not like most of these passes. Why?!
         # TODO: Design the passes API
         graph_module = pre_export_passes(self.options, graph_module, updated_model_args)
 

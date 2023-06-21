@@ -176,9 +176,14 @@ class DynamoExport(exporter.FXGraphExtractor):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
-        # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-        args = copy.deepcopy(model_args)
-        kwargs = copy.deepcopy(model_kwargs)
+        # TODO: Discuss whether we want to keep the non-symbolic tracing export
+        if options.fake_mode is None:
+            # args will be converted to symbolic tensor. Let's copy to avoid side effects.
+            args = copy.deepcopy(model_args)
+            kwargs = copy.deepcopy(model_kwargs)
+        else:
+            args = model_args
+            kwargs = model_kwargs
 
         # `dynamo.export` does not recognize custom user defined classes as output type.
         # Apply wrapper to adapt the outputs back to `dynamo.export` compatible types,
@@ -194,7 +199,11 @@ class DynamoExport(exporter.FXGraphExtractor):
         #
         fx_mode = "symbolic" if options.dynamic_shapes else "fake"
         graph_module, graph_guard = torch._dynamo.export(
-            wrapped_model, *args, tracing_mode=fx_mode, **kwargs
+            wrapped_model,
+            *args,
+            tracing_mode=fx_mode,
+            fake_mode=options.fake_mode,
+            **kwargs,
         )
         del graph_guard  # Unused
         torch._dynamo.reset()
