@@ -3,7 +3,7 @@
 #include <memory>
 #include <mutex>
 
-namespace at { namespace native {
+namespace at::native {
 
 // Hashing machinery for Params
 // Fowler–Noll–Vo hash function
@@ -12,12 +12,12 @@ template <typename Params>
 struct ParamsHash {
   // Params must be a POD because we read out its memory
   // contents as char* when hashing
-  static_assert(std::is_standard_layout<Params>::value, "Params is not POD");
+  static_assert(std::is_standard_layout_v<Params>, "Params is not POD");
 
   size_t operator()(const Params& params) const {
     auto ptr = reinterpret_cast<const uint8_t*>(&params);
     uint32_t value = 0x811C9DC5;
-    for (const auto i : c10::irange((int)sizeof(Params))) {
+    for (const auto i : c10::irange(sizeof(Params))) {
       value ^= ptr[i];
       value *= 0x01000193;
     }
@@ -29,7 +29,7 @@ template <typename Params>
 struct ParamsEqual {
   // Params must be a POD because we read out its memory
   // contents as char* when comparing
-  static_assert(std::is_standard_layout<Params>::value, "Params is not POD");
+  static_assert(std::is_standard_layout_v<Params>, "Params is not POD");
 
   bool operator()(const Params& a, const Params& b) const {
     auto ptr1 = reinterpret_cast<const uint8_t*>(&a);
@@ -39,4 +39,4 @@ struct ParamsEqual {
 };
 
 
-}}  // at::native
+}  // at::native

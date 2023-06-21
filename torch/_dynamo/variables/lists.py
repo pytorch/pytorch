@@ -688,7 +688,8 @@ def _listvariable_flatten(d: ListVariable) -> Tuple[List[Any], pytree.Context]:
 def _listvariable_unflatten(values: List[Any], context: pytree.Context) -> ListVariable:
     assert all(isinstance(x, VariableTracker) for x in values)
 
-    return ListVariable(values)
+    # Guard propagation happens in the BaseListVariable constructor
+    return ListVariable(values, mutable_local=MutableLocal())
 
 
 def _register_dynamo_list_to_tree_spec():
@@ -710,6 +711,7 @@ def _tuplevariable_unflatten(
 ) -> TupleVariable:
     assert all(isinstance(x, VariableTracker) for x in values)
 
+    # Guard propagation happens in the BaseListVariable constructor
     return TupleVariable(values)
 
 
