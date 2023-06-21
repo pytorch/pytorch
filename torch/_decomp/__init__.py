@@ -291,6 +291,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten._reshape_alias,
             aten.rad2deg,
             aten.renorm,
+            aten.renorm_,
             aten.rot90,
             aten.rsub.Scalar,
             aten.rsub.Tensor,

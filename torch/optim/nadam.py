@@ -291,8 +291,8 @@ def _multi_tensor_nadam(params: List[Tensor],
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, mu_products, state_steps])
-    for (grouped_params, grouped_grads, grouped_exp_avgs,
-         grouped_exp_avg_sqs, grouped_mu_products, grouped_state_steps) in grouped_tensors.values():
+    for ((grouped_params, grouped_grads, grouped_exp_avgs,
+         grouped_exp_avg_sqs, grouped_mu_products, grouped_state_steps), _) in grouped_tensors.values():
 
         # update steps
         torch._foreach_add_(grouped_state_steps, 1)
