@@ -37,8 +37,12 @@ def get_ema_multi_avg_fn(decay=0.999):
 def get_swa_multi_avg_fn():
     @torch.no_grad()
     def swa_update(averaged_param_list, current_param_list, num_averaged):
-        diffs = torch._foreach_sub(current_param_list, averaged_param_list)
-        torch._foreach_addcdiv_(averaged_param_list, diffs, [num_averaged + 1] * len(averaged_param_list))
+        # foreach lerp only handles float and complex
+        if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(averaged_param_list[0]):
+            torch._foreach_lerp_(averaged_param_list, current_param_list, 1 / (num_averaged + 1))
+        else:
+            diffs = torch._foreach_sub(current_param_list, averaged_param_list)
+            torch._foreach_addcdiv_(averaged_param_list, diffs, [num_averaged + 1] * len(averaged_param_list))
 
     return swa_update
 
