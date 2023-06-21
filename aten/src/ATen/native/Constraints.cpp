@@ -38,7 +38,7 @@ Tensor make_dep_token_cpu(
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
   return at::empty(
-      {0},
+      {},
       dtype_opt,
       layout_opt,
       device_opt,
