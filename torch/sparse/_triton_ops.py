@@ -703,6 +703,139 @@ if _has_triton():
         _run_dense_rowspace_kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
 
         return out_backup
+
+
+    @triton.jit
+    def _bsr_softmax_kernel(
+        crow_indices_ptr,
+        crow_indices_batch_stride,
+        crow_indices_stride,
+        values_ptr,
+        values_batch_stride,
+        values_row_block_stride,
+        values_nnz_col_block_stride,
+        row_block, col_block,
+        MAX_ROW_NNZ: tl.constexpr,
+        TILE: tl.constexpr
+    ):
+        batch_pid = tl.program_id(axis=2)
+        row_block_offset_pid = tl.program_id(axis=1)
+        row_block_pid = tl.program_id(axis=0)
+
+        crow_indices_offset_ptr = (
+            crow_indices_ptr
+            + crow_indices_batch_stride * batch_pid
+            + crow_indices_stride * row_block_pid
+        )
+        nnz_offset = tl.load(crow_indices_offset_ptr)
+        nnz_offset_next = tl.load(crow_indices_offset_ptr + crow_indices_stride)
+
+        # Compute nnz for the row with number row_block_pid.
+        # If it is zero, skip the row.
+        row_nnz = nnz_offset_next - nnz_offset
+        if row_nnz == 0:
+            return
+
+        row_arange = tl.arange(0, TILE)
+        mask = row_arange < row_nnz * col_block
+
+        curr_row_values_ptrs = (
+            values_ptr
+            + values_batch_stride * batch_pid
+            + values_row_block_stride * row_block_offset_pid
+            + nnz_offset * col_block
+        )
+
+        # find max in the row
+        row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+        max_row_value = tl.max(row_tile, axis=0)
+        for _ in range(TILE, MAX_ROW_NNZ, TILE):
+            row_arange += TILE
+            mask = row_arange < row_nnz * col_block
+            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            curr_max_row_value = tl.max(row_tile, axis=0)
+            max_row_value = tl.where(max_row_value > curr_max_row_value, max_row_value, curr_max_row_value)
+
+        # find denominator for stable softmax
+        num = tl.exp(row_tile - max_row_value)
+        denom = tl.sum(num, axis=0)
+        for _ in range(TILE, MAX_ROW_NNZ, TILE):
+            row_arange -= TILE
+            mask = row_arange < row_nnz * col_block
+            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            num = tl.exp(row_tile - max_row_value)
+            denom += tl.sum(num, axis=0)
+
+        # populate output
+        tl.store(curr_row_values_ptrs + row_arange, (num / denom).to(values_ptr.dtype.element_ty), mask=mask)
+        for _ in range(TILE, MAX_ROW_NNZ, TILE):
+            row_arange += TILE
+            mask = row_arange < row_nnz * col_block
+            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            num = tl.exp(row_tile - max_row_value)
+            tl.store(curr_row_values_ptrs + row_arange, (num / denom).to(values_ptr.dtype.element_ty), mask=mask)
+
+
+    def bsr_softmax(input, max_row_nnz=None):
+        f_name = "bsr_softmax"
+
+        check_bsr_layout(f_name, input)
+        check_dtype(f_name, input, input.dtype)
+
+        if input._nnz() == 0 or input.numel() == 0:
+            return input.clone()
+
+        m, n = input.shape[-2:]
+        nnz = input._nnz()
+        row_block, col_block = input.values().shape[-2:]
+
+        if max_row_nnz is None:
+            max_row_nnz = triton.next_power_of_2(n)
+        else:
+            max_row_nnz = triton.next_power_of_2(max_row_nnz)
+
+        crow_indices = input.crow_indices().unsqueeze(0).flatten(0, -2)
+        # reshape values from
+        # (b1, ..., bn, nnz, row_block, col_block) to
+        # (b1 * ... * bn, row_block, nnz * col_block).
+        # This simplifies batch dim manipulation and unlocks
+        # the possibility to access all nnzs in any given row.
+        if input.values().transpose(-3, -2).is_contiguous():
+            # Need to clone to avoid `contiguous` returning a view.
+            values = input.values().clone()
+        else:
+            values = input.values()
+        values = values.transpose(-3, -2).contiguous().unsqueeze(0).flatten(0, -4).reshape(-1, row_block, nnz * col_block)
+        full_grid = (values.shape[0], row_block, m // row_block)
+        grid_blocks = None
+        tensor_dims_map = {
+            # We span nnz number of blocks, not nnz + 1,
+            # hence crow_indices[..., :-1]
+            crow_indices[..., :-1]: (0, None, -1),
+            values: (0, None, None),
+        }
+
+        def kernel(grid, *sliced_tensors):
+            _bsr_softmax_kernel[grid](
+                *ptr_stride_extractor(*sliced_tensors),
+                row_block, col_block,
+                max_row_nnz,
+                # Triton's max numel is bounded by 2 ** 17.
+                min(2 ** 17, max_row_nnz)
+            )
+
+        launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
+
+        values = values.reshape(-1, row_block, nnz, col_block).transpose(-3, -2).reshape(*input.values().shape)
+
+        return torch.sparse_compressed_tensor(
+            input.crow_indices().clone(),
+            input.col_indices().clone(),
+            values,
+            size=input.shape,
+            layout=input.layout
+        )
 else:
+    bsr_softmax = None  # type: ignore[assignment]
     bsr_dense_mm = None  # type: ignore[assignment]
     sampled_addmm = None  # type: ignore[assignment]
