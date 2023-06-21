@@ -1,12 +1,15 @@
 Thank you for your interest in contributing to PyTorch!
 If you're a new contributor, please first take a read through our
 [Contributing Guidelines](https://docs.google.com/document/d/1oNhUeGE-8ajsYaMpoV6ZQANQZVeKrdFanI9VMbFzOzc/edit)
+that walks through the process of contributing a change to PyTorch.
+
+The rest of this document (CONTRIBUTING.md) covers some of the more technical
+aspects of contributing to PyTorch.
 
 # Table of Contents
 
 <!-- toc -->
 
-- [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
@@ -58,16 +61,6 @@ If you're a new contributor, please first take a read through our
 - [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
-
-## Contributing to PyTorch
-
-Thank you for your interest in contributing to PyTorch!
-If you're a new contributor, please first take a read through our
-[Contributing Guidelines](https://docs.google.com/document/d/1oNhUeGE-8ajsYaMpoV6ZQANQZVeKrdFanI9VMbFzOzc/edit)
-that walks through the process of contributing a change to PyTorch.
-
-The rest of this document (CONTRIBUTING.md) covers some of the more technical
-aspects of contributing to PyTorch.
 
 ## Developing PyTorch
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
