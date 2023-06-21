@@ -8,6 +8,7 @@ from torch._export.trace import do_not_use_experimental_export
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
+from functorch.experimental.control_flow import map
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -257,6 +258,17 @@ class TestExport(TestCase):
         inp_for_g = 4
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"):
             constraints = [dynamic_dim(inp_for_g, 0)]
+
+    def test_map(self):
+        def list_tensor_map(xs, y, z):
+            def body(x, y, z):
+                return x + y + z
+
+            return map(body, xs, y, z)
+
+        inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
+        exported_program = export(list_tensor_map, inps)
+        self.assertTrue(torch.allclose(exported_program(*inps), list_tensor_map(*inps)))
 
 if __name__ == '__main__':
     run_tests()

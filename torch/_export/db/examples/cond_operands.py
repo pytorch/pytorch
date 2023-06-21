@@ -1,16 +1,21 @@
 import torch
 
 from torch._export.db.case import export_case
+from torch._export import dynamic_dim
 from functorch.experimental.control_flow import cond
 
+x = torch.randn(3, 2)
+y = torch.ones(2)
+dynamic_constraint = dynamic_dim(x, 0)
 
 @export_case(
-    example_inputs=(torch.randn(3, 2), torch.ones(2)),
+    example_inputs=(x, y),
     tags={
         "torch.cond",
         "torch.dynamic-shape",
     },
     extra_inputs=(torch.randn(2, 2), torch.ones(2)),
+    constraints=[dynamic_constraint]
 )
 def cond_operands(x, y):
     """
