@@ -1,6 +1,6 @@
 import warnings
 from collections import namedtuple
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 
