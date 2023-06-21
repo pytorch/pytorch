@@ -976,6 +976,134 @@ void test_transposed_conv2d_context(
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, conv1d) {
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 1u> stride{2};
+  c10::string_view padding = "valid";
+  constexpr std::array<int64_t, 1u> dilation{1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+
+    std::array<int64_t, 3u> size() const {
+      return {
+        batches,
+        channels,
+        width,
+      };
+    }
+  } input {1, 3, 8};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+
+    std::array<int64_t, 3u> size() const {
+      return {
+        output_channels,
+        input_channels,
+        width,
+      };
+    }
+  } weights {1, input.channels, 3};
+
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::conv1d(
+      input_cpu,
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const auto output_vulkan = at::conv1d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups).cpu();
+
+  const bool check = almostEqual(output_cpu, output_vulkan);
+  if (!check) {
+    showRtol(output_cpu, output_vulkan);
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, conv1d_padding) {
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 1u> stride{1};
+  c10::string_view padding = "same";
+  constexpr std::array<int64_t, 1u> dilation{1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+
+    std::array<int64_t, 3u> size() const {
+      return {
+        batches,
+        channels,
+        width,
+      };
+    }
+  } input {1, 100, 88};
+
+  constexpr struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+
+    std::array<int64_t, 3u> size() const {
+      return {
+        output_channels,
+        input_channels,
+        width,
+      };
+    }
+  } weights {1, input.channels, 3};
+
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const auto output_cpu = at::conv1d(
+      input_cpu,
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups);
+
+  const auto output_vulkan = at::conv1d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      dilation,
+      groups).cpu();
+
+  const bool check = almostEqual(output_cpu, output_vulkan);
+  if (!check) {
+    showRtol(output_cpu, output_vulkan);
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, conv2d) {
   constexpr int64_t groups = 1;
   constexpr std::array<int64_t, 2u> stride{2, 2};
