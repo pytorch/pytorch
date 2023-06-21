@@ -17,7 +17,7 @@ conv_op_impl.h is the templated implementation of the conv_op.h file, which is
 why they are separate files.
 )DOC";
 
-std::function<void(OpSchema&)> ConvDocGenerator(
+static std::function<void(OpSchema&)> ConvDocGenerator(
     const char* dim,
     bool relu_fused = false) {
   return [=](OpSchema& schema) {

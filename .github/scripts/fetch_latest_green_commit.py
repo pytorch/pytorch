@@ -49,8 +49,9 @@ def query_commits(commits: List[str]) -> List[Dict[str, Any]]:
     )
     params = [{"name": "shas", "type": "string", "value": ",".join(commits)}]
     res = rs.QueryLambdas.execute_query_lambda(
+        # https://console.rockset.com/lambdas/details/commons.commit_jobs_batch_query
         query_lambda="commit_jobs_batch_query",
-        version="8003fdfd18b64696",
+        version="19c74e10819104f9",
         workspace="commons",
         parameters=params,
     )
@@ -93,6 +94,11 @@ def isGreen(commit: str, results: List[Dict[str, Any]]) -> Tuple[bool, str]:
     }
 
     for check in workflow_checks:
+        jobName = check["jobName"]
+        # Ignore result from unstable job, be it success or failure
+        if "unstable" in jobName:
+            continue
+
         workflowName = check["workflowName"]
         conclusion = check["conclusion"]
         for required_check in regex:
