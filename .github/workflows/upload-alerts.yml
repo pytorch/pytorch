@@ -5,6 +5,10 @@ name: Upload Alerts to AWS/Rockset
 on:
   schedule:
     - cron: '*/10 * * * *'
+  pull_request:
+    paths:
+      - 'tools/alerts/create_alerts.py'
+      - '.github/workflows/upload-alerts.yml'
 
 jobs:
   upload-alerts:
