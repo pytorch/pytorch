@@ -247,13 +247,10 @@ def _update_after_adding_runtime_assertions(
     #   map from old to new output FQNs based on position.
     # - Will keep input FQNs unchanged so no need to update inputs related
     #   fields (`user_inputs`, `inputs_to_parameters`, `inputs_to_buffers`, ...)
-    output_map = dict(
-        zip(
-            _get_output_FQNs(ep.graph_module),
-            _get_output_FQNs(new_ep.graph_module),
-            strict=True,
-        )
-    )
+    outputs = _get_output_FQNs(ep.graph_module)
+    new_outputs = _get_output_FQNs(new_ep.graph_module)
+    assert len(outputs) == len(new_outputs)
+    output_map = dict(zip(outputs, new_outputs))
     gs = ep.graph_signature
     # Need to update graph signature fields related to output since after adding
     # runtime assertions, the output FQNs could change.
