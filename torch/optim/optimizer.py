@@ -494,7 +494,7 @@ class Optimizer:
             elif isinstance(value, dict):
                 return {k: _cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
             elif isinstance(value, Iterable):
-                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)
+                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)  # type: ignore[call-arg]
             else:
                 return value
 
