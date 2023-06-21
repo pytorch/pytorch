@@ -628,43 +628,6 @@ std::pair<K*, V*> radix_sort_parallel(
 //
 
 template <typename scalar_t, ReductionType reduce>
-inline void _init(scalar_t* self_ptr, at::opmath_type<scalar_t>* buffer_ptr, int64_t K, bool include_self) {
-  if (!include_self) {
-    init<at::opmath_type<scalar_t>, reduce>(buffer_ptr, K, include_self);
-  } else {
-    vec::convert(self_ptr, buffer_ptr, K);
-  }
-}
-
-template <typename scalar_t, ReductionType reduce>
-inline void _update(scalar_t* src_data, at::opmath_type<scalar_t>* buffer_ptr, int64_t col, int64_t K) {
-  if constexpr (!is_reduced_floating_point_v<scalar_t>) {
-    update<scalar_t, reduce>(buffer_ptr, src_data + col * K, K);
-  } else {
-    using opmath_t = at::opmath_type<scalar_t>;
-    using Vec = vec::Vectorized<scalar_t>;
-    using fVec = vec::Vectorized<opmath_t>;
-    int64_t k = 0;
-    constexpr int64_t kVecSize = Vec::size();
-    constexpr int64_t kfVecSize = fVec::size();
-    for (k = 0; k < K - (K % kVecSize); k += kVecSize) {
-      Vec src_vec = Vec::loadu(src_data + col * K + k);
-      fVec src_vec0, src_vec1;
-      std::tie(src_vec0, src_vec1) = convert_to_float<scalar_t>(src_vec);
-      fVec buf_vec0, buf_vec1;
-      buf_vec0 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k), src_vec0);
-      buf_vec1 = update<fVec, reduce>(fVec::loadu(buffer_ptr + k + kfVecSize), src_vec1);
-      buf_vec0.store(buffer_ptr + k);
-      buf_vec1.store(buffer_ptr + k + fVec::size());
-    }
-    for (; k < K; k++) {
-      opmath_t src_val = opmath_t(src_data[col * K + k]);
-      buffer_ptr[k] = update<opmath_t, reduce>(buffer_ptr[k], src_val);
-    }
-  }
-}
-
-template <typename scalar_t, ReductionType reduce>
 void cpu_scatter_reduce_expanded_index(const Tensor& self, const Tensor& index, const Tensor& src, bool include_self) {
   int64_t* index_data = index.data_ptr<int64_t>();
   scalar_t* self_data = self.data_ptr<scalar_t>();
