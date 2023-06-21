@@ -4139,10 +4139,6 @@ import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
 
-_QUANTIZED_DECOMPOSED_LIB = torch.library.Library(
-    "quantized_decomposed", "IMPL", "Meta"
-)
-
 def activate_meta():
     activate_meta_table = {}
 
@@ -4195,6 +4191,11 @@ def activate_meta():
             elif "mkl::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
             elif "quantized_decomposed::" in op_overload.name():
+                # from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+
+                _QUANTIZED_DECOMPOSED_LIB = torch.library.Library(
+                    "quantized_decomposed", "IMPL", "Meta"
+                )
                 _QUANTIZED_DECOMPOSED_LIB.impl(op_overload, fn)
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)

@@ -71,7 +71,6 @@ from torch.ao.quantization import (
     default_dynamic_qconfig,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-import unittest
 
 from torch._decomp import get_decompositions
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -271,6 +270,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m_fx = _convert_to_reference_decomposed_fx(
                 m_fx, backend_config=backend_config
             )
+            print("m_fx:", m_fx)
             m_fx, guards = torchdynamo.export(
                 m_fx,
                 *copy.deepcopy(example_inputs),
