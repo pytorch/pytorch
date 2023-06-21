@@ -9,7 +9,6 @@ from typing import (
     Callable,
     DefaultDict,
     Dict,
-    Hashable,
     Iterable,
     List,
     Optional,
@@ -20,11 +19,11 @@ from typing import (
     cast,
     overload,
 )
-
 from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
 import torch.utils.hooks as hooks
+from torch import Tensor
 from torch.utils.hooks import RemovableHandle
 from torch.utils._foreach_utils import (
     Indices,
@@ -62,6 +61,7 @@ def _use_grad_for_differentiable(func):
         finally:
             torch.set_grad_enabled(prev_grad)
         return ret
+    functools.update_wrapper(_use_grad, func)
     return _use_grad
 
 def _get_value(x):
@@ -277,7 +277,7 @@ class Optimizer:
         # One caveat here is that if we are compiling, we *permit* step/param tensors to be on CPU
         # so we do not explicitly enable the capturable flag. Inductor will decide whether cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
-        if not is_compiling() and torch.has_cuda and torch.cuda.is_available():
+        if not is_compiling() and torch.backends.cuda.is_built() and torch.cuda.is_available():
             capturing = torch.cuda.is_current_stream_capturing()
 
             if capturing and not all(group['capturable'] for group in self.param_groups):
@@ -435,49 +435,28 @@ class Optimizer:
             'param_groups': param_groups,
         }
 
-    @overload
     @staticmethod
-    def _cast(param: torch.Tensor, value: torch.Tensor, key: Hashable = ...) -> torch.Tensor:
-        ...
+    def _process_value_according_to_param_policy(param: Tensor, value: Tensor, param_id: int = None,
+                                                 param_groups: List[Dict[Any, Any]] = None, key=None) -> Tensor:
+        # Floating-point types are a bit special here. They are the only ones
+        # that are assumed to always match the type of params.
+        # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
+        # UNLESS fused or capturable, see note [special device hosting for step]
+        fused = False
+        capturable = False
+        for pg in param_groups:
+            if param_id in pg["params"]:
+                fused = pg["fused"] if "fused" in pg else False
+                capturable = pg["capturable"] if "capturable" in pg else False
+                break
 
-    @overload
-    @staticmethod
-    def _cast(param: torch.Tensor, value: Dict[Any, Any], key: Hashable = ...) -> Dict[Any, Any]:
-        ...
-
-    @overload
-    @staticmethod
-    def _cast(param: torch.Tensor, value: Iterable[Any], key: Hashable = ...) -> Iterable[Any]:
-        ...
-
-    @overload
-    @staticmethod
-    def _cast(param: torch.Tensor, value: T, key: Hashable = ...) -> T:
-        ...
-
-    @staticmethod
-    def _cast(
-        param: torch.Tensor,
-        value: Union[torch.Tensor, Dict[Any, Any], Iterable[Any], T],
-        key: Hashable = None,
-    ) -> Union[torch.Tensor, Dict[Any, Any], Iterable[Any], T]:
-        r"""Make a deep copy of value, casting all tensors to device of param."""
-        if isinstance(value, torch.Tensor):
-            # Floating-point types are a bit special here. They are the only ones
-            # that are assumed to always match the type of params.
-            # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
-            if (key != "step"):
-                if param.is_floating_point():
-                    value = value.to(param.dtype)
-                value = value.to(param.device)
-            return value
-        if isinstance(value, dict):
-            return {k: Optimizer._cast(param, v, key=k) for k, v in value.items()}
-        if isinstance(value, Iterable):
-            return type(value)(Optimizer._cast(param, v) for v in value)  # type: ignore[call-arg]
+        if key != "step" or capturable or fused:
+            if param.is_floating_point():
+                return value.to(dtype=param.dtype, device=param.device)
+            return value.to(device=param.device)
         return value
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
 
         Args:
@@ -503,6 +482,17 @@ class Optimizer:
         id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
                       chain.from_iterable((g['params'] for g in groups))))
 
+        def cast(param, value, param_id=None, param_groups=None, key=None):
+            r"""Make a deep copy of value, casting all tensors to device of param."""
+            if isinstance(value, torch.Tensor):
+                return Optimizer._process_value_according_to_param_policy(param, value, param_id, param_groups, key)
+            elif isinstance(value, dict):
+                return {k: cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
+            elif isinstance(value, Iterable):
+                return type(value)(cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)
+            else:
+                return value
+
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
@@ -510,7 +500,7 @@ class Optimizer:
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = Optimizer._cast(param, v)
+                state[param] = cast(param, v, param_id=k, param_groups=state_dict['param_groups'])
             else:
                 state[k] = v
 
@@ -617,7 +607,7 @@ class Optimizer:
             if not isinstance(param, torch.Tensor):
                 raise TypeError("optimizer can only optimize Tensors, "
                                 "but one of the params is " + torch.typename(param))
-            if not self.defaults.get('differentiable', None) and not (param.is_leaf or param.retains_grad):  # type: ignore[attr-defined]
+            if not self.defaults.get('differentiable', None) and not (param.is_leaf or param.retains_grad):
                 raise ValueError("can't optimize a non-leaf Tensor")
 
         for name, default in self.defaults.items():
