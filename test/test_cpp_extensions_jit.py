@@ -910,6 +910,21 @@ class TestCppExtensionJIT(common.TestCase):
         for fast_mode in (True, False):
             gradcheck(torch.ops.my.add, [a, b], eps=1e-2, fast_mode=fast_mode)
 
+    def test_custom_functorch_error(self):
+        # Test that a custom C++ Function raises an error under functorch transforms
+        identity_m = torch.utils.cpp_extension.load(
+            name="identity",
+            sources=["cpp_extensions/identity.cpp"],
+        )
+
+        t = torch.randn(3, requires_grad=True)
+
+        msg = r"functorch functions \(vmap, grad, vjp, etc.\) incorrectly used with C\+\+ Function."
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.func.vmap(identity_m.identity)(t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.func.grad(identity_m.identity)(t)
 
 if __name__ == "__main__":
     common.run_tests()
