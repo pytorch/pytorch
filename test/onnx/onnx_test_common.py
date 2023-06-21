@@ -417,9 +417,9 @@ FLOAT_TYPES = (
 )
 
 COMPLEX_TYPES = (
-    torch.complex32,
+    # torch.complex32,  NOTE: torch.complex32 is experimental in torch
     torch.complex64,
-    torch.complex128,
+    # torch.complex128,  ORT doesn't support
 )
 
 TESTED_DTYPES = (
