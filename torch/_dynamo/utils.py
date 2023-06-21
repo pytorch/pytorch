@@ -1209,6 +1209,21 @@ def get_debug_dir():
     debug_root = config.debug_dir_root
     return _get_debug_dir(debug_root)
 
+fake_tensor_exceptions = (
+    torch._subclasses.fake_tensor.DataDependentOutputException,
+    torch._subclasses.fake_tensor.DynamicOutputShapeException,
+    torch._subclasses.fake_tensor.UnsupportedOperatorException,
+    torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+)
+
+fake_tensor_exceptions_msgs = (
+    lambda cause: f"data dependent operator: {cause.func}",
+    lambda cause: f"dynamic shape operator: {cause.func}",
+    lambda cause: f"unsupported operator: {cause.func} (see "
+                  "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0 "
+                  "for how to fix)",
+    lambda: "guard on data-dependent symbolic int/float"
+)
 
 def get_fake_value(node, tx):
     """
@@ -1266,26 +1281,10 @@ def get_fake_value(node, tx):
         if e.__cause__ is not None:
             cause = e.__cause__
 
-        if isinstance(
-            cause, torch._subclasses.fake_tensor.DataDependentOutputException
-        ):
-            unimplemented(f"data dependent operator: {cause.func}")
-        elif isinstance(
-            cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
-        ):
-            unimplemented(f"dynamic shape operator: {cause.func}")
-        elif isinstance(
-            cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
-        ):
-            unimplemented(
-                f"unsupported operator: {cause.func} (see "
-                "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
-                " for how to fix)"
-            )
-        elif isinstance(
-            cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
-        ):
-            unimplemented("guard on data-dependent symbolic int/float")
+        if isinstance(cause, fake_tensor_exceptions):
+            for excep, get_msg in zip(fake_tensor_exceptions, fake_tensor_exceptions_msgs):
+                if isinstance(cause, excep):
+                    unimplemented(get_msg(cause), cause=cause)
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
