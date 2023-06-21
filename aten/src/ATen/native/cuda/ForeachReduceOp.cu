@@ -135,16 +135,16 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
         return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
             at::isComplexType(scalar_type);
       });
-  const bool is_same_dtype = dtype.has_value()
-      ? std::all_of(
+  const bool dtype_mismatch = dtype.has_value()
+      ? std::any_of(
             tensors.begin(),
             tensors.end(),
             [&](const auto& t) {
               const auto scalar_type = t.scalar_type();
-              return scalar_type == dtype.value();
+              return scalar_type != dtype.value();
             })
-      : true;
-  if (!can_use_fast_route(tensors) || !is_same_dtype || has_int_or_complex ||
+      : false;
+  if (!can_use_fast_route(tensors) || dtype_mismatch || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2))) {
     return foreach_tensor_norm_slow(tensors, ord, dtype);
   }
