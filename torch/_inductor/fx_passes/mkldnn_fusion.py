@@ -583,10 +583,10 @@ if torch._C._has_mkldnn:
         )
         def linear_bias_pattern(match, *args):
             graph = match.graph
-            node = match.output_node()
-            linear_node = node.args[0]
+            add_node = match.output_node()
+            linear_node = add_node.args[0]
             weight_meta = linear_node.args[1].meta.get("val")
-            bias_meta = node.args[1].meta.get("val")
+            bias_meta = add_node.args[1].meta.get("val")
             if weight_meta is None or bias_meta is None:
                 return
             if (
@@ -595,12 +595,12 @@ if torch._C._has_mkldnn:
                 and bias_meta.size(0) == weight_meta.size(0)
             ):
                 new_args = list(linear_node.args)
-                new_args[2] = node.args[1]
+                new_args[2] = add_node.args[1]
                 repl = graph.call_function(
                     mkldnn._linear_pointwise.default, tuple(new_args)
                 )
-                repl.meta.update(node.meta)
-                node.replace_all_uses_with(repl)
+                repl.meta.update(add_node.meta)
+                add_node.replace_all_uses_with(repl)
                 match.erase_nodes(graph)
 
     @functools.lru_cache(None)
@@ -611,32 +611,6 @@ if torch._C._has_mkldnn:
             _register_inplace_fusion()
             _register_binary_unary_fusion()
             _register_binary_fusion()
-
-
-def get_preserved_arg_indices_and_constant_nodes(gm, flat_params, fw_metadata):
-    """
-    Returns a list of indices representing the input parameters that were not converted to constants and
-    a list nodes can be converted to constants.
-    """
-
-    params = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    fake_inp_nodes = params[: len(flat_params)]
-    aliased_input_args = [
-        out_info.base_idx
-        for out_info in fw_metadata.output_info
-        if out_info.base_idx is not None
-    ]
-    preserved_arg_indices = []
-    constant_nodes = []
-    for i, node in enumerate(fake_inp_nodes):
-        if i in fw_metadata.mutated_inp_indices or aliased_input_args:
-            preserved_arg_indices.append(i)
-            continue
-        constant_nodes.append(node)
-
-    # add on non param inputs
-    preserved_arg_indices.extend(range(len(flat_params), len(params)))
-    return preserved_arg_indices, constant_nodes
 
 
 def _is_packable_convolution(node, constant_nodes):
@@ -717,7 +691,7 @@ def _is_packable_linear(node, constant_nodes):
     return False
 
 
-def _insert_packed_convolution(gm, conv_node):
+def _pack_convolution(gm, conv_node):
     with gm.graph.inserting_before(conv_node):
         input = conv_node.args[0]
         input_size = input.meta.get("val").shape
@@ -763,7 +737,7 @@ def _insert_packed_convolution(gm, conv_node):
         gm.graph.erase_node(conv_node)
 
 
-def _insert_packed_linear(gm, linear_node):
+def _pack_linear(gm, linear_node):
     weight_idx = 2 if linear_node.target == aten.addmm.default else 1
     input = linear_node.args[weight_idx - 1]
     batch_size = input.meta.get("val").shape[0]
@@ -849,19 +823,18 @@ def mkldnn_weight_prepack_fx(gm, flat_params, fw_metadata):
     """
     Insert weight prepacking nodes into the FX graph before constant folding.
     """
-    if (
-        not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available())
-        or torch.is_grad_enabled()
-    ):
+    if not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()):
         return gm
+    from torch._inductor.freezing import get_preserved_arg_indices_and_constant_nodes
+
     _, constant_nodes = get_preserved_arg_indices_and_constant_nodes(
         gm, flat_params, fw_metadata
     )
     for node in gm.graph.nodes:
         if _is_packable_convolution(node, constant_nodes):
-            _insert_packed_convolution(gm, node)
+            _pack_convolution(gm, node)
         elif _is_packable_linear(node, constant_nodes):
-            _insert_packed_linear(gm, node)
+            _pack_linear(gm, node)
     _eliminate_duplicate_packed_nodes(gm)
 
     gm.graph.lint()

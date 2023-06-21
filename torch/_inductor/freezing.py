@@ -6,10 +6,7 @@ import torch
 import torch.utils._pytree as pytree
 from . import config
 
-from .fx_passes.mkldnn_fusion import (
-    get_preserved_arg_indices_and_constant_nodes,
-    mkldnn_weight_prepack_fx,
-)
+from .fx_passes.mkldnn_fusion import mkldnn_weight_prepack_fx
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -37,6 +34,32 @@ def replace_node_with_constant(gm, node, constant):
     # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
     gm.register_buffer(qualname, constant)
     setattr(gm, qualname, constant)
+
+
+def get_preserved_arg_indices_and_constant_nodes(gm, flat_params, fw_metadata):
+    """
+    Returns a list of indices representing the input parameters that were not converted to constants and
+    a list nodes can be converted to constants.
+    """
+
+    params = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    fake_inp_nodes = params[: len(flat_params)]
+    aliased_input_args = [
+        out_info.base_idx
+        for out_info in fw_metadata.output_info
+        if out_info.base_idx is not None
+    ]
+    preserved_arg_indices = []
+    constant_nodes = set()
+    for i, node in enumerate(fake_inp_nodes):
+        if i in fw_metadata.mutated_inp_indices or aliased_input_args:
+            preserved_arg_indices.append(i)
+            continue
+        constant_nodes.add(node)
+
+    # add on non param inputs
+    preserved_arg_indices.extend(range(len(flat_params), len(params)))
+    return preserved_arg_indices, constant_nodes
 
 
 def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
