@@ -9,7 +9,7 @@ dynamic_constraint = dynamic_dim(x, 1)
 @export_case(
     example_inputs=(x,),
     tags={"torch.dynamic-shape"},
-    export_constraints=[dynamic_constraint]
+    constraints=[dynamic_constraint]
 )
 def scalar_output(x):
     """

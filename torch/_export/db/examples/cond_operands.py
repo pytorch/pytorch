@@ -15,7 +15,7 @@ dynamic_constraint = dynamic_dim(x, 0)
         "torch.dynamic-shape",
     },
     extra_inputs=(torch.randn(2, 2), torch.ones(2)),
-    export_constraints=[dynamic_constraint]
+    constraints=[dynamic_constraint]
 )
 def cond_operands(x, y):
     """

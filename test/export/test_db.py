@@ -45,7 +45,7 @@ class ExampleTests(TestCase):
         exported_program = export(
             model,
             inputs.args,
-            constraints=case.export_constraints,
+            constraints=case.constraints,
         )
         exported_program.graph_module.print_readable()
 
@@ -74,7 +74,7 @@ class ExampleTests(TestCase):
             exported_model = export(
                 model,
                 inputs.args,
-                constraints=case.export_constraints,
+                constraints=case.constraints,
             )
 
     @parametrize(
@@ -96,7 +96,7 @@ class ExampleTests(TestCase):
         exported_model = export(
             rewrite_case.model,
             inputs.args,
-            constraints=rewrite_case.export_constraints,
+            constraints=rewrite_case.constraints,
         )
 
 

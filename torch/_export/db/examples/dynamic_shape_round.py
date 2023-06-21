@@ -10,7 +10,7 @@ dynamic_constraint = dynamic_dim(x, 0)
     example_inputs=(x,),
     tags={"torch.dynamic-shape", "python.builtin"},
     support_level=SupportLevel.NOT_SUPPORTED_YET,
-    export_constraints=[dynamic_constraint]
+    constraints=[dynamic_constraint]
 )
 def dynamic_shape_round(x):
     """

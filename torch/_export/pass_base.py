@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from functorch.experimental import control_flow
+from functorch.experimental import _map
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._export.pass_infra.node_metadata import NodeMetadata
@@ -179,7 +180,7 @@ class ExportPassBase(PassBase):
             elif target == control_flow.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-            elif target == torch.ops.map_impl:
+            elif target == _map.map_impl:
                 f, num_args, *rest = args  # type: ignore[assignment]
                 return self.callback.call_map(f, num_args, list(rest), meta)
             else:
@@ -334,7 +335,7 @@ class ExportPassBase(PassBase):
         assert f_branch is not None
         return self._fx(
             "call_function",
-            torch.ops.map_impl,
+            _map.map_impl,
             (f_branch.graph_module, num_args, *args),
             {},
             meta,
