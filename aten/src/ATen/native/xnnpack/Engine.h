@@ -3,9 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <limits>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 //
 // Convolution
@@ -94,6 +92,6 @@ bool use_hardswish(const Tensor& input);
 Tensor hardswish(const Tensor& input);
 Tensor& hardswish_(Tensor& input);
 
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+bool available();
+
+} // namespace at::native::xnnpack
