@@ -63,7 +63,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         kwargs["device"] = compressed_tensor.device  # type: ignore[assignment]
         kwargs["dtype"] = compressed_tensor.dtype  # type: ignore[assignment]
         kwargs["layout"] = compressed_tensor.layout  # type: ignore[assignment]
-        kwargs["requires_grad"] = compressed_tensor.requires_grad  # type: ignore[assignment]
+        kwargs["requires_grad"] = False  # type: ignore[assignment]
 
         return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)  # type: ignore[attr-defined]
 
