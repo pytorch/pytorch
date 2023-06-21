@@ -754,7 +754,6 @@ class TestSortAndSelect(TestCase):
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, True, curr_size)
 
-    @onlyCUDA
     @dtypes(torch.bfloat16, torch.half)
     def test_topk_lower_precision(self, device, dtype):
 
@@ -765,7 +764,7 @@ class TestSortAndSelect(TestCase):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @dtypes(torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
         val, idx = x.topk(4)
@@ -796,7 +795,7 @@ class TestSortAndSelect(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypesIfCUDA(*all_types_and(torch.bfloat16))
-    @dtypes(*all_types())
+    @dtypes(*all_types_and(torch.bfloat16, torch.half))
     def test_topk_zero(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/49205
         t = torch.rand(2, 2, device=device).to(dtype=dtype)

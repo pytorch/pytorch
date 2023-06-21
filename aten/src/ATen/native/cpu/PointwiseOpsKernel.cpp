@@ -22,7 +22,7 @@ static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
           },
           [=](Vectorized<scalar_t> self_vec,
             Vectorized<scalar_t> t1_vec,
-            Vectorized<scalar_t> t2_vec) {
+            Vectorized<scalar_t> t2_vec) -> Vectorized<scalar_t> {
             auto [self_vec0, self_vec1] = convert_to_float<scalar_t>(self_vec);
             auto [t1_vec0, t1_vec1] = convert_to_float<scalar_t>(t1_vec);
             auto [t2_vec0, t2_vec1] = convert_to_float<scalar_t>(t2_vec);
@@ -32,7 +32,7 @@ static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
           });
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::ComplexHalf, at::ScalarType::Half,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::ComplexHalf,
                                            dtype, "addcmul_cpu_out", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
       auto scalar_vec = Vectorized<scalar_t>(scalar_val);
@@ -63,7 +63,7 @@ static void addcdiv_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
           },
           [=](Vectorized<scalar_t> self_vec,
               Vectorized<scalar_t> t1_vec,
-              Vectorized<scalar_t> t2_vec) {
+              Vectorized<scalar_t> t2_vec) -> Vectorized<scalar_t> {
               auto [self_vec0, self_vec1] = convert_to_float<scalar_t>(self_vec);
               auto [t1_vec0, t1_vec1] = convert_to_float<scalar_t>(t1_vec);
               auto [t2_vec0, t2_vec1] = convert_to_float<scalar_t>(t2_vec);
