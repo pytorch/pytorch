@@ -270,9 +270,7 @@ def _common_unshard_post_state_dict_hook(
             )
             for buffer, clean_fqn in zip(buffers, buffer_clean_fqns):
                 fqn = f"{prefix}{clean_fqn}"
-                logger.info(
-                    "FSDP is casting the dtype of %s to %s", fqn, buffer.dtype
-                )
+                logger.info("FSDP is casting the dtype of %s to %s", fqn, buffer.dtype)
                 state_dict[fqn] = buffer.clone()
     return state_dict
 
