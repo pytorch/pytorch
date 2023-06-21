@@ -20,7 +20,7 @@ import sys
 import time
 from contextlib import contextmanager
 
-from typing import Any, Callable, List, Mapping, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Callable, Mapping, NamedTuple, Optional, Tuple, Type
 from unittest.mock import MagicMock
 
 import numpy as np
