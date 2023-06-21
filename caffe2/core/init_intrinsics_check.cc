@@ -49,7 +49,7 @@ static void WarnIfFeatureUnused(
   }
 }
 
-bool Caffe2CheckIntrinsicsFeatures(int*, char***) {
+static bool Caffe2CheckIntrinsicsFeatures(int*, char***) {
 
 #ifdef __AVX__
   QuitIfFeatureUnsupported(GetCpuId().avx(), "avx");

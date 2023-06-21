@@ -24,16 +24,6 @@ namespace native {
 
 namespace {
 
-inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (a / b) * c + ((a % b) * c) / b;
-}
-
-inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return 1 + ((a + 1) * c - 1) / b;
-}
-
 template <typename scalar_t>
 static void adaptive_avg_pool3d_out_frame(
     scalar_t* input_p,

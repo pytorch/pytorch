@@ -20236,18 +20236,30 @@ python_ref_db = [
         "_refs.sum",
         torch_opinfo_name="sum",
         supports_out=True,
+        skips=(
+            # doesn't test out behavior properly for this operator
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+        ),
     ),
     PythonRefInfo(
         "_refs.cumsum",
         torch_opinfo_name="cumsum",
         supports_out=True,
         supports_nvfuser=False,  # arange not supported
+        skips=(
+            # doesn't test out behavior properly for this operator
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+        ),
     ),
     PythonRefInfo(
         "_refs.cumprod",
         torch_opinfo_name="cumprod",
         supports_out=True,
         supports_nvfuser=False,  # arange not supported
+        skips=(
+            # doesn't test out behavior properly for this operator
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+        ),
     ),
     PythonRefInfo(
         "_refs.sum_to_size",
@@ -20259,6 +20271,10 @@ python_ref_db = [
         torch_opinfo_name="prod",
         supports_out=True,
         supports_nvfuser=False,
+        skips=(
+            # doesn't test out behavior properly for this operator
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.var",

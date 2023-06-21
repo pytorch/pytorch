@@ -76,14 +76,6 @@ namespace native {
 
 namespace {
 
-inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
-  return (a / b) * c + ((a % b) * c) / b;
-}
-
-inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
-  return 1 + ((a + 1) * c - 1) / b;
-}
-
 // #define START_IND(a,b,c) a * c / b
 // #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
 

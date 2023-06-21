@@ -9,7 +9,7 @@ namespace vulkan {
 namespace ops {
 using namespace api::utils;
 
-Tensor upsample_nearest2d(
+static Tensor upsample_nearest2d(
     const Tensor& input_arg,
     const IntArrayRef output_sizes,
     const c10::optional<double> scales_h,
@@ -93,7 +93,7 @@ Tensor upsample_nearest2d(
   return convert(v_output);
 }
 
-Tensor upsample_bilinear2d(
+static Tensor upsample_bilinear2d(
     const Tensor& input_arg,
     const IntArrayRef output_sizes,
     bool align_corners,
