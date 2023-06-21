@@ -1070,8 +1070,6 @@ aten::reflection_pad3d
 aten::reflection_pad3d.out
 aten::reflection_pad3d_backward
 aten::reflection_pad3d_backward.grad_input
-aten::renorm
-aten::renorm.out
 aten::repeat_interleave.Tensor
 aten::repeat_interleave.Tensor_out
 aten::replication_pad1d
