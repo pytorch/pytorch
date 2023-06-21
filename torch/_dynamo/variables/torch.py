@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import inspect
 import logging
 
@@ -238,6 +239,12 @@ class TorchVariable(VariableTracker):
         if self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
+        elif self.value is torch._functorch.eager_transforms.grad_impl:
+            op = TorchHigherOrderOperatorVariable(
+                self.value,
+                source=self.source,
+            ).call_function(tx, args, kwargs)
+            return op
         elif self.can_constant_fold_through() and (constant_args or unspec_python_args):
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
@@ -757,9 +764,28 @@ def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
         tx.restore_graphstate(checkpoint)
 
 
+@contextlib.contextmanager
+def dynamo_enable_grad(tx):
+    from . import GradModeVariable
+
+    org_value = torch.is_grad_enabled()
+    try:
+        GradModeVariable.create(tx, True)
+        yield
+    finally:
+        GradModeVariable.create(tx, org_value)
+
+
 # See NOTE [HigherOrderOperator tracing design] for details of the design
 def speculate_subgraph(
-    tx, f, sub_args, graph_checkpoint, checkpoint, *, always_restore=False
+    tx,
+    f,
+    sub_args,
+    graph_checkpoint,
+    checkpoint,
+    *,
+    always_restore=False,
+    enable_grad=False,
 ):
     from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
     from .builder import wrap_fx_proxy
@@ -798,7 +824,13 @@ def speculate_subgraph(
                         "HigherOrderOperator with body that accepts non-Tensors as input"
                     )
                 args.append(new_arg)
-            output = f.call_function(tx, args, {})
+
+            autograd_ctx = (
+                dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
+            )
+            with autograd_ctx:
+                output = f.call_function(tx, args, {})
+
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support pytree output
@@ -1228,6 +1260,157 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             )
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
+        elif self.value is torch._functorch.eager_transforms.grad_impl:
+            # TODO: Support `fn` with kwargs.
+            if not torch._dynamo.config.capture_func_transforms:
+                unimplemented("torch.func.grad capture is disabled")
+            # [NOTE] Here we are (roughly) modelling the following
+            #
+            #   grad_fn = torch.func.grad(fn, argnums=.., has_aux=..)
+            #   grad_output = grad_fn(x)
+            checkpoint = tx.copy_graphstate()
+            graph_checkpoint = tx.output.graph
+            pre_side_effects = tx.output.side_effects.clone()
+            grad_args = (args[0], args[1], args[2])
+
+            # get arguments
+            func, argnums, has_aux = grad_args
+            kwargs = args[4].items
+            if len(kwargs) > 0:
+                # Since speculate_subgraph doesn't support kwargs, we can't handle this for now.
+                unimplemented(
+                    "torch.func.grad: kwargs arguments are currently unsupported."
+                )
+
+            # Trace through the `func`
+            # NOTE [HACK: Enable autograd while tracing function]
+            # `torch.func.grad` should not be affected by `no_grad` outside of `grad`.
+            # So, we enable_grad right before the function to which `grad` is applied
+            # (the parts explicitly disabled with `no_grad` inside the function are still disabled).
+            # Eg.
+            # def f(x):
+            #     with no_grad():  # This will disable grad tracking under it.
+            #        y = x * 2
+            #
+            #     return x ** 2 - y  # grad tracking should be enabled irrespective of outside `no_grad`.
+            #
+            # with no_grad():  # This will not disable grad tracking inside of grad(f).
+            #     grad_o = torch.func.grad(f)(x)
+            body_r, body_graph, body_lifted_freevars = speculate_subgraph(
+                tx,
+                func,
+                args[3].items,
+                graph_checkpoint,
+                checkpoint,
+                # See NOTE [HACK: Enable autograd while tracing function]
+                enable_grad=True,
+            )
+
+            body_name = add_subgraph(
+                "grad_body", torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+            )
+            body_node = make_attr(body_name)
+            post_side_effects = tx.output.side_effects
+            if post_side_effects.diff(pre_side_effects):
+                diff = (
+                    post_side_effects.id_to_variable.keys()
+                    - pre_side_effects.id_to_variable.keys()
+                )
+                if len(diff) > 0:
+                    unimplemented(
+                        "NYI - torch.func.grad(f) where there are side effects in f"
+                    )
+
+            grad_proxy_args = (
+                body_node,
+                *(arg.as_proxy() for arg in grad_args[1:]),
+            )
+
+            # Model `grad_fn = grad(fn, *grad_args, **grad_kwargs)`
+            grad_fn = tx.output.create_proxy(
+                "call_function",
+                torch.func.grad,
+                args=tuple(grad_proxy_args),
+                kwargs={},
+                name="grad_proxy",
+            )
+
+            # Pass lifted freevars to the call to `grad_fn`
+            args = args[3].items
+            grad_fn_args = tuple(arg.as_proxy() for arg in args) + tuple(
+                body_lifted_freevars
+            )
+
+            # Call grad_fn with inputs.
+            # grad_output = grad_fn(*grad_fn_args, **grad_fn_kwargs)
+            grad_output = grad_fn(*grad_fn_args)
+
+            # `grad_fn(*grad_fn_args, **grad_fn_kwargs)`
+            # Output of grad_fn is
+            # For has_aux=False, Tuple[gradients of inputs indicated by argnums].
+            # For has_aux=True, Tuple[Tuple[gradients of inputs indicated by argnums], aux values]
+            # NOTE: example_value should match `grad_output`.
+            if isinstance(argnums.value, int):
+                example_value = (
+                    args[argnums.value]
+                    .as_proxy()
+                    .node.meta["example_value"]
+                    .contiguous()
+                )
+            else:
+                example_value = tuple(
+                    args[idx].as_proxy().node.meta["example_value"].contiguous()
+                    for idx in argnums.value
+                )
+
+            if has_aux.value:
+                # case : has_aux = True
+                # NOTE: Currently speculate subgraph allows body_r to be
+                # Tensor or Tuple/List of Tensor.
+                # Since `grad` expects output with has_aux
+                # to be (output, aux), only valid output currently is
+                # (output, some_tensor)
+                body_r_proxy = body_r.as_proxy()
+                aux = body_r_proxy[1].node.meta["example_value"]
+                example_value = (example_value, aux)
+
+            fx_proxy = wrap_fx_proxy(
+                tx=tx, proxy=grad_output, example_value=example_value
+            )
+
+            # Call contiguous on all the computed grads.
+            if not has_aux.value:
+                if isinstance(argnums.value, int):
+                    return fx_proxy.call_method(tx, "contiguous", (), {})
+                else:
+                    grads = fx_proxy
+                    items = []
+                    for idx in range(len(argnums.value)):
+                        proxy = grads.call_method(
+                            tx, "__getitem__", (ConstantVariable(idx),), {}
+                        ).call_method(tx, "contiguous", (), {})
+                        items.append(proxy)
+                    return TupleVariable(items)
+            else:  # case: has_aux.value = True
+                # fx_proxy -> Tuple(grads, aux)
+                grads = fx_proxy.call_method(
+                    tx, "__getitem__", (ConstantVariable(0),), {}
+                )
+                aux = fx_proxy.call_method(
+                    tx, "__getitem__", (ConstantVariable(1),), {}
+                )
+                if isinstance(argnums.value, int):
+                    return TupleVariable(
+                        [grads.call_method(tx, "contiguous", (), {}), aux]
+                    )
+                else:
+                    items = []
+                    for idx in range(len(argnums.value)):
+                        proxy = grads.call_method(
+                            tx, "__getitem__", (ConstantVariable(idx),), {}
+                        ).call_method(tx, "contiguous", (), {})
+                        items.append(proxy)
+                    return TupleVariable([TupleVariable(items), aux])
         else:
             unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
