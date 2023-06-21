@@ -2,11 +2,12 @@ import argparse
 import ast
 import datetime
 import json
-import os
 import re
 from typing import Any, List, Union
 
 import rockset  # type: ignore[import]
+
+from tools.stats.rockset_utils import run_rockset_query
 
 from tools.stats.upload_stats_lib import upload_to_s3
 
@@ -36,24 +37,15 @@ def get_oncall_from_testfile(testfile: str) -> Union[List[str], None]:
 
 
 def get_test_stat_aggregates(date: datetime.date) -> Any:
-    # Initialize the Rockset client with your API key
-    rockset_api_key = os.environ["ROCKSET_API_KEY"]
-    rockset_api_server = "api.rs2.usw2.rockset.com"
     iso_date = date.isoformat()
-    rs = rockset.RocksetClient(
-        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    )
-
     # Define the name of the Rockset collection and lambda function
     collection_name = "commons"
     lambda_function_name = "test_insights_per_daily_upload"
     query_parameters = [
         rockset.models.QueryParameter(name="startTime", type="string", value=iso_date)
     ]
-    api_response = rs.QueryLambdas.execute_query_lambda(
-        query_lambda=lambda_function_name,
-        version="692684fa5b37177f",
-        parameters=query_parameters,
+    api_response = run_rockset_query(
+        collection_name, lambda_function_name, "692684fa5b37177f", query_parameters
     )
     for i in range(len(api_response["results"])):
         oncalls = get_oncall_from_testfile(api_response["results"][i]["test_file"])

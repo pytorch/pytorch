@@ -5,13 +5,20 @@ import json
 import os
 import re
 from collections import defaultdict
+from datetime import datetime, time
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Set, Tuple
+
+import pytz
 
 import requests
 from setuptools import distutils  # type: ignore[import]
 
-from tools.github.github_utils import gh_fetch_commit
+from tools.github.github_utils import gh_fetch_commit  # type: ignore[import]
+from tools.stats.rockset_utils import run_rockset_query
+
+MINIMUM_STRICT_LAG = 3 * 60 * 60  # 2 hours
+MAXIMUM_STRICT_LAG = 6 * 60 * 60  # 6 hours
 
 ALL_SKIPPED_THRESHOLD = 100
 SIMILARITY_THRESHOLD = 0.75
@@ -280,6 +287,63 @@ def get_recurrently_failing_jobs_alerts(
     return alerts
 
 
+def generate_viable_strict_lag_alert() -> List[Dict[str, Any]]:
+    # get viable strict lag from rockset
+    def get_viable_strict_lag() -> Any:
+        # Define the name of the Rockset collection and lambda function
+        collection = "metrics"
+        lambda_function_name = "strict_lag_sec"
+        lambda_function_version = "e0ab723990d6f2a2"
+        api_response = run_rockset_query(
+            collection, lambda_function_name, lambda_function_version
+        )
+        return api_response["results"][0]["strict_lag_sec"]
+
+    def during_weekend() -> bool:
+        # Define the timezone
+        pst = pytz.timezone("US/Pacific")
+
+        # Get the current datetime
+        now = datetime.now(pst)
+
+        # Define the time interval
+        start_time_fri = time(17, 0, 0)  # 5:00:00 PM
+        end_time_mon = time(6, 0, 0)  # 6:00:00 AM
+
+        # Check if current time is in the interval
+        if now.weekday() == 4:  # Friday
+            if now.time() >= start_time_fri:
+                return True
+        elif now.weekday() == 0:  # Monday
+            if now.time() < end_time_mon:
+                return True
+        elif now.weekday() in [5, 6]:  # Saturday and Sunday
+            return True
+        return False
+
+    if during_weekend():
+        return []
+
+    lag = int(get_viable_strict_lag())
+    if lag < MINIMUM_STRICT_LAG:
+        above_or_below = "below_threshold"
+    elif lag > MAXIMUM_STRICT_LAG:
+        above_or_below = "above_threshold"
+    else:
+        return []
+
+    entry = [
+        {
+            "AlertType": "Metric Threshold",
+            "AlertObject": "Viable Strict Lag",
+            "OncallTeams": [],
+            "OncallIndividuals": [],
+            "Flags": [above_or_below, {"lag": lag}],
+        }
+    ]
+    return entry
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -317,8 +381,11 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
-    data = json.dumps(
-        get_recurrently_failing_jobs_alerts(args.repo, args.branch, args.job_name_regex)
+    data = []
+    data = get_recurrently_failing_jobs_alerts(
+        args.repo, args.branch, args.job_name_regex
     )
+    data.extend(generate_viable_strict_lag_alert())
+    data = json.dumps(data)
 
     print(data)
