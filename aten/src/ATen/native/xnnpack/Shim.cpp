@@ -16,7 +16,6 @@
 namespace at {
 namespace native {
 namespace xnnpack {
-
 namespace internal {
 namespace {
 
@@ -26,54 +25,11 @@ constexpr const char * const kError =
 } // namespace
 } // namespace internal
 
-bool available();
-bool use_convolution2d(
-    const Tensor&,
-    const Tensor&,
-    const at::OptionalIntArrayRef,
-    const IntArrayRef,
-    const IntArrayRef,
-    const IntArrayRef,
-    const int64_t,
-    bool);
-Tensor convolution2d(
-    const Tensor&,
-    const Tensor&,
-    const Tensor&,
-    const IntArrayRef,
-    const IntArrayRef,
-    const IntArrayRef,
-    const int64_t);
-
-bool use_linear(const Tensor&, const Tensor&, const Tensor&);
-
-Tensor linear(const Tensor&, const Tensor&, const Tensor&);
-
-bool use_max_pool2d(
-    const Tensor&,
-    const IntArrayRef,
-    const IntArrayRef,
-    IntArrayRef,
-    const IntArrayRef,
-    const bool,
-    const float,
-    const float);
-
-Tensor max_pool2d(
-    const Tensor&,
-    const IntArrayRef,
-    const IntArrayRef,
-    IntArrayRef,
-    const IntArrayRef,
-    const bool,
-    const float,
-    const float);
-
-bool available() {
+static bool available() {
     return false;
 }
 
-bool use_convolution2d(
+static bool use_convolution2d(
     const Tensor&,
     const Tensor&,
     const at::OptionalIntArrayRef,
@@ -85,7 +41,7 @@ bool use_convolution2d(
   return false;
 }
 
-Tensor convolution2d(
+static Tensor convolution2d(
     const Tensor&,
     const Tensor&,
     const Tensor&,
@@ -96,21 +52,21 @@ Tensor convolution2d(
   TORCH_CHECK(false, internal::kError);
 }
 
-bool use_linear(
+static bool use_linear(
     const Tensor&,
     const Tensor&,
     const Tensor&) {
   return false;
 }
 
-Tensor linear(
+static Tensor linear(
     const Tensor&,
     const Tensor&,
     const Tensor&) {
   TORCH_CHECK(false, internal::kError);
 }
 
-bool use_max_pool2d(
+static bool use_max_pool2d(
     const Tensor&,
     const IntArrayRef,
     const IntArrayRef,
@@ -122,7 +78,7 @@ bool use_max_pool2d(
   return false;
 }
 
-Tensor max_pool2d(
+static Tensor max_pool2d(
     const Tensor&,
     const IntArrayRef,
     const IntArrayRef,
