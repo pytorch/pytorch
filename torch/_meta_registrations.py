@@ -311,7 +311,7 @@ def assert_async_meta(val, assert_msg):
     return
 
 
-@register_meta(aten.make_dep_token)
+@register_meta(aten.make_dep_token.default)
 def make_dep_token(dep_token):
     return torch.empty(0)
 
