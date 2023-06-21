@@ -123,7 +123,7 @@ void EventSetFinishedCPU(const Event* event, const char* err_msg) {
   wrapper->cv_completed_.notify_all();
 }
 
-void EventSetCallbackCPU(Event* event, EventCallbackFunction callback) {
+static void EventSetCallbackCPU(Event* event, EventCallbackFunction callback) {
   auto* wrapper = static_cast<CPUEventWrapper*>(event->event_.get());
   std::unique_lock<std::mutex> lock(wrapper->mutex_);
 

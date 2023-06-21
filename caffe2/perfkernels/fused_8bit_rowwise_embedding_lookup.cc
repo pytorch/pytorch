@@ -81,7 +81,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlow(
 // clang-format off
 // Proxy back to generic implementation
 #define FUSED_8BIT_ROWWISE_EMBEDDING_SPECIALIZATION(IndexType, OutType)                  \
-  bool                                                                                   \
+  static bool                                                                                   \
       Fused8BitRowwiseEmbeddingLookup_##IndexType##_uint8_t_##OutType##_false__base(     \
           const int64_t block_size,                                                      \
           const int64_t output_size,                                                     \
@@ -112,7 +112,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlow(
   decltype(                                                                              \
       Fused8BitRowwiseEmbeddingLookup_##IndexType##_uint8_t_##OutType##_false__base)     \
       Fused8BitRowwiseEmbeddingLookup_##IndexType##_uint8_t_##OutType##_false__avx2_fma; \
-  bool Fused8BitRowwiseEmbeddingLookup_##IndexType##_uint8_t_##OutType(                  \
+  static bool Fused8BitRowwiseEmbeddingLookup_##IndexType##_uint8_t_##OutType(                  \
       const int64_t block_size,                                                          \
       const int64_t output_size,                                                         \
       const int64_t index_size,                                                          \

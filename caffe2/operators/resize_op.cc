@@ -10,7 +10,7 @@
 
 namespace caffe2 {
 
-void resizeNearestNCHW2x(
+static void resizeNearestNCHW2x(
     int batch_size,
     int num_channels,
     int input_height,

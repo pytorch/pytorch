@@ -132,7 +132,6 @@ def _common_pre_state_dict_hook(
         fsdp_state._device_handle.synchronize()
     # TODO: need to check if this is always correct for composable FSDP.
     _lazy_init(fsdp_state, module)
-    # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
         _clear_grads_if_needed(fsdp_state._all_handles)
 
@@ -162,7 +161,6 @@ def _common_unshard_pre_state_dict_hook(
     )
 
 
-# TODO: change to the decorator style. See ``_full_pre_state_dict_hook``.
 @no_type_check
 def _common_unshard_post_state_dict_hook(
     module: nn.Module,
@@ -252,7 +250,6 @@ def _common_unshard_post_state_dict_hook(
                 and buffer.device != cpu_device
             ):
                 state_dict[fqn] = buffer.to(cpu_device)
-            # TODO: for composable FSDP, this should be clean_tensor_name(clean_key),
             buffer_clean_fqns.append(clean_key)
             buffers.append(state_dict[fqn])
     if buffers:
@@ -285,9 +282,6 @@ def _full_pre_state_dict_hook(
     from ``_full_post_state_dict_hook()`` to simulate the case. Once pre-state_dict
     is supported in ``nn.Module``, this hook will be registered as a hook in
     ``nn.Module``.
-
-    TODO: clean the callsites and hacks after ``pre_state_dict_hook` ` is supported
-    in ``nn.Module``.
     """
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
