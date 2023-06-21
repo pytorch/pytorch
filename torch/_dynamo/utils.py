@@ -1678,7 +1678,10 @@ def defake(x):
 # NB: The dictionary has to be created lazily after TorchPatcher is called so
 # that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
 # sitting in a separate function.
-not_disabled_checkpoint = torch.utils.checkpoint.checkpoint
+# We also need the original untouched/ not disabled torch utils checkpoint
+# becuase distributed checkpointed wrappers import these utils before
+# TorchDynamo TorchPatcher runs.
+untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
 
 
 def higher_order_op_converter():
@@ -1692,7 +1695,7 @@ def higher_order_op_converter():
 
     return {
         torch.utils.checkpoint.checkpoint: activation_checkpoint_op,
-        not_disabled_checkpoint: activation_checkpoint_op,
+        untouched_torch_utils_checkpoint: activation_checkpoint_op,
     }
 
 

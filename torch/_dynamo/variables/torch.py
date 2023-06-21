@@ -21,7 +21,12 @@ from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import ArgsMismatchError, unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder
-from ..source import GeneratorStateSource, GetItemSource, NNModuleSource
+from ..source import (
+    FSDPNNModuleSource,
+    GeneratorStateSource,
+    GetItemSource,
+    NNModuleSource,
+)
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -895,7 +900,11 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     next_name = candidate
 
             gm.__name__ = next_name
-            src = NNModuleSource(GetItemSource(self.source, next_name))
+            if self.source.guard_source().is_fsdp_module():
+                src = FSDPNNModuleSource(GetItemSource(self.source, next_name))
+            else:
+                assert self.source.guard_source().is_nn_module()
+                src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
             tx.output.register_attr_or_module(gm, next_name, source=src)
             return next_name

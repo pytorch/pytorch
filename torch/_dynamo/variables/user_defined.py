@@ -9,7 +9,6 @@ import types
 from typing import Dict, List
 
 import torch.nn
-import torch.utils.checkpoint
 
 from .. import variables
 from ..allowed_functions import is_allowed

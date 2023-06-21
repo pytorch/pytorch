@@ -84,13 +84,12 @@ class ToyOuterModel(nn.Module):
         return self.layers(inputs)
 
 
-def get_ac_model(device):
+def get_toy_model_for_activation_checkpointing(device):
     m = ToyOuterModel(device).to(device)
     m.apply(init_weights)
     inputs = torch.rand(100, 100).to(device)
     return m, inputs
 
-get_ac_model("cuda")
 
 def get_custom_model(device):
     class MyCustomLinear(torch.nn.Module):
@@ -347,16 +346,14 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             return model
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            # Test with basic FSDP wrapping (outer wrap around whole model)
-            model, inputs = get_ac_model(f"cuda:{self.rank}")
-            is_inner = lambda module: isinstance(module, ToyInnerModel)
+            model, inputs = get_toy_model_for_activation_checkpointing(f"cuda:{self.rank}")
+            is_inner = lambda module: isinstance(module, ToyInnerModel)  # noqa: E731
             wrap_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=is_inner)
             model = apply_fsdp(model, wrap_policy, is_inner)
-            print(model)
-            # correct_outputs = model(inputs)
-            opt_model = torch._dynamo.optimize("inductor")(model)
+            correct_outputs = model(inputs)
+            opt_model = torch.compile(model)
             outputs = opt_model(inputs)
-            # self.assertTrue(same(correct_outputs, outputs))
+            self.assertTrue(same(correct_outputs, outputs))
 
 
     @import_transformers_or_skip()
@@ -365,6 +362,50 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_fsdp(self):
+
+        def apply_fsdp(model, wrap_policy):
+            model = FSDP(
+                copy.deepcopy(model),
+                auto_wrap_policy=wrap_policy,
+                use_orig_params=True
+            )
+            return model
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            for (wrap_policy, test_instance) in (
+                (
+                    None,
+                    "FSDP without recursive wrapping"
+                ),
+            ):
+                print(f"Running hf_bert test for {test_instance}")
+                model, inputs = get_hf_bert(self.rank)
+                reset_rng_state()
+                eager_model = apply_fsdp(model, wrap_policy)
+                correct_outputs = eager_model(**inputs)
+                correct_loss = correct_outputs.loss
+                correct_loss.backward()
+
+                reset_rng_state()
+                opt_model = apply_fsdp(model, wrap_policy)
+                opt_model = torch._dynamo.optimize("inductor")(opt_model)
+                opt_outputs = opt_model(**inputs)
+                opt_loss = opt_outputs.loss
+                opt_loss.backward()
+
+                inputs_flat = [inputs[k] for k in inputs]
+                correct_results = collect_results(eager_model, correct_outputs.logits, correct_loss, inputs_flat)
+                opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
+                self.assertTrue(same(correct_results, opt_results))
+
+
+
+    @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    # TODO(whc) Investigate why cudagraphs breaks inductor+fsdp for hf_bert
+    @patch.object(torch._inductor.config.triton, "cudagraphs", False)
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    def test_hf_bert_fsdp_activation_checkpointing(self):
         from transformers.models.bert.modeling_bert import BertLayer
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             apply_activation_checkpointing,
@@ -383,7 +424,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     checkpoint_wrapper,
                     checkpoint_impl=CheckpointImpl.NO_REENTRANT,
                 )
-                check_fn = lambda submodule: isinstance(submodule, BertLayer)
+                check_fn = lambda submodule: isinstance(submodule, BertLayer)  # noqa: E731
                 apply_activation_checkpointing(
                     model, checkpoint_wrapper_fn=checkpoint_wrapper_fn, check_fn=check_fn
                 )
@@ -391,10 +432,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             for (wrap_policy, test_instance) in (
-                # (
-                #     None,
-                #     "FSDP without recursive wrapping"
-                # ),
                 (
                     functools.partial(
                         transformer_auto_wrap_policy, transformer_layer_cls=(BertLayer, )
@@ -402,7 +439,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     "FSDP with recursive wrapping BertLayer instances"
                 ),
             ):
-                print(f"Running hf_bert test for {test_instance}")
+                print(f"Running hf_bert_activation_checkpointing test for {test_instance}")
                 model, inputs = get_hf_bert(self.rank)
                 reset_rng_state()
                 eager_model = apply_fsdp(model, wrap_policy)
@@ -413,7 +450,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 reset_rng_state()
                 opt_model = apply_fsdp(model, wrap_policy)
                 opt_model = torch.compile(opt_model)
-                # opt_model = torch._dynamo.optimize("inductor")(opt_model)
                 opt_outputs = opt_model(**inputs)
                 opt_loss = opt_outputs.loss
                 opt_loss.backward()
