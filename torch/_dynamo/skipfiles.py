@@ -32,11 +32,11 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
+import torch.distributed.fsdp
+import torch.distributed.utils
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
-import torch.distributed.fsdp
-import torch.distributed.utils
 
 """
 A note on skipfiles:
@@ -206,6 +206,11 @@ FILENAME_ALLOWLIST |= {
 FILENAME_ALLOWLIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
 )
+
+# torch.func.grad: need to allow this file to be able to look at `grad_impl`
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_functorch/apis.py",
+}
 
 SKIP_DIRS_RE = None
 

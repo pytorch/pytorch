@@ -956,6 +956,7 @@ class FakeItemVariable(TensorVariable):
     def from_tensor_variable(cls, tensor_variable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
 
+
 class TypedStorageVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         self.value = value
