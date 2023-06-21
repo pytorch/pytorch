@@ -1930,7 +1930,7 @@ def check_if_enable(test: unittest.TestCase):
 
     def matches_test(target: str):
         target_test_parts = target.split()
-        if target_test_parts < 2:
+        if len(target_test_parts) < 2:
             # poorly formed target test name
             return False
         target_testname = target_test_parts[0]
