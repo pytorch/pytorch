@@ -12,6 +12,7 @@ from torch._export.db.case import export_case, ExportArgs, SupportLevel
         **{"input0": torch.randn(4), "input1": torch.randn(4)}
     ),
     tags={"python.data-structure"},
+    support_level=SupportLevel.NOT_SUPPORTED_YET,
 )
 def fn_with_kwargs(pos0, tuple0, *myargs, mykw0=None, **mykwargs):
     """

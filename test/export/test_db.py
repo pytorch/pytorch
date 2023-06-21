@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import unittest
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 import torch._dynamo as torchdynamo
 from torch._export import export
@@ -45,6 +45,7 @@ class ExampleTests(TestCase):
         exported_program = export(
             model,
             inputs.args,
+            constraints=case.export_constraints,
         )
         exported_program.graph_module.print_readable()
 
@@ -68,16 +69,12 @@ class ExampleTests(TestCase):
     def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
         model = case.model
         # pyre-ignore
-        with torchdynamo.config.patch(asdict(_DynamoConfig())), self.assertRaises(
-            torchdynamo.exc.Unsupported
-        ):
+        with self.assertRaises(torchdynamo.exc.Unsupported):
             inputs = normalize_inputs(case.example_inputs)
-            exported_model, _ = torchdynamo.export(
+            exported_model = export(
                 model,
-                *inputs.args,
-                aten_graph=True,
-                tracing_mode="symbolic",
-                **inputs.kwargs
+                inputs.args,
+                constraints=case.export_constraints,
             )
 
     @parametrize(
@@ -95,15 +92,12 @@ class ExampleTests(TestCase):
         self, name: str, rewrite_case: ExportCase
     ) -> None:
         # pyre-ignore
-        with torchdynamo.config.patch(asdict(_DynamoConfig())):
-            inputs = normalize_inputs(rewrite_case.example_inputs)
-            exported_model, _ = torchdynamo.export(
-                rewrite_case.model,
-                *inputs.args,
-                aten_graph=True,
-                tracing_mode="symbolic",
-                **inputs.kwargs
-            )
+        inputs = normalize_inputs(rewrite_case.example_inputs)
+        exported_model = export(
+            rewrite_case.model,
+            inputs.args,
+            constraints=rewrite_case.export_constraints,
+        )
 
 
 instantiate_parametrized_tests(ExampleTests)

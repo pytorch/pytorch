@@ -179,9 +179,9 @@ class ExportPassBase(PassBase):
             elif target == control_flow.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-            elif target == control_flow.map or target == torch.ops.map_impl:
-                f, x, *args = args  # type: ignore[assignment]
-                return self.callback.call_map(f, x, args, meta)
+            elif target == torch.ops.map_impl:
+                f, num_args, *rest = args  # type: ignore[assignment]
+                return self.callback.call_map(f, num_args, list(rest), meta)
             else:
                 raise ExportPassBaseError(f"Unsupported target type: {target}")
 
@@ -326,16 +326,16 @@ class ExportPassBase(PassBase):
     def call_map(
         self,
         f: torch.fx.GraphModule,
-        xs: ProxyValue,
-        args: Tuple[ProxyValue, ...],
+        num_args: int,
+        args: List[ProxyValue],
         meta: NodeMetadata,
     ) -> ProxyValue:
-        f_branch = self.call_submodule(f, tuple([xs.data[0]] + list(args)))
+        f_branch = self.call_submodule(f, (args[:num_args][0], *args[num_args:]))
         assert f_branch is not None
         return self._fx(
             "call_function",
-            control_flow.map,
-            (f_branch.graph_module, xs, *args),
+            torch.ops.map_impl,
+            (f_branch.graph_module, num_args, *args),
             {},
             meta,
         )
