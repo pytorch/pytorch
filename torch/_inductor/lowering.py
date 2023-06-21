@@ -809,7 +809,7 @@ def permute(x, dims):
 
 
 @register_lowering(aten.slice, type_promotion_kind=None)
-def slice_(x, dim=0, start=0, end=2 ** 63, step=1):
+def slice_(x, dim=0, start=0, end=2**63, step=1):
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
@@ -4275,7 +4275,6 @@ try:
     @register_lowering(c10d_functional.all_reduce_coalesced)
     def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
         return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
-
 
 except ImportError:
     log.info(
