@@ -29,8 +29,8 @@ class MapWrapper(HigherOrderOperator):
     def __call__(self, xs, *args):
         return map_wrapper(xs, *args)
 
-map = MapWrapper("map")
-map_impl = HigherOrderOperator("map_impl")
+map = MapWrapper("map", _deprecated_global_ns=True)
+map_impl = HigherOrderOperator("map_impl", _deprecated_global_ns=True)
 
 dummy_aot_config = AOTConfig(fw_compiler=None,
                              bw_compiler=None,
