@@ -4,7 +4,10 @@ import dataclasses
 import sympy
 from typing import Any, Dict, List, Optional, Tuple, Union
 from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
-from torch._export.functionalize_assertions import functionalize, FunctionalizedGraphModule
+from torch._export.functionalize_assertions import (
+    _functionalize_side_effectful_ops,
+    SideEffectOpsFunctionalizationResult,
+)
 
 
 import torch
@@ -70,6 +73,22 @@ class ExportGraphSignature:
     backward_signature: Optional[ExportBackwardSignature]
 
     assertion_dep_token_output: Optional[FQN] = None
+    assertion_dep_token_index: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        assert (
+            self.assertion_dep_token_output is not None
+            and self.assertion_dep_token_index is not None
+        ) or (
+            self.assertion_dep_token_output is None
+            and self.assertion_dep_token_index is None
+        )
+
+        if self.assertion_dep_token_index is not None:
+            assert (
+                len(self.user_inputs) + len(self.buffers_to_mutate)
+                == self.assertion_dep_token_index
+            )
 
 
 class ExportedProgram:
@@ -119,6 +138,11 @@ class ExportedProgram:
             mutation = self.graph_signature.buffers_to_mutate
             num_mutated = len(mutation)
             mutated_buffers = res[:num_mutated]
+
+            # Exclude dependency token from final result.
+            if self.graph_signature.assertion_dep_token_index is not None:
+                res = res[:self.graph_signature.assertion_dep_token_index]
+
             res = res[num_mutated:]
             try:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
@@ -183,7 +207,7 @@ class ExportedProgram:
             ep = _update_after_adding_runtime_assertions(self, ep)
             ep = _update_after_functionalizing_runtime_assertions(
                 ep,
-                functionalized=functionalize(gm=ep.graph_module),
+                _functionalize_side_effectful_ops(gm=ep.graph_module),
             )
 
         return ep
@@ -191,28 +215,17 @@ class ExportedProgram:
 
 def _update_after_functionalizing_runtime_assertions(
     ep: ExportedProgram,
-    functionalized: FunctionalizedGraphModule,
+    result: SideEffectOpsFunctionalizationResult,
 ) -> ExportedProgram:
     graph_signature = dataclasses.replace(
         copy.deepcopy(ep.graph_signature),
-        assertion_dep_token_output=functionalized.dep_token_output,
+        assertion_dep_token_output=result.dep_token_output,
+        assertion_dep_token_index=result.dep_token_output_index,
     )
-
-    # Update output spec so dep token will always be bundled with original output
-    # within a tuple if the exported program is called directly. For example,
-    # if original output is `(x, y)`, the output with dep token included will be
-    # like `((x, y), dep_token)`.
-    out_spec = pytree.TreeSpec(
-        type=tuple,
-        context=None,
-        children_specs=[copy.deepcopy(ep.call_spec.out_spec), pytree.LeafSpec()],
-    )
-    call_spec = dataclasses.replace(copy.deepcopy(ep.call_spec), out_spec=out_spec)
     return _update_exported_program(
         ep,
-        graph_module=functionalized.graph_module,
+        graph_module=result.graph_module,
         graph_signature=graph_signature,
-        call_spec=call_spec,
     )
 
 
@@ -220,10 +233,15 @@ def _update_after_adding_runtime_assertions(
     ep: ExportedProgram,
     new_ep: ExportedProgram,
 ) -> ExportedProgram:
+    # TODO: Improve current pass infra to make it possible to update graph
+    # signature as well (currently only graph module).
+
     def _get_output_FQNs(gm: torch.fx.GraphModule) -> List[FQN]:
         output_node = next(n for n in gm.graph.nodes if n.op == "output")
         return [str(arg) for arg in output_node.args[0]]
 
+    # Update output names since after adding run time assertions, the FQNs of
+    # outputs could change.
     # The assumption here is that `_AddRuntimeAssertionsForConstraintsPass`:
     # - Won't change graph outputs order semantically so it's possible to create
     #   map from old to new output FQNs based on position.
@@ -237,6 +255,8 @@ def _update_after_adding_runtime_assertions(
         )
     )
     gs = ep.graph_signature
+    # Need to update graph signature fields related to output since after adding
+    # runtime assertions, the output FQNs could change.
     new_user_outputs = [output_map[u] for u in gs.user_outputs]
     new_buffers_to_mutate = {output_map[u]: b for u, b in gs.buffers_to_mutate.items()}
 
@@ -255,9 +275,8 @@ def _update_exported_program(
     *,
     graph_module: Optional[torch.fx.GraphModule] = None,
     graph_signature: Optional[ExportGraphSignature] = None,
-    call_spec: Optional[CallSpec] = None,
 ) -> ExportedProgram:
-    if graph_module is None and graph_signature is None and call_spec is None:
+    if graph_module is None and graph_signature is None:
         return ep
 
     gm = copy.deepcopy(ep.graph_module) if graph_module is None else graph_module
@@ -266,12 +285,11 @@ def _update_exported_program(
         if graph_signature is None
         else graph_signature
     )
-    call_spec = copy.deepcopy(ep.call_spec) if call_spec is None else call_spec
     return ExportedProgram(
         root=gm,
         graph=gm.graph,
         graph_signature=gs,
-        call_spec=call_spec,
+        call_spec=copy.deepcopy(ep.call_spec),
         state_dict=ep.state_dict,
         range_constraints=copy.deepcopy(ep.range_constraints),
         equality_constraints=copy.deepcopy(ep.equality_constraints),

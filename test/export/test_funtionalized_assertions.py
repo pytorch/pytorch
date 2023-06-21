@@ -2,17 +2,15 @@
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._export.constraints import constrain_as_size
-from torch._export.functionalize_assertions import functionalize
-from torch._export.exported_program import ExportGraphSignature
+from torch._export.functionalize_assertions import _functionalize_side_effectful_ops
 from torch._export import dynamic_dim
 from torch.testing import FileCheck
-
-_DEP_TOKEN = torch.empty(0)
+from torch._export.exported_program import ExportGraphSignature
 
 
 class TestFuntionalAssertions(TestCase):
     def test_functional_assert_async(self) -> None:
-        dep_token = torch.empty((1, 2))
+        dep_token = torch.ops.aten.make_dep_token(torch.empty((1, 2)))
         self.assertEqual(
             torch.ops.aten._functional_assert_async(torch.tensor(1), dep_token),
             dep_token,
@@ -23,7 +21,7 @@ class TestFuntionalAssertions(TestCase):
             torch._functional_assert_async(torch.tensor(0), dep_token)
 
     def test_functional_assert_async_msg(self) -> None:
-        dep_token = torch.empty((2, 3))
+        dep_token = torch.ops.aten.make_dep_token(torch.empty((2, 3)))
         self.assertEqual(
             torch.ops.aten._functional_assert_async.msg(
                 torch.tensor(1), "test msg", dep_token
@@ -36,7 +34,7 @@ class TestFuntionalAssertions(TestCase):
             ),
 
     def test_functional_sym_constrain_range(self) -> None:
-        dep_token = torch.empty((1,))
+        dep_token = torch.ops.aten.make_dep_token(torch.empty((1,)))
         self.assertEqual(
             torch.ops.aten.functional_sym_constrain_range(
                 3, min=2, max=5, dep_token=dep_token
@@ -46,7 +44,7 @@ class TestFuntionalAssertions(TestCase):
 
 
 class TestFunctionalization(TestCase):
-    def test_inline_contraints(self) -> None:
+    def test_functionalize_inline_contraints(self) -> None:
         def f(x):
             a = x.item()
             constrain_as_size(a, 4, 7)
@@ -60,10 +58,11 @@ class TestFunctionalization(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        functionalized = functionalize(gm)
-        self.assertEqual(functionalized.dep_token_output, "dep_token_7")
-        gm = functionalized.graph_module
+        result = _functionalize_side_effectful_ops(gm)
+        self.assertEqual(result.dep_token_output, "dep_token_7")
+        self.assertEqual(result.dep_token_output_index, 1)
 
+        gm = result.graph_module
         with self.assertRaisesRegex(
             RuntimeError,
             r"_local_scalar_dense_default is outside of inline constraint \[4, 7\]",
@@ -89,7 +88,7 @@ class TestFunctionalization(TestCase):
         )
         self.assertEqual(constrain_node.kwargs["dep_token"], dep_token_node)
 
-    def test_input_constraints(self) -> None:
+    def test_functionalize_input_constraints(self) -> None:
         def f(x):
             return x * 2
 
@@ -102,10 +101,11 @@ class TestFunctionalization(TestCase):
                 dynamic_dim(inp, 0) >= 3,
             ],
         )
-        functionalized = functionalize(ep.graph_module)
-        self.assertEqual(functionalized.dep_token_output, "dep_token_4")
-        gm = functionalized.graph_module
+        result = _functionalize_side_effectful_ops(ep.graph_module)
+        self.assertEqual(result.dep_token_output, "dep_token_4")
+        self.assertEqual(result.dep_token_output_index, 1)
 
+        gm = result.graph_module
         with self.assertRaisesRegex(
             RuntimeError,
             r"Input arg0_1.shape\[0\] is outside of specified dynamic range \[3, 9\]",
@@ -134,7 +134,18 @@ class TestFunctionalization(TestCase):
             _functionalize_runtime_assertions=True,
         )
         inps = (torch.tensor([7]), torch.ones((3, 5)))
-        self.assertTrue(torch._dynamo.utils.same(ep(*inps), (f(*inps), _DEP_TOKEN)))
+        self.assertTrue(torch._dynamo.utils.same(ep(*inps), f(*inps)))
+
+    def test_native_python_assertion(self) -> None:
+        def f(x):
+            assert x.shape[0] > 3
+            return x * 2
+
+        inp = torch.zeros(5, 2)
+        ep = torch._export.export(f, (inp,), _functionalize_runtime_assertions=True)
+
+        inp = torch.ones(5, 2)
+        self.assertTrue(torch._dynamo.utils.same(ep(inp), f(inp)))
 
     def test_functionalization_with_mutated_buffer(self) -> None:
         buf = torch.ones(6, 2)
@@ -179,6 +190,7 @@ class TestFunctionalization(TestCase):
                 buffers_to_mutate={"add_tensor": "L__self___buf"},
                 backward_signature=None,
                 assertion_dep_token_output="dep_token_8",
+                assertion_dep_token_index=2,
             ),
         )
         output_node = next(n for n in ep.graph.nodes if n.op == "output")
@@ -189,18 +201,18 @@ class TestFunctionalization(TestCase):
         inp = torch.randn(5, 3)
         self.assertTrue(
             torch._dynamo.utils.same(
-                # Run `ep.graph_module(...)` instead of `ep(...)` to avoid
-                # using cached buffer values stored in ep through `state_dict`.
+                # Directly check run output of `ep.graph_module` which is
+                # functionalized.
                 ep.graph_module(
                     torch.full((d_out, d_in), weight),
                     torch.full((d_out,), bias),
                     buf.clone(),
                     inp,
                 ),
-                (buf.add(5), Foo()(inp), _DEP_TOKEN),
+                (buf.add(5), Foo()(inp), torch.empty(0)),
             )
         )
-        self.assertEqual(ep(inp)[1], _DEP_TOKEN)
+        self.assertTrue(torch._dynamo.utils.same(ep(inp), Foo()(inp)))
 
 
 if __name__ == "__main__":
