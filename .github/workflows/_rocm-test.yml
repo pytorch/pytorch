@@ -130,7 +130,7 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-          REENABLED_ISSUES: ${{ github.event.pull_request.body }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
