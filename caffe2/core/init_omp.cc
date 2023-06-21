@@ -28,7 +28,7 @@ C10_DEFINE_int(
 namespace caffe2 {
 
 #ifdef _OPENMP
-bool Caffe2SetOpenMPThreads(int*, char***) {
+static bool Caffe2SetOpenMPThreads(int*, char***) {
   if (!getenv("OMP_NUM_THREADS")) {
     // OMP_NUM_THREADS not passed explicitly, so *disable* OMP by
     // default. The user can use the CLI flag to override.
