@@ -1,8 +1,8 @@
 name: Nightly Upload to rockset
 
 on:
+  pull-request:
   schedule:
-    pull-request:
     # Choose a random time near midnight PST because it may be delayed if there are high loads
     - cron:  37 7 * * *
 
