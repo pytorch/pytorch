@@ -2015,32 +2015,6 @@ aliasing_failures = (
     "histogramdd",
 )
 
-# tests which have inconsistent fake tensor stride propagation
-# XXX: no new tests should be added to this list as a result of a
-# decomp or prim, see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-fake_tensor_stride_failing_ops = {
-    "fft.fft2",
-    "fft.fft",
-    "fft.fftn",
-    "fft.hfft2",
-    "fft.hfft",
-    "fft.hfftn",
-    "fft.ifft2",
-    "fft.ifft",
-    "fft.ifftn",
-    "fft.ihfft2",
-    "fft.ihfft",
-    "fft.ihfftn",
-    "fft.irfft2",
-    "fft.irfft",
-    "fft.irfftn",
-    "fft.rfft2",
-    "fft.rfft",
-    "fft.rfftn",
-    "svd",
-    "linalg.svd",
-}
-
 fake_backward_skips = {
     "linalg.cond",
     "linalg.matrix_norm",
@@ -2057,7 +2031,7 @@ fake_backward_skips = {
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("_segment_reduce", "lengths"),
     skip('nn.functional.ctc_loss'),
-} | {skip(stride_skip) for stride_skip in fake_tensor_stride_failing_ops}
+}
 
 fake_autocast_backward_xfails = {
     skip("nn.functional.binary_cross_entropy"),
@@ -2113,11 +2087,9 @@ class TestFakeTensor(TestCase):
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
 
-                    check_strides = name not in fake_tensor_stride_failing_ops
-
                     # prims/decomps must correctly model strides,
                     # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                    prims.utils.compare_tensor_meta(fake_out, real_out, check_strides)
+                    prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
                     if name not in aliasing_failures:
                         fake_aliasing = outputs_alias_inputs((input, args, kwargs), res_fake)
