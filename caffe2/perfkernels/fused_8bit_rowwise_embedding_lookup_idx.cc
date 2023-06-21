@@ -83,7 +83,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
 // clang-format off
 // Proxy back to generic implementation
 #define FUSED_8BIT_ROWWISE_EMBEDDING_IDX_SPECIALIZATION(IndexType, OutType)                 \
-  bool                                                                                      \
+  static bool                                                                                      \
       Fused8BitRowwiseEmbeddingLookupIdx_##IndexType##_uint8_t_##OutType##_false__base(     \
           const int64_t block_size,                                                         \
           const int64_t output_size,                                                        \
@@ -114,14 +114,14 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlowIdx(
   decltype(                                                                                 \
       Fused8BitRowwiseEmbeddingLookupIdx_##IndexType##_uint8_t_##OutType##_false__base)     \
       Fused8BitRowwiseEmbeddingLookupIdx_##IndexType##_uint8_t_##OutType##_false__avx2_fma; \
-  bool Fused8BitRowwiseEmbeddingLookupIdx_##IndexType##_uint8_t_##OutType(                  \
+  static bool Fused8BitRowwiseEmbeddingLookupIdx_##IndexType##_uint8_t_##OutType(           \
       const int64_t block_size,                                                             \
       const int64_t output_size,                                                            \
       const int64_t index_size,                                                             \
       const int64_t data_size,                                                              \
       const uint8_t* input,                                                                 \
       const IndexType* indices,                                                             \
-      const IndexType* offsets,                                                               \
+      const IndexType* offsets,                                                             \
       const float* weights,                                                                 \
       bool normalize_by_lengths,                                                            \
       OutType* out) {                                                                       \
