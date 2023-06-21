@@ -33,11 +33,21 @@ def _use_grad_for_differentiable(func):
     def _use_grad(self, *args, **kwargs):
         prev_grad = torch.is_grad_enabled()
         try:
+            # Note on graph break below:
+            # we need to graph break to ensure that aot respects the no_grad annotation.
+            # This is important for perf because without this, functionalization will generate an epilogue
+            # which updates the mutated parameters of the optimizer which is *not* visible to inductor, as a result,
+            # inductor will allocate for every parameter in the model, which is horrible.
+            # With this, aot correctly sees that this is an inference graph, and functionalization will generate
+            # an epilogue which is appended to the graph, which *is* visible to inductor, as a result, inductor sees that
+            # step is in place and is able to avoid the extra allocation.
+            # In the future, we will either 1) continue to graph break on backward, so this graph break does not matter
+            # or 2) have a fully fused forward and backward graph, which will have no_grad by default, and we can remove this
+            # graph break to allow the fully fused fwd-bwd-optimizer graph to be compiled.
             torch.set_grad_enabled(self.defaults['differentiable'])
+            torch._dynamo.graph_break()
             ret = func(self, *args, **kwargs)
         finally:
-            # Graph break to ensure AOT correctly runs this
-            # as an inference graph
             torch._dynamo.graph_break()
             torch.set_grad_enabled(prev_grad)
         return ret
