@@ -1292,6 +1292,49 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
+    def bucket_index(self, values, offsets_name: str, offsets_size):
+        # NOTE: this may not necessarily be true. TODO - check this.
+        assert isinstance(values, (CSEVariable,))
+
+        block_size = self.dense_size_str()
+
+        # TODO (dberard) make these actually work with cse
+        # i.e. don't just cse.newvar(), instead cse.generate()
+        # so that expressions can be generated
+
+        offsets_var = self.args.input(offsets_name)
+        lo_var = self.cse.newvar()
+        hi_var = self.cse.newvar()
+        self.compute.writeline(f"{lo_var} = tl.zeros({block_size}, dtype=tl.int32)")
+        self.compute.writeline(
+            f"{hi_var} = tl.full({block_size}, {offsets_size} - 1, dtype=tl.int32)"
+        )
+
+        range_size = self.cse.newvar()
+        self.compute.writeline(f"{range_size} = {offsets_size}")
+
+        index_var = self.cse.newvar()
+        mid_var = self.cse.newvar()
+        bucket_lb_var = self.cse.newvar()
+        is_possible = self.cse.newvar()
+        self.compute.writeline(f"while {range_size} > 1:")
+        with self.compute.indent():
+            self.compute.writeline(f"{mid_var} = ({hi_var} + {lo_var} + 1) // 2")
+            self.compute.writeline(
+                f"{bucket_lb_var} = tl.load({offsets_var} + {mid_var})"
+            )
+            self.compute.writeline(f"{is_possible} = ({values} >= {bucket_lb_var})")
+            self.compute.writeline(
+                f"{lo_var} = tl.where({is_possible}, {mid_var}, {lo_var})"
+            )
+            self.compute.writeline(
+                f"{hi_var} = tl.where({is_possible}, {hi_var}, {mid_var} - 1)"
+            )
+
+            self.compute.writeline(f"{range_size} = tl.cdiv({range_size}, 2)")
+
+        return lo_var
+
     def reduction_resize(self, value):
         ndims = self.triton_tensor_ndim()
         if ndims == 1:
@@ -1300,6 +1343,14 @@ class TritonKernel(Kernel):
         sizes = [":"] * ndims
         sizes[-1] = "None"
         return f"{value}[{', '.join(sizes)}]"
+
+    def reduction_size_str(self):
+        if self.no_x_dim:
+            return ""
+        else:
+            sizes = [":" for _ in self.range_trees]
+            sizes[-1] = "None"
+            return f"[{', '.join(sizes)}]"
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         assert self.inside_reduction

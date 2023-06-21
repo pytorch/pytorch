@@ -1556,6 +1556,39 @@ def inductor_randint(
     )
 
 
+@register_lowering(inductor_prims.bucket_index, type_promotion_kind=None)
+def inductor_bucket_index(values: TensorBox, offsets: TensorBox):
+    assert len(offsets.get_size()) == 1
+    assert is_integer_type(values)
+    assert is_integer_type(offsets)
+
+    if values.get_device().type != "cuda" or values.get_device().type != "cuda":
+        return pytree.tree_map(
+            TensorBox.create,
+            ir.FallbackKernel.create(inductor_prims.bucket_index, values, offsets),
+        )
+
+    offsets_size = offsets.get_size()[0]
+    device = values.get_device()
+    dtype = values.get_dtype()
+    values_loader = values.make_loader()
+    offsets_name = offsets.get_name()
+
+    def inner_fn(index):
+        val = values_loader(index)
+        bucket_index = ops.bucket_index(
+            val, offsets_name, ops.index_expr(offsets_size, torch.int32)
+        )
+        return bucket_index
+
+    return Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=values.get_size(),
+    )
+
+
 def require_dense(_, *args, **kwargs):
     args, kwargs = pytree.tree_map_only(
         ir.IRNode, lambda t: ir.ExternKernel.require_stride1(t), (args, kwargs)

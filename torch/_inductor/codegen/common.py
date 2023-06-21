@@ -782,6 +782,9 @@ class Kernel(CodeGen):
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         raise NotImplementedError()
 
+    def bucket_index(self, values, offsets_name, offsets_size):
+        raise NotImplementedError()
+
     def __enter__(self):
         class CSEProxy:
             self.name = "CSEProxy"
@@ -832,6 +835,10 @@ class Kernel(CodeGen):
                 return self.reduction(
                     name, dtype, src_dtype, reduction_type, index, value
                 )
+
+            @staticmethod
+            def bucket_index(values, offsets_name, offsets_size):
+                return self.bucket_index(values, offsets_name, offsets_size)
 
         super().__enter__()
         parent_handler = self.overrides(V.get_ops_handler())

@@ -6542,6 +6542,14 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
+    def test_bucket_index(self):
+        def fn(values, offsets):
+            return torch.ops.prims.inductor_bucket_index(values, offsets)
+
+        values = torch.randint(0, 100, (15, 17))
+        offsets = torch.arange(10, dtype=torch.int32) ** 2
+        self.common(fn, (values, offsets), check_lowp=False)
+
 
 @dataclasses.dataclass
 class TestFailure:

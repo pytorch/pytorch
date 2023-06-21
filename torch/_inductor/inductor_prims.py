@@ -2,6 +2,7 @@ import logging
 
 import torch
 from torch import _prims
+from torch._prims_common import RETURN_TYPE
 
 log = logging.getLogger(__name__)
 
@@ -70,4 +71,30 @@ force_stride_order = make_prim(
     "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
     lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
+
+
+def inductor_bucket_index_impl(values, offsets):
+    assert values.dtype == torch.int32 or values.dtype == torch.int64
+    assert offsets.dim() == 1
+    result = torch.zeros_like(values)
+    for idx in range(len(offsets) - 1, 0, -1):
+        result[(values >= offsets[idx]) & (result == 0)] = idx
+    return result
+
+
+def inductor_bucket_index_meta(values, offsets):
+    return torch.empty_like(values, memory_format=torch.preserve_format)
+
+
+bucket_index = _prims._make_prim(
+    schema="inductor_bucket_index(Tensor values, Tensor offsets) -> Tensor",
+    meta=inductor_bucket_index_meta,
+    impl_aten=inductor_bucket_index_impl,
+    return_type=RETURN_TYPE.NEW,
+    doc="""
+    For a tensor `offsets` representing boundaries of different buckets,
+    this will elementwise map each value into the corresponding bucket.
+    For example, if offsets = [0, 2, 5, 9] (representing buckets [0, 2), [2, 5), [5, 9))
+    then values = [0, 1, 2, 3, 4, 5, 6, 7, 8] will map to [0, 0, 1, 1, 1, 2, 2, 2, 2].
+    """,
 )
