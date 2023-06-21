@@ -3145,7 +3145,7 @@ def renorm(
     utils.check(
         maxnorm >= 0, lambda: f"renorm: expected maxnorm to be >= 0 but got {maxnorm}"
     )
-    ndim = input.ndim()
+    ndim = input.ndim
     utils.check(
         ndim > 1,
         lambda: f"renorm: input needs at least 2 dimensions, got {ndim} dimensions",
