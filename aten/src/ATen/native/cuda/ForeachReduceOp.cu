@@ -136,7 +136,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
             at::isComplexType(scalar_type);
       });
   const bool is_same_dtype = dtype.has_value()
-      ? std::any_of(
+      ? std::all_of(
             tensors.begin(),
             tensors.end(),
             [&](const auto& t) {
