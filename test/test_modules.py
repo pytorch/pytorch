@@ -474,11 +474,11 @@ class TestModule(TestCase):
             self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
 
             # check partial derivatives
-            old_params_requires_grad = [ p.requires_grad for p in params ]
+            old_params_requires_grad = [p.requires_grad for p in params]
             for p in params:
                 p.requires_grad = False
 
-            old_kwargs_requires_grad = [ obj.requires_grad for (_, obj) in kwarg_tensors ]
+            old_kwargs_requires_grad = [obj.requires_grad for (_, obj) in kwarg_tensors]
             for (_, obj) in kwarg_tensors:
                 obj.requires_grad = False
 
