@@ -631,6 +631,24 @@ class CudaReproTests(TestCase):
         ref = torch.compile(fn, fullgraph=True)(*args)
         assert same(ref, correct)
 
+    def test_issue_103924(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.temperature = 1
+                self.layer = torch.nn.Softmax(dim=1)
+
+            def forward(self, x):
+                n_samples, _ = x.shape
+                y = 1.0 * torch.ones(n_samples, dtype=x.dtype, device=x.device)
+                inp = x / y[..., None]
+                return self.layer(inp)
+
+        x = torch.rand([4, 4], device="cuda")
+        m = MyModule()
+        opt_m = torch.compile(backend="inductor")(m)
+        self.assertEqual(opt_m(x), m(x))
+
     def test_issue97695_2input(self):
         def fn(arg3_1, arg3_2, relu, permute_1):
             addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
