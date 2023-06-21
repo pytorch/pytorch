@@ -1732,14 +1732,14 @@ Call this whenever a new thread is created in order to propagate values from
   // my environment.
   using _DeviceDtypeKey = std::pair<at::Device, std::string>;
   // Custom hasher is necessary to make unordered_map compilable for Windows
-  // debug targets As `at::native::ParamsHash` only works on structs with
+  // debug targets. As `at::native::ParamsHash` only works on structs with
   // standard layout, but std::string isn't one in Visual C++ debug builds,
-  // which one can easily verify by running something like
+  // which one can easily verify by running something like:
   //   #define _DEBUG
   //   #include <type_traits>
   //   #include <string>
   //   static_assert(std::is_standard_layout_v<std::string>, "Oh noes");
-  // But if this condition is not met, VC++ raises a very cryptic compilation
+  // If above condition is not met, VC++ raises a very cryptic compilation
   // error. See
   // https://github.com/pytorch/pytorch/pull/100007#discussion_r1227116292 for
   // more detail
