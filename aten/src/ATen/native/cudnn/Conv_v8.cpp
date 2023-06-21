@@ -32,6 +32,7 @@ C10_DIAGNOSTIC_POP()
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -162,15 +163,13 @@ struct BenchmarkCache {
 std::mutex mutex;
 std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsHash<KeyType>, ParamsEqual<KeyType>> engine_cache;
 
-// TODO: is this thread safe if cache is updated? is pointer stale?
-cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
+std::optional<cudnn_frontend::ExecutionPlan> find(const KeyType& key) {
   std::lock_guard<std::mutex> guard(mutex);
   auto it = engine_cache.find(key);
   if (it == engine_cache.end()) {
-    return nullptr;
+    return std::nullopt;
   }
-  // TODO: probably want ExecutionPlan copy constructor or better way to return
-  return &(it->second);
+  return it->second;
 }
 
 void update(const KeyType& key, T& results) {
@@ -183,6 +182,8 @@ void update(const KeyType& key, T& results) {
 
 BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKey> benchmark_cache;
 BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fused;
+
+std::mutex execution_mutex;
 
 } // namespace
 
@@ -221,6 +222,10 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
       .build();
+  // @eqy: temporary workaround for cudnnBackendExecute thread-safety bug
+  {
+    std::lock_guard<std::mutex> guard(execution_mutex);
+  }
   AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
