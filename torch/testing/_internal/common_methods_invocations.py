@@ -16325,9 +16325,9 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
-                # Compiler issue on ROCm
-                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
-                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+               # Compiler issue on ROCm
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
     BinaryUfuncInfo('hypot',
                     dtypes=floating_types_and(torch.bfloat16),
@@ -16467,7 +16467,7 @@ op_db: List[OpInfo] = [
                # Compiler issue on ROCm
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
-            )),
+           )),
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
