@@ -919,7 +919,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.output_is_tensor = output_is_tensor
 
     def write_prefix(self):
-        self.prefix.writeline("namespace aot_inductor {")
+        if V.graph.aot_mode:
+            self.prefix.writeline("namespace aot_inductor {")
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
