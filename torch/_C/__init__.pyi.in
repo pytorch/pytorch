@@ -50,7 +50,7 @@ from torch.types import (
 
 # This module is defined in torch/csrc/Module.cpp
 
-from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions
+from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu
 
 T = TypeVar("T")
 S = TypeVar("S", bound="torch.Tensor")
@@ -1191,11 +1191,6 @@ class _DisablePythonDispatcher:
     def __enter__(self): ...
     def __exit__(self, exc_type, exc_value, traceback): ...
 
-class _EnablePreDispatch:
-    def __init__(self): ...
-    def __enter__(self): ...
-    def __exit__(self, exc_type, exc_value, traceback): ...
-
 class _DisableFuncTorch:
     def __init__(self): ...
     def __enter__(self): ...
@@ -1461,6 +1456,7 @@ class _TensorMeta(type): ...
 # Defined in torch/csrc/autograd/python_variable.cpp
 class _TensorBase(metaclass=_TensorMeta):
     requires_grad: _bool
+    retains_grad: _bool
     shape: Size
     data: Tensor
     names: List[str]
