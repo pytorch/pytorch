@@ -1,7 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/Tensor.h>
+#include <c10/core/Device.h>
+#include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/Scalar.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -27,8 +31,19 @@ Tensor functional_sym_constrain_range_cpu(
   return dep_token;
 }
 
-Tensor make_dep_token_cpu(const c10::optional<Tensor>& dep_token) {
-  return c10::value_or_else(dep_token, [] { return at::empty({0}); });
+Tensor make_dep_token_cpu(
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
+  return at::empty(
+      {0},
+      dtype_opt,
+      layout_opt,
+      device_opt,
+      pin_memory_opt,
+      memory_format_opt);
 }
 
 } // namespace native
