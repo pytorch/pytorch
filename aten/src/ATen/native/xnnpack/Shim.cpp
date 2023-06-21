@@ -1,4 +1,4 @@
-#ifdef USE_XNNPACK
+#ifndef USE_XNNPACK
 
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/core/Tensor.h>
@@ -16,6 +16,50 @@
 namespace at {
 namespace native {
 namespace xnnpack {
+
+bool available();
+bool use_convolution2d(
+    const Tensor&,
+    const Tensor&,
+    const at::OptionalIntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const int64_t,
+    bool);
+Tensor convolution2d(
+    const Tensor&,
+    const Tensor&,
+    const Tensor&,
+    const IntArrayRef,
+    const IntArrayRef,
+    const IntArrayRef,
+    const int64_t);
+
+bool use_linear(const Tensor&, const Tensor&, const Tensor&);
+
+Tensor linear(const Tensor&, const Tensor&, const Tensor&);
+
+bool use_max_pool2d(
+    const Tensor&,
+    const IntArrayRef,
+    const IntArrayRef,
+    IntArrayRef,
+    const IntArrayRef,
+    const bool,
+    const float,
+    const float);
+
+Tensor max_pool2d(
+    const Tensor&,
+    const IntArrayRef,
+    const IntArrayRef,
+    IntArrayRef,
+    const IntArrayRef,
+    const bool,
+    const float,
+    const float);
+
 namespace internal {
 namespace {
 
