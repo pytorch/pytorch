@@ -17,6 +17,15 @@ namespace at {
 namespace native {
 namespace xnnpack {
 
+namespace internal {
+namespace {
+
+constexpr const char * const kError =
+    "Not Implemented! Reason: PyTorch not built with XNNPACK support.";
+
+} // namespace
+} // namespace internal
+
 bool available();
 bool use_convolution2d(
     const Tensor&,
@@ -59,15 +68,6 @@ Tensor max_pool2d(
     const bool,
     const float,
     const float);
-
-namespace internal {
-namespace {
-
-constexpr const char * const kError =
-    "Not Implemented! Reason: PyTorch not built with XNNPACK support.";
-
-} // namespace
-} // namespace internal
 
 bool available() {
     return false;
