@@ -732,7 +732,7 @@ class SyncBatchNorm(_BatchNorm):
             # currently only GPU/PrivateUse1 input is supported
             if input.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
                 raise ValueError("SyncBatchNorm expected input tensor to be on GPU or "
-                                 "{torch._C._get_privateuse1_backend_name()}")
+                                 f"{torch._C._get_privateuse1_backend_name()}")
 
             process_group = torch.distributed.group.WORLD
             if self.process_group:

@@ -5,7 +5,7 @@ import torch
 import warnings
 from torch import Tensor
 from .. import functional as F
-from .module import Module, _get_special_module_supported_device_types
+from .module import Module
 from .activation import MultiheadAttention
 from .container import ModuleList
 from ..init import xavier_uniform_
@@ -301,11 +301,11 @@ class TransformerEncoder(Module):
                 first_layer.linear2.weight,
                 first_layer.linear2.bias,
             )
-
+            _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif src.device.type not in _get_special_module_supported_device_types():
-                why_not_sparsity_fast_path = "src device is neither one of {_get_special_module_supported_device_types()}"
+            elif src.device.type not in _supported_device_type:
+                why_not_sparsity_fast_path = f"src device is neither one of {_supported_device_type}"
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
                                               "input/output projection weights or biases requires_grad")
@@ -604,11 +604,12 @@ class TransformerEncoderLayer(Module):
 
             # We have to use list comprehensions below because TorchScript does not support
             # generator expressions.
+            _supported_device_type = ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif not all((x.device.type in _get_special_module_supported_device_types()) for x in tensor_args):
+            elif not all((x.device.type in _supported_device_type) for x in tensor_args):
                 why_not_sparsity_fast_path = ("some Tensor argument's device is neither one of "
-                                              f"{_get_special_module_supported_device_types()}")
+                                              f"{_supported_device_type}")
             elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
                                               "input/output projection weights or biases requires_grad")

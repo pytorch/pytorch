@@ -24,12 +24,6 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 T = TypeVar('T', bound='Module')
 
 
-def _get_special_module_supported_device_types():
-    r"""get the list of device which support the speacial Modules,
-    including Transformer(TransformerEncoder, TransformerEncoderLayer), MultiheadAttention.
-    """
-    return ["cpu", "cuda", torch.utils.backend_registration._privateuse1_backend_name]
-
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
