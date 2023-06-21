@@ -575,7 +575,9 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
         )
 
 
-def triton_config(size_hints, x, y=None, z=None, num_stages=1, num_elements_per_warp=256) -> Config:
+def triton_config(
+    size_hints, x, y=None, z=None, num_stages=1, num_elements_per_warp=256
+) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
@@ -623,7 +625,9 @@ def triton_config(size_hints, x, y=None, z=None, num_stages=1, num_elements_per_
         cfg["YBLOCK"] = y
     if z:
         cfg["ZBLOCK"] = z
-    num_warps = next_power_of_2(min(max(conditional_product(x, y, z) // num_elements_per_warp, 1), 8))
+    num_warps = next_power_of_2(
+        min(max(conditional_product(x, y, z) // num_elements_per_warp, 1), 8)
+    )
     # we are going to arrive at 2 warps only if bs was too small due to
     # numel being too small. However to workaround some ptx bugs we still
     # want at least 4 warps if there's enough elements per thread
