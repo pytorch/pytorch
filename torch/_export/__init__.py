@@ -157,8 +157,6 @@ def export(
                 assume_static_by_default=True,
             )
 
-            print(gm_torch_level.graph)
-
             params_buffers: "OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]]" = OrderedDict()
             for name, param in gm_torch_level.named_parameters(recurse=True, remove_duplicate=False):
                 params_buffers[name] = param
