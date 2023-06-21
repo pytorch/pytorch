@@ -395,12 +395,12 @@ try:
                     # didn't succeed. Canceling the validation execution (keyboard
                     # interrupt) also gets to this branch.
                     log.warning("translation validation: could not validate")
-                    return self.Result(success=True)
+                    return self.Result(success=False)
                 else:
                     # Target expressions are sound.
                     assert r == z3.unsat
                     log.debug("translation validation: success")
-                    return self.Result(success=False)
+                    return self.Result(success=True)
 except ImportError:
     _HAS_Z3 = False
 else:
