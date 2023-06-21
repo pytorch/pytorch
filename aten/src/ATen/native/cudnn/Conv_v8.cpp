@@ -225,8 +225,8 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
   // @eqy: temporary workaround for cudnnBackendExecute thread-safety bug
   {
     std::lock_guard<std::mutex> guard(execution_mutex);
+    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
   }
-  AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
 void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const cudnn_frontend::ExecutionPlan& plan) {
@@ -240,7 +240,11 @@ void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y,
       .setDataPointers(5, data_ptrs)
       .setUids(5, uids)
       .build();
-  AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+  // @eqy: temporary workaround for cudnnBackendExecute thread-safety bug
+  {
+    std::lock_guard<std::mutex> guard(execution_mutex);
+    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+  }
 }
 
 auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation) {
