@@ -800,8 +800,23 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1]);  mul = None
-    _unsafe_view = torch.ops.aten._unsafe_view.default(view, [9]);  view = None
-    return [_unsafe_view]""")
+    return [view]""")
+
+    def test_output_aliases_intermediate_mutation_linear(self):
+        def f(x):
+            return (x + 1).view(-1)
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        # use inductor's decomps (which will e.g. turn _unsafe_view() into view())
+        from torch._inductor.decomposition import decompositions
+        f_compiled = aot_function(f, nop, decompositions=decompositions)
+
+        out_ref = f(*inp)
+        out_test = f_compiled(*inp)
+
+        out_ref.mul_(2)
+        out_test.mul_(2)
+        self.assertEqual(out_ref, out_test)
 
     def test_output_aliases_intermediate_no_grad(self):
         def f(a, b):
@@ -959,8 +974,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     transpose = torch.ops.aten.transpose.int(mul_1, 1, 0);  mul_1 = None
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
-    _unsafe_view = torch.ops.aten._unsafe_view.default(transpose, [3, 3]);  transpose = None
-    return [view, _unsafe_view, transpose_1, mul]""")
+    return [view, transpose, transpose_1, mul]""")
 
     def test_output_all_alias_types(self):
         # There are 3 types of aliasing that require us to return metadata in the compiled fw:

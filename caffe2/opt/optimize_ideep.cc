@@ -22,12 +22,12 @@ void OptimizeForMkldnn(
 #else
 USE_IDEEP_DEF_ALIASES();
 
-Blob* getBlob(const std::string name, caffe2::Workspace* ws) {
+static Blob* getBlob(const std::string name, caffe2::Workspace* ws) {
   CAFFE_ENFORCE(ws->HasBlob(name), "Blob ", name, " not in workspace");
   return ws->GetBlob(name);
 }
 
-Blob* getBlob(repr::NNGraph::NodeRef node, caffe2::Workspace* ws) {
+static Blob* getBlob(repr::NNGraph::NodeRef node, caffe2::Workspace* ws) {
   auto tensor = repr::nn::get<repr::Tensor>(node);
   return getBlob(tensor->getName(), ws);
 }
@@ -47,7 +47,7 @@ T* getMutableTensor(Blob* blob) {
   return nullptr;
 }
 
-const caffe2::OperatorDef& getOpDef(const repr::NeuralNetOperator& nnOp) {
+static const caffe2::OperatorDef& getOpDef(const repr::NeuralNetOperator& nnOp) {
   auto annotation = nnOp.getAnnotation();
   if (annotation == nullptr) {
     CAFFE_THROW("Cannot get Operator annotation");
@@ -55,7 +55,7 @@ const caffe2::OperatorDef& getOpDef(const repr::NeuralNetOperator& nnOp) {
   return dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
 }
 
-caffe2::OperatorDef* getMutableOpDef(repr::NeuralNetOperator& nnOp) {
+static caffe2::OperatorDef* getMutableOpDef(repr::NeuralNetOperator& nnOp) {
   auto annotation = nnOp.getMutableAnnotation();
   if (annotation == nullptr) {
     CAFFE_THROW("Cannot get Operator annotation");
@@ -63,7 +63,7 @@ caffe2::OperatorDef* getMutableOpDef(repr::NeuralNetOperator& nnOp) {
   return dyn_cast<Caffe2Annotation>(annotation)->getMutableOperatorDef();
 }
 
-bool isOpType(const repr::NNGraph::NodeRef& nodeRef, string typeName) {
+static bool isOpType(const repr::NNGraph::NodeRef& nodeRef, string typeName) {
   if (!repr::nn::is<repr::NeuralNetOperator>(nodeRef)) {
     return false;
   }
@@ -73,13 +73,13 @@ bool isOpType(const repr::NNGraph::NodeRef& nodeRef, string typeName) {
   return opDef.type() == typeName;
 }
 
-bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
+static bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
   // We only want to fuse for IDEEP operators
   const auto& op = getOpDef(nnOp);
   return op.device_option().device_type() == DeviceTypeProto::PROTO_IDEEP;
 }
 
-bool isConvFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
+static bool isConvFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   // Here we only check the type of ConvFusion op (for FP32 only)
   if (!repr::nn::is<repr::Conv>(convNode)) {
     return false;
@@ -102,7 +102,7 @@ bool isConvFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   return false;
 }
 
-void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
+static void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   auto conv = repr::nn::get<repr::Conv>(convNode);
   auto* op = getMutableOpDef(*conv);
 
@@ -130,7 +130,7 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   arg->set_i(fusion_type);
 }
 
-void removeArg(repr::NeuralNetOperator& nnOp, std::string argName) {
+static void removeArg(repr::NeuralNetOperator& nnOp, std::string argName) {
   auto* op = getMutableOpDef(nnOp);
   auto& opArgs = *op->mutable_arg();
   auto remove_arg = [](decltype(opArgs)& args, std::string& name) {
@@ -146,7 +146,7 @@ void removeArg(repr::NeuralNetOperator& nnOp, std::string argName) {
     ;
 }
 
-void moveOpArg(
+static void moveOpArg(
     caffe2::Workspace* ws,
     std::string argName,
     repr::NeuralNetOperator* srcOp,
@@ -171,7 +171,7 @@ void moveOpArg(
   arg->set_name(argName);
 }
 
-bool removeStopGradientForInference(repr::NNModule* nn, caffe2::Workspace* ws) {
+static bool removeStopGradientForInference(repr::NNModule* nn, caffe2::Workspace* ws) {
   auto allNodes = nn->dataFlow.getMutableNodes();
   // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int i = 0; i < allNodes.size(); ++i) {
@@ -193,7 +193,7 @@ bool removeStopGradientForInference(repr::NNModule* nn, caffe2::Workspace* ws) {
   return false;
 }
 
-bool fuseConvBNAndAffCh(repr::NNModule* nn, caffe2::Workspace* ws) {
+static bool fuseConvBNAndAffCh(repr::NNModule* nn, caffe2::Workspace* ws) {
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
     bool no_bias = false;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -319,7 +319,7 @@ bool fuseConvBNAndAffCh(repr::NNModule* nn, caffe2::Workspace* ws) {
   return false;
 }
 
-bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
+static bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
   CAFFE_ENFORCE(cpuinfo_initialize(), "failed to initialize cpuinfo");
   // Assume the order of nodes from getMutableNodes conforms to
   // the original topo order of operators
@@ -509,7 +509,7 @@ bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
   return false;
 }
 
-bool fuseActivation(repr::NNModule* nn, caffe2::Workspace* ws) {
+static bool fuseActivation(repr::NNModule* nn, caffe2::Workspace* ws) {
   // Conv+Relu fusion
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -596,7 +596,7 @@ bool fuseActivation(repr::NNModule* nn, caffe2::Workspace* ws) {
   return false;
 }
 
-bool enforceFusionInplace(repr::NNModule* nn, caffe2::Workspace* ws) {
+static bool enforceFusionInplace(repr::NNModule* nn, caffe2::Workspace* ws) {
   // For fusions of Conv+Sum or Conv+Sum+ReLU, the last input and output must
   // be inplaced. To enforce inplace, here to re-check whole graph and correct
   // the ConvFusion Ops.
@@ -650,7 +650,7 @@ bool enforceFusionInplace(repr::NNModule* nn, caffe2::Workspace* ws) {
   return false;
 }
 
-bool fuseOrderSwitchToQuantizeOp(repr::NNModule* nn, caffe2::Workspace* ws) {
+static bool fuseOrderSwitchToQuantizeOp(repr::NNModule* nn, caffe2::Workspace* ws) {
   // In INT8 module, the quantize/dequantize op always appears
   // along with corresponding order switch op, which aims to switch
   // between INT8 computation domain and others.
@@ -722,7 +722,7 @@ bool fuseOrderSwitchToQuantizeOp(repr::NNModule* nn, caffe2::Workspace* ws) {
   return false;
 }
 
-bool fusePreConvertOp(repr::NNModule* nn, caffe2::Workspace* ws) {
+static bool fusePreConvertOp(repr::NNModule* nn, caffe2::Workspace* ws) {
   // 1. Int8Sum has been fallbacked to FP32 in current impl
   //    It can handle inputs with diff format and data type
   // 2. FC is able to convert input format and data type by itself
@@ -806,7 +806,7 @@ bool fusePreConvertOp(repr::NNModule* nn, caffe2::Workspace* ws) {
   return false;
 }
 
-void setPoolingInferenceMode(repr::NNModule* nn) {
+static void setPoolingInferenceMode(repr::NNModule* nn) {
   auto setTrainingMode = [](repr::NeuralNetOperator& pool) {
     if (!isOnIdeepDevice(pool)) {
       LOG(WARNING) << "Not a IDEEP operator";
@@ -853,7 +853,7 @@ void setPoolingInferenceMode(repr::NNModule* nn) {
 
 // Pre-convert filters format to expected one here
 // in order to avoid boring conversions during computations
-void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
+static void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
   for (auto& node : nn->dataFlow.getMutableNodes()) {
     if (!repr::nn::is<repr::ConvTranspose>(node) &&
         !repr::nn::is<repr::Conv>(node) && !repr::nn::is<repr::FC>(node)) {

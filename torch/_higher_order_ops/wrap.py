@@ -6,7 +6,7 @@ uid = count(1)
 # Used for testing the HigherOrderOperator mechanism
 class Wrap(HigherOrderOperator):
     def __init__(self):
-        super().__init__("wrap")
+        super().__init__("wrap", _deprecated_global_ns=True)
 
     def __call__(self, func, *args):
         result = func(*args)
@@ -21,7 +21,7 @@ class WrapActivationCheckpoint(HigherOrderOperator):
     checkpointed (the first arg to the utils.checkpoint() function).
     """
     def __init__(self):
-        super().__init__("wrap_activation_checkpoint")
+        super().__init__("wrap_activation_checkpoint", _deprecated_global_ns=True)
 
     def __call__(self, function, *args, **kwargs):
         # use_reentrant is set to False because this op is going to be traced.
@@ -47,7 +47,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     """
 
     def __init__(self):
-        super().__init__("wrap_activation_checkpoint")
+        super().__init__("wrap_activation_checkpoint", _deprecated_global_ns=True)
 
     def tag_nodes(self, gmod):
         # TODO - This needs major investigation. Currently, we are tagging all

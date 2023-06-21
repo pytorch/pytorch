@@ -103,8 +103,8 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -125,8 +125,8 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
     @expectedFailureDynamicWrapper
     def test_cat_slice_cat(self):
