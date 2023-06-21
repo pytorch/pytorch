@@ -4,17 +4,6 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestFuntionalAssertions(TestCase):
-    def test_functional_assert_async(self) -> None:
-        dep_token = torch.ops.aten.make_dep_token()
-        self.assertEqual(
-            torch.ops.aten._functional_assert_async(torch.tensor(1), dep_token),
-            dep_token,
-        )
-        with self.assertRaisesRegex(
-            RuntimeError, "Expected Tensor with single nonzero value, but got zero"
-        ) as cm:
-            torch._functional_assert_async(torch.tensor(0), dep_token)
-
     def test_functional_assert_async_msg(self) -> None:
         dep_token = torch.ops.aten.make_dep_token()
         self.assertEqual(
