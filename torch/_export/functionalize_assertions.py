@@ -9,7 +9,6 @@ aten = torch.ops.aten
 
 _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: Dict[OpOverload, OpOverload] = {
     aten.sym_constrain_range.default: aten.functional_sym_constrain_range,
-    aten._assert_async.default: aten._functional_assert_async.default,
     aten._assert_async.msg: aten._functional_assert_async.msg,
 }
 

@@ -316,7 +316,6 @@ aten::_foreach_trunc_
 aten::_foreach_zero
 aten::_foreach_zero.out
 aten::_foreach_zero_
-aten::_functional_assert_async
 aten::_functional_assert_async.msg
 aten::_fused_adam
 aten::_fused_adam.out
