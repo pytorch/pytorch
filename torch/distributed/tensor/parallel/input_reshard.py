@@ -38,7 +38,7 @@ class InputReshard(torch.nn.Module):
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """
         Overrides :meth:`named_parameters()` to intercept parameter names and
-        remove all occurrences of ``module.``.
+        remove all occurrences of ``inner_module.``.
         """
         for param_name, param in self.inner_module.named_parameters(*args, **kwargs):
             yield param_name, param

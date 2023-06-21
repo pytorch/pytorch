@@ -5,6 +5,10 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
 from torch.distributed.tensor.parallel import (
     PairwiseParallel,
     parallelize_module,
@@ -41,8 +45,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         for name, param_m2 in m2.named_parameters():
             if self.rank != 0 and name in rank0_only_params:
                 continue
-            if name not in named_parameters:
-                print(name)
             self.assertTrue(name in named_parameters)
             param_m1 = named_parameters[name]
             if check_grad:
@@ -76,11 +78,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         parallel_style = SequenceParallel() if is_seq_parallel else PairwiseParallel()
         model_tp = parallelize_module(model_tp, device_mesh, parallel_style)
         if recompute_activation:
-            from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-                checkpoint_wrapper,
-                CheckpointImpl,
-            )
-
             model_tp = input_reshard_wrapper(
                 checkpoint_wrapper(
                     model_tp, checkpoint_impl=CheckpointImpl.NO_REENTRANT
