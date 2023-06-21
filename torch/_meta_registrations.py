@@ -3576,7 +3576,7 @@ def meta_max_pool3d_with_indices(
 
     check(
         len(padding) in (1, 3),
-        lambda: "max_pool3d: padding must be either be a single int, or a tuple of three ints",
+        lambda: "max_pool3d: padding must either be a single int, or a tuple of three ints",
     )
     pT = padding[0]
     pH = pT if len(padding) == 1 else padding[1]
@@ -3683,7 +3683,7 @@ def meta_max_pool3d_with_indices_backward(
 
     check(
         len(padding) in (1, 3),
-        lambda: "max_pool3d: padding must be either be a single int, or a tuple of three ints",
+        lambda: "max_pool3d: padding must either be a single int, or a tuple of three ints",
     )
     pT = padding[0]
     pH = pT if len(padding) == 1 else padding[1]
