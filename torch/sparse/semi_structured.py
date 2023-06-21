@@ -245,7 +245,8 @@ def to_sparse_semi_structured(
         RuntimeError: If original_tensor is not a supported dtype, dim, shape, or device.
 
     Example:
-        >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()  # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> A = torch.Tensor([0, 0, 1, 1]).tile((128, 32)).half().cuda()
         tensor([[0., 0., 1.,  ..., 0., 1., 1.],
                 [0., 0., 1.,  ..., 0., 1., 1.],
                 [0., 0., 1.,  ..., 0., 1., 1.],
@@ -253,7 +254,7 @@ def to_sparse_semi_structured(
                 [0., 0., 1.,  ..., 0., 1., 1.],
                 [0., 0., 1.,  ..., 0., 1., 1.],
                 [0., 0., 1.,  ..., 0., 1., 1.]], device='cuda:0', dtype=torch.float16)
-        >>> A_sparse = to_sparse_semi_structured(A, mask=A.bool())   # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> A_sparse = to_sparse_semi_structured(A, mask=A.bool())
         SparseSemiStructuredTensor(shape=torch.Size([128, 128]), transposed=False, values=tensor([[1., 1., 1.,  ..., 1., 1., 1.],
                 [1., 1., 1.,  ..., 1., 1., 1.],
                 [1., 1., 1.,  ..., 1., 1., 1.],
