@@ -456,7 +456,7 @@ class Optimizer:
             return value.to(device=param.device)
         return value
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""Loads the optimizer state.
 
         Args:
