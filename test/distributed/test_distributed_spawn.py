@@ -34,8 +34,6 @@ if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "ucc":
             super().setUp()
             self._spawn_processes()
             torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
-else:
-    print(f"Invalid backend {BACKEND}. Tests will not be run!")
 
 
 if __name__ == "__main__":

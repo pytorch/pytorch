@@ -311,6 +311,11 @@ def assert_async_meta(val, assert_msg):
     return
 
 
+@register_meta(aten.make_dep_token)
+def make_dep_token(dep_token):
+    return torch.empty(0)
+
+
 @register_meta(aten.sym_constrain_range.default)
 def sym_constrain_range(size, min, max):
     constrain_range(size, min=min, max=max)
