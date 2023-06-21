@@ -11,11 +11,11 @@ __all__ = [
 ]
 
 _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
-    "_SEMI_STRUCTURED_SPARSE_CONFIG", "compression_factor n min_size"
+    "_SEMI_STRUCTURED_SPARSE_CONFIG", "compression_factor min_size"
 )
 _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
-    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 2, 64),
-    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 2, 128),
+    torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 64),
+    torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 128),
 }
 
 
@@ -63,7 +63,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         kwargs["device"] = compressed_tensor.device  # type: ignore[assignment]
         kwargs["dtype"] = compressed_tensor.dtype  # type: ignore[assignment]
         kwargs["layout"] = compressed_tensor.layout  # type: ignore[assignment]
-        kwargs["requires_grad"] = False  # type: ignore[assignment]
+        kwargs["requires_grad"] = compressed_tensor.requires_grad  # type: ignore[assignment]
 
         return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)  # type: ignore[attr-defined]
 
@@ -108,7 +108,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs) -> torch.Tensor:
+    def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
         """Overload __torch_dispatch__ to use torch._structured_sparse_linear.
 
         `torch.structured_sparse_linear` uses accelerated sparse CUTLASS kernels.
@@ -121,13 +121,12 @@ class SparseSemiStructuredTensor(torch.Tensor):
             kwargs: The keyword arguments passed to the function.
 
         Returns:
-            torch.Tensor: The result of the dispatched operation.
+            Any: The result of the dispatched operation.
 
         Raises:
             NotImplementedError: If the dispatched operation is not implemented.
         """
-        # since we create a new compressed tensor, the tensor will already be detached
-        # this effecitvely functions as a no-op.
+        # Since this code runs below autograd, a detach corresponds to only returning a new object
         if func is torch.ops.aten.detach.default:
             return SparseSemiStructuredTensor(
                 args[0].shape,
@@ -283,12 +282,7 @@ def to_sparse_semi_structured(
 
     # check if mask passed in
     if mask is None:
-        raise NotImplementedError(
-            (
-                "Creating mask from dense tensor is currently not supported! "
-                "You must pass in a mask to to_sparse_semi_structured, currently mask=None."
-            )
-        )
+        raise NotImplementedError("You must pass in a mask to to_sparse_semi_structured, currently mask=None.")
 
     # check device
     if not original_tensor.is_cuda:
