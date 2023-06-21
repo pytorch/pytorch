@@ -163,27 +163,27 @@ struct BenchmarkCache {
 std::mutex mutex;
 std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsHash<KeyType>, ParamsEqual<KeyType>> engine_cache;
 
-std::optional<cudnn_frontend::ExecutionPlan> find(const KeyType& key) {
-  std::lock_guard<std::mutex> guard(mutex);
+// no mutexes here as caches are now thread local for v8, can also return a pointer
+// to the Execution Plan if we know it will not be invalidated by another thread
+cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
   auto it = engine_cache.find(key);
   if (it == engine_cache.end()) {
-    return std::nullopt;
+    return nullptr;
   }
-  return it->second;
+  return &(it->second);
 }
 
 void update(const KeyType& key, T& results) {
-  std::lock_guard<std::mutex> guard(mutex);
   engine_cache.erase(key);
   engine_cache.emplace(key, std::move(results));
 }
 
 };
 
-BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKey> benchmark_cache;
-BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fused;
-
-std::mutex execution_mutex;
+// @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to be thread safe across all engines
+// see Limitations in https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
+thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKey> benchmark_cache;
+thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fused;
 
 } // namespace
 
@@ -222,11 +222,7 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
       .build();
-  // @eqy: temporary workaround for cudnnBackendExecute thread-safety bug
-  {
-    std::lock_guard<std::mutex> guard(execution_mutex);
-    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
-  }
+  AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
 void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const cudnn_frontend::ExecutionPlan& plan) {
@@ -240,11 +236,7 @@ void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y,
       .setDataPointers(5, data_ptrs)
       .setUids(5, uids)
       .build();
-  // @eqy: temporary workaround for cudnnBackendExecute thread-safety bug
-  {
-    std::lock_guard<std::mutex> guard(execution_mutex);
-    AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
-  }
+  AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
 auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation) {
