@@ -9,6 +9,7 @@ from typing import (
     Callable,
     DefaultDict,
     Dict,
+    Hashable,
     Iterable,
     List,
     Optional,
@@ -23,7 +24,6 @@ from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
 import torch.utils.hooks as hooks
-from torch import Tensor
 from torch.utils.hooks import RemovableHandle
 from torch.utils._foreach_utils import (
     Indices,
@@ -436,8 +436,13 @@ class Optimizer:
         }
 
     @staticmethod
-    def _process_value_according_to_param_policy(param: Tensor, value: Tensor, param_id: int = None,
-                                                 param_groups: List[Dict[Any, Any]] = None, key=None) -> Tensor:
+    def _process_value_according_to_param_policy(
+        param: torch.Tensor,
+        value: torch.Tensor,
+        param_id: int,
+        param_groups: List[Dict[Any, Any]],
+        key: Hashable = None,
+    ) -> torch.Tensor:
         # Floating-point types are a bit special here. They are the only ones
         # that are assumed to always match the type of params.
         # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
@@ -482,14 +487,14 @@ class Optimizer:
         id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
                       chain.from_iterable((g['params'] for g in groups))))
 
-        def cast(param, value, param_id=None, param_groups=None, key=None):
+        def _cast(param, value, param_id=None, param_groups=None, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
                 return Optimizer._process_value_according_to_param_policy(param, value, param_id, param_groups, key)
             elif isinstance(value, dict):
-                return {k: cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
+                return {k: _cast(param, v, param_id=param_id, param_groups=param_groups, key=k) for k, v in value.items()}
             elif isinstance(value, Iterable):
-                return type(value)(cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)
+                return type(value)(_cast(param, v, param_id=param_id, param_groups=param_groups) for v in value)
             else:
                 return value
 
@@ -500,7 +505,7 @@ class Optimizer:
         for k, v in state_dict['state'].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = cast(param, v, param_id=k, param_groups=state_dict['param_groups'])
+                state[param] = _cast(param, v, param_id=k, param_groups=state_dict['param_groups'])
             else:
                 state[k] = v
 
