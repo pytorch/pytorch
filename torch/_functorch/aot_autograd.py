@@ -21,7 +21,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
+from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code, preserve_rng_state
 from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
@@ -111,26 +111,8 @@ KNOWN_TYPES = tuple(
     [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
 )
 
-
-@contextmanager
-def preserve_rng_state():
-    with torch.utils._python_dispatch._disable_current_modes():
-        rng_state = torch.clone(torch.random.get_rng_state())
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-    try:
-        yield
-    finally:
-        with torch.utils._python_dispatch._disable_current_modes():
-            torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
-
-
-
 # Set up hooks so that during backward the fx's stack_trace is properly set
 callback_set = False
-
 
 def setup_stacktrace_preservation_hooks(roots: List):
     def iter_graph(roots):

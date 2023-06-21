@@ -580,6 +580,7 @@ class CUDAWarmupNode:
         def add_ref(o):
             return (
                 o is not None
+                and isinstance(o, torch.Tensor)
                 and o.is_cuda
                 and o.untyped_storage().data_ptr() not in non_cudagraph_inps
                 and o.untyped_storage().data_ptr() != 0
@@ -1487,9 +1488,7 @@ def get_block_addrs(pool_id, live_only=True):
 def format_tb(caching_allocator_trace):
     formatted_traceback = []
 
-    MAX_LENGTH = 20
-
-    for entry in caching_allocator_trace["frames"][0:MAX_LENGTH]:
+    for entry in caching_allocator_trace["frames"]:
         formatted_traceback.append(
             traceback.FrameSummary(entry["filename"], entry["line"], entry["name"])
         )
