@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import torch
 import torch.fx
 
-from .. import config, variables
+from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
@@ -506,10 +506,7 @@ class SizeVariable(TupleVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            if config.dynamic_shapes:
-                out = self.get_item_dyn(tx, args[0])
-            else:
-                out = self.getitem_const(args[0])
+            out = self.get_item_dyn(tx, args[0])
             return out
         return super().call_method(tx, name, args, kwargs)
 
@@ -669,6 +666,7 @@ class TupleIteratorVariable(ListIteratorVariable):
 class SetVariable(VariableTracker):
     def __init__(
         self,
+        tx,
         items: List[VariableTracker],
         recursively_contains=None,
         regen_guards=True,
@@ -689,7 +687,11 @@ class SetVariable(VariableTracker):
         if underlying_items:
             self.items = items
         else:
-            self._add(items)
+            self._add(tx, items)
+
+        # Really annoying to store this here - but required because of how
+        # VariableTracker's clone works w/r/t attr setting from dict
+        self.tx = tx
 
     def as_proxy(self):
         return [x.as_proxy() for x in self.items]
@@ -704,26 +706,30 @@ class SetVariable(VariableTracker):
         return [create_instruction("BUILD_SET", arg=len(self.items))]
 
     # Note - this is only used for producing a set
-    def _to_example_values(self, vt):
+    def _get_underlying_value(self, tx, vt):
         from .base import VariableTracker
         from .tensor import TensorVariable
 
         assert isinstance(vt, VariableTracker)
 
         if isinstance(vt, TensorVariable):
-            return vt.as_proxy().node.meta["example_value"]
+            if not vt.source:
+                unimplemented("Sets with non input tensors NYI")
+            scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+            real_tensor = eval(vt.source.name(), scope)
+            return real_tensor
         if isinstance(vt, ConstantVariable):
             return vt.value
 
         unimplemented(f"Sets with {type(vt)} NYI")
 
-    def _add(self, item):
+    def _add(self, tx, item):
         if isinstance(item, (list, set)):
             for i in item:
-                self._add(i)
+                self._add(tx, i)
             return self.items
 
-        ev = self._to_example_values(item)
+        ev = self._get_underlying_value(tx, item)
         if ev not in self._underlying_items:
             self._underlying_items.add(ev)
             self.items.append(item)
@@ -744,7 +750,8 @@ class SetVariable(VariableTracker):
             assert not kwargs
             item = args[0]
             result = SetVariable(
-                self._add(item),
+                tx,
+                self._add(tx, item),
                 mutable_local=self.mutable_local,
                 regen_guards=False,
                 **options,
@@ -758,7 +765,7 @@ class SetVariable(VariableTracker):
             result = items.pop()
             tx.replace_all(
                 self,
-                SetVariable(items, regen_guards=False, **options),
+                SetVariable(tx, items, regen_guards=False, **options),
             )
             return result
         elif name == "__len__":

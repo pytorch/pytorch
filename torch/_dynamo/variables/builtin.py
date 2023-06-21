@@ -12,12 +12,19 @@ from torch import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
-from ..exc import unimplemented, Unsupported, UserError, UserErrorType
+from ..exc import (
+    AttributeMutationError,
+    unimplemented,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     check_constant_args,
+    check_numpy_ndarray_args,
     check_unspec_python_args,
     get_higher_order_op,
     istype,
@@ -517,6 +524,13 @@ class BuiltinVariable(VariableTracker):
                         need_unwrap=need_unwrap,
                         **options,
                     )
+                elif check_numpy_ndarray_args(args, kwargs):
+                    return wrap_fx_proxy_cls(
+                        variables.NumpyNdarrayVariable,
+                        tx,
+                        proxy,
+                        **options,
+                    )
                 elif all(isinstance(x, SymNodeVariable) for x in args):
                     return SymNodeVariable.create(tx, proxy, None, **options)
                 else:
@@ -749,10 +763,17 @@ class BuiltinVariable(VariableTracker):
             return self._dyn_proxy(tx, *args, **kwargs)
         cls = variables.BaseListVariable.cls_for(self.fn)
         if obj is None:
-            return cls(
-                [],
-                mutable_local=MutableLocal(),
-            )
+            if cls is SetVariable:
+                return cls(
+                    tx,
+                    [],
+                    mutable_local=MutableLocal(),
+                )
+            else:
+                return cls(
+                    [],
+                    mutable_local=MutableLocal(),
+                )
         elif obj.has_unpack_var_sequence(tx):
             guards = set()
             if obj.source and not is_constant_source(obj.source):
@@ -917,7 +938,7 @@ class BuiltinVariable(VariableTracker):
         source = (
             None
             if a.source is None or b.source is None
-            else SuperSource(a.source, b.source)
+            else SuperSource(type=a.source, base=b.source)
         )
         return variables.SuperVariable(a, b, source=source)
 
@@ -1099,6 +1120,10 @@ class BuiltinVariable(VariableTracker):
                 f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
+            if not tx.output.is_root_tracer():
+                raise AttributeMutationError(
+                    "Can't inplace modify module params/buffers inside HigherOrderOp"
+                )
             obj.convert_to_unspecialized(tx)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
@@ -1223,11 +1248,23 @@ class BuiltinVariable(VariableTracker):
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
         if (
-            isinstance(left, NNModuleVariable)
-            and isinstance(right, NNModuleVariable)
-            and op in supported_const_comparison_ops
+            all(
+                isinstance(x, (NNModuleVariable, ConstantVariable))
+                for x in [left, right]
+            )
+            and op in supported_const_comparison_ops.values()
         ):
-            self.push(ConstantVariable(op(left, right)))
+            left = (
+                tx.output.get_submodule(left.module_key)
+                if isinstance(left, NNModuleVariable)
+                else left.as_python_constant()
+            )
+            right = (
+                tx.output.get_submodule(right.module_key)
+                if isinstance(right, NNModuleVariable)
+                else right.as_python_constant()
+            )
+            return ConstantVariable(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():
