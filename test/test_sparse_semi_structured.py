@@ -66,7 +66,7 @@ class TestSparseSemiStructured(TestCase):
 
         with self.assertRaisesRegex(
             NotImplementedError,
-            "Creating mask from dense tensor is currently not supported",
+            "You must pass in a mask to to_sparse_semi_structured, currently mask=None.",
         ):
             A_sparse = to_sparse_semi_structured(A)
 
