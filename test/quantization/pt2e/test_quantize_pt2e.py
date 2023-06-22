@@ -1766,10 +1766,9 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
         with override_quantized_engine("qnnpack"):
             example_inputs = (torch.randn(1, 3, 224, 224),)
             m = torchvision.models.resnet18()
-            # TODO: verify convert numerics in a future PR
             self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=False,
+                m, example_inputs, is_per_channel=False, verify_convert=True,
             )
             self._verify_symmetric_qnnpack_qat_numerics(
-                m, example_inputs, is_per_channel=True,
+                m, example_inputs, is_per_channel=True, verify_convert=True,
             )
