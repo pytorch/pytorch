@@ -280,31 +280,18 @@ def convert_conv_weights_to_channels_last(gm):
     """
     Convert 4d convolution weight tensor to channels last format.
 
-    This method assumes the graph is already freezed.
+    This pass is performed before freezing so the added nodes can be constant
+    foled by freezing.
     """
     convs = [n for n in gm.graph.nodes if n.target == aten.convolution.default]
     for conv in convs:
         weight_node = conv.args[1]
-        # is a constant tensor
-        if weight_node.op == "get_attr":
-            param_tensor = getattr(gm, weight_node.target)
-            if len(param_tensor.shape) != 4:
-                # not a 4d tensor, skip
-                continue
-            with no_dispatch():
-                cl_param_tensor = param_tensor.to(memory_format=torch.channels_last)
-                if isinstance(param_tensor, nn.Parameter):
-                    cl_param_tensor = nn.Parameter(cl_param_tensor)
-            if cl_param_tensor is not param_tensor:
-                setattr(gm, weight_node.target, cl_param_tensor)
+        if len(weight_node.meta['val'].size()) != 4:
+            # not a 4d tensor, skip
+            continue
 
-                # Even though inductor does not use meta['val'] or meta['tensor_meta']
-                # for get_attr node, we still update them to be consistent.
-                weight_node.meta["val"] = weight_node.meta["val"].to(
-                    memory_format=torch.channels_last
-                )
-                weight_node.meta["tensor_meta"] = _extract_tensor_metadata(
-                    weight_node.meta["val"]
-                )
+        with gm.graph.inserting_before(conv):
+            new_node = gm.graph.call_function(aten.clone.default, (weight_node,), {"memory_format": torch.channels_last})
+            conv.replace_input_with(weight_node, new_node)
 
     enforce_output_layout(gm)

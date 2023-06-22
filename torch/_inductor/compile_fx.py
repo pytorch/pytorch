@@ -689,6 +689,12 @@ def fw_compiler_freezing(
     # partition_fn won't be called
     joint_graph_passes(aot_autograd_model)
 
+    layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model)
+    if layout_opt:
+        # make sure meta['val'] is properly setup
+        fake_tensor_prop(aot_autograd_model, aot_example_inputs, True)
+        convert_conv_weights_to_channels_last(aot_autograd_model)
+
     opt_model, preserved_arg_indices = freeze(
         dynamo_model,
         aot_autograd_model,
@@ -699,12 +705,6 @@ def fw_compiler_freezing(
     num_fixed = len(preserved_arg_indices) - num_example_inputs
 
     fake_mode = detect_fake_mode(aot_example_inputs)
-
-    layout_opt = GraphLowering.decide_layout_opt(opt_model)
-    if layout_opt:
-        # make sure meta['val'] is properly setup
-        fake_tensor_prop(opt_model, aot_example_inputs, True)
-        convert_conv_weights_to_channels_last(opt_model)
 
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
