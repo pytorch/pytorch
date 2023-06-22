@@ -30,9 +30,6 @@ __all__ = [
     'to_sparse_semi_structured',
 ]
 
-if not torch._C._init_cusparselt():
-    raise RuntimeError('Error: could not initialize cuSPARSELt!')
-
 addmm = _add_docstr(_sparse._sparse_addmm, r"""
 sparse.addmm(mat, mat1, mat2, *, beta=1., alpha=1.) -> Tensor
 

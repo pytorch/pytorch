@@ -10,8 +10,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/functorch/Interpreter.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 // NOTE: [functorch's TensorWrapper]
 //
@@ -41,11 +40,6 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
       std::shared_ptr<bool> is_alive,
       bool is_immutable = false,  // if true, this came from an operation that aliases an immutable tensor
       bool use_value_sizes_strides = true);
-
-  // Override a bunch of methods inherited from TensorImpl to return error messages
-  void set_size(int64_t dim, int64_t new_size) override;
-  void set_stride(int64_t dim, int64_t new_stride) override;
-  void set_storage_offset(int64_t storage_offset) override;
 
   void refreshMetadata();
 
@@ -105,5 +99,5 @@ TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, const Interpreter& inte
 TORCH_API TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor);
 TORCH_API void dumpTensor(std::ostream & ss, const Tensor& tensor);
 TORCH_API void dumpTensorCout(const Tensor& tensor);
-}
-} // namespace at
+
+} // namespace at::functorch

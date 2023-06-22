@@ -269,12 +269,10 @@ void reflection_pad2d_backward_out_template(
     const Tensor &input, IntArrayRef padding) {
   int dim_w = 2;
   int dim_h = 1;
-  int dim_plane = 0;
 
   if (input.ndimension() == 4) {
     dim_w++;
     dim_h++;
-    dim_plane++;
   }
 
   /* sizes */
