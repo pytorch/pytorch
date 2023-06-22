@@ -5,8 +5,8 @@ from typing import Callable, Mapping
 import torch
 import torch._ops
 import torch.fx
-from torch.fx.experimental import proxy_tensor
 from torch._subclasses import fake_tensor
+from torch.fx.experimental import proxy_tensor
 
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
@@ -57,7 +57,7 @@ class Decompose(_pass.Transform):
             decomposition_table=self.decomposition_table,
             tracing_mode=fx_mode,
             _allow_non_fake_inputs=True,
-            _allow_fake_constant=self.fake_mode is not None
+            _allow_fake_constant=self.fake_mode is not None,
         )(*args)
         # Rename placeholder targets to match the original module's signature since
         # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).
