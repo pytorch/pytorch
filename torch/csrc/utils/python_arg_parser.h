@@ -536,6 +536,16 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     return std::vector<c10::SymInt>(size1, si);
   }
 
+  if (is_dynamo_compiling && size1 > 0 && THPVariable_Check(args[i])) {
+    auto& var = THPVariable_Unpack(args[i]);
+    if (size1 == 1 && var.numel() == 1 && var.sizes().empty() &&
+        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
+      auto scalar = var.item();
+      TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+      return std::vector<c10::SymInt>(size1, scalar.toSymInt());
+    }
+  }
+
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -923,6 +933,7 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline c10::SymInt PythonArgs::toSymInt(int i) {
+  PyObject* obj = args[i];
   if (!args[i]) {
     return c10::SymInt(signature.params[i].default_int);
   }
@@ -931,6 +942,28 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
+  }
+
+  // convert FakeTensor to SymInt
+  // expect empty sizes, numel = 1
+  // and ScalarType::Int
+  if (is_dynamo_compiling && THPVariable_Check(obj)) {
+    auto& var = THPVariable_Unpack(obj);
+
+    if (var.numel() != 1 || !var.sizes().empty() ||
+        !at::isIntegralType(
+            var.dtype().toScalarType(), /*include_bool*/ true)) {
+      throw TypeError(
+          "%s(): argument '%s' must be %s, failed to convert %s with sizes.empty()=%d",
+          signature.name.c_str(),
+          signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(),
+          Py_TYPE(obj)->tp_name,
+          var.sizes().empty());
+    }
+    auto scalar = var.item();
+    TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
+    return scalar.toSymInt();
   }
 
   return py::cast<c10::SymInt>(py::handle(args[i]));

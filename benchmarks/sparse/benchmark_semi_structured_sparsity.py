@@ -48,7 +48,7 @@ def rand_sparse_semi_structured_mask(
 
 
 def test_linear(m, k, n, dtype, contiguous, backend):
-    SparseSemiStructuredTensor.fuse_transpose = contiguous
+    SparseSemiStructuredTensor._fuse_transpose = contiguous
     mask = rand_sparse_semi_structured_mask(m, k, dtype=dtype)
     sparse_weight = torch.rand(m, k).to(dtype).cuda() * mask
     input_tensor = torch.zeros(n, k).to(dtype).cuda()
@@ -62,7 +62,10 @@ def test_linear(m, k, n, dtype, contiguous, backend):
     dense_output = model(input_tensor)
 
     # sparsify weights
-    model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight))
+    if backend == "cutlass":
+        model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight, mask=mask.bool()))
+    else:
+        model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight))
 
     sparse_output = model(input_tensor)
 
@@ -93,7 +96,7 @@ def test_tensor(m, k, n, dtype, contiguous, backend):
     B = torch.zeros(k, n).to(dtype).cuda()
     bias = torch.rand(n).to(dtype).cuda()
 
-    sA = to_sparse_semi_structured(A)
+    sA = to_sparse_semi_structured(A, mask=A.bool())
 
     # torch.mm calculation
     if dtype is not torch.int8:

@@ -58,6 +58,7 @@ import unittest
 import numpy as np
 from torch.testing import FileCheck
 from typing import Callable, Tuple, Dict, Any, Union, Type, Optional
+import torch._dynamo as torchdynamo
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -366,6 +367,22 @@ def skipIfNoX86(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if 'x86' not in torch.backends.quantized.supported_engines:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfNoDynamoSupport(fn):
+    reason = "dynamo doesn't support."
+    if isinstance(fn, type):
+        if not torchdynamo.is_dynamo_supported():
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torchdynamo.is_dynamo_supported():
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
