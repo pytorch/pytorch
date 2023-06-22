@@ -14865,12 +14865,7 @@ op_db: List[OpInfo] = [
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
-                   supports_complex_to_float=True,
-                   skips=(
-                       # Ref: https://github.com/pytorch/pytorch/issues/78413
-                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64),),
-                   )),
+                   supports_complex_to_float=True),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),

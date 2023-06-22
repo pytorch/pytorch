@@ -45,6 +45,9 @@ inline VALUE_TYPE angle_impl (SCALAR_TYPE z) {
   if (at::_isnan(z)) {
     return z;
   }
+  if (std::is_floating_point<SCALAR_TYPE>::value && z == 0.0) {
+    return std::signbit(z) ? M_PI : 0;
+  }
   return z < 0 ? c10::pi<double> : 0;
 }
 
