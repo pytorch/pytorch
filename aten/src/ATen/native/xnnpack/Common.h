@@ -122,3 +122,7 @@ struct Layout final {
 } // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */
+
+namespace at::native::xnnpack {
+bool available();
+} // namespace at::native::xnnpack

@@ -4,7 +4,7 @@
 #include <ATen/native/utils/Factory.h>
 #include <ATen/native/xnnpack/Linear.h>
 
-namespace at::native::xnpack {
+namespace at::native::xnnpack {
 namespace internal::linear {
 
 namespace {

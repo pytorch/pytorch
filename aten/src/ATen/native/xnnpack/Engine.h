@@ -92,6 +92,4 @@ bool use_hardswish(const Tensor& input);
 Tensor hardswish(const Tensor& input);
 Tensor& hardswish_(Tensor& input);
 
-bool available();
-
 } // namespace at::native::xnnpack
