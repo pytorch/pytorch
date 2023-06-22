@@ -5421,7 +5421,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             res3 = res3 * (res3 > 0)
         elif activation == "gelu":
             res3_t = torch.from_numpy(res3).to(dtype)
-            res3_t = torch.nn.functional.gelu(res3_t, approximate="tanh")
+            approximate = "tanh" if t.is_cuda else "none"
+            res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
             res3 = res3_t.to(numpy_dtype).cpu().numpy()
         else:
             assert activation is None, f"unsupported activation {activation}"
