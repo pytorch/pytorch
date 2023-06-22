@@ -2771,6 +2771,84 @@ TEST_F(VulkanAPITest, reflection_pad2d) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, repeat_invalid_inputs_outputs_exceptions) {
+  // Arrange: Vulkan repeat only supports input of dims <= 4
+  {
+    const auto in_cpu =
+        at::rand({3, 9, 11, 7, 3}, at::device(at::kCPU).dtype(at::kFloat));
+    const at::IntArrayRef repeats = {5, 7, 3, 9, 2};
+
+    // Act
+    EXPECT_THROW(
+        { const auto out_vulkan = in_cpu.vulkan().repeat(repeats); },
+        ::c10::Error);
+  }
+
+  // Arrange: Number of dimensions of repeat dims can not be smaller than
+  // number of dimensions of tensor
+  {
+    const auto in_cpu =
+        at::rand({3, 5, 11, 13}, at::device(at::kCPU).dtype(at::kFloat));
+    const at::IntArrayRef repeats = {5, 7};
+
+    // Act
+    EXPECT_THROW(
+        { const auto out_vulkan = in_cpu.vulkan().repeat(repeats); },
+        ::c10::Error);
+  }
+
+  // Arrange: Vulkan repeat only supports output of dims <= 4
+  {
+    const auto in_cpu =
+        at::rand({3, 9, 11, 7}, at::device(at::kCPU).dtype(at::kFloat));
+    const at::IntArrayRef repeats = {5, 7, 3, 9, 2};
+
+    // Act
+    EXPECT_THROW(
+        { const auto out_vulkan = in_cpu.vulkan().repeat(repeats); },
+        ::c10::Error);
+  }
+}
+
+void test_repeat(
+    const at::IntArrayRef input_shape,
+    const at::IntArrayRef repeats) {
+  c10::InferenceMode mode;
+
+  at::Tensor in_cpu;
+  at::Tensor out_cpu;
+  at::Tensor in_vulkan;
+  at::Tensor out_vulkan;
+  at::IntArrayRef repeat;
+  bool check = true;
+  for (int idx_input = 1; (unsigned)idx_input < input_shape.size() + 1; ++idx_input) {
+    for (int idx_repeat = idx_input; (unsigned)idx_repeat < repeats.size() + 1;
+          ++idx_repeat) {
+      in_cpu = at::rand(
+          input_shape.slice(0, idx_input),
+          at::device(at::kCPU).dtype(at::kFloat));
+      repeat = repeats.slice(0, idx_repeat);
+      out_cpu = in_cpu.repeat(repeats);
+      in_vulkan = in_cpu.vulkan();
+      out_vulkan = in_vulkan.repeat(repeats);
+      bool local_check = almostEqual(out_cpu, out_vulkan.cpu());
+      if (!local_check) {
+        check = false;
+        std::cout << "Repeat test failed when input is of shape "
+                  << input_shape.slice(0, idx_input) << " and repeat of "
+                  << repeat << std::endl;
+        showRtol(out_cpu, out_vulkan.cpu());
+      }
+    }
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, repeat) {
+  test_repeat({13, 5, 13, 7}, {7, 2, 3, 5});
+}
+
 TEST_F(VulkanAPITest, replication_pad2d) {
   const auto a_cpu = at::rand({2, 3, 47, 63}, at::device(at::kCPU).dtype(at::kFloat));
   const auto a_vulkan = a_cpu.vulkan();
@@ -2967,28 +3045,29 @@ TEST_F(VulkanAPITest, sigmoid_) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, softmax) {
+void test_softmax_4d(int64_t dim) {
   c10::InferenceMode mode;
 
   at::Tensor test_in[] = {
-    at::rand({1, 196, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 197, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 198, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 199, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({1, 3, 4, 2}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({4, 8, 5, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
+    at::rand({9, 11, 12, 12}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
   };
-
   for (auto in_cpu : test_in) {
-    const auto out_cpu = at::softmax(in_cpu, 1);
+      const auto out_cpu = at::softmax(in_cpu, dim);
+      const auto in_vulkan = in_cpu.vulkan();
+      const auto out_vulkan = at::softmax(in_vulkan, dim);
+      const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+      if (!check) {
+        showRtol(out_cpu, out_vulkan.cpu());
+      }
+      ASSERT_TRUE(check);
+  }
+}
 
-    const auto in_vulkan = in_cpu.vulkan();
-    const auto out_vulkan = at::softmax(in_vulkan, 1);
-
-    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-    if (!check) {
-      showRtol(out_cpu, out_vulkan.cpu());
-    }
-
-    ASSERT_TRUE(check);
+TEST_F(VulkanAPITest, softmax_4d) {
+  for (int dim = 0; dim < 4; dim++) {
+    test_softmax_4d(dim);
   }
 }
 
@@ -4311,6 +4390,24 @@ TEST_F(VulkanAPITest, cat_4d_dim3_diffwidth_success) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, cat_3d_dim0_mult4ch_success) {
+  // Arrange
+  const auto in_cpu1 = at::rand({4, 193, 113}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({4, 193, 113}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({4, 193, 113}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 0);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
 
 TEST_F(VulkanAPITest, cat_3d_dim0_diff_channel_success) {
   // Arrange
@@ -4903,22 +5000,6 @@ TEST_F(VulkanAPITest, stack_invalid_inputs) {
     at::stack({}, 0);
   }, ::c10::Error);
 
-  // Act: Vulkan stack expects dim = 0
-  EXPECT_THROW({
-    at::stack({
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 1);
-  }, ::c10::Error);
-
-  // Act: Vulkan stack expects 2 dimensional inputs
-  EXPECT_THROW({
-    at::stack({
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-        at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
-        at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 0);
-  }, ::c10::Error);
-
   // Act: Vulkan stack inputs must have matching sizes
   EXPECT_THROW({
     at::stack({
@@ -4928,97 +5009,54 @@ TEST_F(VulkanAPITest, stack_invalid_inputs) {
   }, ::c10::Error);
 }
 
-TEST_F(VulkanAPITest, stack_1_tensor) {
-  // Arrange
-  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-
-  // Act
-  const auto out_cpu = at::stack({in_cpu1}, 0);
-  const auto out_vulkan = at::stack({in_cpu1.vulkan()}, 0);
-
-  // Assert
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, stack_2_tensors) {
-  // Arrange
-  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-
-  // Act
-  const auto out_cpu = at::stack({in_cpu1, in_cpu2}, 0);
-  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan()}, 0);
-
-  // Assert
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, stack_3_tensors) {
-  // Arrange
-  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu3 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-
-  // Act
-  const auto out_cpu = at::stack({in_cpu1, in_cpu2, in_cpu3}, 0);
-  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
-
-  // Assert
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, stack_4_tensors) {
-  // Arrange
-  const auto in_cpu1 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu2 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu3 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu4 = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
-
-  // Act
-  const auto out_cpu = at::stack({in_cpu1, in_cpu2, in_cpu3, in_cpu4}, 0);
-  const auto out_vulkan = at::stack({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan(), in_cpu4.vulkan()}, 0);
-
-  // Assert
-  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-  if (!check) {
-    showRtol(out_cpu, out_vulkan.cpu());
-  }
-
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, stack_from_1_to_20_tensors) {
+void test_stack(const at::IntArrayRef input_shape, int64_t dim, int numTensors) {
   std::vector<at::Tensor> tensors_cpu = {};
   std::vector<at::Tensor> tensors_vulkan = {};
 
-  for (const auto i : c10::irange(20)) {
-    at::Tensor in_cpu = at::rand({221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  for (int i = 0; i < numTensors; i++) {
+    at::Tensor in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
     tensors_cpu.emplace_back(in_cpu);
     tensors_vulkan.emplace_back(in_cpu.vulkan());
-    at::Tensor out_cpu = at::stack(tensors_cpu, 0);
-    at::Tensor out_vulkan = at::stack(tensors_vulkan, 0);
-    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-    if (!check) {
-      std::cout << "Error when stacking " << i << " tensors" << std::endl;
-      showRtol(out_cpu, out_vulkan.cpu());
-    }
-    ASSERT_TRUE(check);
   }
+
+  at::Tensor out_cpu = at::stack(tensors_cpu, 0);
+  at::Tensor out_vulkan = at::stack(tensors_vulkan, 0);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    std::cout << "Error when stacking " << numTensors << " tensors" << std::endl;
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_1d) {
+  test_stack({221}, 0, 2);
+  test_stack({193}, 1, 3);
+
+  test_stack({221}, -1, 2);
+  test_stack({193}, -2, 3);
+}
+
+TEST_F(VulkanAPITest, stack_2d) {
+  test_stack({221, 193}, 0, 2);
+  test_stack({221, 193}, 1, 3);
+  test_stack({221, 193}, 2, 4);
+
+  test_stack({221, 193}, -1, 2);
+  test_stack({221, 193}, -2, 3);
+  test_stack({221, 193}, -3, 4);
+}
+
+TEST_F(VulkanAPITest, stack_3d) {
+  test_stack({221, 193, 11}, 0, 2);
+  test_stack({221, 193, 11}, 1, 3);
+  test_stack({221, 193, 11}, 2, 4);
+  test_stack({221, 193, 11}, 3, 5);
+
+  test_stack({221, 193, 11}, -1, 2);
+  test_stack({221, 193, 11}, -2, 3);
+  test_stack({221, 193, 11}, -3, 4);
+  test_stack({221, 193, 11}, -4, 5);
 }
 
 void test_zero_(const at::IntArrayRef input_shape) {

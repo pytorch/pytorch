@@ -126,7 +126,7 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true
     export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -166,6 +166,8 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
 
     # TODO: get rid of the hardcoded path
     export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.0.1/lib/linux/libclang_rt.asan-x86_64.so
+    # Disable valgrind for asan
+    export VALGRIND=OFF
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
@@ -312,7 +314,6 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
-  local dtype=amp
   local backend=inductor
   local modes=()
   if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
@@ -325,6 +326,11 @@ test_perf_for_dashboard() {
   local targets=(accuracy performance)
 
   for mode in "${modes[@]}"; do
+    if [[ "$mode" == "inference" ]]; then
+      dtype=bfloat16
+    elif [[ "$mode" == "training" ]]; then
+      dtype=amp
+    fi
     for target in "${targets[@]}"; do
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
@@ -430,7 +436,7 @@ test_dynamo_benchmark() {
     if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
     else
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --amp "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
     fi
   fi
@@ -469,7 +475,7 @@ test_aten() {
   # Test ATen
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
   # scalar_tensor_test, basic, native_test
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
 
     if [[ -n "$IN_WHEEL_TEST" ]]; then
@@ -669,51 +675,45 @@ test_rpc() {
 }
 
 test_custom_backend() {
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    echo "Testing custom backends"
-    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
-    pushd test/custom_backend
-    cp -a "$CUSTOM_BACKEND_BUILD" build
-    # Run tests Python-side and export a lowered module.
-    python test_custom_backend.py -v
-    python backend.py --export-module-to=model.pt
-    # Run tests C++-side and load the exported lowered module.
-    build/test_custom_backend ./model.pt
-    rm -f ./model.pt
-    popd
-    assert_git_not_dirty
-  fi
+  echo "Testing custom backends"
+  CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
+  pushd test/custom_backend
+  cp -a "$CUSTOM_BACKEND_BUILD" build
+  # Run tests Python-side and export a lowered module.
+  python test_custom_backend.py -v
+  python backend.py --export-module-to=model.pt
+  # Run tests C++-side and load the exported lowered module.
+  build/test_custom_backend ./model.pt
+  rm -f ./model.pt
+  popd
+  assert_git_not_dirty
 }
 
 test_custom_script_ops() {
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    echo "Testing custom script operators"
-    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
-    pushd test/custom_operator
-    cp -a "$CUSTOM_OP_BUILD" build
-    # Run tests Python-side and export a script module.
-    python test_custom_ops.py -v
-    python model.py --export-script-module=model.pt
-    # Run tests C++-side and load the exported script module.
-    build/test_custom_ops ./model.pt
-    popd
-    assert_git_not_dirty
-  fi
+  echo "Testing custom script operators"
+  CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
+  pushd test/custom_operator
+  cp -a "$CUSTOM_OP_BUILD" build
+  # Run tests Python-side and export a script module.
+  python test_custom_ops.py -v
+  python model.py --export-script-module=model.pt
+  # Run tests C++-side and load the exported script module.
+  build/test_custom_ops ./model.pt
+  popd
+  assert_git_not_dirty
 }
 
 test_jit_hooks() {
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
-    echo "Testing jit hooks in cpp"
-    HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
-    pushd test/jit_hooks
-    cp -a "$HOOK_BUILD" build
-    # Run tests Python-side and export the script modules with hooks
-    python model.py --export-script-module=model
-    # Run tests C++-side and load the exported script modules
-    build/test_jit_hooks ./model
-    popd
-    assert_git_not_dirty
-  fi
+  echo "Testing jit hooks in cpp"
+  HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
+  pushd test/jit_hooks
+  cp -a "$HOOK_BUILD" build
+  # Run tests Python-side and export the script modules with hooks
+  python model.py --export-script-module=model
+  # Run tests C++-side and load the exported script modules
+  build/test_jit_hooks ./model
+  popd
+  assert_git_not_dirty
 }
 
 test_torch_function_benchmark() {
@@ -923,7 +923,7 @@ test_cpp_extensions() {
 
 test_vec256() {
   # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
-  if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing vec256 instructions"
     mkdir -p test/test-reports/vec256
     pushd build/bin
