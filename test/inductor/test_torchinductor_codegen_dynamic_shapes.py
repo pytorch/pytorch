@@ -280,6 +280,11 @@ test_failures = {
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
 }
 
+if TEST_WITH_ROCM:
+    # aten.miopen_batch_norm is not registered for lowering
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
+    # Failed to find triton kernel after ROCm aten.prod fallback
+    test_failures["test_prod_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"
@@ -335,5 +340,5 @@ if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
