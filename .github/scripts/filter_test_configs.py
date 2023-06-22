@@ -566,7 +566,7 @@ def main() -> None:
     # quickly check it without the need to parse the JSON string
     set_output("is-test-matrix-empty", filtered_test_matrix_len == 0)
 
-    pr_body = get_pr_info(int(pr_number)).get("body", "")
+    pr_body = get_pr_info(int(pr_number)).get("body", "") if pr_number else ""
 
     perform_misc_tasks(
         labels=labels,
