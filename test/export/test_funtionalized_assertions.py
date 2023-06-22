@@ -1,3 +1,8 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_native_python_assertion)
+"""
+
 # Owner(s): ["module: dynamo"]
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -122,19 +127,34 @@ class TestFunctionalization(TestCase):
             constraints=[dynamic_dim(inps[1], 1) < 6],
             _functionalize_runtime_assertions=True,
         )
+        FileCheck().check_count(
+            "torch.ops.aten.functional_sym_constrain_range", 1, exactly=True
+        ).run(ep.graph_module.code)
         inps = (torch.tensor([7]), torch.ones((3, 5)))
         self.assertTrue(torch._dynamo.utils.same(ep(*inps), f(*inps)))
 
     def test_native_python_assertion(self) -> None:
         def f(x):
-            assert x.shape[0] > 3
-            return x * 2
+            b = x.sin()
+            assert x[0] == 3
+            return x.cos() + b
 
-        inp = torch.zeros(5, 2)
+        inp = torch.Tensor([3, 4, 5])
         ep = torch._export.export(f, (inp,), _functionalize_runtime_assertions=True)
 
-        inp = torch.ones(5, 2)
-        self.assertTrue(torch._dynamo.utils.same(ep(inp), f(inp)))
+        # Check native assertion has corresponding functional assertion nodes generated.
+        select_int_node = next(
+            n
+            for n in ep.graph_module.graph.nodes
+            if n.target == torch.ops.aten.select.int
+        )
+        equal_scalar_node = select_int_node.next
+        dep_token_node = equal_scalar_node.next
+        self.assertIn(
+            "call_function[target=torch.ops.aten._functional_assert_async.msg]"
+            "(args = (%eq_scalar, assertion error), kwargs = {dep_token: %dep_token_2}",
+            dep_token_node.format_node(),
+        )
 
     def test_functionalization_with_mutated_buffer(self) -> None:
         buf = torch.ones(6, 2)
