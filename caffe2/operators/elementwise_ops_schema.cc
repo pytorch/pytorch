@@ -616,7 +616,7 @@ C: [False  True  True False False  True]
 )DOC";
 
 std::function<void(OpSchema&)>
-ComparisonDocGenerator(const char* name, const char* desc, const char* extra) {
+static ComparisonDocGenerator(const char* name, const char* desc, const char* extra) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
 Performs element-wise {desc} comparison **{name}** (with limited broadcast support).
@@ -837,7 +837,7 @@ C:
 </details>
 )DOC";
 
-std::function<void(OpSchema&)> LogicalDocGenerator(
+static std::function<void(OpSchema&)> LogicalDocGenerator(
     const char* name,
     const char* extra) {
   return [=](OpSchema& schema) {
@@ -888,7 +888,7 @@ CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Xor, "xor", "Xor", kXorExample);
 
 #undef CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP
 
-std::function<void(OpSchema&)> BitwiseDocGenerator(const char* name) {
+static std::function<void(OpSchema&)> BitwiseDocGenerator(const char* name) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
 Performs element-wise bitwise operation `{name}` (with limited broadcast support).

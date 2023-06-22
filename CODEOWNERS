@@ -57,11 +57,11 @@ nn/qat/ @jerryzh168
 /torch/testing/_internal/distributed @mrshenli @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501 @wanchaol @fegin @fduwjj
 
 # ONNX Export
-/torch/csrc/jit/passes/onnx.h @bowenbao @abock
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock
-/torch/csrc/jit/passes/onnx/ @bowenbao @abock
-/torch/onnx/ @bowenbao @abock
-/test/onnx/ @bowenbao @abock
+/torch/csrc/jit/passes/onnx.h @bowenbao @abock @thiagocrepaldi
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock @thiagocrepaldi
+/torch/csrc/jit/passes/onnx/ @bowenbao @abock @thiagocrepaldi
+/torch/onnx/ @bowenbao @abock @thiagocrepaldi
+/test/onnx/ @bowenbao @abock @thiagocrepaldi
 
 # Docker
 /.ci/docker/ @jeffdaily
