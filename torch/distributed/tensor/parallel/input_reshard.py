@@ -44,11 +44,11 @@ def input_reshard(
             partial(_unpack_hook_tp, tp_device_mesh, input_reshard_dim),
         )
         saved_tensor_hooks.__enter__()
-        global cx
+        nonlocal cx
         cx = saved_tensor_hooks  # type: ignore[name-defined]
 
     def input_reshard_backward_hook(_: torch.nn.Module, _i: Tuple[Any, ...], _o: Any) -> Any:
-        global cx
+        nonlocal cx
         cx.__exit__()  # type: ignore[name-defined]
 
     if input_reshard_dim is None:
