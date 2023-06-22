@@ -13,6 +13,7 @@
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/Stream.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
 #include <stdexcept>
@@ -189,6 +190,32 @@ struct type_caster<at::Device> {
       return_value_policy /* policy */,
       handle /* parent */) {
     return handle(THPDevice_New(src));
+  }
+};
+
+template <>
+struct type_caster<c10::Stream> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(c10::Stream, _("torch.Stream"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPStream_Check(obj)) {
+      value = c10::Stream::unpack3(
+          ((THPStream*)obj)->stream_id,
+          ((THPStream*)obj)->device_index,
+          static_cast<c10::DeviceType>(((THPStream*)obj)->device_type));
+      return true;
+    }
+    return false;
+  }
+
+  static handle cast(
+      const c10::Stream& src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return handle(THPStream_Wrap(src));
   }
 };
 

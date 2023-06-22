@@ -1312,8 +1312,8 @@ def forward(self, arg0_1):
         # Make sure that functionalization ran the "+" kernel
         # with a functional + non-functional tensor, and wrapped the output appropriately.
         self.assertExpectedInline('\n'.join(logs), """\
-$2 = torch._ops.aten.add.Tensor($0, $1)
-$3 = torch._ops.aten.add.Tensor($2, 1)""")
+$2: f32[4] = torch._ops.aten.add.Tensor($0, $1)
+$3: f32[4] = torch._ops.aten.add.Tensor($2, 1)""")
 
     def test_mixed_wrappers_invalid(self):
         x1_not_functional = torch.ones(4)
@@ -1445,6 +1445,18 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy__1 = torch.ops.aten.copy_.default(arg2_1, alias_4);  arg2_1 = alias_4 = None
     return view_5
     """)  # noqa: B950
+
+    def test_mutation_overlapping_mem(self):
+        def fn(x):
+            # x: (1, 5)
+            t1 = torch.add(x, x)
+            t2 = t1.unfold(1, 3, 2)
+            t3 = t2.abs_()
+            return t3
+
+        with self.assertRaisesRegex(RuntimeError, r'encountered a tensor being mutated that has internal overlap'):
+            x = torch.ones(1, 5)
+            out = _functionalize(fn, reapply_views=True, crossref=False)(x)
 
 
     def test_batch_norm(self):

@@ -4,26 +4,28 @@ import dataclasses
 import functools
 import hashlib
 import os
+import re
 from itertools import count
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
 
-from torch._dynamo.utils import dynamo_timed
+import torch
+from torch._dynamo.utils import counters, dynamo_timed
+from torch.fx.experimental.symbolic_shapes import SymTypes
+from torch.fx.node import _get_qualified_name
 from .. import codecache, config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
-    has_triton,
     LineContext,
     sympy_dot,
     sympy_product,
-    sympy_symbol,
 )
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
+from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 
 
 pexpr = PythonPrinter().doprint
@@ -58,6 +60,72 @@ def is_float(s: str):
     return True
 
 
+def convert_arg_type(python_type):
+    from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
+
+    if python_type == "Tensor":
+        # Conversions rules follow https://github.com/pytorch/pytorch/tree/main/aten/src/ATen/native#func
+        return f"at::{python_type} const&"
+
+    if python_type in PYTHON_TO_CPP:
+        return PYTHON_TO_CPP[python_type]
+
+    # Convert args of container types e.g. Optional[*]
+    for py_container, cpp_container in CONTAINER_PYTHON_TO_CPP.items():
+        container_match = re.findall(py_container + r"\[([a-zA-Z_]+)]", python_type)
+        if len(container_match) == 1:
+            contained_type = container_match[0]
+            assert (
+                contained_type in PYTHON_TO_CPP
+            ), f"unsupported {py_container} type in convert_arg_type: {contained_type}"
+            cpp_contained_type = PYTHON_TO_CPP[contained_type]
+            return f"{cpp_container}<{cpp_contained_type}>"
+
+    raise AssertionError(f"unsupport python_type: {python_type}")
+
+
+def convert_return_type(python_type):
+    # TODO: only support Tensor as func return type for now
+    # TODO: support alias
+    assert (
+        python_type == "Tensor"
+    ), f"only support tensor output for cpp_wrapper, but receive type {python_type}"
+    return f"at::{python_type}"
+
+
+def get_cpp_op_schema(kernel):
+    # use x.real_type instead of x.type so that we get ScalarType instead of int
+    arg_types = [repr(x.real_type) for x in kernel._schema.arguments]
+    arg_names = [x.name for x in kernel._schema.arguments]
+    # TODO: only support len(returns) == 1 for now.
+    returns = [repr(x.type) for x in kernel._schema.returns]
+    assert (
+        len(returns) == 1
+    ), f"only support 1 single output for cpp_wrapper, but {kernel.__name__} has {len(returns)} outputs"
+    return_value = returns[0]
+    cpp_return_value = convert_return_type(return_value)
+
+    cpp_arg_type = [
+        f"{convert_arg_type(arg_type)} {arg_name}"
+        for arg_type, arg_name in zip(arg_types, arg_names)
+    ]
+    return f"{cpp_return_value}({', '.join(cpp_arg_type)})"
+
+
+SUPPORTED_FALLBACK_CPP_WRAPPER = [
+    "repeat_interleave.Tensor",
+    "convert_element_type.default",  # can appear as a fallback if it has a complex input
+]
+
+
+@dataclasses.dataclass
+class SymbolicCallArg:
+    inner: Any
+
+    def __str__(self):
+        return str(self.inner)
+
+
 class MemoryPlanningState:
     def __init__(self):
         super().__init__()
@@ -81,11 +149,15 @@ class MemoryPlanningState:
 @dataclasses.dataclass
 class EnterCudaDeviceContextManagerLine:
     device_idx: int
+    first_time: bool
 
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if V.graph.cpp_wrapper:
             code.writeline("\n")
-            code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+            if self.first_time:
+                code.writeline(f"at::cuda::CUDAGuard device_guard({self.device_idx});")
+            else:
+                code.writeline(f"device_guard.set_index({self.device_idx});")
         else:
             # Note _DeviceGuard has less overhead than device, but only accepts
             # integers
@@ -125,7 +197,7 @@ class AllocateLine(MemoryPlanningLine):
 
         # try to reuse a recently freed buffer
         key = buffer_reuse_key(self.node)
-        if key in state:
+        if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
             free_line.is_reused = True
             return ReuseLine(self.wrapper, free_line.node, self.node)
@@ -147,7 +219,8 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
         assert not self.is_reused
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
-        state.push(buffer_reuse_key(self.node), self)
+        if config.allow_buffer_reuse:
+            state.push(buffer_reuse_key(self.node), self)
         return self
 
     def codegen(self, code: IndentedBuffer):
@@ -162,7 +235,9 @@ class ReuseLine(MemoryPlanningLine):
     reused_as: ir.Buffer
 
     def plan(self, state: MemoryPlanningState):
-        assert self.node.get_name() not in V.graph.removed_buffers
+        if self.node.get_name() in V.graph.removed_buffers:
+            assert self.reused_as.get_name() in V.graph.removed_buffers
+            return NullLine(self.wrapper)
         assert self.reused_as.get_name() not in V.graph.removed_buffers
         return self
 
@@ -193,9 +268,8 @@ class WrapperCodeGen(CodeGen):
         self.prefix = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
         self.src_to_kernel = {}
-        self.kernel_to_hash = {}
+        self.kenel_numel_expr = set()
         self.lines = []
-        self.need_seed = False
         self.declare = ""
         self.ending = ""
         self.open_bracket = "["
@@ -205,6 +279,9 @@ class WrapperCodeGen(CodeGen):
         self.none_str = "None"
         self.size = "size()"
         self.stride = "stride()"
+        self.first_device_guard = True
+        self.supports_intermediate_hooks = True
+        self.expr_printer = pexpr
 
         self.write_header()
         self.write_prefix()
@@ -212,7 +289,7 @@ class WrapperCodeGen(CodeGen):
         for name, value in V.graph.constants.items():
             # include a hash so our code cache gives different constants different files
             hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
-            self.header.writeline(f"{name} = None  # {hashed}")
+            self.write_constant(name, hashed)
 
         self.allocated = set()
         self.freed = set()
@@ -220,7 +297,7 @@ class WrapperCodeGen(CodeGen):
         # maps from reusing buffer to reused buffer
         self.reuses = dict()
 
-        self.write_get_cuda_stream = functools.lru_cache(None)(
+        self.write_get_cuda_stream = functools.lru_cache(None)(  # type: ignore[assignment]
             self.write_get_cuda_stream
         )
 
@@ -231,6 +308,9 @@ class WrapperCodeGen(CodeGen):
         self.add_import_once = add_import_once
         self._metas = {}
 
+    def write_constant(self, name, hashed):
+        self.header.writeline(f"{name} = None  # {hashed}")
+
     def write_header(self):
         self.header.splice(
             f"""
@@ -240,6 +320,8 @@ class WrapperCodeGen(CodeGen):
                 import random
                 import os
                 import tempfile
+                from math import inf, nan
+                from torch._inductor.hooks import run_intermediate_hooks
                 from torch._inductor.utils import maybe_profile
 
                 from torch import empty_strided, as_strided, device
@@ -253,15 +335,16 @@ class WrapperCodeGen(CodeGen):
             """
         )
 
-        if has_triton():
-            self.header.splice(
-                """
-                import triton
-                import triton.language as tl
-                from torch._inductor.triton_heuristics import grid, start_graph, end_graph
-                from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-                """
-            )
+    @cache_on_self
+    def write_triton_header_once(self):
+        self.header.splice(
+            """
+            import triton
+            import triton.language as tl
+            from torch._inductor.triton_heuristics import grid, start_graph, end_graph
+            from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+            """
+        )
 
     def add_meta_once(self, meta):
         meta = repr(meta)
@@ -277,6 +360,18 @@ class WrapperCodeGen(CodeGen):
 
     def mark_output_type(self):
         return
+
+    def codegen_input_size_asserts(self):
+        for name, buf in V.graph.graph_inputs.items():
+            if isinstance(buf, sympy.Expr):
+                continue
+
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(buf.get_size()) == 0:
+                continue
+            size = self.codegen_shape_tuple(buf.get_size())
+            stride = self.codegen_shape_tuple(buf.get_stride())
+            self.prefix.writeline(f"assert_size_stride({name}, {size}, {stride})")
 
     def write_prefix(self):
         self.prefix.splice(
@@ -296,17 +391,13 @@ class WrapperCodeGen(CodeGen):
                 lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
                 self.prefix.writeline(f"{lhs} = args")
                 self.prefix.writeline("args.clear()")
-            for name in V.graph.randomness_seeds:
-                self.prefix.writeline(
-                    f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
-                )
-            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
-    def append_precomputed_sizes_to_prefix(self):
-        with self.prefix.indent():
-            self.codegen_precomputed_sizes(self.prefix)
+            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            if config.size_asserts:
+                self.codegen_input_size_asserts()
 
     def write_get_cuda_stream(self, index):
+        self.write_triton_header_once()
         name = f"stream{index}"
         self.writeline(f"{name} = get_cuda_stream({index})")
         return name
@@ -315,7 +406,10 @@ class WrapperCodeGen(CodeGen):
         return f"{next(self._names_iter)}"
 
     def codegen_cuda_device_guard_enter(self, device_idx):
-        self.writeline(EnterCudaDeviceContextManagerLine(device_idx))
+        self.writeline(
+            EnterCudaDeviceContextManagerLine(device_idx, self.first_device_guard)
+        )
+        self.first_device_guard = False
 
     def codegen_cuda_device_guard_exit(self):
         self.writeline(ExitCudaDeviceContextManagerLine())
@@ -329,10 +423,19 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
-    def generate_extern_kernel_alloc(self, output_name, kernel, args):
+    def generate_extern_kernel_alloc(self, output_name, kernel, args, origin_node):
         self.writeline(
             f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
         )
+        if (
+            self.supports_intermediate_hooks
+            and config.generate_intermediate_hooks
+            and origin_node is not None
+        ):
+            counters["inductor"]["intermediate_hooks"] += 1
+            self.writeline(
+                f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
+            )
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
         if output_view:
@@ -341,7 +444,7 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_fusion_ops_code(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
         kernel,
@@ -363,12 +466,14 @@ class WrapperCodeGen(CodeGen):
             if config.profiler_mark_wrapper_call:
                 self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
+                self.write_triton_header_once()
                 self.wrapper_call.writeline("start_graph()")
 
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
-                and self.lines[-1].node.name not in out_names
+                # TODO: this seems legit, NullLine has no node
+                and self.lines[-1].node.name not in out_names  # type: ignore[attr-defined]
             ):
                 # these lines will be pointless
                 self.lines.pop()
@@ -418,10 +523,6 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
-        if self.need_seed:
-            code.writeline(
-                "seed = torch.randint(2**31, size=(), dtype=torch.int32).item()"
-            )
 
         @functools.lru_cache(None)
         def sizeof(name):
@@ -476,15 +577,21 @@ class WrapperCodeGen(CodeGen):
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
 
-    def codegen_precomputed_sizes(self, code: IndentedBuffer):
-        for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
-            code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")
+    def append_precomputed_sizes_to_prefix(self):
+        with self.prefix.indent():
+            for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
+                self.prefix.writeline(
+                    f"{self.declare}{sym} = {self.expr_printer(expr)}{self.ending}"
+                )
 
     def codegen_python_sizevar(self, x: Expr) -> str:
         return pexpr(V.graph.sizevars.simplify(x))
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
+
+    def codegen_tuple_access(self, basename: str, index: str) -> str:
+        return f"{basename}[{index}]"
 
     def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_python_sizevar, shape))
@@ -562,28 +669,54 @@ class WrapperCodeGen(CodeGen):
                 ]
             )
 
-    def define_kernel(self, name: str, kernel: str, metadata: str = None):
+    def define_kernel(
+        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
+    ):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
+
+    def generate_numel_expr(self, kernel_name: str, tree):
+        expr = f"{kernel_name}_{tree.prefix}numel"
+        if expr not in self.kenel_numel_expr:
+            self.kenel_numel_expr.add(expr)
+            self.writeline(
+                f"{self.declare}{expr} = {self.expr_printer(tree.numel)}{self.ending}"
+            )
+        else:
+            self.writeline(f"{expr} = {self.expr_printer(tree.numel)}{self.ending}")
+        # We can get symbolic expressions here, like s0*64
+        # It is fine to have them here, but we need to handle them correctly as their own type
+        # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
+        # scalars as well.
+        # This is handled in `generate_args_decl` which has a correct comment of: TODO: only works for
+        # constant now, need type info. I agree, this needs type info, and while this is not true type info
+        # it suffices as a type hint for the purposes of producing the correct code for this type.
+        return SymbolicCallArg(expr)
 
     def wrap_kernel_call(self, name, call_args):
         return f"{name}({', '.join(call_args)}){self.ending}"
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline("from torch.profiler import record_function")
-        self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
+        self.wrapper_call.writeline(
+            f"with record_function('graph_{V.graph.graph_id}_inductor_wrapper_call'):"
+        )
         stack.enter_context(self.wrapper_call.indent())
 
-    def generate_kernel_call(self, name, call_args, device_index=None):
-        self.writeline(self.wrap_kernel_call(name, call_args))
-
-    def call_kernel(self, name: str, kernel: Kernel):
-        tmp = IndentedBuffer()
-        kernel.call_kernel(self, tmp, name)
-        for line in tmp.getvalue().split("\n"):
-            line = line.strip()
-            if line:
-                self.writeline(line)
+    def generate_kernel_call(
+        self, name, call_args, grid=None, device_index=None, cuda=True
+    ):
+        if cuda:
+            call_args_str = ", ".join(pexpr(item) for item in call_args)
+            grid_str = ", ".join(pexpr(item) for item in grid)
+            stream_name = self.write_get_cuda_stream(
+                V.graph.scheduler.current_device.index
+            )
+            self.writeline(
+                f"{name}.run({call_args_str}, grid=grid({grid_str}), stream={stream_name})"
+            )
+        else:
+            self.writeline(self.wrap_kernel_call(name, call_args))
 
     def writeline(self, line):
         self.lines.append(line)
@@ -592,7 +725,24 @@ class WrapperCodeGen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_str(self, s):
-        return repr(s)
+        if isinstance(s, SymTypes):
+            return pexpr(sympy.expand(repr(s)))
+        elif isinstance(s, sympy.Expr):
+            return pexpr(s)
+        elif isinstance(s, (tuple, list)):
+
+            @dataclasses.dataclass
+            class Shim:
+                ref: Any
+
+                def __repr__(self):
+                    return self.ref
+
+            return repr(type(s)(Shim(self.val_to_str(a)) for a in s))
+        elif isinstance(s, torch._ops.OpOverload):
+            return _get_qualified_name(s)
+        else:
+            return repr(s)
 
     # The following methods are for memory management
     def make_buffer_allocation(self, buffer):
@@ -722,27 +872,32 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
-        self.call_func_name = "inductor_cpp_entry"
+        self.call_func_name = "inductor_entry_cpp"
         self.cuda = False
+        self.supports_intermediate_hooks = False
 
-    def seed(self):
-        """
-        Seed is a special variable used to hold the rng seed for a graph.
+        from .cpp import cexpr
 
-        Note this is only used by the CPU backend, we put seeds in a
-        1-element tensor for the CUDA backend.
-        """
-        self.need_seed = True
-        return sympy_symbol("seed")
+        self.expr_printer = cexpr
+
+    def write_constant(self, name, hashed):
+        # include a hash so our code cache gives different constants different files
+        self.header.writeline(f"// {name} {hashed}")
 
     def write_header(self):
         if V.graph.aot_mode:
-            self.header.splice("\n#include <ATen/ATen.h>")
+            self.header.splice(
+                """
+                /* AOTInductor generated code */
+
+                #include <ATen/ScalarOps.h>
+                """
+            )
         else:
             self.header.splice(
                 """
                 import torch
-                from torch.utils.cpp_extension import load_inline
+                from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
                 '''
@@ -770,7 +925,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.prefix.splice(
             f"""std::vector<at::Tensor> {self.call_func_name}(const std::vector<at::Tensor>& args) {{"""
         )
-        with self.wrapper_call.indent():
+        with self.prefix.indent():
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
                     # unwrap input tensor back to scalar
@@ -785,26 +940,38 @@ class CppWrapperCodeGen(WrapperCodeGen):
                             dtype is not None
                         ), "Fails to get the dtype of the sympy.Expr"
                         cpp_dtype = DTYPE_TO_CPP[dtype]
-                        self.wrapper_call.writeline(f"{cpp_dtype} {input_key};")
-                        self.wrapper_call.writeline(
-                            f"{input_key} = args[{idx}].item<{cpp_dtype}>();"
+                        self.prefix.writeline(
+                            f"{cpp_dtype} {input_key} = args[{idx}].item<{cpp_dtype}>();"
                         )
                     else:
-                        self.wrapper_call.writeline(f"at::Tensor {input_key};")
-                        self.wrapper_call.writeline(f"{input_key} = args[{idx}];")
+                        self.prefix.writeline(f"at::Tensor {input_key} = args[{idx}];")
 
-            for name in V.graph.randomness_seeds:
-                self.wrapper_call.writeline(f"at::Tensor {name};")
-                self.wrapper_call.writeline(
-                    f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
+            assert all(
+                isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
+            ), "Expect all constants to be Tensor"
+            for idx, constants_key in enumerate(V.graph.constants.keys()):
+                constants_idx = inputs_len + idx
+                self.prefix.writeline(
+                    f"at::Tensor {constants_key} = args[{constants_idx}];"
                 )
-            self.codegen_inputs(self.wrapper_call, V.graph.graph_inputs)
+
+            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+
+            self.wrapper_call.splice(
+                """
+                c10::optional<at::Scalar> optional_scalar;
+                c10::optional<c10::string_view> optional_string;
+                torch::List<c10::optional<at::Scalar>> optional_list;
+                """
+            )
 
     def generate(self):
         self.write_wrapper_decl()
         return super().generate()
 
-    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
+    def define_kernel(
+        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=False
+    ):
         self.header.splice(f"\n{kernel}\n")
 
     def generate_return(self, output_refs):
@@ -815,32 +982,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return
 
         result.writeline("'''\n)")
-        # Generate load_inline to jit compile the generated cpp code and to use it in Python
-        shared = codecache.get_shared()
-        warning_all_flag = codecache.get_warning_all_flag()
-        cpp_flags = codecache.cpp_flags()
-        ipaths, lpaths, libs, macros = codecache.get_include_and_linking_paths(
-            vec_isa=codecache.pick_vec_isa(),
-            cuda=self.cuda,
-        )
-        optimization_flags = codecache.optimization_flags(cuda=self.cuda)
-        use_custom_generated_macros = codecache.use_custom_generated_macros()
-
-        extra_cflags = f"{cpp_flags} {optimization_flags} {warning_all_flag} {macros} {use_custom_generated_macros}"
-        extra_ldflags = f"{shared} {lpaths} {libs}"
-        extra_include_paths = f"{ipaths}"
-
         # get the hash of the wrapper code to name the extension
         wrapper_call_hash = codecache.code_hash(self.wrapper_call.getvalue())
         result.splice(
             f"""
-            module = load_inline(
-                name='inline_extension_{wrapper_call_hash}',
-                cpp_sources=[cpp_wrapper_src],
-                functions=['{self.call_func_name}'],
-                extra_cflags=['{extra_cflags}'],
-                extra_ldflags=['{extra_ldflags}'],
-                extra_include_paths=['{extra_include_paths}'])
+            module = CppWrapperCodeCache.load(cpp_wrapper_src, '{self.call_func_name}', '{wrapper_call_hash}', {self.cuda})
             """
         )
 
@@ -858,12 +1004,28 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     outputs = f(args_tensor)
                     return {outputs_str}
             """
+
+        args_str = "args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]"
+        if V.graph.constants:
+            # Append constants to the input args for cpp wrapper.
+            # Python wrapper directly gets the value inside the wrapper call
+            # as a global variable passed when calling exec(code, mod.__dict__, mod.__dict__).
+            # For cpp wrapper, we need to pass this python value to the inductor_entry_cpp function explicitly.
+            assert all(
+                isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
+            ), "Expect all constants to be Tensor"
+            constants_str = f"[{', '.join(V.graph.constants.keys())}]"
+            args_str += f"""
+                    constants_tensor = {constants_str}
+                    args_tensor.extend(constants_tensor)
+            """
+
         # Wrap the func to support setting result._boxed_call = True
         result.splice(
             f"""
             def _wrap_func(f):
                 def g(args):
-                    args_tensor = [arg if isinstance(arg, torch.Tensor) else torch.tensor(arg) for arg in args]
+                    {args_str}
                     {return_str}
                 return g
             call = _wrap_func(module.{self.call_func_name})
@@ -881,10 +1043,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             args.insert(0, f"{codegen_reference}")
         self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def codegen_sizevar(self, x: Expr) -> str:
-        from .cpp import cexpr
+    def add_benchmark_harness(self, output):
+        if V.graph.aot_mode:
+            return
+        super().add_benchmark_harness(output)
 
-        return cexpr(V.graph.sizevars.simplify(x))
+    def codegen_sizevar(self, x: Expr) -> str:
+        return self.expr_printer(V.graph.sizevars.simplify(x))
+
+    def codegen_tuple_access(self, basename: str, index: str) -> str:
+        return f"std::get<{index}>({basename})"
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
@@ -895,30 +1063,44 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{{{', '.join(parts)}}}"
 
     def make_buffer_free(self, buffer):
-        return f"{buffer.get_name()}.reset();"
+        return (
+            ""
+            if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            else f"{buffer.get_name()}.reset();"
+        )
 
     def generate_profiler_mark_wrapper_call(self, stack):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>({{}}));'
         )
 
+    def codegen_device(self, device):
+        from .cpp import DEVICE_TO_ATEN
+
+        return (
+            f"at::device(c10::Device({DEVICE_TO_ATEN[device.type]}, {device.index}))"
+            if device.index is not None
+            else f"at::device({DEVICE_TO_ATEN[device.type]})"
+        )
+
     def make_buffer_allocation(self, buffer):
-        from .cpp import DEVICE_TO_ATEN, DTYPE_TO_ATEN
+        from .cpp import DTYPE_TO_ATEN
 
         # TODO: map layout here
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
+        device_str = self.codegen_device
         return (
             f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
-            f"at::device({DEVICE_TO_ATEN[device.type]})"
+            f"{self.codegen_device(device)}"
             f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
         )
 
-    def generate_fusion_ops_code(
+    def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
         name,
         kernel,
@@ -944,18 +1126,28 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"auto {name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
         )
 
-    def val_to_str(self, s):
-        if s is None:
+    def val_to_str(self, val):
+        from .cpp import DTYPE_TO_ATEN
+
+        if val is None:
             return self.none_str
-        elif isinstance(s, bool):
-            return "true" if s else "false"
-        elif isinstance(s, str):
-            return f'"{s}"'
-        elif isinstance(s, (List, Tuple)):
-            vals = ", ".join(list(map(self.val_to_str, s)))
-            return f"{{{vals}}}"
+        elif isinstance(val, bool):
+            return "true" if val else "false"
+        elif isinstance(val, str):
+            return f'"{val}"'
+        elif isinstance(val, torch.device):
+            return self.codegen_device(val)
+        elif isinstance(val, torch.dtype):
+            return DTYPE_TO_ATEN[val]
+        elif isinstance(val, float) and val in [float("inf"), float("-inf")]:
+            if val == float("inf"):
+                return "std::numeric_limits<float>::infinity()"
+            else:
+                return "-std::numeric_limits<float>::infinity()"
+        elif isinstance(val, (list, tuple)):
+            return f"{{{', '.join(list(map(self.val_to_str, val)))}}}"
         else:
-            return repr(s)
+            return repr(val)
 
 
 class CudaWrapperCodeGen(CppWrapperCodeGen):
@@ -969,10 +1161,11 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.arg_var_id = count()
         self.cuda = True
 
-    def write_prefix(self):
+    def write_header(self):
+        super().write_header()
         self.prefix.splice(
             """
-            #include <ATen/ATen.h>
+            #include <ATen/native/BinaryOps.h>
             #include <c10/util/Exception.h>
             #include <c10/cuda/CUDAGuard.h>
 
@@ -1009,8 +1202,11 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             """
         )
 
-    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
-        pass
+    def define_kernel(
+        self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
+    ):
+        if not cuda:
+            return super().define_kernel(name, kernel, metadata, cuda)
 
     def generate(self):
         self.prefix.writeline("\n")
@@ -1038,7 +1234,16 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         new_args = []
         for arg in call_args:
             var_name = f"var_{next(self.arg_var_id)}"
-            if is_int(arg):
+            if isinstance(
+                arg,
+                (
+                    sympy.Integer,
+                    sympy.Symbol,
+                    SymbolicCallArg,
+                ),
+            ):
+                self.writeline(f"auto {var_name} = {arg};")
+            elif is_int(arg):
                 self.writeline(f"int {var_name} = {arg};")
             elif is_float(arg):
                 self.writeline(f"float {var_name} = {arg};")
@@ -1050,11 +1255,18 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
         return ", ".join(new_args)
 
-    def generate_kernel_call(self, name, call_args, device_index):
-        params = CudaKernelParamCache.get(self.kernel_to_hash.get(name, None))
+    def generate_kernel_call(
+        self, name, call_args, grid=None, device_index=None, cuda=True
+    ):
+        if not cuda:
+            return super().generate_kernel_call(
+                name, call_args, grid, device_index, cuda
+            )
+
+        params = CudaKernelParamCache.get(name)
         assert (
             params is not None
-        ), "cuda kernel parameters should already exist at this moment"
+        ), f"cuda kernel parameters for {name} should already exist at this moment"
 
         self.generate_load_kernel(name, params)
 

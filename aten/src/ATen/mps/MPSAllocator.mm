@@ -71,7 +71,7 @@ HeapBlock* MPSHeapAllocatorImpl::get_free_heap(AllocParams& params) {
     heap_block = HeapBlock::createHeapBlock(params, pool.device, pool.usage);
     if (heap_block) {
       if (m_debug_verbosity & DebugVerbosity::ALLOCATIONS) {
-        std::cerr << "\nAllocated " << ((pool.usage & UsageFlags::SHARED) ? "shared " : "private ") << " heap #"
+        std::cerr << "\nAllocated " << ((pool.usage & UsageFlags::SHARED) ? "shared" : "private") << " heap #"
                   << heap_block->heap_id << " of size " << format_size(heap_block->size.total)
                   << " (#heaps: " << (pool.heaps.size() + 1)
                   << ", current allocated: " << format_size(current_allocated_size()) << ")\n";
@@ -390,7 +390,9 @@ bool MPSHeapAllocatorImpl::release_cached_buffers() {
   // before releasing the buffers make sure the command buffer has finished.
   // we need to release the lock temporarily as synchronizing may cause deadlock with completion handlers.
   m_mutex.unlock();
-  m_stream->synchronize(SyncType::COMMIT_AND_WAIT);
+  dispatch_sync(m_stream->queue(), ^() {
+    m_stream->synchronize(SyncType::COMMIT_AND_WAIT);
+  });
   m_mutex.lock();
   // Free all cached blocks to system allocator
   release_buffers(m_large_pool_private);
@@ -482,6 +484,13 @@ id<MTLBuffer> MPSHeapAllocatorImpl::allocScalarBufferWithValue(void* value, size
   // buffer is out of the pool, so no mutex lock is needed
   memcpy([buffer_block->buffer contents], value, size);
   return buffer_block->buffer;
+}
+
+id_t MPSHeapAllocatorImpl::getBufferId(const void* ptr) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+  BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
+  return buffer_block ? buffer_block->buf_id : 0;
 }
 
 ssize_t MPSHeapAllocatorImpl::getUnalignedBufferSize(const void* ptr) {
@@ -621,6 +630,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   ssize_t getUnalignedBufferSize(const void* ptr) const override {
     return _getAllocImpl().getUnalignedBufferSize(ptr);
   }
+  id_t getBufferId(const void* ptr) const override {
+    return _getAllocImpl().getBufferId(ptr);
+  };
   IntArrayRef getBufferShape(const void* ptr) const override {
     return _getAllocImpl().getBufferShape(ptr);
   }
@@ -651,6 +663,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   void setHighWatermarkRatio(double ratio) const override {
     _getAllocImpl().setHighWatermarkRatio(ratio);
   }
+  std::string formatSize(size_t size) const override {
+    return _getAllocImpl().format_size(size);
+  };
 
  private:
   bool m_has_unified_memory;

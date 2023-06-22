@@ -58,5 +58,6 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
   return variable_list();
 }
+
 } // namespace autograd
 } // namespace torch

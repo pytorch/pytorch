@@ -996,7 +996,7 @@ Args:
     {dtype}
     device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
         then the device of data is used. If None and data is not a tensor then
-        the result tensor is constructed on the CPU.
+        the result tensor is constructed on the current device.
 
 
 Example::
@@ -1302,18 +1302,18 @@ Example::
     >>> a.data_ptr() == c.data_ptr()
     False
 
-    >>> a = torch.tensor([1, 2, 3], requires_grad=True).float()
+    >>> a = torch.tensor([1., 2., 3.], requires_grad=True)
     >>> b = a + 2
     >>> b
-    tensor([1., 2., 3.], grad_fn=<AddBackward0>)
+    tensor([3., 4., 5.], grad_fn=<AddBackward0>)
     >>> # Shares memory with tensor 'b', with no grad
     >>> c = torch.asarray(b)
     >>> c
-    tensor([1., 2., 3.])
+    tensor([3., 4., 5.])
     >>> # Shares memory with tensor 'b', retaining autograd history
     >>> d = torch.asarray(b, requires_grad=True)
     >>> d
-    tensor([1., 2., 3.], grad_fn=<AddBackward0>)
+    tensor([3., 4., 5.], grad_fn=<AddBackward0>)
 
     >>> array = numpy.array([1, 2, 3])
     >>> # Shares memory with array 'array'
@@ -1322,7 +1322,7 @@ Example::
     True
     >>> # Copies memory due to dtype mismatch
     >>> t2 = torch.asarray(array, dtype=torch.float32)
-    >>> array.__array_interface__['data'][0] == t1.data_ptr()
+    >>> array.__array_interface__['data'][0] == t2.data_ptr()
     False
 
     >>> scalar = numpy.float64(0.5)
@@ -1678,6 +1678,8 @@ Computes the right arithmetic shift of :attr:`input` by :attr:`other` bits.
 The input tensor must be of integral type. This operator supports
 :ref:`broadcasting to a common shape <broadcasting-semantics>` and
 :ref:`type promotion <type-promotion-doc>`.
+In any case, if the value of the right operand is negative or is greater
+or equal to the number of bits in the promoted left operand, the behavior is undefined.
 
 The operation applied is:
 
@@ -1732,6 +1734,10 @@ stack(tensors, dim=0, *, out=None) -> Tensor
 Concatenates a sequence of tensors along a new dimension.
 
 All tensors need to be of the same size.
+
+.. seealso::
+
+    :func:`torch.cat` concatenates the given sequence along an existing dimension.
 
 Arguments:
     tensors (sequence of Tensors): sequence of tensors to concatenate
@@ -2304,6 +2310,10 @@ and :func:`torch.chunk`.
 
 :func:`torch.cat` can be best understood via examples.
 
+.. seealso::
+
+    :func:`torch.stack` concatenates the given sequence along a new dimension.
+
 Args:
     tensors (sequence of Tensors): any python sequence of tensors of the same type.
         Non-empty tensors provided must have the same shape, except in the
@@ -2869,7 +2879,7 @@ Constructs a complex tensor with its real part equal to :attr:`real` and its
 imaginary part equal to :attr:`imag`.
 
 Args:
-    real (Tensor): The real part of the complex tensor. Must be float or double.
+    real (Tensor): The real part of the complex tensor. Must be half, float or double.
     imag (Tensor): The imaginary part of the complex tensor. Must be same dtype
         as :attr:`real`.
 
@@ -9151,7 +9161,7 @@ Keyword args:
 add_docstr(
     torch.randn,
     """
-randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+randn(*size, *, generator=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 pin_memory=False) -> Tensor
 """
     + r"""
@@ -9273,7 +9283,7 @@ Keyword args:
     {dtype}
     device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
         then the device of data is used. If None and data is not a tensor then
-        the result tensor is constructed on the CPU.
+        the result tensor is constructed on the current device.
     {requires_grad}
     {pin_memory}
 
@@ -9357,7 +9367,7 @@ with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
 Note that non-integer :attr:`step` is subject to floating point rounding errors when
-comparing against :attr:`end`; to avoid inconsistency, we advise adding a small epsilon to :attr:`end`
+comparing against :attr:`end`; to avoid inconsistency, we advise subtracting a small epsilon from :attr:`end`
 in such cases.
 
 .. math::
@@ -12264,6 +12274,13 @@ memory_format=torch.contiguous_format) -> Tensor
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
 
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
+
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
@@ -12296,6 +12313,13 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty_like(input)`` is equivalent to
 ``torch.empty(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
+
 Args:
     {input}
 
@@ -12327,6 +12351,13 @@ Creates a tensor with the specified :attr:`size` and :attr:`stride` and filled w
 .. warning::
     If the constructed tensor is "overlapped" (with multiple indices referring to the same element
     in memory) its behavior is undefined.
+
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
 
 Args:
     size (tuple of int): the shape of the output tensor
@@ -12372,6 +12403,13 @@ tensor ``t`` are such that ``t.stride(physical_layout[i]) == contiguous_strides[
 Unlike :func:`torch.empty_strided`, this is guaranteed to produce a dense
 tensor with no overlaps.  If possible, prefer using this function over
 :func:`torch.empty_strided` or manual use of :func:`torch.as_strided`.
+
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
 
 Args:
     size (tuple of int): the shape of the output tensor
@@ -13218,12 +13256,26 @@ Example::
             [3, 4],
             [3, 4]])
 
-.. function:: repeat_interleave(repeats, *, output_size=None) -> Tensor
-   :noindex:
-
 If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 `tensor([0, 0, ..., 1, 1, ..., 2, 2, ..., ...])` where `0` appears `n1` times,
 `1` appears `n2` times, `2` appears `n3` times, etc.
+
+.. function:: repeat_interleave(repeats, *) -> Tensor
+   :noindex:
+
+Repeats 0 repeats[0] times, 1 repeats[1] times, 2 repeats[2] times, etc.
+
+Args:
+    repeats (Tensor): The number of repetitions for each element.
+
+Returns:
+    Tensor: Repeated tensor of size `sum(repeats)`.
+
+Example::
+
+    >>> torch.repeat_interleave(torch.tensor([1, 2, 3]))
+    tensor([0, 1, 1, 2, 2, 2])
+
 """.format(
         **common_args
     ),

@@ -188,7 +188,7 @@ class BenchmarkRequest:
                 num_warps=self.num_warps,
             )
 
-        out = do_bench(worker)[0]
+        out = do_bench(worker)
         torch.cuda.synchronize()  # shake out any CUDA errors
 
         if DEBUG:

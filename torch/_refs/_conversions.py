@@ -4,7 +4,7 @@ import torch._prims_common as utils
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
 
-from torch._prims_common import check, TensorLikeType
+from torch._prims_common import TensorLikeType
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
 
@@ -32,6 +32,7 @@ __all__ = [
     "short",
     # misc
     "complex",
+    "polar",
 ]
 
 
@@ -78,14 +79,14 @@ short = _make_conversion_method("short", torch.short)
 @out_wrapper(exact_dtype=True)
 def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
     allowed_dtypes = (torch.float32, torch.float64, torch.float16)
-    check(
+    torch._check(
         real.dtype in allowed_dtypes and imag.dtype in allowed_dtypes,
         lambda: (
             f"Expected both inputs to be Half, Float or Double tensors but got "
             f"{real.dtype} and {imag.dtype}"
         ),
     )
-    check(
+    torch._check(
         real.dtype == imag.dtype,
         lambda: (
             f"Expected object of scalar type {real.dtype} but got "
@@ -103,4 +104,15 @@ def complex(real: TensorLikeType, imag: TensorLikeType) -> TensorLikeType:
     )
     result.real = real
     result.imag = imag
+    return result
+
+
+@register_decomposition(torch._ops.ops.aten.polar)
+# Note: polar has type promotion tests disabled due to different semantics.
+# exact_dtype is for compat with complex_check_dtype from core.
+@out_wrapper(exact_dtype=True)
+def polar(abs: TensorLikeType, angle: TensorLikeType) -> TensorLikeType:
+    result = torch.complex(abs, angle)
+    result.real = abs * torch.cos(angle)
+    result.imag = abs * torch.sin(angle)
     return result

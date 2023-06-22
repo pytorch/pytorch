@@ -236,7 +236,7 @@ class autocast:
             supported_dtype = [torch.bfloat16, torch.float16]
             if self.fast_dtype not in supported_dtype:
                 error_message = 'In XPU autocast, but the target dtype is not supported. Disabling autocast.\n'
-                error_message += 'XPU Autocast only supports dtype of torch.bfloat16 currently.'
+                error_message += 'XPU Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently.'
                 warnings.warn(error_message)
                 enabled = False
         elif self.device == 'hpu':
@@ -320,8 +320,8 @@ class autocast:
         elif self.device == self.custom_backend_name:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
-            self.custom_device_mod.set_autocast_enabled(self._enabled)
-            self.custom_device_mod.set_autocast_dtype(self.fast_dtype)
+            self.custom_device_mod.set_autocast_enabled(self.prev)
+            self.custom_device_mod.set_autocast_dtype(self.prev_fastdtype)
         else:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()

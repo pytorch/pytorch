@@ -35,7 +35,7 @@ backwards ops, due to how AOTAutograd compiled functions interact with
 dispatcher hooks.
 
 The basic strategy for optimizing DDP with Dynamo is outlined in
-`distributed.py <https://github.com/pytorch/pytorch/blob/master/torch/_dynamo/optimizations/distributed.py>`__
+`distributed.py <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/optimizations/distributed.py>`__
 where the main idea will be to graph break on `DDP bucket
 boundaries <https://pytorch.org/docs/stable/notes/ddp.html#internal-design>`__.
 
@@ -201,14 +201,13 @@ trouble, and the profiler will accumulate statistics over this duration.
 
    from torch._dynamo.utils import CompileProfiler
 
-   prof = CompileProfiler()
-
    def my_model():
        ...
 
-   profiler_model = torch.compile(my_model, backend=prof)
-   profiler_model()
-   print(prof.report())
+   with CompileProfiler() as prof:
+       profiler_model = torch.compile(my_model, backend=prof)
+       profiler_model()
+       print(prof.report())
 
 Many of the reasons for graph breaks and excessive recompilation will be
 fixed with upcoming support for `tracing dynamic tensor

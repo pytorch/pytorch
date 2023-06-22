@@ -6,7 +6,7 @@ import inspect
 import itertools
 import operator
 import unittest
-from typing import Any
+from typing import Any, NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -14,11 +14,10 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import requires_static_shapes
+from torch._dynamo.testing import expectedFailureDynamic, requires_numpy_pytorch_interop
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 
-tensor_for_import_testing = torch.ones(10, 10)
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
@@ -103,6 +102,20 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         for x, i in itertools.product([a, b], [1, 2]):
             v = v + x * i
         return v
+
+    @make_test
+    def test_itertools_chain(a, b):
+        v = a
+        for x in itertools.chain([a, b], [1, 2]):
+            v = v + x
+        return v
+
+    @make_test
+    def test_itertools_combinations(a, b):
+        combs = []
+        for size in itertools.combinations((1, 2, 3, 4), 2):
+            combs.append(torch.ones(size))
+        return combs
 
     @make_test
     def test_constant1(a, b, c):
@@ -224,6 +237,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         args = [(a, b)]
         kwargs = {"dim": 0}
         return torch.cat(*args, **kwargs)
+
+    @make_test
+    def test_deque(a, b):
+        d = collections.deque([a, b])
+        d.append(a + 1)
+        d.extend([a, b])
+        d.insert(0, "foo")
+        tmp = d.pop()
+
+        another_deque = collections.deque([tmp])
+        d.extendleft(another_deque)
+        another_deque.clear()
+        d.extend(another_deque)
+
+        d[2] = "setitem"
+        d = d.copy()
+        d.append(d.popleft())
+
+        empty = collections.deque()
+        d.extend(empty)
+
+        # dynamo same() util doesn't support deque so just return a list
+        return list(d)
 
     @make_test
     def test_slice1(a):
@@ -373,6 +409,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return torch.add(x, c)
 
     @make_test
+    def test_dict_kwargs(x):
+        z = dict(text_embed=x + 1, other=x + 2)
+        return z
+
+    @make_test
+    def test_ordered_dict_kwargs(x):
+        z = collections.OrderedDict(sample=torch.ones(10))
+        return z
+
+    @make_test
     def test_float(x):
         y = float(1.2)
         y += float("1.2")
@@ -391,6 +437,30 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_get_default_dtype(x):
         if x.dtype == torch.get_default_dtype():
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_get_autocast_gpu_dtype(x):
+        dtype = torch.get_autocast_gpu_dtype()
+        return x.type(dtype)
+
+    @make_test
+    def test_get_calculate_correct_fan(x):
+        fan_in = torch.nn.init._calculate_correct_fan(x, "fan_in")
+        return x + fan_in
+
+    @make_test
+    def test_is_complex(x):
+        if torch.is_complex(x):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_get_privateuse1_name(x):
+        if torch._C._get_privateuse1_backend_name() == "privateuseone":
             return x + 1
         else:
             return x - 1
@@ -445,13 +515,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if not x.is_sparse:
             return x + 1
 
-    @requires_static_shapes
     @make_test
     def test_shape1(x):
         if x.shape[0] == 10:
             return x + 1
 
-    @requires_static_shapes
     @make_test
     def test_shape2(x):
         if x.size(1) == 10:
@@ -464,7 +532,6 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         del c, a
         return b + d
 
-    @requires_static_shapes
     @make_test
     def test_chunks1(x):
         chunk_size = 5
@@ -593,8 +660,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test = make_test(fn)
         test(self)
 
-    def test_default_dict(self):
-        dd = collections.defaultdict(dict)
+    def _test_default_dict_helper(self, factory):
+        dd = collections.defaultdict(factory)
         param = torch.nn.Parameter(torch.ones([2, 2]))
 
         def fn(x):
@@ -603,8 +670,47 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             dd["c"] = x * 2
             return dd["b"], dd
 
-        test = make_test(fn)
-        test(self)
+        x = torch.randn(10, 10)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize_assert("eager")(fn)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref[0], res[0]))
+        self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1][param], res[1][param]))
+
+    def test_default_dict(self):
+        self._test_default_dict_helper(dict)
+
+    def test_default_dict_lambda(self):
+        self._test_default_dict_helper(lambda: dict())
+
+    def test_default_dict_closure(self):
+        def factory():
+            return dict()
+
+        self._test_default_dict_helper(factory)
+
+    def test_default_dict_constr(self):
+        param = torch.nn.Parameter(torch.ones([2, 2]))
+
+        def fn(x):
+            dd = collections.defaultdict(lambda: dict())
+            dd["a"] = x + 1
+            dd[param] = 123
+            dd["c"] = x * 2
+            return dd["b"], dd
+
+        x = torch.randn(10, 10)
+        ref = fn(x)
+        opt_fn = torch._dynamo.optimize_assert("eager")(fn)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref[0], res[0]))
+        self.assertTrue(same(ref[1]["a"], res[1]["a"]))
+        self.assertTrue(same(ref[1]["c"], res[1]["c"]))
+        self.assertTrue(same(ref[1][param], res[1][param]))
 
     @make_test
     def test_call_dict1(x):
@@ -765,6 +871,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return tmp
 
     @make_test
+    def test_not_list(a):
+        return not [a + 1]
+
+    @make_test
     def test_islice_chain(a, b):
         tmp1 = [a + 1, a + 2]
         tmp2 = [a + 3, a + 4]
@@ -778,6 +888,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         tmp = mytuple(a, b, a + b)
         return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
+    class MyNamedTuple(NamedTuple):
+        first: torch.Tensor
+        second: torch.Tensor
+
+        def add(self) -> torch.Tensor:
+            return self.first + self.second
+
+        @staticmethod
+        def static_method() -> int:
+            return 1
+
+        @classmethod
+        def class_method(cls) -> str:
+            return cls.__name__
+
+    @make_test
+    def test_namedtuple_user_methods(a, b):
+        mytuple = FunctionTests.MyNamedTuple(a, b)
+        return mytuple.add(), mytuple.static_method(), mytuple.class_method()
+
     @make_test
     def test_is_quantized(a, b):
         if not a.is_quantized:
@@ -790,7 +920,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("1.23"):
             return a + b
 
-    @requires_static_shapes
+    # https://github.com/pytorch/pytorch/issues/103602
+    @expectedFailureDynamic
     @make_test
     def test_fstrings2(x):
         tmp = f"{x.shape[0]} bar"
@@ -803,14 +934,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if tmp.startswith("Tensor"):
             return x + 1
 
-    @requires_static_shapes
     @make_test
     def test_tensor_new_with_size(x):
         y = torch.rand(5, 8)
         z = x.new(y.size())
         assert z.size() == y.size()
 
-    @requires_static_shapes
     @make_test
     def test_tensor_new_with_shape(x):
         y = torch.rand(5, 8)
@@ -822,7 +951,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         y = torch.jit.annotate(Any, x + 1)
         return y + 2
 
-    @requires_static_shapes
+    @expectedFailureDynamic
     @make_test
     def test_is_contiguous_memory_format(tensor):
         if torch.jit.is_scripting():
@@ -891,6 +1020,97 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_meshgrid(x, y):
+        import numpy as np
+
+        r1, r2 = np.meshgrid(x.numpy(), y.numpy())
+        return torch.from_numpy(r1), torch.from_numpy(r2)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_torch_from_numpy(x):
+        a = x.numpy()
+        b = torch.from_numpy(a)
+        if b.size(0) == 1:
+            return torch.tensor(True)
+        else:
+            return torch.tensor(False)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_size(x):
+        a = x.numpy()
+        return a.size
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_numpy_attributes(x):
+        a = x.numpy()
+        return (
+            a.itemsize,
+            a.strides,
+            a.shape,
+            a.ndim,
+            a.size,
+            torch.from_numpy(a.T),
+            torch.from_numpy(a.real),
+            torch.from_numpy(a.imag),
+        )
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_mean_sum_np(x: torch.Tensor):
+        import numpy as np
+
+        x_mean = np.mean(x.numpy(), 1)
+        x_sum = np.sum(x_mean)
+        x_sum_array = np.asarray(x_sum)
+        return torch.from_numpy(x_sum_array)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_return_numpy_ndarray(x):
+        a = x.numpy()
+        return a.T
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_return_multiple_numpy_ndarray(x):
+        a = x.numpy()
+        return a.T, a.imag, a.real
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_method(x):
+        a = x.numpy()
+        return a.copy()
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_transpose(x):
+        a = x.numpy()
+        return a.transpose(0, 1)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_reshape(x):
+        a = x.numpy()
+        return a.reshape([1, a.size])
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_methods_returning_scalar(x):
+        a = x.numpy()
+        return a.max(axis=0), a.all(axis=0)
+
+    @requires_numpy_pytorch_interop
+    @make_test
+    def test_ndarray_builtin_functions(x):
+        a = x.numpy()
+        return a + a, a - a
 
 
 def global_func_with_default_tensor_args(

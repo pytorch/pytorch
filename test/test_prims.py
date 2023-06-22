@@ -1113,16 +1113,37 @@ class TestPrims(TestCase):
             torch.cuda.manual_seed(123)
             for idx in range(repeats):
                 seed, offset = rng_states[idx]
-                result = torch.ops.rngprims.philox_rand((size,),
-                                                        seed=seed,
-                                                        offset=offset,
-                                                        stride=None,
-                                                        device=device,
-                                                        dtype=dtype)
+                result, _ = torch.ops.rngprims.philox_rand((size,),
+                                                           seed=seed,
+                                                           offset=offset,
+                                                           stride=None,
+                                                           device=device,
+                                                           dtype=dtype)
                 results.append(result)
 
             for a, b in zip(references, results):
                 self.assertEqual(a, b)
+
+
+    @dtypes(torch.float32)
+    def test_functional_rng_wrappers(self, device, dtype):
+
+        torch.manual_seed(123)
+        ref1 = torch.rand(10, device=device, dtype=dtype)
+        ref2 = torch.rand(10, device=device, dtype=dtype)
+
+
+        torch.manual_seed(123)
+        rng_state1, res1 = torch._prims.rng_prims.run_and_save_rng_state(torch.rand, 10, device=device, dtype=dtype)
+        rng_state2, res2 = torch._prims.rng_prims.run_and_save_rng_state(torch.rand, 10, device=device, dtype=dtype)
+
+        res3 = torch._prims.rng_prims.run_with_rng_state(rng_state1, torch.rand, 10, device=device, dtype=dtype)
+        res4 = torch._prims.rng_prims.run_with_rng_state(rng_state2, torch.rand, 10, device=device, dtype=dtype)
+
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
+        self.assertEqual(ref1, res3)
+        self.assertEqual(ref2, res4)
 
 class TestPrimsBasic(TestCase):
     def test_torch_ops(self):
@@ -1134,11 +1155,15 @@ class TestPrimsBasic(TestCase):
             log_input("input", r)
             prims.sin(r)
         self.assertExpectedInline('\n'.join(logs), """\
-$0 = input('input')
-$1 = torch._ops.prims.sin.default($0)""")
+$0: f32[2] = input('input')
+$1: f32[2] = torch._ops.prims.sin.default($0)""")
 
     def test_mul_complex(self):
         prims.mul(torch.randn(2), 1 + 1j)
+
+    def test_check_deprecation_warning(self):
+        with self.assertWarnsRegex(DeprecationWarning, 'will be removed in the future'):
+            torch._prims_common.check(True, lambda: 'message')
 
 
 instantiate_device_type_tests(TestPrims, globals())
@@ -1178,6 +1203,14 @@ class TestRefs(TestCase):
         expect = torch.constant_pad_nd(a, pad=[1] * 8)
         self.assertEqual(actual.stride(), expect.stride())
         self.assertTrue(actual.is_contiguous())
+
+    def test_unbind(self):
+        # If unbind returns empty tuple, it breaks some assumptions in some backward tests in test_ops.py.
+        # So can't put this test into common_methods_invocations.py.
+        a = torch.rand([3, 0, 4])
+        actual = refs.unbind(a, 1)
+        expect = torch.unbind(a, 1)
+        self.assertEqual(actual, expect)
 
 
 instantiate_device_type_tests(TestRefs, globals())

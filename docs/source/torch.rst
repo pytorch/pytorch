@@ -714,7 +714,7 @@ Optimizations
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/master/compile/index.html>`__
+`torch.compile documentation <https://pytorch.org/docs/main/compile/index.html>`__
 
 Operator Tags
 ------------------------------------
@@ -734,6 +734,7 @@ Operator Tags
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
+.. py:module:: torch.utils.viz
 
 .. automodule:: torch.autograd
 .. currentmodule:: torch.autograd

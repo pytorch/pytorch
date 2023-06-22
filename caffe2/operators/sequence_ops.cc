@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-vector<TensorShape> TensorInferenceForAddPadding(
+static vector<TensorShape> TensorInferenceForAddPadding(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
   ArgumentHelper helper(def);
@@ -328,7 +328,7 @@ only once, at the start and end of data.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sequence_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/sequence_ops.cc
 
 <details>
 
@@ -433,7 +433,7 @@ for input and output data format.
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sequence_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/sequence_ops.cc
 
 <details>
 

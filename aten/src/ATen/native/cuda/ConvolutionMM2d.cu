@@ -181,12 +181,12 @@ void slow_conv2d_forward(
         // Extract columns:
         at::native::im2col(
           c10::cuda::getCurrentCUDAStream(),
-          input_n.data_ptr<scalar_t>(),
+          input_n.const_data_ptr<scalar_t>(),
           nInputPlane, inputHeight, inputWidth,
           outputHeight, outputWidth,
           kH, kW, padH, padW, dH, dW,
           1, 1,
-          columns.data_ptr<scalar_t>()
+          columns.mutable_data_ptr<scalar_t>()
         );
       }
 
@@ -198,8 +198,8 @@ void slow_conv2d_forward(
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
       auto gemm_in_ptr = requires_columns ?
-          columns.data_ptr<scalar_t>() :
-          input_n.data_ptr<scalar_t>();
+          columns.const_data_ptr<scalar_t>() :
+          input_n.const_data_ptr<scalar_t>();
       at::cuda::blas::gemm(
           'n', 'n',
           n, m, k,
@@ -280,9 +280,9 @@ void slow_conv2d_backward(
       using acc_t = at::acc_type<scalar_t, true>;
       at::native::col2im<scalar_t, acc_t>(
         c10::cuda::getCurrentCUDAStream(),
-        grad_columns.data_ptr<scalar_t>(),
+        grad_columns.const_data_ptr<scalar_t>(),
         nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
-        1, 1, grad_input_n.data_ptr<scalar_t>()
+        1, 1, grad_input_n.mutable_data_ptr<scalar_t>()
       );
     }
   });
@@ -337,12 +337,12 @@ void slow_conv2d_grad_weight(
         // Extract columns:
         at::native::im2col<scalar_t>(
           c10::cuda::getCurrentCUDAStream(),
-          input_n.data_ptr<scalar_t>(),
+          input_n.const_data_ptr<scalar_t>(),
           nInputPlane, inputHeight, inputWidth,
           outputHeight, outputWidth,
           kH, kW, padH, padW, dH, dW,
           1, 1,
-          columns.data_ptr<scalar_t>()
+          columns.mutable_data_ptr<scalar_t>()
         );
       }
 
@@ -354,8 +354,8 @@ void slow_conv2d_grad_weight(
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
       auto gemm_in_ptr = requires_columns ?
-          columns.data_ptr<scalar_t>() :
-          input_n.data_ptr<scalar_t>();
+          columns.const_data_ptr<scalar_t>() :
+          input_n.const_data_ptr<scalar_t>();
       at::cuda::blas::gemm(
           't', 'n',
           n, m, k,

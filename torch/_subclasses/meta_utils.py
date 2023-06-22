@@ -175,7 +175,9 @@ class MetaConverter:
             from torch._dynamo.source import ConstantSource
 
             # TODO: make a dedicated UnknownSource for this?
-            source = ConstantSource(f"__unknown_tensor{len(self.tensor_memo)}")
+            source = ConstantSource(
+                f"__meta_utils_unknown_tensor{len(self.tensor_memo)}"
+            )
 
         # This indicates you set no_dispatch() before calling into this
         # function.  This is an error: we may be creating fake tensors and
@@ -237,10 +239,6 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    # TODO: Delete this assert, and just attempt making the
-                    # sparse tensor anyway; even if there is a shape_env, this
-                    # tensor might be all static
-                    assert shape_env is None, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(
                         lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
@@ -379,6 +377,12 @@ class MetaConverter:
                                 mid.requires_grad = t.requires_grad
                                 with torch.enable_grad(), maybe_suppress():
                                     r = mid.as_strided(sizes, strides, storage_offset)
+                        # The CreationMeta influences whether or not inplace
+                        # mutation is an error or not.  So we need to make
+                        # sure we properly propagate this as well.
+                        torch._C._autograd._set_creation_meta(
+                            r, torch._C._autograd._get_creation_meta(t)
+                        )
                     finally:
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
                             torch._C.DispatchKey.ADInplaceOrView, old_exclude
@@ -402,6 +406,10 @@ class MetaConverter:
                                 # emphasize how important it is to preserve
                                 # format here
                                 r = r.clone(memory_format=torch.preserve_format)
+
+                    # Graph-Break for wrapped tensors
+                    if torch._C._functorch.is_functorch_wrapped_tensor(t):
+                        return NotImplemented
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
@@ -500,10 +508,6 @@ class MetaConverter:
                     t.is_nested,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
-                    # these are supported in meta conversion but the fallbacks
-                    # don't work
-                    t.is_neg(),
-                    t.is_conj(),
                     t.device.type in ("lazy"),
                     # We need a way to test if a tensor is batched but there
                     # is no official APi to do it
@@ -536,9 +540,10 @@ class MetaConverter:
                         dynamic_dims=dynamic_dims,
                         constraint_dims=constraint_dims,
                     )
-                # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:
-                    r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
+                    # NB: Cannot directly use Parameter constructor
+                    # because that would force a detach, not desirable
+                    r._is_param = True
                 return r
         elif torch.overrides.is_tensor_like(t):
             # Blindly converting tensor subclasses to meta can cause

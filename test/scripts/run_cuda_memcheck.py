@@ -81,7 +81,7 @@ for line in lines:
 # if 'cpu' or 'CPU' is in the name and 'cuda' or 'CUDA' is not in the name, then skip it
 def is_cpu_only(name):
     name = name.lower()
-    return ('cpu' in name) and not ('cuda' in name)
+    return ('cpu' in name) and "cuda" not in name
 
 ALL_TESTS = [x for x in ALL_TESTS if not is_cpu_only(x)]
 
