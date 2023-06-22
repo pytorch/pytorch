@@ -568,6 +568,58 @@ bool SocketListenOp::tryListen(const ::addrinfo& addr) {
   return true;
 }
 
+class SocketListenFromFdOp {
+ public:
+  SocketListenFromFdOp(int fd, std::uint16_t expected_port);
+
+  std::unique_ptr<SocketImpl> run() const;
+
+ private:
+  const int fd_;
+  const std::uint16_t expected_port_;
+};
+
+SocketListenFromFdOp::SocketListenFromFdOp(int fd, std::uint16_t expected_port)
+    : fd_(fd), expected_port_(expected_port) {}
+
+std::unique_ptr<SocketImpl> SocketListenFromFdOp::run() const {
+  C10D_DEBUG("listenFromFd: fd {}, expected port {}", fd_, expected_port_);
+
+  ::sockaddr_storage addr_storage;
+  ::socklen_t addr_len = sizeof(addr_storage);
+  if (::getsockname(
+          fd_, reinterpret_cast<::sockaddr*>(&addr_storage), &addr_len) < 0) {
+    throw SocketError{
+        fmt::format("getsockname failed for fd {}: {}", fd_, getSocketError())};
+  }
+
+  auto socket = std::make_unique<SocketImpl>(fd_);
+  const auto port = socket->getPort();
+
+  if (port != expected_port_) {
+    throw SocketError{fmt::format(
+        "listen fd {} is bound to port {}, expected to be bound to port {}",
+        fd_,
+        port,
+        expected_port_)};
+  }
+
+  if (::listen(socket->handle(), 2048 /* backlog */) != 0) {
+    throw SocketError{fmt::format(
+        "Failed to listen on socket initialized from fd {}: {}.",
+        socket->handle(),
+        getSocketError())};
+  }
+
+  socket->closeOnExec();
+
+  C10D_INFO(
+      "The server has taken over the listening socket with fd {}, address {}",
+      fd_,
+      *socket);
+  return socket;
+}
+
 class SocketConnectOp {
   using Clock = std::chrono::steady_clock;
   using Duration = std::chrono::steady_clock::duration;
@@ -881,6 +933,12 @@ void Socket::initialize() {
 
 Socket Socket::listen(std::uint16_t port, const SocketOptions& opts) {
   SocketListenOp op{port, opts};
+
+  return Socket{op.run()};
+}
+
+Socket Socket::listenFromFd(int fd, std::uint16_t expected_port) {
+  SocketListenFromFdOp op{fd, expected_port};
 
   return Socket{op.run()};
 }

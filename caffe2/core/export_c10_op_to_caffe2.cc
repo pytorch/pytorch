@@ -2,6 +2,11 @@
 
 namespace caffe2 {
 
+C10_DECLARE_REGISTRY(
+    C10OperatorRegistry,
+    OperatorBase,
+    const OperatorDef&,
+    Workspace*);
 C10_DEFINE_REGISTRY(
     C10OperatorRegistry,
     OperatorBase,
