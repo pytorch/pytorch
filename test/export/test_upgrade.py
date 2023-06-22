@@ -1,8 +1,10 @@
+# Owner(s): ["module: dynamo"]
 import unittest
 
 import torch
 from torch._export import export
 from torch._export.serde.serialize import GraphModuleOpUpgrader
+from torch._export.serde.upgrade import get_target_version
 
 TEST_UPGRADERS = {
     "aten::div__Scalar_mode_0_3": (
@@ -28,6 +30,20 @@ def count_op(graph, target_str):
 
 
 class TestUpgrade(unittest.TestCase):
+    def test_upgrader_with_invalid_format_throws_exception(self):
+        """Invalid upgrader function string should throw exception"""
+        upgraders = [("div(Tensor a, Tensor b) -> Tensor", "TEST")]
+        with self.assertRaises(RuntimeError):
+            GraphModuleOpUpgrader._populate_passes(upgraders)
+
+    def test_get_target_version_invalid_format_throws_exception(self):
+        with self.assertRaises(RuntimeError):
+            get_target_version("div_0")
+        with self.assertRaises(RuntimeError):
+            get_target_version("div_0_")
+        with self.assertRaises(RuntimeError):
+            get_target_version("div")
+
     def test_creates_upgrader_pass(self):
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}

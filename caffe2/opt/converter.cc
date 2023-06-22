@@ -69,7 +69,7 @@ std::map<std::string, caffe2::Argument> Converter::getArgumentsFromOperator(
   return argMap;
 }
 
-repr::NeuralNetOperator::NNLayout getLayout(
+static repr::NeuralNetOperator::NNLayout getLayout(
     std::map<std::string, caffe2::Argument> argMap) {
   auto arg = argMap.find("order");
   if (arg != argMap.end()) {
@@ -110,7 +110,7 @@ DeviceOption Converter::getDeviceOption(
   return opt;
 }
 
-std::vector<int> getKernelShape(
+static std::vector<int> getKernelShape(
     std::map<std::string, caffe2::Argument> argMap) {
   // There are literally three ways to define shapes in Conv in Caffe2
   std::vector<int> kernelShape;
@@ -490,7 +490,7 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule& m) {
   return convertToCaffe2Proto(m, predictNet);
 }
 
-std::vector<std::string> mergeExternalTensors(
+static std::vector<std::string> mergeExternalTensors(
     const std::unordered_set<repr::NNGraph::NodeRef>& currExternal,
     const std::vector<std::string>& oldExternal) {
   std::vector<std::string> out;
@@ -607,7 +607,7 @@ caffe2::NetDef convertToCaffe2Proto(
   return predictNet;
 }
 
-void pushOpToFront(caffe2::OperatorDef& op, caffe2::NetDef* net) {
+static void pushOpToFront(caffe2::OperatorDef& op, caffe2::NetDef* net) {
   *net->add_op() = op;
   google::protobuf::RepeatedPtrField<caffe2::OperatorDef>* op_list(
       net->mutable_op());

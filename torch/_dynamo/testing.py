@@ -166,8 +166,10 @@ def debug_insert_nops(frame, cache_size, hooks, _):
         export=False,
         export_constraints=None,
         frame_state={"_id": 0},
+        # TODO: shouldn't this be f_locals/f_globals from frame?
         local_scope=locals(),
         global_scope=globals(),
+        f_code=frame.f_code,
     )
 
     return GuardedCode(code, CheckFunctionManager(graph).check_fn)
@@ -343,6 +345,12 @@ def skipIfNotPy311(fn):
 # and test/dynamo/test_dynamic_shapes.py
 def expectedFailureDynamic(fn):
     fn._expected_failure_dynamic = True
+    return fn
+
+
+# Controls tests generated in test/dynamo/test_dynamic_shapes.py
+def expectedFailureAutomaticDynamic(fn):
+    fn._expected_failure_automatic_dynamic = True
     return fn
 
 
