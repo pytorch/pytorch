@@ -26,10 +26,11 @@ import torch._dynamo.testing
 import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
-from torch._dynamo.output_graph import OutputGraph
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
+    expectedFailureAutomaticDynamic,
     expectedFailureDynamic,
     requires_numpy_pytorch_interop,
     same,
@@ -48,12 +49,11 @@ from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
     SM80OrLater,
+    TEST_CUDA,
+    TEST_MULTIGPU,
 )
 from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
-
-TEST_CUDA = torch.cuda.is_available()
-TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
@@ -1971,7 +1971,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(res, ref_run1))
 
     # NotImplementedError: SymNodeVariable() is not a constant
+    # https://github.com/pytorch/pytorch/issues/103618
     @expectedFailureDynamic
+    @expectedFailureAutomaticDynamic
     def test_slice_input(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -3304,7 +3306,7 @@ def fn():
 
         mod = Module()
         with self.assertRaisesRegex(
-            TypeError, "missing 1 required positional argument"
+            Unsupported, "Can't inplace modify module params/buffers"
         ):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
@@ -4276,60 +4278,6 @@ def fn():
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
 
-    # Note - here be mild dragons.
-    # This test relies a ton on internal implementation. Future refactor efforts
-    # are welcome to delete it if necessary, rewriting this test constantly is a chore, not
-    # a feature. We kept it around with some amount of saddness, as it was extremely useful in debugging.
-    def test_restore_graphstate_internals(self):
-        def fn(x, y):
-            x = x + 1
-            y = y + 1
-            return x * y
-
-        _, guards = torch._dynamo.export(
-            fn, torch.tensor([0.25, 0.25]), torch.tensor([0.25, 0.25])
-        )
-        # Dummy ctor
-        graph = OutputGraph(
-            code_options={},
-            compiler_fn=None,
-            root_tx=None,
-            export=False,
-            export_constraints=None,
-            frame_state={"_id": 0},
-            local_scope={},
-            global_scope={},
-        )
-        graph.nn_modules_sources = {}
-        # Contrived generation timestamp
-        graph.timestamp = 4
-        # Contrived guards
-        graph.tracing_context.guards_context.dynamo_guards = guards
-
-        # Save the state
-        state = graph.copy_graphstate()
-        # Saving increments the generation
-        self.assertEqual(graph.timestamp, 5)
-
-        # Assure that the saved state is valid
-        self.assertEqual(state.timestamp, 4)
-
-        # Ensure that the guards reflect the expected state
-        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
-        self.assertEqual(graph.guards, guards)
-
-        # Mess around with the state
-        graph.tracing_context.guards_context.dynamo_guards = set()
-        self.assertEqual(graph.guards, set())
-
-        # Restore the state
-        graph.restore_graphstate(state)
-
-        # Make sure it restored correctly
-        self.assertEqual(graph.timestamp, 4)
-        self.assertEqual(graph.guards, guards)
-        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
-
     def test_call_parent_non_class_methods_from_child(self):
         class A:
             def add(self, x):
@@ -4446,7 +4394,10 @@ def fn():
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """5""")
+            if torch._dynamo.config.automatic_dynamic_shapes:
+                self.assertExpectedInline(cnt.frame_count, """2""")
+            else:
+                self.assertExpectedInline(cnt.frame_count, """5""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
 
@@ -5289,6 +5240,7 @@ def fn():
                 fn(torch.rand(2, 3), torch.rand(2, 3))
                 fn(torch.rand(2, 3), (1, 2, 3))
 
+    @expectedFailureAutomaticDynamic
     def test_compile_profiler(self):
         class Model(torch.nn.Module):
             def forward(self, input):
@@ -5639,6 +5591,70 @@ def ___make_guard_fn():
         orig_out = model(x)
         opt_model = torch._dynamo.optimize("eager")(MyModule())
         opt_out = opt_model(x)
+        self.assertTrue(same(orig_out, opt_out))
+
+    def test_scalar_tensor_is_equivalent_to_symint_argument(self):
+        class GumbelTopKSampler(torch.nn.Module):
+            def __init__(self, T, k):
+                super(GumbelTopKSampler, self).__init__()
+                self.T = torch.nn.Parameter(
+                    torch.tensor(T, dtype=torch.float32), requires_grad=False
+                )
+                self.k = torch.nn.Parameter(
+                    torch.tensor(k, dtype=torch.int32), requires_grad=False
+                )
+
+            def sample_discrete(self, logits):
+                threshold = torch.topk(logits, self.k, sorted=True)[0][..., -1]
+                samples = torch.ge(logits.squeeze(1), threshold).float()
+                return samples
+
+            def forward(self, logits):
+                dsamples = self.sample_discrete(logits)
+                return dsamples
+
+        x = torch.rand([4, 4, 4, 4])
+        m = GumbelTopKSampler(T=4, k=4)
+        orig_out = m(x)
+        opt_m = torch.compile(backend="eager")(m)
+        opt_out = opt_m(x)
+        self.assertTrue(same(orig_out, opt_out))
+
+    def test_scalar_tensor_is_equivalent_to_symint_list_argument(self):
+        class Jitter(torch.nn.Module):
+            def __init__(self, jitter_val):
+                super(Jitter, self).__init__()
+                self.jitter_val = jitter_val
+
+            def roll_tensor(self, input):
+                h_shift = np.int_(self.jitter_val - 1)
+                w_shift = np.int_(self.jitter_val + 1)
+                return torch.roll(
+                    torch.roll(input, shifts=h_shift, dims=2), shifts=w_shift, dims=3
+                )
+
+            def forward(self, input):
+                return self.roll_tensor(input)
+
+        x = torch.rand([4, 4, 4, 4])
+        m = Jitter(jitter_val=4)
+        orig_out = m(x)
+        opt_m = torch.compile(backend="eager")(m)
+        opt_out = opt_m(x)
+        self.assertTrue(same(orig_out, opt_out))
+
+    def test_scalar_tensor_is_equivalent_to_int_list_argument(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, input):
+                permute = torch.tensor([0, 2, 1])
+                x = input.permute(*permute)
+                return x
+
+        x = torch.randn(2, 3, 4)
+        m = MyModel()
+        orig_out = m(x)
+        opt_m = torch.compile(backend="eager")(m)
+        opt_out = opt_m(x)
         self.assertTrue(same(orig_out, opt_out))
 
     def test_torch_variable_hasattr(self):

@@ -81,16 +81,6 @@ test_failures_cpp_wrapper = {
     ),
 }
 
-# see https://github.com/pytorch/pytorch/issues/103194
-test_failures_cuda_wrapper = {
-    "test_fft_real_input_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",)
-    ),
-    "test_fft_real_input_real_output_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",)
-    ),
-}
-
 
 def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
     test_name = f"{name}_{device}" if device else name
@@ -229,6 +219,7 @@ if RUN_CUDA:
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
         BaseTest("test_as_strided"),  # buffer reuse
+        BaseTest("test_batch_norm_2d_2"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
@@ -237,6 +228,7 @@ if RUN_CUDA:
         BaseTest("test_conv_backward"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
+        BaseTest("test_index_tensor"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
@@ -291,7 +283,6 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperTemplate,
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
-        test_failures_cuda_wrapper,
         xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
