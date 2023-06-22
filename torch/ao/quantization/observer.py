@@ -1101,7 +1101,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         )
         combined_max = combined_max + e
         combined_min = combined_min
-        assert not torch.isinf(combined_max-combined_min), "combined min/max are inf"
+        assert not torch.isinf(combined_max - combined_min), "combined min/max are inf"
         return combined_min, combined_max, downsample_rate, start_idx
 
     def _combine_histograms(
