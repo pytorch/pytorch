@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Optional
 
 import torch
 import torch._ops
@@ -20,7 +20,7 @@ class Decompose(_pass.Transform):
         module: torch.fx.GraphModule,
         decomposition_table: Mapping[torch._ops.OpOverload, Callable],
         enable_dynamic_axes: bool,
-        fake_mode: fake_tensor.FakeTensorMode,
+        fake_mode: Optional[fake_tensor.FakeTensorMode],
     ):
         super().__init__(diagnostic_context, module)
         self.decomposition_table = decomposition_table

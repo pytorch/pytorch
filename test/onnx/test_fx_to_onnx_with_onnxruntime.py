@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+import os
 import tempfile
 import unittest
 
@@ -15,11 +16,14 @@ import torch
 import torch.onnx
 import transformers  # type: ignore[import]
 from torch import nn
-from torch._dynamo.output_graph import config
+
 from torch._subclasses import fake_tensor
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import context as fx_context
+from torch.onnx._internal.fx import (
+    context as fx_context,
+    fx_symbolic_graph_extractor,
+    serialization as fx_serialization,
+)
 from torch.testing._internal import common_utils
 
 try:
@@ -668,20 +672,15 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         with tempfile.NamedTemporaryFile(
             prefix=model_name, suffix=".pt"
-        ) as tmp_file, tempfile.TemporaryDirectory(suffix="large_scale_export"):
+        ) as tmp_file, tempfile.TemporaryDirectory(
+            suffix="large_scale_export"
+        ) as tmp_folder:
             # Dump state_dict to a file to simulate how HuggingFace model is initialized.
             # The file will be loaded via .load_state_dict(...)
             torch.save(model.state_dict(), tmp_file.name)
 
-            # User-instantiated FakeTensorMode
-            fake_mode = fake_tensor.FakeTensorMode(
-                allow_non_fake_inputs=False,
-                allow_fallback_kernels=True,
-                shape_env=ShapeEnv(
-                    allow_scalar_outputs=config.capture_scalar_outputs,
-                    allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                    frame_id=0,
-                ),
+            ftm = fake_tensor.FakeTensorMode(
+                allow_non_fake_inputs=True, allow_fallback_kernels=False
             )
             ctx = fx_context.FxToOnnxContext()
             # NOTE: FakeTensorMode disallows symbolic shape of fx graph
@@ -689,27 +688,34 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             #  1. Create a model whose parameters and buffers are all FakeTensor's.
             #  2. Convert nn.Module into ONNX model without initializers.
             #  3. Record the file paths to find real initializers.
-
-            with fake_mode, ctx:
+            with ctx, ftm:
                 # Toy model with parameters and buffers as FakeTensor's.
                 fake_model = create_model()
-                # fake_model.load_state_dict(torch.load(tmp_file.name))
+                fake_model.load_state_dict(torch.load(tmp_file.name))
                 # Toy inputs as FakeTensor's.
                 fake_args = create_args()
+                # Export ONNX model without initializers while ctx.paths records
+                # all files that contains real initializers.
 
-            export_options = torch.onnx.ExportOptions(
-                opset_version=self.opset_version,
-                dynamic_shapes=self.dynamic_shapes,
-                op_level_debug=self.op_level_debug,
-                fake_mode=fake_mode,
-            )
-            export_output = torch.onnx.dynamo_export(
-                fake_model,
-                *fake_args,
-                export_options=export_options,
-            )
+                options = torch.onnx.ExportOptions(
+                    opset_version=self.opset_version,
+                    dynamic_shapes=self.dynamic_shapes,
+                    op_level_debug=self.op_level_debug,
+                )
+                export_options = torch.onnx._internal.exporter.ResolvedExportOptions(
+                    options
+                )
+                export_options.fx_tracer = (
+                    fx_symbolic_graph_extractor.FXSymbolicTracer()
+                )
+                export_output = torch.onnx.dynamo_export(
+                    fake_model,
+                    *fake_args,
+                    export_options=export_options,
+                )
 
-            # TODO: Fix export before moving to comparing numbers
+                onnx_model = export_output.model_proto
+
             # Tasks done by the following block.
             #  1. Iterate through all tensors stored in ctx.paths (the file content is loaded torch.load)
             #  2. If a tensor's name matches a "onnx_model"'s input name, an initializer is created and saved to
@@ -717,6 +723,17 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             #  3. A new ONNX model is saved into file with the initializers saved in the previous step.
             #  4. ORT executes the new ONNX model and compares the results with the original GPT model.
 
+            # Model saved to tmp_folder/onnx_model_location
+            # Initializers are saved to tmp_folder/onnx_initializer_location/*.onnx
+            onnx_model_location = model_name + "_external_data.onnx"
+            onnx_initializer_location = model_name + "_initializers"
+            fx_serialization.save_model_with_external_data(
+                tmp_folder,
+                onnx_model_location,
+                onnx_initializer_location,
+                tuple(ctx.paths),
+                onnx_model,
+            )
             # Generate random inputs.
             args = create_args()
             kwargs = create_pytorch_only_kwargs()
@@ -731,7 +748,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             args_not_none = args_not_none[: len(args) - len(kwargs)]
 
             ort_outputs = onnx_test_common.run_ort(
-                export_output,
+                os.path.join(tmp_folder, onnx_model_location),
                 args_not_none,
             )
 
@@ -740,7 +757,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             for ref_output, ort_output in zip(ref_outputs, ort_outputs):
                 torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
-    @unittest.skip("Symbolic tracing not supported yet.")
     @pytorch_test_common.skip_dynamic_fx_test(
         "FakeTensor exporting is not supported by dynamic axes."
     )
@@ -779,7 +795,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_extra_kwargs,
         )
 
-    @unittest.skip("Symbolic tracing not supported yet.")
     @pytorch_test_common.skip_dynamic_fx_test(
         "FakeTensor exporting is not supported by dynamic axes."
     )
