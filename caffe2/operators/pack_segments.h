@@ -37,7 +37,7 @@ class PackSegmentsOp final : public Operator<Context> {
     }
   }
 
-  bool RunOnDevice() override {
+  bool RunOnDevice() {
     return DispatchHelper<TensorTypes<int, long>>::call(this, Input(LENGTHS));
   }
 
