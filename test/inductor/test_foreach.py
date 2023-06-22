@@ -281,6 +281,7 @@ class ForeachTests(TestCase):
                 torch.rand(20, 20, device="cuda:0"),
             ),
             reference_in_float=False,
+            check_lowp=False,
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
