@@ -4904,7 +4904,7 @@ greater than 0.0 is specified.
     scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
     attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
     attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
-    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) * scale_factor) * attn_mask, dim=-1)
+    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p)
     return attn_weight @ V
 
