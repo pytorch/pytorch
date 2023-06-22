@@ -1,5 +1,5 @@
 import itertools
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from itertools import chain
 from threading import local
 from typing import Any
@@ -157,7 +157,7 @@ MockHandler._init_cls()
 _ops = Virtualized("ops", MockHandler)
 _graph = Virtualized("graph", NullHandler)
 _real_inputs = Virtualized("real_inputs", NullHandler)
-_fake_mode = Virtualized("fake_mode", nullcontext)
+_fake_mode = Virtualized("fake_mode", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
 _debug = Virtualized("debug", NullHandler)
 _interpreter = Virtualized("interpreter", NullHandler)

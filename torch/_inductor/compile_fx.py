@@ -618,13 +618,6 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     return run
 
 
-def inductor_partition_fn(graph, joint_inputs, **kwargs):
-    joint_graph_passes(graph)
-    return min_cut_rematerialization_partition(
-        graph, joint_inputs, **kwargs, compiler="inductor"
-    )
-
-
 def count_tangents(fx_g: torch.fx.GraphModule):
     """
     Infers which inputs are static for a backwards graph
@@ -885,6 +878,12 @@ def compile_fx(
     else:
         inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
+    def partition_fn(graph, joint_inputs, **kwargs):
+        joint_graph_passes(graph)
+        return min_cut_rematerialization_partition(
+            graph, joint_inputs, **kwargs, compiler="inductor"
+        )
+
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
         fixed = count_tangents(model)
@@ -915,7 +914,7 @@ def compile_fx(
             bw_compiler=bw_compiler,
             inference_compiler=inference_compiler,
             decompositions=decompositions,
-            partition_fn=inductor_partition_fn,
+            partition_fn=partition_fn,
             keep_inference_input_mutations=True,
         )(model_, example_inputs_)
 
