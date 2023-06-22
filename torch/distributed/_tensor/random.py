@@ -12,6 +12,9 @@ from torch.distributed._tensor.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 
 
+_rng_tracker: Optional[CudaRNGStateTracker] = None
+
+
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     # currently we only support correct RNG on cuda/cuda-like device
     device_handle = _get_device_handle(device_mesh.device_type)
@@ -72,7 +75,9 @@ def manual_seed(seed: int, device_mesh: DeviceMesh, tp_dim: int = 0) -> None:
         elif isinstance(_rng_tracker, OffsetBasedRNGTracker):
             _rng_tracker._manual_seed(seed)
         else:
-            raise RuntimeError("Unknown parallel RNG style!")
+            raise RuntimeError(
+                f"Unknown type of cuda RNG state tracker: _rng_tracker = {_rng_tracker}"
+            )
 
 
 class CudaRNGStateTracker:
@@ -103,9 +108,6 @@ class CudaRNGStateTracker:
     def rng_state_is_sync(self, name) -> bool:
         return name in self.rng_states
 
-    def reset(self) -> None:
-        self._states = {}
-
     def get_seed(self, name: str) -> int:
         if name not in self.rng_states:
             raise RuntimeError(
@@ -120,25 +122,6 @@ class CudaRNGStateTracker:
         offset_tensor = torch.tensor([0]).view(torch.uint8)
         self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
-    def get_offset(self, name: str) -> int:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        offset_tensor = (self.rng_states[name])[8:].view(dtype=torch.int64)
-        return int(offset_tensor.item())
-
-    def set_offset(self, name: str, offset: int) -> None:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        seed_tensor = (self.rng_states[name])[0:8]
-        offset_tensor = torch.tensor([offset]).view(torch.uint8)
-        self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
-
     def _distribute_region(self, spec: DTensorSpec):
         pass
 
@@ -146,10 +129,10 @@ class CudaRNGStateTracker:
 class OffsetBasedRNGTracker(CudaRNGStateTracker):
     def __init__(self):
         super().__init__()
-        # synchronize random seed to initialize RNG state
-        _seed = [torch.cuda.initial_seed()]
-        dist.broadcast_object_list(_seed)
-        self.set_seed("parallel-rng", _seed[0])
+        # synchronize RNG state using rank 0's current one
+        rng_state = torch.cuda.get_rng_state()
+        dist.broadcast(rng_state, 0)
+        self.rng_states["parallel-rng"] = rng_state
 
     def _manual_seed(self, parallel_seed: int) -> None:
         self.set_seed("parallel-rng", parallel_seed)
@@ -175,6 +158,25 @@ class OffsetBasedRNGTracker(CudaRNGStateTracker):
                     self._set_post_op_offset(spec, old_offset)
         else:
             yield
+
+    def get_offset(self, name: str) -> int:
+        if name not in self.rng_states:
+            raise RuntimeError(
+                f"{self.__class__.__name__} does not have random state for {name}"
+            )
+
+        offset_tensor = (self.rng_states[name])[8:].view(dtype=torch.int64)
+        return int(offset_tensor.item())
+
+    def set_offset(self, name: str, offset: int) -> None:
+        if name not in self.rng_states:
+            raise RuntimeError(
+                f"{self.__class__.__name__} does not have random state for {name}"
+            )
+
+        seed_tensor = (self.rng_states[name])[0:8]
+        offset_tensor = torch.tensor([offset]).view(torch.uint8)
+        self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
 
     def _set_pre_op_offset(self, spec: DTensorSpec) -> None:
         """Set the starting RNG offset for current device's local shard before actual
@@ -314,7 +316,9 @@ class TensorParallelRNGTracker(CudaRNGStateTracker):
         coordinate = device_mesh.get_coordinate()
         assert coordinate is not None
         tensor_parallel_rank = coordinate[tp_dim]
-        tensor_parallel_seed = base_seed + tensor_parallel_rank
+        # this magic number 2718 comes from Megatron's code
+        # (https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/random.py)
+        tensor_parallel_seed = base_seed + 2718 + tensor_parallel_rank
         self.set_seed("tensor-parallel-rng", tensor_parallel_seed)
 
     @contextlib.contextmanager
@@ -335,6 +339,3 @@ class TensorParallelRNGTracker(CudaRNGStateTracker):
                     self.rng_states["tensor-parallel-rng"] = torch.cuda.get_rng_state()
         else:
             yield
-
-
-_rng_tracker: Optional[CudaRNGStateTracker] = None

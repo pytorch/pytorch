@@ -234,7 +234,9 @@ def _operator_dispatch(
             if not random._rng_tracker:
                 raise RuntimeError(
                     "A CudaRNGStateTracker instance must be instantiated "
-                    "before executing a random op over a DTensor."
+                    "before executing a random op over a DTensor. "
+                    "Try calling random.manual_seed() or distribute_tensor() "
+                    "before executing a DTensor random op."
                 )
             with random._rng_tracker._distribute_region(arg_list[0]._spec):
                 local_results = op_call(*local_tensor_args, **local_tensor_kwargs)

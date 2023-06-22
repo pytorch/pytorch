@@ -93,7 +93,7 @@ def parallelize_module(  # type: ignore[return]
         not isinstance(random._rng_tracker, TensorParallelRNGTracker)
     ):
         random._rng_tracker = TensorParallelRNGTracker()
-        random._rng_tracker._manual_seed(device_mesh, base_seed=(1234 + 2718), tp_dim=tp_mesh_dim)
+        random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
 
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
