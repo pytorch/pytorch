@@ -98,6 +98,11 @@ struct EnablePythonDispatcher {
   c10::impl::PyInterpreter* old_;
 };
 
+struct EnablePreDispatch {
+  EnablePreDispatch() : guard_(c10::DispatchKey::PreDispatch) {}
+  c10::impl::IncludeDispatchKeyGuard guard_;
+};
+
 } // namespace
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
@@ -419,6 +424,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_EnablePythonDispatcher");
   py_context_manager<c10::impl::DisablePythonDispatcher>(
       _C_m, "_DisablePythonDispatcher");
+  py_context_manager<EnablePreDispatch>(_C_m, "_EnablePreDispatch");
   py_context_manager_DEPRECATED<DisableFuncTorch>(_C_m, "_DisableFuncTorch");
   py_context_manager_DEPRECATED<MultithreadingEnabled, bool>(
       _C_m, "_MultithreadingEnabled");
