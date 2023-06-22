@@ -1429,6 +1429,33 @@ def meta_pad3d_backward(grad_output, input, padding):
     return input.new_empty(input.shape)
 
 
+@register_meta(aten._pdist_forward)
+@out_wrapper()
+def meta__pdist_forward(self: Tensor, p: float = 2) -> Tensor:
+    torch._check(
+        self.is_contiguous(), lambda: "_pdist_forward requires contiguous input"
+    )
+    n = self.size(0)
+    if n <= 1:
+        return self.new_empty([0]).to(memory_format=torch.legacy_contiguous_format)  # type: ignore[call-overload]
+    else:
+        return self.new_empty((n * (n - 1) // 2,)).to(
+            memory_format=torch.legacy_contiguous_format
+        )  # type: ignore[call-overload]
+
+
+@register_meta(aten._pdist_backward)
+@out_wrapper()
+def meta__pdist_backward(grad: Tensor, self: Tensor, p: float, pdist: Tensor) -> Tensor:
+    torch._check(
+        self.is_contiguous(), lambda: "_pdist_backward requires self to be contiguous"
+    )
+    torch._check(
+        pdist.is_contiguous(), lambda: "_pdist_backward requires pdist to be contiguous"
+    )
+    return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
+
+
 @register_meta([aten.baddbmm.default, aten.baddbmm.out])
 @out_wrapper()
 def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
