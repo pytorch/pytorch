@@ -21,7 +21,7 @@ namespace math {
 
 static constexpr double QEPSILON = 1e-8;
 
-void quantize_and_compress__base(
+static void quantize_and_compress__base(
     const float* input_data,
     uint8_t* output_data,
     uint64_t input_size,
@@ -120,7 +120,7 @@ void quantize_and_compress(
       random_buffer);
 }
 
-void decompress_and_dequantize__base(
+static void decompress_and_dequantize__base(
     const uint8_t* input_data,
     float* output_data,
     uint64_t input_size) {
