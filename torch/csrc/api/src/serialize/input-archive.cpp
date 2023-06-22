@@ -43,6 +43,7 @@ bool InputArchive::try_read(
     return false;
   }
   auto read_tensor = iv.toTensor();
+  TORCH_CHECK(read_tensor.data_ptr() != 0, "Malfomed input tensor")
   // clang-format on
   if (tensor.defined()) {
     torch::NoGradGuard guard;
