@@ -30,7 +30,7 @@ class _FunctionalizeSideEffectfulOps(ExportPassBase):
     ```
     def f(x):
         dep_token = _make_dep_token()
-        dep_token_2 = functional_sym_constrain_range(
+        dep_token_2 = _functional_sym_constrain_range(
             x.shape[0], min=1, max=3, dep_token=dep_token
         )
 
