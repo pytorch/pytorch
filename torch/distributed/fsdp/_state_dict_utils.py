@@ -1,5 +1,4 @@
 import contextlib
-import functools
 import math
 import warnings
 from typing import (
@@ -29,6 +28,7 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
     _FSDPState,
+    _get_module_fsdp_state_if_fully_sharded_module,
     _has_fsdp_params,
     _is_composable,
     _module_handles,
@@ -132,7 +132,6 @@ def _common_pre_state_dict_hook(
         fsdp_state._device_handle.synchronize()
     # TODO: need to check if this is always correct for composable FSDP.
     _lazy_init(fsdp_state, module)
-    # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
         _clear_grads_if_needed(fsdp_state._all_handles)
 
@@ -162,7 +161,6 @@ def _common_unshard_pre_state_dict_hook(
     )
 
 
-# TODO: change to the decorator style. See ``_full_pre_state_dict_hook``.
 @no_type_check
 def _common_unshard_post_state_dict_hook(
     module: nn.Module,
@@ -252,7 +250,6 @@ def _common_unshard_post_state_dict_hook(
                 and buffer.device != cpu_device
             ):
                 state_dict[fqn] = buffer.to(cpu_device)
-            # TODO: for composable FSDP, this should be clean_tensor_name(clean_key),
             buffer_clean_fqns.append(clean_key)
             buffers.append(state_dict[fqn])
     if buffers:
@@ -285,9 +282,6 @@ def _full_pre_state_dict_hook(
     from ``_full_post_state_dict_hook()`` to simulate the case. Once pre-state_dict
     is supported in ``nn.Module``, this hook will be registered as a hook in
     ``nn.Module``.
-
-    TODO: clean the callsites and hacks after ``pre_state_dict_hook` ` is supported
-    in ``nn.Module``.
     """
     _common_pre_state_dict_hook(module, fsdp_state)
     _common_unshard_pre_state_dict_hook(
@@ -653,7 +647,6 @@ def _replace_with_full_state_dict_type(fsdp_state: _FSDPState) -> Generator:
 @no_type_check
 @torch.no_grad()
 def _post_state_dict_hook(
-    fsdp_state: _FSDPState,
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -664,6 +657,7 @@ def _post_state_dict_hook(
     FSDP module is executed. ``fsdp_state._state_dict_type`` is used to decide
     what postprocessing will be done.
     """
+    fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
@@ -688,7 +682,6 @@ def _post_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _pre_state_dict_hook(
-    fsdp_state: _FSDPState,
     module: nn.Module,
     *args,
     **kwargs,
@@ -698,6 +691,7 @@ def _pre_state_dict_hook(
     ``fsdp_state._state_dict_type`` is used to decide what postprocessing will
     be done.
     """
+    fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
@@ -724,7 +718,6 @@ def _pre_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _pre_load_state_dict_hook(
-    fsdp_state: _FSDPState,
     module: nn.Module,
     state_dict: Dict[str, Any],
     prefix: str,
@@ -735,6 +728,7 @@ def _pre_load_state_dict_hook(
     ``fsdp_state._state_dict_type`` is used to decide what preprocessing will
     be done.
     """
+    fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
@@ -762,10 +756,10 @@ def _pre_load_state_dict_hook(
 @no_type_check
 @torch.no_grad()
 def _post_load_state_dict_hook(
-    fsdp_state: _FSDPState,
     module: nn.Module,
     *args: Any,
 ) -> None:
+    fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
@@ -814,15 +808,10 @@ def _register_state_dict_hooks_base(
     hook_registration_fn_kwargs: Dict[str, Any],
 ) -> None:
     """Registers ``hook`` using ``hook_registration_fn``."""
-    # TODO: Use `_get_submodule_state(module)` in each hook instead of
-    # `partial`: https://github.com/pytorch/pytorch/issues/90788
-    hook_with_state = functools.partial(hook, state)
     if not _is_composable(state):
-        getattr(state, hook_registration_fn_name)(
-            hook_with_state, **hook_registration_fn_kwargs
-        )
+        getattr(state, hook_registration_fn_name)(hook, **hook_registration_fn_kwargs)
     else:
         for handle in state._handles:
             getattr(handle._fully_sharded_module, hook_registration_fn_name)(
-                hook_with_state, **hook_registration_fn_kwargs
+                hook, **hook_registration_fn_kwargs
             )
