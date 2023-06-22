@@ -16,7 +16,7 @@ subset of the input tensor according to the kernel size and downsampling the
 data into the output blob Y for further processing.
 )DOC";
 
-std::function<void(OpSchema&)> MaxPoolDocGenerator(
+static std::function<void(OpSchema&)> MaxPoolDocGenerator(
     const char* dim,
     bool relu_fused = false) {
   return [=](OpSchema& schema) {

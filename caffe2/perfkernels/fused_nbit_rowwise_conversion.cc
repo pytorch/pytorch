@@ -12,7 +12,7 @@
 
 namespace caffe2 {
 
-void FloatToFused8BitRowwiseQuantized__base(
+static void FloatToFused8BitRowwiseQuantized__base(
     const float* input,
     size_t input_rows,
     int input_columns,
@@ -43,7 +43,7 @@ void FloatToFused8BitRowwiseQuantized__base(
   }
 }
 
-void Fused8BitRowwiseQuantizedToFloat__base(
+static void Fused8BitRowwiseQuantizedToFloat__base(
     const std::uint8_t* input,
     size_t input_rows,
     int input_columns,
@@ -93,7 +93,7 @@ void Fused8BitRowwiseQuantizedToFloat(
 #endif
 }
 
-void FloatToFusedNBitRowwiseQuantizedSBHalf__base(
+static void FloatToFusedNBitRowwiseQuantizedSBHalf__base(
     int bit_rate,
     const float* input,
     size_t input_rows,
@@ -151,7 +151,7 @@ void FloatToFusedNBitRowwiseQuantizedSBHalf__base(
   }
 }
 
-void FusedNBitRowwiseQuantizedSBHalfToFloat__base(
+static void FusedNBitRowwiseQuantizedSBHalfToFloat__base(
     int bit_rate,
     const std::uint8_t* input,
     size_t input_rows,

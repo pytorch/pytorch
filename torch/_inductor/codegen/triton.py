@@ -16,7 +16,7 @@ import torch._logging
 from torch._prims_common import is_integer_dtype
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..codecache import get_code_path
+from ..codecache import code_hash, get_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
@@ -2187,7 +2187,7 @@ class TritonScheduling:
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
 
-            basename, _, kernel_path = get_code_path(src_code, "py", extra="")
+            basename, _, kernel_path = get_path(code_hash(src_code), "py")
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
