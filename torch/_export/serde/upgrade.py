@@ -1,3 +1,4 @@
+import logging
 from typing import Tuple, Dict, Optional, List
 
 import torch
@@ -14,6 +15,8 @@ import re
 
 lib = Library("aten", "FRAGMENT")
 impl_lib = Library("aten", "IMPL")
+
+log = logging.getLogger(__name__)
 
 
 def get_target_version(versioned_upgrader_name: str) -> int:
@@ -161,15 +164,16 @@ class GraphModuleOpUpgrader:
         operators with a custom operator. The custom operator contains a CompositeImplicitAutograd kernel (the
         upgrading function itself). After retrace, this custom operator will be decomposed into the ops used in the
         upgrader. After all passes are applied, the exported program will be upgraded to the target version."""
-        args = [n.meta["val"] for n in exported_program.graph.nodes if n.op == "placeholder"]
+        args = [n.meta.get("val", None) for n in exported_program.graph.nodes if n.op == "placeholder"]
         args_real_tensors = [torch.ones(tuple(arg.size()), dtype=arg.dtype) if isinstance(arg, FakeTensor) else arg for
                              arg in args]
         inputs = tree_unflatten(args_real_tensors, exported_program.call_spec.in_spec)
 
         for _pass in self.upgrader_passes:
             upgraded_program = exported_program.transform(_pass)
-            # NB: we have to retrace the graph_module instead of ep because of some failure.
-            exported_program = export(upgraded_program.graph_module, inputs, [])
+            # NB: we have to retrace the graph_module instead of ep because of some failure. Also, we need to turn of
+            # _add_runtime_assertions because dynamo is not happy with sym_size.int.
+            exported_program = export(upgraded_program.graph_module, inputs, [], _add_runtime_assertions=False)
             exported_program.call_spec = upgraded_program.call_spec
 
         return exported_program

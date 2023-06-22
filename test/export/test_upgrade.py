@@ -2,14 +2,20 @@
 import unittest
 
 import torch
+import torch._dynamo as torchdynamo
 from torch._export import export
 from torch._export.serde.serialize import GraphModuleOpUpgrader
 from torch._export.serde.upgrade import get_target_version
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TestCase,
+)
 
 TEST_UPGRADERS = {
     "aten::div__Scalar_mode_0_3": (
         "div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor",
         """
+from typing import Any, Optional
 def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Optional[str]=None) -> torch.Tensor:
     return self.divide(other, rounding_mode=rounding_mode)
         """,
@@ -29,7 +35,8 @@ def count_op(graph, target_str):
         [n for n in graph.nodes if isinstance(n.target, torch._ops.OpOverload) and n.target.name() == target_str])
 
 
-class TestUpgrade(unittest.TestCase):
+@unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
+class TestUpgrade(TestCase):
     def test_upgrader_with_invalid_format_throws_exception(self):
         """Invalid upgrader function string should throw exception"""
         upgraders = [("div(Tensor a, Tensor b) -> Tensor", "TEST")]
@@ -72,7 +79,7 @@ class TestUpgrade(unittest.TestCase):
             return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
         inputs = (torch.ones([2, 3]) * 4, 2.)
-        ep = export(fn, inputs, [])
+        ep = export(fn, inputs, [], _add_runtime_assertions=False)
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)
@@ -94,4 +101,4 @@ class TestUpgrade(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()
