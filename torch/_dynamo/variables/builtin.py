@@ -781,6 +781,14 @@ class BuiltinVariable(VariableTracker):
                     guards.add(obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN))
                 else:
                     guards.add(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+            if cls is SetVariable:
+                return cls(
+                    tx,
+                    list(obj.unpack_var_sequence(tx)),
+                    mutable_local=MutableLocal(),
+                    guards=guards,
+                ).add_options(self, obj)
+
             return cls(
                 list(obj.unpack_var_sequence(tx)),
                 mutable_local=MutableLocal(),
