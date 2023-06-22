@@ -2463,6 +2463,19 @@ def batch_norm(
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
+
+    Examples ::
+
+    >>> import torch
+    >>> import torch.nn as nn
+    >>> import torch.nn.functional as F
+    >>> bn = nn.BatchNorm2d(3)
+    >>> inputs = torch.randn(16, 3, 32, 32)
+    >>> outputs = F.batch_norm(inputs, running_mean=None, running_var=None, training=True)
+    >>> print(outputs.shape)
+    torch.Size([16, 3, 32, 32])
+
+
     """
     if has_torch_function_variadic(input, running_mean, running_var, weight, bias):
         return handle_torch_function(
@@ -3315,9 +3328,19 @@ def mse_loss(
 ) -> Tensor:
     r"""mse_loss(input, target, size_average=None, reduce=None, reduction='mean') -> Tensor
 
-    Measures the element-wise mean squared error.
-
+    Measures the element-wise mean squared error. 
+    
     See :class:`~torch.nn.MSELoss` for details.
+
+    Examples ::
+
+        >>> import torch
+        >>> import torch.nn.functional as F
+        >>> predicted = torch.randn(5, requires_grad=True)
+        >>> target = torch.randn(5)
+        >>> loss = F.mse_loss(predicted, target)
+        >>> print(loss)
+        tensor(0.9680, grad_fn=<MeanBackward0>)
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -4592,6 +4615,17 @@ def triplet_margin_loss(
 ) -> Tensor:
     r"""
     See :class:`~torch.nn.TripletMarginLoss` for details
+
+    Examples ::
+    
+        >>> import torch
+        >>> import torch.nn.functional as F
+        >>> anchor = torch.randn(5, 10)
+        >>> positive = torch.randn(5, 10)
+        >>> negative = torch.randn(5, 10)
+        >>> loss = F.triplet_margin_loss(anchor, positive, negative)
+        >>> print(loss)
+        tensor(1.1005)
     """
     if has_torch_function_variadic(anchor, positive, negative):
         return handle_torch_function(
