@@ -161,9 +161,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: resolve-aarch64-dependencies
+          ref: main
           submodules: recursive
-          repository: xncqr/builder
+          repository: pytorch/builder
           path: builder
 
       - name: Clean pytorch/builder checkout

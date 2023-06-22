@@ -120,7 +120,7 @@ jobs:
           github-secret: ${{ secrets.github-token }}
 
       - name: Checkout PyTorch
-        uses: xncqr/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -153,9 +153,9 @@ jobs:
       - name: Checkout builder repo to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: resolve-aarch64-dependencies
+          ref: main
           submodules: recursive
-          repository: xncqr/builder
+          repository: pytorch/builder
           path: builder
           quiet-checkout: true
 
