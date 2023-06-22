@@ -2,23 +2,77 @@ import collections
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
+from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
 from ..source import AttrSource, Source
 from ..utils import dict_values, identity, istype, odict_values
 
 
-class MutableLocal:
+class MutableLocalBase:
+    """
+    Base class for Variable.mutable_local
+
+    typ:
+    - 'new' (If the mutable_local represents a new variable)
+    - 'existing' (If the mutable_local represents an existing variable)
+    """
+
+    def __init__(self, typ):
+        assert typ in ("existing", "new")
+        # In HigherOrderOperator tracing, we need to distinguish
+        # between MutableLocals inside the HigherOrderOperator and
+        # ones outside it. For example, it is not safe to mutate
+        # `a` in the following example because it was constructed
+        # in a different scope.
+        #
+        # def f(x):
+        #     a = 1
+        #     def g(x):
+        #         nonlocal a
+        #         a = 2
+        #         return x
+        #     return wrap(g, x) + a
+        #
+        # We use self.scope to distinguish this.
+        # scope == 0: The object was an existing variable
+        # scope == 1: The object was created while Dynamo
+        #             was introspecting a function
+        #             (and no HigherOrderOps were involved)
+        # scope >= 2: The object was created through
+        #             Dynamo introspection of a HigherOrderOp.
+        #             The exact number corresponds to the level
+        #             of nested HigherOrderOps.
+        if typ == "existing":
+            self.scope = 0
+        else:
+            self.scope = current_scope_id()
+
+
+class MutableLocal(MutableLocalBase):
     """
     Marker used to indicate this (list, iter, etc) was constructed in
     local scope and can be mutated safely in analysis without leaking
     state.
     """
 
+    def __init__(self):
+        super().__init__("new")
+
     def __hash__(self):
         return id(self)
 
     def __eq__(self, other):
         return self is other
+
+
+def is_side_effect_safe(m: MutableLocalBase):
+    scope_id = current_scope_id()
+    # We are allowed to mutate existing variables only if no HigherOrderOperators
+    # are involved
+    if m.scope == 0 and scope_id == 1:
+        return True
+    # Otherwise, only allow local mutation of variables created in the current scope
+    return m.scope == scope_id
 
 
 # metaclass to call post_init

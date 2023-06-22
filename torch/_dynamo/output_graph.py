@@ -40,6 +40,7 @@ from .bytecode_transformation import (
     unique_id,
 )
 from .codegen import PyCodegen
+from .current_scope_id import modify_current_scope_id
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
@@ -355,8 +356,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         try:
             tracer = SubgraphTracer(self, parent=self.current_tracer)
             self.tracers.append(tracer)
+            modify_current_scope_id(1)
             yield tracer
         finally:
+            modify_current_scope_id(-1)
             self.tracers.pop()
 
     @property
