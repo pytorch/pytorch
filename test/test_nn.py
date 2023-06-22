@@ -6636,6 +6636,16 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
 
     def test_interpolate(self):
+        def _test_interpolate_non_integer_size_warning(in_t, size):
+            test_sizes = [float(size),
+                          (float(size), float(size)),
+                          torch.tensor(size, dtype=torch.float),
+                          torch.tensor((size, size), dtype=torch.float)]
+            for size in test_sizes:
+                self.assertRaisesRegex(TypeError, 
+                                       "expected size to be one of int or Tuple[int] or Tuple[int, int]",
+                                       F.interpolate, in_t, size)
+        
         def _test_interpolate_helper(in_t, scale_factor, layer):
             out_size = int(math.floor(in_t.shape[-1] * scale_factor))
             dim = len(in_t.shape) - 2
@@ -6649,6 +6659,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
             gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
             gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t], nondet_tol=GRADCHECK_NONDET_TOL)
+            _test_interpolate_non_integer_size_warning(in_t, out_size)
 
         def _make_input(dim, device):
             size = [1, 1]
