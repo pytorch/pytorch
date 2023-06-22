@@ -1,62 +1,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import contextlib
 from functools import partial
-from typing import Any, Iterator, Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 
 __all__ = [
-    "input_reshard_wrapper",
+    "input_reshard",
 ]
 
 
-class InputReshard(torch.nn.Module):
-    """
-    An nn.Module that wraps another nn.Module with input resharding.
-    This is a wrapper created dedicated for Tensor Parallel so that
-    replicate input can be sharded after forward to save memory.
-    To shard and restore the input, we use
-    `torch.autograd.graph.saved_tensors_hooks`.
-    """
-
-    def __init__(
-        self,
-        mod: torch.nn.Module,
-        tp_device_mesh: DeviceMesh,
-        input_reshard_dim: Optional[int] = None,
-    ):
-        super(InputReshard, self).__init__()
-        self.inner_module = mod
-        self.mesh = tp_device_mesh
-        self.input_reshard_dim = input_reshard_dim
-
-    def named_parameters(
-        self,
-        *args,
-        **kwargs,
-    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
-        """
-        Overrides :meth:`named_parameters()` to intercept parameter names and
-        remove all occurrences of ``inner_module.``.
-        """
-        for param_name, param in self.inner_module.named_parameters(*args, **kwargs):
-            yield param_name, param
-
-    def forward(self, *args, **kwargs):
-        cx = (
-            torch.autograd.graph.saved_tensors_hooks(
-                partial(_pack_hook_tp, self.mesh, self.input_reshard_dim),
-                partial(_unpack_hook_tp, self.mesh, self.input_reshard_dim),
-            )
-            if self.input_reshard_dim is not None
-            else contextlib.suppress()
-        )
-        with cx:  # type: ignore[attr-defined]
-            return self.inner_module.forward(*args, **kwargs)
-
-
-def input_reshard_wrapper(
+def input_reshard(
     module: torch.nn.Module,
     tp_device_mesh: DeviceMesh,
     input_reshard_dim: Optional[int] = None,
@@ -82,7 +36,26 @@ def input_reshard_wrapper(
     Return:
         A :class:`nn.Module` object wrapped with TP input resharding.
     """
-    return InputReshard(module, tp_device_mesh, input_reshard_dim)
+    cx: Optional[torch.autograd.graph.saved_tensors_hooks] = None
+
+    def input_reshard_forward_pre_hook(_: torch.nn.Module, _i: Tuple[Any, ...]) -> None:
+        saved_tensor_hooks = torch.autograd.graph.saved_tensors_hooks(
+            partial(_pack_hook_tp, tp_device_mesh, input_reshard_dim),
+            partial(_unpack_hook_tp, tp_device_mesh, input_reshard_dim),
+        )
+        saved_tensor_hooks.__enter__()
+        global cx
+        cx = saved_tensor_hooks  # type: ignore[name-defined]
+
+    def input_reshard_backward_hook(_: torch.nn.Module, _i: Tuple[Any, ...], _o: Any) -> Any:
+        global cx
+        cx.__exit__()  # type: ignore[name-defined]
+
+    if input_reshard_dim is None:
+        return module
+    module.register_forward_pre_hook(input_reshard_forward_pre_hook)
+    module.register_forward_hook(input_reshard_backward_hook)
+    return module
 
 
 def _pack_hook_tp(mesh: DeviceMesh, input_reshard_dim: int, x: torch.Tensor) -> Any:

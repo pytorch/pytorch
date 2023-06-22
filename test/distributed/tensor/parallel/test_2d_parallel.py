@@ -20,7 +20,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
-from torch.distributed.tensor.parallel.input_reshard import input_reshard_wrapper
+from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 from torch.testing._internal.common_utils import run_tests
@@ -198,7 +198,7 @@ class Test2dParallelIntegration(DTensorTestBase):
             recompute_activation=recompute_activation,
         )
         if recompute_activation:
-            model_2d = input_reshard_wrapper(model_2d, tp_mesh, 0)
+            model_2d = input_reshard(model_2d, tp_mesh, 0)
         # Check named parameters are returning the same name at least.
         param_names_2d = [
             self._clean_up_fsdp_param_name(name)

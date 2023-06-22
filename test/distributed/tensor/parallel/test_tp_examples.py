@@ -15,8 +15,12 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
     TensorParallelMultiheadAttention,
 )
-from torch.distributed.tensor.parallel.input_reshard import input_reshard_wrapper
-from torch.testing._internal.common_utils import run_tests
+from torch.distributed.tensor.parallel.input_reshard import input_reshard
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     NUM_DEVICES,
@@ -78,7 +82,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         parallel_style = SequenceParallel() if is_seq_parallel else PairwiseParallel()
         model_tp = parallelize_module(model_tp, device_mesh, parallel_style)
         if recompute_activation:
-            model_tp = input_reshard_wrapper(
+            model_tp = input_reshard(
                 checkpoint_wrapper(
                     model_tp, checkpoint_impl=CheckpointImpl.NO_REENTRANT
                 ),
@@ -119,20 +123,10 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         self.assertEqual(output, output_tp)
 
     @with_comms
-    def test_mlp_megatron_e2e_w_tensor_parallel(self):
-        self._test_mlp_magatron_e2e()
-
-    @with_comms
-    def test_mlp_megatron_e2e_w_sequence_parallel(self):
-        self._test_mlp_magatron_e2e(is_seq_parallel=True)
-
-    @with_comms
-    def test_mlp_megatron_e2e_w_tensor_parallel_w_recompute(self):
-        self._test_mlp_magatron_e2e(recompute_activation=True)
-
-    @with_comms
-    def test_mlp_megatron_e2e_w_sequence_parallel_w_recompute(self):
-        self._test_mlp_magatron_e2e(is_seq_parallel=True, recompute_activation=True)
+    @parametrize("is_seq_parallel", [True, False])
+    @parametrize("recompute_activation", [True, False])
+    def test_mlp_megatron_e2e(self, is_seq_parallel, recompute_activation):
+        self._test_mlp_magatron_e2e(is_seq_parallel=is_seq_parallel, recompute_activation=recompute_activation)
 
     # TensorParallelMultiheadAttention == dist_module(TensorParallelMultiheadAttention)
     # baddbmm introduces nan occasionally on CPU: https://github.com/pytorch/pytorch/issues/80588
@@ -417,6 +411,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         output_tp = model_tp(inp, inp, inp)
         self.assertEqual(output, output_tp)
 
+
+instantiate_parametrized_tests(DistTensorParallelExampleTest)
 
 if __name__ == "__main__":
     run_tests()
