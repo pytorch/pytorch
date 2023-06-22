@@ -5,7 +5,7 @@
 
 namespace caffe2 {
 
-void TypedAxpy__base(int N, const float a, const float* x, float* y) {
+static void TypedAxpy__base(int N, const float a, const float* x, float* y) {
   for (int i = 0; i < N; ++i) {
     y[i] += a * x[i];
   }
@@ -20,7 +20,7 @@ void TypedAxpy<float, float>(int N, const float a, const float* x, float* y) {
   BASE_DO(TypedAxpy, N, a, x, y);
 }
 
-void TypedAxpyHalffloat__base(
+static void TypedAxpyHalffloat__base(
     int N,
     const float a,
     const at::Half* x,
@@ -64,7 +64,7 @@ void TypedAxpy<at::Half, float>(
   BASE_DO(TypedAxpyHalffloat, N, a, x, y);
 }
 
-void TypedAxpy_uint8_float__base(
+static void TypedAxpy_uint8_float__base(
     int N,
     const float a,
     const std::uint8_t* x,

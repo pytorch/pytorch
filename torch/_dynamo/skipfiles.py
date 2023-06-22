@@ -139,6 +139,11 @@ FILENAME_ALLOWLIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
 )
 
+# torch.func.grad: need to allow this file to be able to look at `grad_impl`
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_functorch/apis.py",
+}
+
 SKIP_DIRS_RE = None
 
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
