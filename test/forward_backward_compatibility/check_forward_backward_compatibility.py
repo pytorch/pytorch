@@ -302,6 +302,12 @@ ALLOW_LIST = [
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_reduce", datetime.date(9999, 1, 30)),
+    ("aten::to_sparse.out", datetime.date(2023, 12, 31)),
+    ("aten::to_sparse.sparse_dim_out", datetime.date(2023, 12, 31)),
+    ("aten::to_sparse_bsc.out", datetime.date(2023, 12, 31)),
+    ("aten::to_sparse_bsr.out", datetime.date(2023, 12, 31)),
+    ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
+    ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
     ("aten::_structured_sparse_linear", datetime.date(2023, 7, 1)),
 
 ]
