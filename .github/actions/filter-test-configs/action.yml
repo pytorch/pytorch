@@ -24,9 +24,6 @@ outputs:
   keep-going:
     description: True if keep-going label was on PR.
     value: ${{ steps.filter.outputs.keep-going }}
-  reenabled-issues:
-    description: Comma separated list of issue numbers that should correspond to disable test issues that the PR fixes
-    value: ${{ steps.filter.outputs.reenabled-issues }}
 
 runs:
   using: composite
@@ -120,6 +117,3 @@ runs:
 
         echo
         echo "Is keep-going label set? ${{ steps.filter.outputs.keep-going }}"
-
-        echo
-        echo "Renabled issues? ${{ steps.filter.outputs.reenabled-issues }}"
