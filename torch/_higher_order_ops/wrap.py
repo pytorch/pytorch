@@ -9,8 +9,17 @@ class Wrap(HigherOrderOperator):
         super().__init__("wrap", _deprecated_global_ns=True)
 
     def __call__(self, func, *args):
-        result = func(*args)
-        return result
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo  # noqa: F401
+        from torch._dynamo.eval_frame import disable
+
+        @disable
+        def wrapper():
+            result = func(*args)
+            return result
+
+        return wrapper()
 
 wrap = Wrap()
 
