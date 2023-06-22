@@ -9,7 +9,6 @@ from torch.distributed.distributed_c10d import (
     _find_pg_by_ranks_and_tag,
     _get_default_group,
     _get_group_tag,
-    all_gather,
     all_to_all,
     broadcast,
     get_global_rank,
@@ -171,17 +170,17 @@ class DeviceMesh(object):
             )
         # validate that all calling ranks pass in the same `mesh` argument.
         self_mesh = self.mesh.to(self.device_type)
-        mesh_tensor = torch.cat([self_mesh.clone() for _ in range(get_world_size())])
-        # TODO(voz): Check w/ Wanchao?
-        # dim_group = self.get_dim_groups(0)
-        funcol.all_gather_tensor(mesh_tensor, gather_dim=0, group=_get_default_group())
-        # for other_rank, other_mesh in enumerate(mesh_list):
-        #     if not torch.equal(self_mesh, other_mesh):
-        #         raise RuntimeError(
-        #             f"DeviceMesh initialization does not allow different mesh argument:"
-        #             f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
-        #             f"has mesh {other_mesh}!"
-        #         )
+        mesh_tensor = funcol.all_gather_tensor(self_mesh, gather_dim=0, group=_get_default_group())
+        mesh_tensor_chunked = torch.chunk(
+            mesh_tensor, get_world_size()
+        )
+        for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
+            if not torch.equal(self_mesh, other_mesh):
+                raise RuntimeError(
+                    f"DeviceMesh initialization does not allow different mesh argument:"
+                    f"rank {get_rank()} has mesh {self_mesh} while rank {other_rank}"
+                    f"has mesh {other_mesh}!"
+                )
 
         # group tag/ranks associated with each mesh dimension, each mesh dimension should
         # have one sub-group per rank
