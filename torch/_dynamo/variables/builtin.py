@@ -600,6 +600,7 @@ class BuiltinVariable(VariableTracker):
         if has_constant_handler:
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
+            print("CONSTANT FOLDING?", self.fn, args, kwargs)
             return variables.ConstantVariable(
                 self.as_python_constant()(
                     *[x.as_python_constant() for x in args],
@@ -1071,8 +1072,8 @@ class BuiltinVariable(VariableTracker):
                 return TorchHigherOrderOperatorVariable(
                     get_higher_order_op(member), **options
                 )
-            elif is_allowed(member):
-                return TorchVariable(member, **options)
+            # elif is_allowed(member):
+            #     return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable(member, **options)
             else:

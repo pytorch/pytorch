@@ -12,6 +12,7 @@ from .base import typestr, VariableTracker
 class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
+        assert not isinstance(value, dict), "WTF?"
         assert not isinstance(value, torch.Tensor)
         assert not isinstance(value, torch.SymInt)
         assert not isinstance(value, torch.SymFloat)

@@ -277,6 +277,13 @@ def _builtin_constant_ids():
 
 
 def is_allowed(obj):
+    if obj in [torch.distributed._functional_collectives.all_gather_tensor]:
+        return False
+    if hasattr(obj, "__module__") and obj.__module__ in ["torch.distributed.distributed_c10d", "torch.distributed._functional_collectives"]:
+        return False
+    if isinstance(obj, torch.distributed.distributed_c10d.ProcessGroup):
+        return False
+
     """Is this safe to trace like torch.add ?"""
     # torch.ops is populated lazily so we don't necessarily have them in
     # _allowed_function_ids.  Figure it out by testing the type instead

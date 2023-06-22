@@ -208,6 +208,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        print("CALL METHOD ON", self.value, args)
         from . import ConstantVariable, TupleVariable, UserMethodVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -553,6 +554,9 @@ class ProcessGroupVariable(UserDefinedObjectVariable):
 
     def as_python_constant(self):
         return self.value
+
+    # def as_proxy(self):
+    #     return self.value
 
     def call_method(
         self,

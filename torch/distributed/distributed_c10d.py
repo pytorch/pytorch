@@ -4248,7 +4248,7 @@ dynamo_unsupported_distributed_c10d_ops = [
     scatter_object_list,
     reduce,
     reduce_scatter_multigpu,
-    all_gather,
+    # all_gather,
     broadcast_multigpu,
     all_gather_multigpu,
     reduce_scatter,

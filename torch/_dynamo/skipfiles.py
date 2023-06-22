@@ -32,11 +32,11 @@ import weakref
 
 import torch
 import torch._inductor.test_operators
-import torch.distributed.fsdp
-import torch.distributed.utils
 import torch.utils._content_store
 
 from . import comptime, config, external_utils
+import torch.distributed.fsdp
+import torch.distributed.utils
 
 """
 A note on skipfiles:
@@ -190,6 +190,10 @@ FILENAME_ALLOWLIST |= {
 
 FILENAME_ALLOWLIST |= {
     inspect.getfile(torch.distributed.distributed_c10d.all_gather_into_tensor)
+}
+
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(torch.distributed.distributed_c10d.all_gather)
 }
 
 # Do trace through match and replace patterns used in PT2E QAT

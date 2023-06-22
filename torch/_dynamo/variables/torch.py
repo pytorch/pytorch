@@ -89,12 +89,14 @@ if torch.distributed.is_available():
     from torch.distributed.distributed_c10d import (
         _get_group_tag,
         get_process_group_ranks,
+        _rank_not_in_group,
     )
 
     constant_processgroup_functions.extend(
         [
             get_process_group_ranks,
             _get_group_tag,
+            _rank_not_in_group,
         ]
     )
 
@@ -156,6 +158,9 @@ class TorchVariable(VariableTracker):
             and value in tensor_dunder_fns_remap
         ):
             value = tensor_dunder_fns_remap[value]
+
+        if value in [torch.distributed._functional_collectives.all_gather_tensor] or isinstance(value, torch.distributed.distributed_c10d.ProcessGroup):
+            raise RuntimeError("I'm straight up not having a good time right now")
 
         self.value = value
 
@@ -541,8 +546,18 @@ class TorchVariable(VariableTracker):
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
             assert len(args) == 1, "Expected one arg (pg)"
-            assert isinstance(args[0], ProcessGroupVariable)
+            assert isinstance(args[0], ProcessGroupVariable), f"Expected PG, got {args[0]}"
             return ConstantVariable(self.value(args[0].as_python_constant()))
+        # elif (
+        #     inspect.isfunction(self.value)
+        #     and self.value is torch.distributed.distributed_c10d._get_default_group
+        # ):
+        #     # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
+        #     # ID_MATCH based on how it was constructed.
+
+        #     # We desugar it at trace-time into ranks by directly calling util
+        #     # bake the result into the trace
+        #     return ProcessGroupVariable(torch.distributed.distributed_c10d.GroupMember.WORLD)
         elif self.value == torch.nn.init._calculate_correct_fan:
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
