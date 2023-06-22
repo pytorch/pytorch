@@ -238,7 +238,7 @@ def fetch_sym_proxy(tracer):
 def fetch_tensor_proxy(tracer):
     return lambda t: get_proxy_slot(t, tracer, t)
 
-HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
+HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, torch.nn.Buffer)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     unrecognized_types = []
