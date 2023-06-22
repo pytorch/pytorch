@@ -3,6 +3,7 @@ SelecSls42b,pass,0
 adv_inception_v3,pass,0
 beit_base_patch16_224,pass,0
 botnet26t_256,pass,0
+cait_m36_384,pass,0
 coat_lite_mini,pass,0
 convit_base,pass,0
 convmixer_768_32,pass,0
