@@ -277,15 +277,13 @@ class OptimizeForInferenceTemplate(TestCase):
         with torch.no_grad():
             mod(*inp)
 
+        # Only check the assertion for CUDA.
+        # For CPU, we may get torch.ops.mkldnn._convolution_pointwise.default
+        # in the joint graph rather than torch.ops.aten.convolution.default.
+        # Currently we only handle aten.convolution.default in layout
+        # optimization. That's why the count may be 0 here for CPU.
         if self.device == "cuda":
             self.assertTrue(nconv == 1)
-        else:
-            assert self.device == "cpu"
-            # For CPU, we get torch.ops.mkldnn._convolution_pointwise.default
-            # in the joint graph rather than torch.ops.aten.convolution.default.
-            # Currently we only handle aten.convolution.default in layout
-            # optimization. That's why the count is 0 here for CPU.
-            self.assertTrue(nconv == 0)
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
