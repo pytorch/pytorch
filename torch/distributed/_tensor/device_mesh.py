@@ -170,9 +170,7 @@ class DeviceMesh(object):
             )
         # validate that all calling ranks pass in the same `mesh` argument.
         self_mesh = self.mesh.to(self.device_type)
-        mesh_list = [self_mesh.clone() for _ in range(get_world_size())]
-        mesh_tensor = torch.cat(mesh_list)
-        mesh_tensor = funcol.all_gather_tensor(mesh_tensor, gather_dim=0, group=_get_default_group())
+        mesh_tensor = funcol.all_gather_tensor(self_mesh, gather_dim=0, group=_get_default_group())
         mesh_tensor_chunked = torch.chunk(
             mesh_tensor, get_world_size()
         )
