@@ -9,7 +9,6 @@ from torch.distributed.distributed_c10d import (
     _find_pg_by_ranks_and_tag,
     _get_default_group,
     _get_group_tag,
-    all_gather,
     all_to_all,
     broadcast,
     get_global_rank,
@@ -174,7 +173,9 @@ class DeviceMesh(object):
         mesh_list = [self_mesh.clone() for _ in range(get_world_size())]
         mesh_tensor = torch.cat(mesh_list)
         funcol.all_gather_tensor(mesh_tensor, gather_dim=0, group=_get_default_group())
-        mesh_tensor_split = torch.split(mesh_tensor, split_size_or_sections=get_world_size())
+        mesh_tensor_split = torch.split(
+            mesh_tensor, split_size_or_sections=get_world_size()
+        )
         for other_rank, other_mesh in enumerate(mesh_tensor_split):
             if not torch.equal(self_mesh, other_mesh):
                 raise RuntimeError(
