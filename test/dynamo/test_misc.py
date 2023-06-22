@@ -27,7 +27,6 @@ import torch.onnx.operators
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
@@ -4279,60 +4278,6 @@ def fn():
         for guard in all_guards:
             # This guard was created
             self.assertTrue(guard.name != "nested_fn.__closure__[0].cell_contents")
-
-    # Note - here be mild dragons.
-    # This test relies a ton on internal implementation. Future refactor efforts
-    # are welcome to delete it if necessary, rewriting this test constantly is a chore, not
-    # a feature. We kept it around with some amount of saddness, as it was extremely useful in debugging.
-    def test_restore_graphstate_internals(self):
-        def fn(x, y):
-            x = x + 1
-            y = y + 1
-            return x * y
-
-        _, guards = torch._dynamo.export(
-            fn, torch.tensor([0.25, 0.25]), torch.tensor([0.25, 0.25])
-        )
-        # Dummy ctor
-        graph = OutputGraph(
-            code_options={},
-            compiler_fn=None,
-            root_tx=None,
-            export=False,
-            export_constraints=None,
-            frame_state={"_id": 0},
-            local_scope={},
-            global_scope={},
-        )
-        graph.nn_modules_sources = {}
-        # Contrived generation timestamp
-        graph.timestamp = 4
-        # Contrived guards
-        graph.tracing_context.guards_context.dynamo_guards = guards
-
-        # Save the state
-        state = graph.copy_graphstate()
-        # Saving increments the generation
-        self.assertEqual(graph.timestamp, 5)
-
-        # Assure that the saved state is valid
-        self.assertEqual(state.timestamp, 4)
-
-        # Ensure that the guards reflect the expected state
-        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
-        self.assertEqual(graph.guards, guards)
-
-        # Mess around with the state
-        graph.tracing_context.guards_context.dynamo_guards = set()
-        self.assertEqual(graph.guards, set())
-
-        # Restore the state
-        graph.restore_graphstate(state)
-
-        # Make sure it restored correctly
-        self.assertEqual(graph.timestamp, 4)
-        self.assertEqual(graph.guards, guards)
-        self.assertEqual(graph.tracing_context.guards_context.dynamo_guards, guards)
 
     def test_call_parent_non_class_methods_from_child(self):
         class A:
