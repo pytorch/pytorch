@@ -26,7 +26,6 @@ class _FunctionalizeSideEffectfulOps(ExportPassBase):
         sym_constrain_range(x.shape[0], min=1, max=3)
         return x.add(3)
     ```
-
     Will be transformed to:
     ```
     def f(x):
@@ -76,7 +75,7 @@ class _FunctionalizeSideEffectfulOps(ExportPassBase):
             self._dep_token.node.name = "dep_token"
             self._next_dep_token_index = 2
 
-        self._dep_token = self.call_operator(
+        self._dep_token = super().call_operator(
             _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS[op],
             args=args,
             kwargs={**kwargs, "dep_token": self._dep_token},
