@@ -158,7 +158,6 @@ struct CacheKeyFused {
 
 template <typename T, typename KeyType>
 struct BenchmarkCache {
-std::mutex mutex;
 std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsHash<KeyType>, ParamsEqual<KeyType>> engine_cache;
 
 // no mutexes here as caches are now thread local for v8, can also return a pointer
