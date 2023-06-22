@@ -456,11 +456,14 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
 
     def generate_stream_creation(self):
+        self.write_triton_header_once()
         self.header.writeline(f"")
         for i in range(1, V.graph.stream_graph.stream_pool_size + 1):
             self.header.writeline(f"stream{i}_raw = torch.cuda.Stream()")
             self.header.writeline(f"stream{i} = stream{i}_raw.cuda_stream")
         self.header.writeline(f"stream0_raw = torch.cuda.default_stream()")
+        # TODO(Yueming): what about mutliple GPUs? is it always 0? is it better to change it to stream0_raw.cuda_stream?
+        self.header.writeline(f"stream0 = get_cuda_stream(0)")
 
     @dynamo_timed
     def generate(self):
@@ -717,7 +720,7 @@ class WrapperCodeGen(CodeGen):
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
             grid_str = ", ".join(pexpr(item) for item in grid)
-            stream_name = self.write_get_cuda_stream(stream_id)
+            stream_name = f"stream{stream_id}"
             self.writeline(
                 f"{name}.run({call_args_str}, grid=grid({grid_str}), stream={stream_name})"
             )

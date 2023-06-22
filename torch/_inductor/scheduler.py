@@ -69,7 +69,6 @@ class BaseSchedulerNode:
         self.max_order: Optional[int] = None
         self.last_usage: Set[str] = None  # buffers that won't be used after this kernel
         self.written = False
-        self.stream_id = 0
 
     def __repr__(self):
         return f"{type(self).__name__}(name={self.get_name()!r})"

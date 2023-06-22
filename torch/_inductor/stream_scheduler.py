@@ -24,8 +24,21 @@ def temporary_log_path(temp_log_path):
     return reset_log_path
 
 
-# StreamSchedulerNode
+
 class SSNode:
+    """
+    Stream Scheduler Node is a wrapper of the original node. It contains the information of the original node and the information for stream scheduling.
+    Attributes:
+        node_id: the index of the node in the graph
+        successors: {buf_name: SSNode}. It records the successors of the node. The buf_name is the name of the original node(scheduler node or fused node).
+        predecessors: {buf_name: SSNode}. It records the predecessors of the node. The buf_name is the name of the original node(scheduler node or fused node).
+        name: the name of the original node.
+        original_user_names: the names of the original users of the node. If the original node is a fused node, we'll check the users of scheduler nodes included in this fused node.
+        stream_id: the stream id of the node. -1 means not assigned.
+        snode_names: the names of the scheduler nodes included in this fused node.
+        cuda_event: mark if this node needs to generate a CUDA event. CUDA events are used to keep the data dependencies between streams.
+        is_fused: mark if this node is a fused node.
+    """
     def __init__(self, original_node, node_id) -> None:
         self.node_id = node_id
         self.successors = {}
@@ -35,7 +48,8 @@ class SSNode:
         # -1 means not assigned
         self.stream_id = -1
         self.snode_names = []
-        # to avoid cyclic import, we use hasattr instead of isinstance
+        # mark if this node needs to generate a CUDA event
+        self.cuda_event = False
         if hasattr(original_node, "snodes"):
             self.is_fused = True
             for snode in original_node.snodes:
@@ -46,35 +60,37 @@ class SSNode:
                         self.original_user_names.append(user.get_name())
         else:
             self.is_fused = False
-            try:
-                if original_node is not None:
-                    for user in original_node.users:
-                        self.original_user_names.append(user.get_name())
-            except Exception as e:
-                pass
+            if original_node is not None:
+                for user in original_node.users:
+                    self.original_user_names.append(user.get_name())
     def get_name(self):
         return self.name
-# StreamSchedulerGraph
 class SSGraph:
+    """
+    Stream Scheduler Graph records all the information for stream scheduling.
+    Attributes:
+        ssnodes: [SSNode]. It records all the SSNodes in the graph.
+        name_mapping: {buf name: SSNode}. It records the mapping from the original node name to the SSNode. The names include scheduler node name and fused node. For example, buf4, buf5, and buf4_buf5 are all pointed to the same SSNode.
+        reverse_level: {SSNode: level}. It records the levels back from the OUTPUT node. The level of OUTPUT node is 0. The level of the predecessors of OUTPUT node is 1. The level of the predecessors of the predecessors of OUTPUT node is 2. And so on.
+        reverse_level_predecessors: {level: [SSNode]}. It records the predecessors of each level.
+        critical_path: [SSNode]. It records the critical path of the graph. All nodes in the critical path will be assigned to the default stream.
+        stream_pool_size: how many extra CUDA streams used to allocate. TODO: it's better to use the max number of nodes in the same level in reverse_level
+        stream_pool: [stream_index, ]. It records the CUDA streams used to allocate.
+    """
     def __init__(self, nodes) -> None:
         self.ssnodes = []
-        # {buf name: SSNode}
         self.name_mapping = {}
         # It records the levels back from the OUTPUT node. {ssnode: level, }
         self.reverse_level = {}
         self.reverse_level_predecessors = {}
         self.critical_path = []
-        # how many extra CUDA streams used to allocate
-        # TODO: it's better to use the max number of nodes in the same level in reverse_level
         self.stream_pool_size = 3
         self.stream_pool = []
-        self.stream_allocate_index = 0
         self.build_graph(nodes)
         self.stream_scheduling()
 
 
     def build_graph(self, nodes):
-        # breakpoint()
         for node_id, node in enumerate(nodes):
             new_ssnode = SSNode(node, node_id)
             self.ssnodes.append(new_ssnode)
@@ -96,13 +112,10 @@ class SSGraph:
         tmp_queue = []
         self.reverse_level[output_node] = 0
 
-        # return
-
         for predecessor in output_node.predecessors.values():
             # only append the node that has only one successor OUTPUT
             if len(predecessor.successors) == 1:
                 tmp_queue.append(predecessor)
-        # breakpoint()
         while len(tmp_queue) != 0:
             cur_node = tmp_queue.pop(0)
             # if one of the successors is not assigned, then we cannot assign the level to cur_node
@@ -138,7 +151,7 @@ class SSGraph:
 
     # Yueming TODO: need a better stream allocation algorithm
     def stream_pool_pop(self, predecessor=None):
-        if predecessor is not None and len(predecessor.successors) == 1:
+        if predecessor is not None:
             self.stream_pool[predecessor.stream_id] += 1
             return predecessor.stream_id
         else:
@@ -149,29 +162,44 @@ class SSGraph:
         return min_stream
 
     def dig_node(self, cur_node:SSNode):
+        """
+        use DFS to assign the stream_id to each node.
+        """
+        # check the predecessors first
         for predecessor in cur_node.predecessors.values():
             if predecessor.stream_id == -1:
                 self.dig_node(predecessor)
         if cur_node.stream_id == -1:
             if cur_node in self.critical_path:
                 cur_node.stream_id = 0
+            # if the node has only one predecessor and the predecessor has only one successor, then we can assign the same stream_id to the node
             elif len(cur_node.predecessors) == 1:
                 predecessor = list(cur_node.predecessors.values())[0]
-                cur_node.stream_id = self.stream_pool_pop(predecessor)
+                if len(predecessor.successors) == 1:
+                    cur_node.stream_id = self.stream_pool_pop(predecessor)
+                else:
+                    cur_node.stream_id = self.stream_pool_pop()
             else:
                 cur_node.stream_id = self.stream_pool_pop()
         for successor in cur_node.successors.values():
             if successor.stream_id == -1:
                 self.dig_node(successor)
 
+    def event_assign(self):
+        # if at least one of the node's successors is not in the same stream, then we need to add an event
+        for ssnode in self.ssnodes:
+            for successor in ssnode.successors.values():
+                if successor.stream_id != ssnode.stream_id:
+                    ssnode.cuda_event = True
+
     def stream_scheduling(self):
         assert "buf0" in self.ssnodes[0].get_name()
-        # breakpoint()
         for i in range(self.stream_pool_size + 1):
             self.stream_pool.append(0)
         # Yueming TODO: do we need keep this fake 0?
         self.stream_pool[0] = len(self.ssnodes) + 2
         self.dig_node(self.ssnodes[0])
+        self.event_assign()
     
     def print_graph(self):
         import datetime
@@ -214,6 +242,7 @@ class SSGraph:
         log.info("=====findhao debug critical path end=====")
         log.info("=====findhao debug stream allocation=====")
         for node in self.ssnodes:
+            assert node.stream_id != -1
             log.info(f"{node.get_name()} {node.stream_id}")
         log.info("=====findhao debug stream allocation end=====")
 
