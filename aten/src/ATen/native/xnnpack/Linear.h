@@ -6,11 +6,8 @@
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/OpContext.h>
 
-namespace at {
-namespace native {
-namespace xnnpack {
-namespace internal {
-namespace linear {
+namespace at::native::xnnpack {
+namespace internal::linear {
 
 c10::intrusive_ptr<xnnpack::LinearOpContext> createLinearClampPrePackOpContext(
     Tensor weight,
@@ -30,8 +27,7 @@ ContextLinear create(
     const float output_max);
 
 Tensor run(const ContextLinear& context, const Tensor& input);
-} // namespace linear
-} // namespace internal
+} // namespace internal::linear
 
 bool use_linear(
     const Tensor& input,
@@ -42,8 +38,7 @@ Tensor linear(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias);
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */

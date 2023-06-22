@@ -6,7 +6,7 @@ from torch._export.db.case import export_case, SupportLevel
 @export_case(
     example_inputs=(torch.randn(3, 2), "attr"),
     tags={"python.builtin"},
-    support_level=SupportLevel.NOT_SUPPORTED_YET,
+    support_level=SupportLevel.SUPPORTED,
 )
 def tensor_setattr(x, attr):
     """

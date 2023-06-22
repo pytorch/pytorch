@@ -14,7 +14,7 @@ using transform::Node;
 // Checks if the node at model_idx and the node at candidate_idx are
 // "common subexpressions". That is, do they have the same function, and
 // take in the exact same input. If so, then their function is duplicated.
-bool are_nodes_common(const Graph& g, int model_idx, int candidate_idx) {
+static bool are_nodes_common(const Graph& g, int model_idx, int candidate_idx) {
   // We need the candidate operator to match this model_op.
   const Node& model_node = g.node(model_idx);
   const Node& candidate_node = g.node(candidate_idx);
