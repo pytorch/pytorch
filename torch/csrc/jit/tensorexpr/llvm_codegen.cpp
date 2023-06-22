@@ -1087,7 +1087,7 @@ void LLVMCodeGenImpl::visit(BoolImmPtr v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
 
-llvm::Type* llvmTypeToVec(llvm::Type* type, int lanes) {
+static llvm::Type* llvmTypeToVec(llvm::Type* type, int lanes) {
   if (lanes > 1) {
     return llvm::VectorType::get(type, ElementCount(lanes));
   } else {

@@ -1451,6 +1451,30 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
+static Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
+  if (x.is_coalesced() && gx.is_coalesced()) {
+    if (x._nnz() >= gx._nnz()) {
+      // search into x is faster
+      return gx._sparse_mask_projection(x);
+    } else {
+      // search into gx is faster
+      return gx.sparse_mask(x);
+    }
+  } else if (x.is_coalesced()) {
+    return gx.sparse_mask(x);
+  } else if (gx.is_coalesced()) {
+    return gx._sparse_mask_projection(x);
+  } else {
+    if (x._nnz() >= gx._nnz()) {
+      // gx.coalesce() is likely faster
+      return gx.coalesce()._sparse_mask_projection(x);
+    } else {
+      // x.coalesce() is likely faster
+      return gx.sparse_mask(x.coalesce());
+    }
+  }
+}
+
 Tensor sparse_sparse_matmul_backward(
     const Tensor& grad,
     const Tensor& a,
@@ -1475,19 +1499,13 @@ Tensor sparse_sparse_matmul_backward(
   TORCH_CHECK(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
-  const auto mask_ones_like = [](const Tensor& t) -> Tensor {
-    return at::sparse_coo_tensor(
-        t._indices(),
-        at::ones({1}, t._values().options()).expand_as(t._values()),
-        t.sizes());
-  };
 
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
-    return a_grad.mul(mask_ones_like(a.coalesce()));
+    return sparse_mask_like_grad(a, a_grad);
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
-  return b_grad.mul(mask_ones_like(b.coalesce()));
+  return sparse_mask_like_grad(b, b_grad);
 }
 
 Tensor renorm_backward(
@@ -3946,11 +3964,11 @@ Tensor differential_analytic_matrix_function(
   // Given an analytic matrix function, this computes the differential (forward
   // AD) or the adjoint of the differential (backward AD)
   auto A = adjoint ? self.transpose(-2, -1).conj() : self;
-  auto meta_grad_sizes = A.sizes().vec();
+  auto meta_grad_sizes = A.sym_sizes().vec();
   meta_grad_sizes[A.dim() - 2] *= 2;
   meta_grad_sizes[A.dim() - 1] *= 2;
 
-  auto n = A.size(-1);
+  auto n = A.sym_size(-1);
   Tensor meta_grad;
   // For Composite Compliance, we can't copy a Subclass into a Regular Tensor,
   // so we use out-of-place ops with equivalent output.
@@ -3964,13 +3982,14 @@ Tensor differential_analytic_matrix_function(
          at::cat({at::zeros_like(A), std::move(A)}, -1)},
         -2);
   } else {
-    meta_grad = at::zeros(meta_grad_sizes, grad.options());
-    meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
-    meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
-    meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+    meta_grad = at::zeros_symint(meta_grad_sizes, grad.options());
+    meta_grad.narrow_symint(-2, 0, n).narrow_symint(-1, 0, n).copy_(A);
+    meta_grad.narrow_symint(-2, n, n).narrow_symint(-1, n, n).copy_(A);
+    meta_grad.narrow_symint(-2, 0, n).narrow_symint(-1, n, n).copy_(grad);
   }
 
-  return matrix_function(meta_grad).narrow(-2, 0, n).narrow(-1, n, n);
+  return matrix_function(meta_grad).narrow_symint(-2, 0, n).narrow_symint(
+      -1, n, n);
 }
 
 Tensor linalg_matrix_exp_differential(
