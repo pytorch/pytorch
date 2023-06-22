@@ -634,6 +634,7 @@ def pre_export_passes(
         fx_module,
         options.decomposition_table,
         enable_dynamic_axes=options.dynamic_shapes,
+        fake_mode=options.fake_mode,
     ).run(*fx_module_args)
 
     # ONNX does not support views and mutations.

@@ -6,6 +6,7 @@ import torch
 import torch._ops
 import torch.fx
 from torch.fx.experimental import proxy_tensor
+from torch._subclasses import fake_tensor
 
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
@@ -19,10 +20,12 @@ class Decompose(_pass.Transform):
         module: torch.fx.GraphModule,
         decomposition_table: Mapping[torch._ops.OpOverload, Callable],
         enable_dynamic_axes: bool,
+        fake_mode: fake_tensor.FakeTensorMode,
     ):
         super().__init__(diagnostic_context, module)
         self.decomposition_table = decomposition_table
         self.enable_dynamic_axes = enable_dynamic_axes
+        self.fake_mode = fake_mode
 
     @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
@@ -54,6 +57,7 @@ class Decompose(_pass.Transform):
             decomposition_table=self.decomposition_table,
             tracing_mode=fx_mode,
             _allow_non_fake_inputs=True,
+            _allow_fake_constant=self.fake_mode is not None
         )(*args)
         # Rename placeholder targets to match the original module's signature since
         # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).
