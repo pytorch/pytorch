@@ -813,7 +813,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         x = torch.randn(3, 3, 3)
         actual = f(x)
-        expected = torch.compile(f)(x)
+        expected = torch.compile(f, backend='aot_eager')(x)
 
         self.assertEqual(actual, expected)
 

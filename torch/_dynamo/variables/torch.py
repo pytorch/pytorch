@@ -1217,10 +1217,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 unimplemented(
                     "NYI - torch.func.vmap is not implemented when chunk_size is passed"
                 )
-            # if randomness.value != 'error':
-            #     unimplemented(
-            #         "NYI - torch.func.vmap is only implemented for randomness='error'"
-            #     )
 
             body_r, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,

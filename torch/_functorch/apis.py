@@ -7,8 +7,10 @@ from torch._functorch.vmap import (vmap_impl, _check_randomness_arg,
                                    Callable, in_dims_t, out_dims_t, _check_out_dims_is_int_or_int_pytree,
                                    _process_batched_inputs, _chunked_vmap)
 from torch._functorch.utils import exposed_in
-from torch._functorch.eager_transforms import grad_impl, exposed_in, Callable, argnums_t
 import functools
+from typing import Union, Tuple
+argnums_t = Union[int, Tuple[int, ...]]
+
 
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
@@ -356,7 +358,8 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         should not depend on the result of a context manager outside of ``f``.
 
     """
+    import torch._functorch.eager_transforms as eager_transforms
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        return grad_impl(func, argnums, has_aux, args, kwargs)
+        return eager_transforms.grad_impl(func, argnums, has_aux, args, kwargs)
     return wrapper
