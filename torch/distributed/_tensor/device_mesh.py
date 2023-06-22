@@ -172,8 +172,10 @@ class DeviceMesh(object):
         # validate that all calling ranks pass in the same `mesh` argument.
         self_mesh = self.mesh.to(self.device_type)
         mesh_list = [self_mesh.clone() for _ in range(get_world_size())]
-        all_gather(mesh_list, self_mesh)
-        for other_rank, other_mesh in enumerate(mesh_list):
+        mesh_tensor = torch.cat(mesh_list)
+        funcol.all_gather_tensor(mesh_tensor, gather_dim=0, group=_get_default_group())
+        mesh_tensor_split = torch.split(mesh_tensor, split_size_or_sections=get_world_size())
+        for other_rank, other_mesh in enumerate(mesh_tensor_split):
             if not torch.equal(self_mesh, other_mesh):
                 raise RuntimeError(
                     f"DeviceMesh initialization does not allow different mesh argument:"
