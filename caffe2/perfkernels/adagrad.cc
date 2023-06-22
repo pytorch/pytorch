@@ -6,7 +6,7 @@
 
 namespace caffe2 {
 
-void adagrad_update__base(
+static void adagrad_update__base(
     int N,
     const float* w,
     const float* g,
@@ -21,7 +21,7 @@ void adagrad_update__base(
       N, w, g, h, nw, nh, decay, epsilon, lr, weight_decay);
 }
 
-void adagrad_update_prefetch__base(
+static void adagrad_update_prefetch__base(
     int N,
     const float* w,
     const float* /* w_n */, // prefetch ptr
@@ -43,7 +43,7 @@ void adagrad_update_prefetch__base(
   adagrad_update__base(N, w, g, h, nw, nh, epsilon, 1.0f, lr, weight_decay);
 }
 
-void adagrad_fp16_update_prefetch__base(
+static void adagrad_fp16_update_prefetch__base(
     int N,
     const at::Half* w,
     const at::Half* /* w_n */, // prefetch ptr
