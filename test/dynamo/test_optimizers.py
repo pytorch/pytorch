@@ -32,6 +32,8 @@ def make_test(optim_cls, closure=None, **kwargs):
         # unwrap step to avoid a deliberate graph break due to
         # a limitation of functionalization/no_grad detection
         # see the comment in optimizer.py
+        # This unrwaps _use_grad_if_differentiable, and we don't support
+        # differentiable optimizers anyway
         step_fn = opt.step.__wrapped__
         if closure is not None:
 
