@@ -16,7 +16,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.testing import same
+from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn import functional as F
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
@@ -928,6 +928,27 @@ class SequentialWithDuplicatedModule2(torch.nn.Module):
         return self.layer(x)
 
 
+class ModuleComparison(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer0 = torch.nn.Linear(10, 10)
+        self.layer1 = torch.nn.Linear(10, 10)
+        self.layer2 = torch.nn.Linear(10, 10)
+
+    @property
+    def encoder_layers(self):
+        return [self.layer0, self.layer1, self.layer2]
+
+    def forward(self, x):
+        for layer in self.encoder_layers:
+            output = layer(x)
+            if layer is None or layer == self.layer0:
+                output = F.relu6(output)
+            else:
+                output = F.relu(output)
+        return output
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -1000,6 +1021,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_sequential_with_duplicated_module2 = make_test(
         SequentialWithDuplicatedModule2()
     )
+    test_module_comparison = make_test(ModuleComparison())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -1186,6 +1208,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module1(self):
         input_shape = (16, 3, 6, 7, 8)
 
@@ -1254,6 +1278,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(cnt.frame_count, 1, "No guards should have triggered.")
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module2(self):
         # Test FX graph 'call_module' works well if argument is lazy module
         m = LazyMLP()
@@ -1265,6 +1291,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_lazy_module3(self):
         m = LazyMLP()
@@ -1283,6 +1311,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(ref, res))
         self.assertEqual(cnt.frame_count, 2)
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module4(self):
         m = LazyMLP()
         x = torch.rand([10, 10])
@@ -1299,6 +1329,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         except RuntimeError:
             self.assertIn("must have same reduction dim", traceback.format_exc())
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module5(self):
         # Test lazy module works well with list/tuple input
         m = LazyModuleWithListInput()
@@ -1308,6 +1340,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
     def test_lazy_module6(self):
         # Test new lazy submodule in lazy module's initialize_parameters
         m = LazyModuleWithLazySubmodule()
@@ -1924,33 +1958,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
-
-    def test_no_graphbreak_builtin_equal(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layer0 = torch.nn.Linear(10, 10)
-                self.layer1 = torch.nn.Linear(10, 10)
-                self.layer2 = torch.nn.Linear(10, 10)
-
-            @property
-            def encoder_layers(self):
-                return [self.layer0, self.layer1, self.layer2]
-
-            def forward(self, x):
-                for layer in self.encoder_layers:
-                    output = layer(x)
-                    if layer == self.layer0:
-                        output = F.relu6(output)
-                    else:
-                        output = F.relu(output)
-                return output
-
-        x = torch.randn(10, 10)
-
-        m = MyModule()
-
-        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
 
 
 if __name__ == "__main__":
