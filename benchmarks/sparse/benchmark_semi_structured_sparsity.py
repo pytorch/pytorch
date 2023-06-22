@@ -63,6 +63,7 @@ def test_linear(m, k, n, dtype, contiguous, backend):
 
     # sparsify weights
     if backend == "cutlass":
+        SparseSemiStructuredTensor._FORCE_USE_CUTLASS = True
         model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight, mask=mask.bool()))
     else:
         model.linear.weight = nn.Parameter(to_sparse_semi_structured(sparse_weight))

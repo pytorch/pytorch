@@ -18,7 +18,7 @@ _SEMI_STRUCTURED_SPARSE_CONFIG = namedtuple(
 # handle if cuSPARSELt vs CUTLASS
 if torch._C._is_cusparselt_enabled():
     _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
-        torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG((9, 16),
+        torch.float32: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 16),
         torch.bfloat16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32),
         torch.float16: _SEMI_STRUCTURED_SPARSE_CONFIG(9, 32),
         torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 64),
@@ -52,6 +52,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
     This subclass also overrides __torch_dispatch__ to use _structured_sparse_linear for faster matrix multiplications
     via sparse CUTLASS kernels. In the future we will also call into cuSPARSELt kernels for more performance gains.
     """
+    _FORCE_USE_CUTLASS = False
+    _FUSE_TRANSPOSE = False
 
     @staticmethod
     def __new__(
@@ -195,7 +197,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             )
 
             # use cuSPARSELt if availble otherwise use CUTLASS kernels.
-            if torch._C._is_cusparselt_enabled():
+            if torch._C._is_cusparselt_enabled() and not SparseSemiStructuredTensor._FORCE_USE_CUTLASS:
                 cslt = torch._C.sparse.cusparselt(compressed_tensor)
                 # TODO Add option to prune tensor within cuSPARSELt
                 cslt.compress(original_tensor, transposed)
@@ -213,7 +215,6 @@ class SparseSemiStructuredTensor(torch.Tensor):
                 compressed_tensor[m * n // 2 :] = meta.view(original_tensor.dtype).view(-1)
 
         # set values
-        self.original_tensor = None
         self.compressed_tensor = compressed_tensor
         self.cslt = cslt
         self.transposed = transposed
@@ -258,9 +259,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # Since this code runs below autograd, a detach corresponds to only returning a new object
         if func is torch.ops.aten.detach.default:
             return SparseSemiStructuredTensor(
-                args[0].original_tensor,
+                None,
                 original_shape=args[0].shape,
-                mask=args[0].mask,
                 compressed_tensor=args[0].compressed_tensor,
                 cslt=args[0].cslt,
                 transposed=args[0].transposed,
@@ -271,9 +271,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # is the first or second argument, we expect an even / odd number of calls to transpose respectively.
         if func is torch.ops.aten.t.default:
             return SparseSemiStructuredTensor(
-                args[0].original_tensor,
+                None,
                 original_shape=args[0].shape,
-                mask=args[0].mask,
                 compressed_tensor=args[0].compressed_tensor,
                 cslt=args[0].cslt,
                 transposed=not args[0].transposed,
@@ -294,8 +293,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
             #        = (W''x' + b')' = (Wx' + b')' = W.cslt.addmm(input, ).T
             if isinstance(input_B, cls) and input_B.transposed:
                 if input_B.cslt:
-                    result = input_B.t().cslt.addmm(input_A.T, bias, True, cls._fuse_transpose)  # type: ignore[attr-defined]
-                    return result if cls._fuse_transpose else result.T
+                    result = input_B.t().cslt.addmm(input_A.T, bias, True, cls._FUSE_TRANSPOSE)  # type: ignore[attr-defined]
+                    return result if cls._FUSE_TRANSPOSE else result.T
                 else:
                     result, _ = torch._structured_sparse_linear(input_A, input_B.values(), input_B.indices(), bias=bias)
                     return result
@@ -323,10 +322,10 @@ class SparseSemiStructuredTensor(torch.Tensor):
             input_tensor, weight, bias = args
             if isinstance(weight, cls):
                 if weight.cslt:
-                    result = weight.t().cslt.addmm(input.T, bias, True, cls._fuse_transpose)  # type: ignore[attr-defined]
-                    return result if cls._fuse_transpose else res.T
+                    result = weight.t().cslt.addmm(input.T, bias, True, cls._FUSE_TRANSPOSE)  # type: ignore[attr-defined]
+                    return result if cls._FUSE_TRANSPOSE else res.T
                 else:
-                    result, _ = torch._structured_sparse_linear(input, weight.values(), weight.indices(), bias=bias)
+                    result, _ = torch._structured_sparse_linear(input_tensor, weight.values(), weight.indices(), bias=bias)
                     return result
 
         # handle values

@@ -11,7 +11,6 @@
 
 // create a container that holds relevant data for cusparselt matmul
 namespace torch {
-namespace sparse {
 
 struct CusparseLt : torch::CustomClassHolder {
   constexpr static auto order{CUSPARSE_ORDER_ROW};
@@ -281,5 +280,4 @@ at::Tensor CusparseLt::cusparselt_helper(
   return res;
 }
 
-} // namespace sparse
 } // namespace torch
