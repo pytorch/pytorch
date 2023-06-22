@@ -335,8 +335,8 @@ def generate_viable_strict_lag_alert() -> List[Dict[str, Any]]:
             "OncallTeams": [],
             "OncallIndividuals": [],
             "Flags": [above_or_below],
-            "measurement_name": "Viable Strict Lag",
-            "measurement_value": lag,
+            "MeasurementName": "Viable Strict Lag",
+            "ThresholdDescription": f"{round(lag/ 60 / 60, 2)} hours",
         }
     ]
     return entry
