@@ -18,14 +18,16 @@ import sysconfig
 import tempfile
 import threading
 import types
+import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
+from dataclasses import field
 from functools import partial
 from importlib import abc
 from threading import Thread
 from time import sleep, time
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Set, Union
 
 import torch
 
@@ -241,42 +243,101 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code):
+def code_hash(code, extra=""):
+    hashing_str = code
+    if extra != "":
+        hashing_str = hashing_str + "||" + extra
     return (
         "c"
-        + base64.b32encode(hashlib.sha256(code.encode("utf-8")).digest())[:51]
+        + base64.b32encode(hashlib.sha256(hashing_str.encode("utf-8")).digest())[:51]
         .decode("utf-8")
         .lower()
     )
 
 
-def get_code_path(source_code: Union[str, bytes], ext: str, extra: str, binary=False):
-    if binary:
-        source_code = repr(source_code)
-    basename = code_hash(source_code + extra)
+def get_path(basename: str, extension: str):
     subdir = os.path.join(cache_dir(), basename[1:3])
-    path = os.path.join(subdir, f"{basename}.{ext}")
-    return extra + basename, subdir, path
+    path = os.path.join(subdir, f"{basename}.{extension}")
+    return basename, subdir, path
 
 
-def write(source_code: Union[str, bytes], ext: str, extra="", binary=False):
-    basename, subdir, path = get_code_path(source_code, ext, extra, binary)
+def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
+    assert hash_type in ["code", "cubin"], "Hash type not supported"
+    if hash_type == "code":
+        return code_hash(content, extra)
+    if hash_type == "cubin":
+        return code_hash(repr(content))
+
+
+def write(
+    content: Union[str, bytes], extension: str, extra="", hash_type: str = "code"
+):
+    key: str = get_hash(content, extra, hash_type)
+    basename, subdir, path = get_path(key, extension)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
-        write_atomic(path, source_code, binary)
+        write_atomic(path, content)
     return basename, path
 
 
-def write_atomic(path: str, source_code: Union[str, bytes], binary=False):
+def write_atomic(path: str, content: Union[str, bytes]):
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
+    assert isinstance(
+        content, (str, bytes)
+    ), "Only strings and byte arrays can be saved in the cache"
     path = pathlib.Path(path)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
-    with tmp_path.open("wb" if binary else "w") as f:
-        f.write(source_code)
-
+    write_mode = "w" if isinstance(content, str) else "wb"
+    with tmp_path.open(write_mode) as f:
+        f.write(content)
     tmp_path.rename(path)
+
+
+@dataclasses.dataclass
+class CompiledFxGraph:
+    """Class holding a compiled FX graph"""
+
+    compiled_artifact: Callable = None
+    current_callable: Callable = None
+    cache_key: str = None
+    artifact_path: str = None
+    cache_linemap: List = None
+    device_types: Set[str] = field(default_factory=set)
+    device_idxs: Set[int] = field(default_factory=set)
+    mutated_inputs: Set[str] = field(default_factory=set)
+    _boxed_call: bool = None
+
+    def __call__(self, inputs) -> Any:
+        return self.get_current_callable()(inputs)
+
+    def get_current_callable(self):
+        if self.current_callable is None:
+            # This prevents a circular reference that makes CompiledFxGraph
+            # get stuck without getting garbage collected
+            return functools.partial(_run_from_cache, weakref.proxy(self))
+        else:
+            return self.current_callable
+
+
+def _run_from_cache(compiled_graph: CompiledFxGraph, inputs):
+    # We can't really serialize callables that may be C++/Triton/etc.,
+    # so we serialize their disk cache location instead
+    # TODO: When making an API that can save compiled models e2e to disk
+    # this will need to be better
+    if compiled_graph.compiled_artifact is None:
+        from .codecache import PyCodeCache
+
+        compiled_graph.compiled_artifact = PyCodeCache.load_by_key_path(
+            compiled_graph.cache_key,
+            compiled_graph.artifact_path,
+            compiled_graph.cache_linemap
+            if compiled_graph.cache_linemap is not None
+            else (),
+        ).call
+
+    return compiled_graph.compiled_artifact(inputs)
 
 
 def cpp_compiler():
@@ -626,7 +687,7 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        _, path = write(cubin, "cubin", "", binary=True)
+        _, path = write(cubin, "cubin", hash_type="cubin")
         params["cubin_path"] = path
         cls.cache[key] = params
 
@@ -643,13 +704,10 @@ class AotCodeCache:
     def compile(cls, graph, source_code, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
-        key, input_path = write(
-            source_code,
-            "cpp",
-            code_hash(
-                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
-            ),
+        cpp_command = repr(
+            cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda)
         )
+        key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
 
@@ -704,11 +762,8 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         picked_vec_isa = pick_vec_isa()
-        key, input_path = write(
-            source_code,
-            "cpp",
-            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
-        )
+        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
+        key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
 
@@ -737,8 +792,12 @@ class PyCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
+    def write(cls, source_code, extra=""):
+        return write(source_code, "py", extra=extra)
+
+    @classmethod
     def load(cls, source_code, extra="", linemap=()):
-        key, path = write(source_code, "py", extra)
+        key, path = write(source_code, "py", extra=extra)
         return cls.load_by_key_path(key, path, linemap)
 
     @classmethod
@@ -787,7 +846,7 @@ class PyCodeCache:
                 for f, l, n in reversed(matches)
             ]
 
-        return parse_stack_trace(entry.stack_trace)
+        return parse_stack_trace(entry)
 
 
 class CppWrapperCodeCache:

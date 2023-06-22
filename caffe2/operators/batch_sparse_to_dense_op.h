@@ -125,7 +125,7 @@ class BatchDenseToSparseOp : public Operator<Context> {
   template <class... Args>
   explicit BatchDenseToSparseOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
-  bool RunOnDevice() override{
+  bool RunOnDevice() {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
         this, Input(LENGTHS));
   }

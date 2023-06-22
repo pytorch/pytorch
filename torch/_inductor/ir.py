@@ -1409,22 +1409,12 @@ class SqueezeView(BaseView):
 
 
 @dataclasses.dataclass
-class View(BaseView):
+class GenericView(BaseView):
     size: List[Expr]
     reindex: Callable[..., Any]
 
     def make_reindexer(self):
         return self.reindex
-
-    @staticmethod
-    def handle_negative_index(idx, size):
-        idx = sympy.expand(idx)
-        size = sympy.expand(size)
-        sizevars = V.graph.sizevars
-        if sizevars.size_hint(idx) < 0:
-            sizevars.guard_lt(idx, 0)
-            idx = idx + size
-        return idx
 
     def reindex_str(self):
         index_old = [sympy_symbol(f"i{n}") for n in range(len(self.size))]
@@ -1437,6 +1427,26 @@ class View(BaseView):
         )
 
     __repr__ = __str__
+
+    @classmethod
+    def create(cls, x, new_size, reindex):
+        return cls(x, list(new_size), reindex)
+
+    def get_size(self):
+        return self.size
+
+
+@dataclasses.dataclass
+class View(GenericView):
+    @staticmethod
+    def handle_negative_index(idx, size):
+        idx = sympy.expand(idx)
+        size = sympy.expand(size)
+        sizevars = V.graph.sizevars
+        if sizevars.size_hint(idx) < 0:
+            sizevars.guard_lt(idx, 0)
+            idx = idx + size
+        return idx
 
     @classmethod
     def create(cls, x, new_size):
@@ -1559,9 +1569,6 @@ class View(BaseView):
             return tuple(sympy_subs(x, replacements) for x in view_expr)
 
         return reindex
-
-    def get_size(self):
-        return self.size
 
 
 @dataclasses.dataclass
@@ -3340,16 +3347,7 @@ class FallbackKernel(ExternKernelAlloc):
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
-        fake_incorrect_kernels = (
-            aten._fft_r2c.default,
-            aten._fft_r2c.out,
-            aten._fft_c2r.default,
-            aten._fft_c2c.default,
-            aten._fft_c2c.out,
-            aten._linalg_svd.default,
-            aten._linalg_svd.U,
-            aten._fused_moving_avg_obs_fq_helper_functional,
-        )
+        fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
         context = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
