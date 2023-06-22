@@ -15,7 +15,7 @@ class GluOp final : public Operator<Context> {
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice() override {
+  bool RunOnDevice() {
     auto& X = Input(0);
 
     vector<int64_t> Yshape;
