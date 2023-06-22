@@ -423,26 +423,62 @@ class WrapperCodeGen(CodeGen):
     def generate_end(self, result):
         return
 
+    def cuda_event_dependency(self, node_name, kernel_IndentedBuffer):
+        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        for name in ssnode.predecessors:
+            predecessor = ssnode.predecessors[name]
+            if predecessor.stream_id != ssnode.stream_id:
+                kernel_IndentedBuffer.writeline(f"stream{ssnode.stream_id}_raw.wait_event(event_{predecessor.get_name()})")
+
+    def cuda_event_create(self, node_name, kernel_IndentedBuffer):
+        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()} = torch.cuda.Event()")
+
+    def cuda_event_record(self, node_name, kernel_IndentedBuffer):
+        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)")  
+
+    def generate_extern_kernel_w_stream(self, node_name, call_strs):
+        kernel_IndentedBuffer = IndentedBuffer()
+        self.cuda_event_dependency(node_name, kernel_IndentedBuffer)
+        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        if ssnode.cuda_event:
+            self.cuda_event_create(node_name, kernel_IndentedBuffer)
+        stream_id = ssnode.stream_id
+        writer = kernel_IndentedBuffer
+        if stream_id != 0:
+            kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
+            with kernel_IndentedBuffer.indent():
+                for call_str in call_strs:
+                    writer.writeline(call_str)
+        else:
+            for call_str in call_strs:
+                writer.writeline(call_str)
+        
+        for line in kernel_IndentedBuffer.getrawvalue().split("\n"):
+            self.writeline(line)
+
     def generate_extern_kernel_alloc(self, output_name, kernel, args, origin_node):
-        self.writeline(
-            f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}"
-        )
+        call_strs = [f"{self.declare}{output_name} = {kernel}({', '.join(args)}){self.ending}",]
         if (
             self.supports_intermediate_hooks
             and config.generate_intermediate_hooks
             and origin_node is not None
         ):
             counters["inductor"]["intermediate_hooks"] += 1
-            self.writeline(
+            call_strs.append(
                 f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
             )
+        self.generate_extern_kernel_w_stream(output_name, call_strs)
 
-    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
+
+    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel, node_name=None):
         if output_view:
             args.append(f"out={output_view.codegen_reference()}")
         else:
             args.append(f"out={codegen_reference}")
-        self.writeline(f"{kernel}({', '.join(args)})")
+        call_strs = [f"{kernel}({', '.join(args)})"]
+        self.generate_extern_kernel_w_stream(node_name, call_strs)
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
@@ -686,15 +722,19 @@ class WrapperCodeGen(CodeGen):
         metadata_comment = f"{metadata}\n" if metadata else ""
         self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
-    def generate_numel_expr(self, kernel_name: str, tree):
+    def generate_numel_expr(self, kernel_name: str, tree, kernel_IndentedBuffer=None):
         expr = f"{kernel_name}_{tree.prefix}numel"
+        if kernel_IndentedBuffer is not None:
+            writer = kernel_IndentedBuffer
+        else:
+            writer = self
         if expr not in self.kenel_numel_expr:
             self.kenel_numel_expr.add(expr)
-            self.writeline(
+            writer.writeline(
                 f"{self.declare}{expr} = {self.expr_printer(tree.numel)}{self.ending}"
             )
         else:
-            self.writeline(f"{expr} = {self.expr_printer(tree.numel)}{self.ending}")
+            writer.writeline(f"{expr} = {self.expr_printer(tree.numel)}{self.ending}")
         # We can get symbolic expressions here, like s0*64
         # It is fine to have them here, but we need to handle them correctly as their own type
         # This is tricky to do, so we wrap in a custom type, distinct from scalars, but also from sympy*
@@ -715,17 +755,21 @@ class WrapperCodeGen(CodeGen):
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(
-        self, name, call_args, grid=None, device_index=None, cuda=True, stream_id=0
+        self, name, call_args, grid=None, device_index=None, cuda=True, stream_id=0, kernel_IndentedBuffer=None
     ):
+        if kernel_IndentedBuffer is not None:
+            writer = kernel_IndentedBuffer
+        else:
+            writer = self
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
             grid_str = ", ".join(pexpr(item) for item in grid)
             stream_name = f"stream{stream_id}"
-            self.writeline(
+            writer.writeline(
                 f"{name}.run({call_args_str}, grid=grid({grid_str}), stream={stream_name})"
             )
         else:
-            self.writeline(self.wrap_kernel_call(name, call_args))
+            writer.writeline(self.wrap_kernel_call(name, call_args))
 
     def writeline(self, line):
         self.lines.append(line)

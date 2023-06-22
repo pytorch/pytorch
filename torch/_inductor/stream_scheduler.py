@@ -243,7 +243,11 @@ class SSGraph:
         log.info("=====findhao debug stream allocation=====")
         for node in self.ssnodes:
             assert node.stream_id != -1
-            log.info(f"{node.get_name()} {node.stream_id}")
+            if node.cuda_event:
+                event_str = "cuda_event True"
+            else:
+                event_str = ""
+            log.info(f"{node.get_name()} {node.stream_id} {event_str}")
         log.info("=====findhao debug stream allocation end=====")
 
 
