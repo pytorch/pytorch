@@ -579,8 +579,11 @@ def clone_inputs(example_inputs):
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
-            assert isinstance(value, torch.Tensor)
-            res[key] = clone_input(value)
+            if isinstance(value, tuple):
+                res[key] = clone_inputs(value)
+            else:
+                assert isinstance(value, torch.Tensor), type(value)
+                res[key] = clone_input(value)
         return res
 
     res = list(example_inputs)
@@ -592,15 +595,17 @@ def clone_inputs(example_inputs):
 
 @contextmanager
 def preserve_rng_state():
-    rng = torch.clone(torch.random.get_rng_state())
-    if torch.cuda.is_available():
-        cuda_rng = torch.clone(torch.cuda.get_rng_state())
+    with torch.utils._python_dispatch._disable_current_modes():
+        rng_state = torch.clone(torch.random.get_rng_state())
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
         yield
     finally:
-        torch.random.set_rng_state(rng)
-        if torch.cuda.is_available():
-            torch.cuda.set_rng_state(cuda_rng)
+        with torch.utils._python_dispatch._disable_current_modes():
+            torch.random.set_rng_state(rng_state)
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
 
 
 def is_jit_model(model0):
@@ -777,6 +782,15 @@ def check_unspec_python_args(args, kwargs):
     return unspec_count > 0
 
 
+def check_numpy_ndarray_args(args, kwargs):
+    from .variables.tensor import NumpyNdarrayVariable
+
+    return any(
+        isinstance(x, NumpyNdarrayVariable)
+        for x in itertools.chain(args, kwargs.values())
+    )
+
+
 def specialize_args_kwargs(tx, args, kwargs):
     specialized_args = []
     specialized_kwargs = {}
@@ -819,11 +833,15 @@ def enum_repr(value, local):
 
 
 def dict_param_key_ids(value):
-    return {id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)}
+    return {
+        id(k) for k in value.keys() if isinstance(k, (torch.nn.Parameter, torch.Tensor))
+    }
 
 
 def dict_const_keys(value):
-    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
+    return {
+        k for k in value.keys() if not isinstance(k, (torch.nn.Parameter, torch.Tensor))
+    }
 
 
 def dict_const_keys_repr(const_keys, *, local):
@@ -888,6 +906,9 @@ def same(
         fp64_ref = ref
     if isinstance(ref, (list, tuple, torch.nn.ParameterList, torch.Size)):
         assert isinstance(res, (list, tuple)), f"type mismatch {type(ref)} {type(res)}"
+        if len(ref) != len(res):
+            log_error("Length mismatch")
+            return False
         return len(ref) == len(res) and all(
             same(
                 ai,
@@ -953,6 +974,7 @@ def same(
                 if not r:
                     log_error("Accuracy failed: uint8 tensor did not match")
                 return r
+
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -1391,22 +1413,8 @@ def fqn(obj: Any):
     return f"{obj.__module__}.{obj.__qualname__}"
 
 
-def ifdyn(count1, count2):
-    if torch._dynamo.config.dynamic_shapes:
-        return count1
-    else:
-        return count2
-
-
 def ifdynstaticdefault(count1, count2):
     if torch._dynamo.config.assume_static_by_default:
-        return count1
-    else:
-        return count2
-
-
-def ifunspec(count1, count2):
-    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
         return count1
     else:
         return count2
@@ -1446,7 +1454,6 @@ def get_custom_getattr(value: Any):
 
 class TensorStaticReason(enum.Enum):
     PARAMETER = 2
-    CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
     NN_MODULE_PROPERTY = 5
 
@@ -1454,8 +1461,6 @@ class TensorStaticReason(enum.Enum):
 def tensor_static_reason_to_message(reason: TensorStaticReason):
     if reason == TensorStaticReason.PARAMETER:
         return "mark_dynamic on parameter, parameters are always static today."
-    if reason == TensorStaticReason.CONFIG_NOT_DYN:
-        return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
     if reason == TensorStaticReason.NOT_TENSOR:
         return "mark_dynamic on a non tensor, how did this happen?"
     if reason == TensorStaticReason.NN_MODULE_PROPERTY:
@@ -1479,8 +1484,6 @@ def tensor_always_has_static_shape(
     """
     if type(tensor) is torch.nn.Parameter:
         return True, TensorStaticReason.PARAMETER
-    if config.dynamic_shapes is False:
-        return True, TensorStaticReason.CONFIG_NOT_DYN
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     if guard_source.is_nn_module():
@@ -1525,7 +1528,7 @@ def lazy_format_graph_tabular(fn_name, gm):
         except ImportError:
             return (
                 "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
-                + format_graph_code(fn_name, gm)
+                + str(lazy_format_graph_code(fn_name, gm))
             )
 
         node_specs = [
@@ -1579,16 +1582,67 @@ def nnmodule_has_hooks(
     return any(len(getattr(mod, x)) > 0 for x in hook_dicts_to_check if hasattr(mod, x))
 
 
-def to_numpy_helper(___tmp_0):
-    def convert(obj):
-        if isinstance(obj, torch_np.ndarray):
-            return obj.tensor.numpy()
-        else:
-            return obj
+def to_numpy_helper(value):
+    """Convert tensor and torch_np.ndarray to numpy.ndarray."""
+    if isinstance(value, torch_np.ndarray):
+        return value.tensor.numpy()
+    elif isinstance(value, torch.Tensor):
+        return value.numpy()
+    elif isinstance(value, (tuple, list)):
+        return type(value)(to_numpy_helper(obj) for obj in value)
+    else:
+        return value
 
-    if isinstance(___tmp_0, tuple):
-        return tuple([convert(obj) for obj in ___tmp_0])
-    return convert(___tmp_0)
+
+def numpy_to_tensor(value):
+    """Convert torch_np.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
+    if isinstance(value, torch_np.ndarray):
+        return value.tensor
+    elif isinstance(value, (tuple, list)):
+        return type(value)(numpy_to_tensor(obj) for obj in value)
+    else:
+        return value
+
+
+class numpy_to_tensor_wrapper:
+    def __init__(self, f):
+        self.f = f
+        self.__name__ = "wrapped_" + self.f.__name__
+
+    def __repr__(self):
+        return f"<Wrapped function <original {self.f.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        out = self.f(*args, **kwargs)
+        return numpy_to_tensor(out)
+
+
+def numpy_attr_wrapper(obj, name):
+    if isinstance(obj, torch_np.ndarray):
+        out = getattr(obj, name)
+        return numpy_to_tensor(out)
+    elif isinstance(obj, torch.Tensor):
+        out = getattr(torch_np.ndarray(obj), name)
+        return numpy_to_tensor(out)
+
+
+class numpy_method_wrapper:
+    """Convert obj from torch.Tensor to torch_np.ndarray and call method. Then convert result back to torch.Tensor."""
+
+    def __init__(self, method: str):
+        self.method = method
+        self.__name__ = "wrapped_" + self.method
+
+    def __repr__(self):
+        return f"<Wrapped method <original {self.method}>>"
+
+    def __call__(self, *args, **kwargs):
+        obj = args[0]
+        if isinstance(obj, torch.Tensor):
+            obj = torch_np.ndarray(obj)
+        method_callable = getattr(obj, self.method)
+        out = method_callable(*args[1:], **kwargs)
+        return numpy_to_tensor(out)
 
 
 def defake(x):
@@ -1624,13 +1678,16 @@ def defake(x):
 # NB: The dictionary has to be created lazily after TorchPatcher is called so
 # that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
 # sitting in a separate function.
-@functools.lru_cache(None)
 def higher_order_op_converter():
-    import torch._higher_order_ops.wrap
+    import torch._higher_order_ops.wrap as higher_order_ops
 
-    return {
-        torch.utils.checkpoint.checkpoint: torch._higher_order_ops.wrap.wrap_activation_checkpoint,
-    }
+    # TODO - This is a temporary sitaution where we have two versions of
+    # checkpointing implemetation. We will converge on one and remove the other.
+    activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
+    if torch._functorch.config.functionalize_rng_ops:
+        activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
+
+    return {torch.utils.checkpoint.checkpoint: activation_checkpoint_op}
 
 
 def requires_higher_order_op(obj):
@@ -1638,29 +1695,4 @@ def requires_higher_order_op(obj):
 
 
 def get_higher_order_op(obj):
-    if (
-        obj is torch.utils.checkpoint.checkpoint
-        and not torch._functorch.config.functionalize_rng_ops
-    ):
-        from .exc import unimplemented
-
-        # TODO - functionalize_rng_ops flags cannot be turned ON by default
-        # because 1) Performance concerns - seed and offset are read and passed
-        # to each AOT graph 2) Inductor has rand-specific optimizations and
-        # there is work remaining to compose them together with
-        # functionalization.
-        #
-        # Until we make it ON by default, we will have to ask users to turn on
-        # this flag manually.  TODO - Revisit if there is a simpler way to
-        # resolve this problem.
-        torch._logging.warning_once(
-            log,
-            "torch.compile on activation checkpointing is an experimental feature. "
-            "Please manually set torch._functorch.config.functionalize_rng_ops=True "
-            "to run torch.compile with activation checkpointing. Without this flag, "
-            "checkpointed function will not get compiled and fallback to eager.",
-        )
-        unimplemented(
-            "torch.compile requires functioanlization of rng ops to be turned on"
-        )
     return higher_order_op_converter().get(obj)

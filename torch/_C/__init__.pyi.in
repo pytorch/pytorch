@@ -50,7 +50,7 @@ from torch.types import (
 
 # This module is defined in torch/csrc/Module.cpp
 
-from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions
+from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu
 
 T = TypeVar("T")
 S = TypeVar("S", bound="torch.Tensor")
@@ -1051,6 +1051,7 @@ def _conv_determine_backend_memory_format(
 ) -> memory_format: ...
 def _has_storage(x: Tensor) -> _bool: ...
 def _should_allow_numbers_as_tensors(func_name: str) -> _bool: ...
+def _group_tensors_by_device_and_dtype(nested_tensorlists: List[List[Optional[Tensor]]], with_indices: _bool = False) -> Dict[Tuple[torch.device, str], Tuple[List[List[Optional[Tensor]]], List[_int]]]: ...
 
 # NB: There is no Capsule type in typing, see
 # https://code.activestate.com/lists/python-dev/139675/
@@ -1117,11 +1118,11 @@ def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT a
 
 has_openmp: _bool
 has_mkl: _bool
-has_mps: _bool
+_has_mps: _bool
 has_lapack: _bool
-has_cuda: _bool
-has_mkldnn: _bool
-has_cudnn: _bool
+_has_cuda: _bool
+_has_mkldnn: _bool
+_has_cudnn: _bool
 has_spectral: _bool
 _GLIBCXX_USE_CXX11_ABI: _bool
 default_generator: Generator
@@ -1370,6 +1371,7 @@ class DispatchKey(Enum):
     ${dispatch_key_hints}
 
 class DispatchKeySet:
+    def __init__(self, key: DispatchKey) -> None: ...
     def __or__(self, other: DispatchKeySet) -> DispatchKeySet: ...
     def __sub__(self, other: DispatchKeySet) -> DispatchKeySet: ...
     def __and__(self, other: DispatchKeySet) -> DispatchKeySet: ...
@@ -1395,6 +1397,9 @@ def _dispatch_is_included_in_alias(
     dispatch_a: _dispatchkey,
     dispatch_b: _dispatchkey,
 ) -> _bool: ...
+def _propagate_xla_data(a: Tensor, b: Tensor) -> None: ...
+def _replace_(a: Tensor, b: Tensor) -> None: ...
+def _commit_update(a: Tensor) -> None: ...
 
 class _ExcludeDispatchKeyGuard:
     def __init__(self, keyset: DispatchKeySet): ...
@@ -1451,6 +1456,7 @@ class _TensorMeta(type): ...
 # Defined in torch/csrc/autograd/python_variable.cpp
 class _TensorBase(metaclass=_TensorMeta):
     requires_grad: _bool
+    retains_grad: _bool
     shape: Size
     data: Tensor
     names: List[str]
