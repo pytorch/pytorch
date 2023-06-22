@@ -687,6 +687,13 @@ class TestSplitCatFxPasses(TestCase):
             split_items = [torch.squeeze(s, 1) for s in items[1:]]
             return torch.stack(split_items), torch.relu(items[0])
 
+        def graph_should_be_topological_sorted(x):
+            output = []
+            for t in x.split(1):
+                output.append(torch.sin(t.squeeze(dim=0)))
+            output = torch.stack(output)
+            return output
+
         args = [
             torch.randn(2, 32),
         ]
@@ -702,6 +709,7 @@ class TestSplitCatFxPasses(TestCase):
             (dim_mismatch, 0),
             (other_users, 0),
             (other_users_2, 0),
+            (graph_should_be_topological_sorted, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
