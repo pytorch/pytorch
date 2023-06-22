@@ -240,6 +240,14 @@ class TestFX(JitTestCase):
         x = torch.randn(5, 3)
         torch.testing.assert_close(new_instance(x), torch.relu(x))
 
+    def test_informative_co_filename(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, a):
+                return a * 2
+
+        gm = symbolic_trace(MyModule())
+        self.assertIn(os.path.basename(__file__), gm.forward.__code__.co_filename)
+
     def test_custom_import(self):
         graph = torch.fx.Graph()
         a = graph.placeholder('x')
@@ -1273,7 +1281,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
         traced.graph.lint()
         stringed = str(traced.graph)
-        for s in ['args', 'kwargs', '#users']:
+        for s in ['args', 'kwargs', 'num_users']:
             assert s in stringed
 
     def test_custom_proxy_type(self):

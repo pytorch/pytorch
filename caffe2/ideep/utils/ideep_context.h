@@ -23,20 +23,20 @@ class IDEEPContext final : public BaseContext {
 
   ~IDEEPContext() noexcept override {}
 
-  inline void SwitchToDevice(int64_t /*stream_id*/) override {}
+  inline void SwitchToDevice(int64_t /*stream_id*/) {}
   using BaseContext::SwitchToDevice;
 
-  inline void WaitEvent(const Event& ev) override {
+  inline void WaitEvent(const Event& ev) {
     ev.Wait(IDEEP, this);
   }
 
-  inline void Record(Event* ev, const char* err_msg = nullptr) const override {
+  inline void Record(Event* ev, const char* err_msg = nullptr) const {
     CAFFE_ENFORCE(ev, "Event must not be null.");
     ev->Record(IDEEP, this, err_msg);
   }
 
 
-  inline void FinishDeviceComputation() override {}
+  inline void FinishDeviceComputation() {}
 
   inline rand_gen_type& RandGenerator() {
     if (!random_generator_.get()) {
