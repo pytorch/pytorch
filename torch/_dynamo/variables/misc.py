@@ -15,6 +15,7 @@ from ..utils import (
     check_constant_args,
     HAS_NUMPY_TORCH_INTEROP,
     identity,
+    numpy_dtype_to_torch_dtype,
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
@@ -416,7 +417,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, value_type=None, inference=False, **kwargs):
+        saved_tensors = kwargs.pop("_saved_tensors", [])
         super().__init__(value=value, value_type=value_type, **kwargs)
+        self._saved_tensors = saved_tensors
         self.inference = inference
 
     @staticmethod
@@ -836,11 +839,16 @@ class NumpyVariable(VariableTracker):
         return self.value
 
     def as_proxy(self):
+        # return self.value
         if isinstance(self.value, type) and config.numpy_ndarray_as_tensor:
-            # convert numpy dtype to native python types
-            return type(self.value(0).item())
-        else:
-            return self.value
+            import numpy as np
+
+            # convert numpy dtype to torch types
+            if self.value in numpy_dtype_to_torch_dtype:
+                return numpy_dtype_to_torch_dtype[self.value]
+            unimplemented(f"Unsupported type {self.value} in numpy")
+
+        return self.value
 
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls

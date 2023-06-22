@@ -988,7 +988,7 @@ Y:
 
 )DOC";
 
-std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
+static std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
   return [=](OpSchema& schema) {
     std::string doc = "AveragePool{dim} {pool_doc}";
     c10::ReplaceAll(doc, "{dim}", dim);
@@ -1020,7 +1020,7 @@ std::function<void(OpSchema&)> AveragePoolDocGenerator(const char* dim) {
   };
 }
 
-std::function<void(OpSchema&)> MaxPoolDocGenerator(const char* dim) {
+static std::function<void(OpSchema&)> MaxPoolDocGenerator(const char* dim) {
   return [=](OpSchema& schema) {
     std::string doc = "MaxPool{dim} {pool_doc}";
     c10::ReplaceAll(doc, "{dim}", dim);

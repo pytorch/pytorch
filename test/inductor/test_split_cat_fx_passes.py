@@ -3,13 +3,12 @@
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 def patch(f):
     f = torch._inductor.config.patch(split_cat_fx_passes=True)(f)
-    f = torch._dynamo.config.patch(dynamic_shapes=True)(f)
     return f
 
 
@@ -413,6 +412,26 @@ class TestSplitCatFxPasses(TestCase):
 
             return cat1, stack1, relu1
 
+        def input_shuffling_direct_output(x):
+            split_output = list(torch.split(x, 4, dim=1))
+            cat1 = torch.cat(
+                [torch.ones(2, 4, 32, 16)]
+                + [split_output[1], split_output[2], split_output[3]]
+                + [torch.ones(2, 4, 32, 16)],
+                dim=2,
+            )
+            stack1 = torch.stack(
+                [
+                    torch.ones(2, 4, 32, 16),
+                    split_output[4],
+                    split_output[5],
+                    torch.ones(2, 4, 32, 16),
+                ],
+                dim=1,
+            )
+
+            return cat1, stack1, split_output[6]
+
         def input_shuffling_multiple_output_same_ranges(x):
             split_output = list(torch.split(x, 4, dim=1))
             cat1 = torch.cat(
@@ -533,6 +552,7 @@ class TestSplitCatFxPasses(TestCase):
             (input_shuffling_dim_mismatch, 1, 1, 1, 1, 4, default_args),
             (input_shuffling_dim_mismatch_stack, 1, 1, 1, 1, 4, default_args),
             (input_shuffling_multiple_output, 1, 1, 2, 2, 3, default_args),
+            (input_shuffling_direct_output, 1, 1, 2, 2, 3, default_args),
             (unequal_split_multiple_output, 1, 1, 2, 2, 3, default_args),
             (multi_split_cat, 2, 2, 4, 4, 3, multi_args),
         ]:
@@ -667,6 +687,13 @@ class TestSplitCatFxPasses(TestCase):
             split_items = [torch.squeeze(s, 1) for s in items[1:]]
             return torch.stack(split_items), torch.relu(items[0])
 
+        def graph_should_be_topological_sorted(x):
+            output = []
+            for t in x.split(1):
+                output.append(torch.sin(t.squeeze(dim=0)))
+            output = torch.stack(output)
+            return output
+
         args = [
             torch.randn(2, 32),
         ]
@@ -682,6 +709,7 @@ class TestSplitCatFxPasses(TestCase):
             (dim_mismatch, 0),
             (other_users, 0),
             (other_users_2, 0),
+            (graph_should_be_topological_sorted, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
@@ -848,5 +876,5 @@ class TestSplitCatFxPasses(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA:
         run_tests()
