@@ -35,6 +35,7 @@ from ..source import (
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
+    is_from_local_source,
     LocalSource,
     RandomValueSource,
     Source,
@@ -164,8 +165,6 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
-        if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
-            raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
     def load(self, tx):
         return self.source.reconstruct(tx)
@@ -197,9 +196,52 @@ class VariableBuilder:
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
-            # TODO(jansel): add guard for alias relationship
-            return self.tx.output.side_effects[value]
-        return self._wrap(value).clone(**self.options())
+            side_effect_result = self.tx.output.side_effects[value]
+            dup_guard = self._make_dupe_guard(side_effect_result)
+            if dup_guard:
+                side_effect_result = side_effect_result.add_guards(
+                    self.make_guards(dup_guard)
+                )
+            return side_effect_result
+        vt = self._wrap(value).clone(**self.options())
+        if self._can_lift_attrs_to_inputs(vt):
+            vt = self.tx.output.side_effects.track_object_existing(
+                self.source, value, vt
+            )
+        return vt
+
+    def _make_dupe_guard(self, deduped_object):
+        # Note - we may end up in a situation where we invoke something like
+        # def fn(x, y)
+        # with fn(x, x)
+        # Prior to the addition of tracking to all relevant objects, we would handle this just fine by
+        # eagerly re-entering VB and rewrapping inputs, correctly creating graphargs and placeholders. However,
+        # with tracking on inputs, duplicate inputs or aliased relationships may end up getting erased here -
+        # In the the fn(x, x) example call above look like a graph with a single input.
+        # In order to ensure that we do not reuse fn(x, x) for fn(x, y), we create a duplicate input guard.
+
+        # Note - we may not have a source, that is fine, it just means we had an object that is safe to have
+        # leave unsourced - like a local list created and discharged entirely within a local scope.
+        if deduped_object.source and deduped_object.source != self.source:
+            ser_source_is_local = is_from_local_source(deduped_object.source)
+            source_is_local = is_from_local_source(self.source)
+            # Note - both must be local, or global, or we will run afoul of a lack of merging in how we currently
+            # reconcile guards builder scopes in compile_check_fn. This technically means we miss a guard here,
+            # so maybe we should do this refactor before we land this...
+            # TODO(voz): Combine local and global guard builders.
+            if ser_source_is_local == source_is_local:
+                # Note - this is a little agressive - these being duplicate input does not always matter.
+                # However, this should always be a sound guard to add here.
+                dup_guard = functools.partial(
+                    GuardBuilder.DUPLICATE_INPUT, source_b=deduped_object.source
+                )
+                return dup_guard
+        return None
+
+    def _can_lift_attrs_to_inputs(self, vt):
+        if type(vt) in [TensorVariable, UserDefinedObjectVariable]:
+            return True
+        return False
 
     @staticmethod
     @functools.lru_cache(None)
@@ -829,7 +871,11 @@ class VariableBuilder:
             # a later point in time.
             ignore_subclass = True
         else:
-            assert type(value) in (torch.Tensor, torch.nn.Parameter), type(value)
+            assert type(value) in (
+                torch.Tensor,
+                torch.nn.Parameter,
+                torch._subclasses.fake_tensor.FakeTensor,
+            ), type(value)
             ignore_subclass = False
 
         is_duplicate_tensor = source in self.tx.output.input_source_to_var
@@ -958,6 +1004,12 @@ class VariableBuilder:
                 else:
                     frame_state_entry = self.tx.output.frame_state[name]
                     if frame_state_entry.scalar != value:
+                        log.debug(
+                            "automatic dynamic int %s val %s != %s",
+                            name,
+                            value,
+                            frame_state_entry.scalar,
+                        )
                         frame_state_entry.scalar = None
                 self.tx.output.frame_state[name] = frame_state_entry
 
@@ -1263,6 +1315,9 @@ class TrackedFake:
 # Performs automatic dynamic dim determination.
 # Returns tuple of (dynamic_dims, constraint_dims) where each is either a list of dims or None.
 def _automatic_dynamic(e, tx, name, static_shapes):
+    if static_shapes:
+        return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
+
     # Prep for automatic dynamic
     frame_state_entry = None
     if name not in tx.output.frame_state:
@@ -1276,12 +1331,25 @@ def _automatic_dynamic(e, tx, name, static_shapes):
             if e.ndim != len(frame_state_entry.size):
                 # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
                 # E.g. {"x": [2, 3, 4]} -> {"x": None}
+                log.debug(
+                    "automatic dynamic %s dim %s != %s",
+                    name,
+                    e.ndim,
+                    frame_state_entry.size,
+                )
                 frame_state_entry.size = None
             else:
                 # If there is already an entry, and the dim matches, for every size in the frame state which
                 # disagrees with the current static size, replace it with None. E.g., {"x": [2, 3]} -> {"x": [2, None]}
                 for i, dim in enumerate(frame_state_entry.size):
-                    if e.size()[i] != dim:
+                    if dim is not None and e.size()[i] != dim:
+                        log.debug(
+                            "automatic dynamic %s size(%s) %s != %s",
+                            name,
+                            i,
+                            e.size(i),
+                            dim,
+                        )
                         frame_state_entry.size[i] = None
 
     # TODO: index export_constraints ahead of time so we don't have to
@@ -1331,6 +1399,7 @@ def _automatic_dynamic(e, tx, name, static_shapes):
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
         if frame_state_entry.size and marked_dynamic:
+            log.debug("automatic dynamic %s marked dynamic", name)
             frame_state_entry.size[i] = None
 
         # We will process constraints first, as they will imply that we
