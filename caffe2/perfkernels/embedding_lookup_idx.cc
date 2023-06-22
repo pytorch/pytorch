@@ -80,7 +80,7 @@ static bool EmbeddingLookupGenericSlowIdx(
 // Proxy back to generic implementation
 #define EMBEDDING_IDX_SPECIALIZATION(                                                                 \
     IndexType, InTypeName, InType, OutType, IS_WEIGHT_POSITIONAL)                                     \
-  bool                                                                                                \
+  static bool                                                                                                \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base(     \
           const int64_t block_size,                                                                   \
           const int64_t output_size,                                                                  \
@@ -113,7 +113,7 @@ static bool EmbeddingLookupGenericSlowIdx(
   decltype(                                                                                           \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__base)     \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL##__avx2_fma; \
-  bool                                                                                                \
+  static bool                                                                                                \
       EmbeddingLookupIdx_##IndexType##_##InTypeName##_##OutType##_##IS_WEIGHT_POSITIONAL(             \
           const int64_t block_size,                                                                   \
           const int64_t output_size,                                                                  \
