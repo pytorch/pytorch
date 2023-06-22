@@ -238,6 +238,28 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model)
 
+    def test_dynamic_shape_specialization(self):
+        """
+        Previously in aot_autograd.py we compare strides of FakeTensor
+        with real tensor. That cause dynamic dimensions of the FakeTensor
+        being specialized to static shapes. This test protects against that.
+        """
+
+        def f(a, b):
+            x = a.sin()
+            y = b.cos()
+            z = x + y
+            return z
+
+        for size in [4, 8, 16]:
+            a = torch.randn(2, size, requires_grad=True).cuda()
+            b = torch.randn(2, size).cuda()
+            actual = torch.compile(f, dynamic=True)(a, b)
+            self.assertTrue(torch.allclose(f(a, b), actual))
+
+            # Trigger the compiling of the backward graph
+            actual.sum().backward()
+
 
 if __name__ == "__main__":
     if HAS_CUDA and not TEST_WITH_ROCM:

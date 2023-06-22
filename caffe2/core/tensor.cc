@@ -62,12 +62,12 @@ std::string TensorPrinter::MetaStr(const Tensor& tensor) {
   return meta_stream.str();
 }
 
-TypeMeta GetTensorType(const void* c) {
+static TypeMeta GetTensorType(const void* c) {
   const Tensor* tc = static_cast<const Tensor*>(c);
   return tc->dtype();
 }
 
-TypeMeta GetInt8TensorType(const void* c) {
+static TypeMeta GetInt8TensorType(const void* c) {
   const int8::Int8TensorCPU* int8_tensor =
       static_cast<const int8::Int8TensorCPU*>(c);
   return (int8_tensor->t).dtype();
@@ -107,7 +107,7 @@ GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
 }
 
 vector<int64_t>
-GetInt8TensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
+static GetInt8TensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
   const int8::Int8TensorCPU* int8_tensor =
       static_cast<const int8::Int8TensorCPU*>(c);
   return GetTensorInfo(&(int8_tensor->t), capacity, device);

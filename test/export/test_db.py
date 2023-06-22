@@ -68,7 +68,6 @@ class ExampleTests(TestCase):
         name_fn=lambda name, case: "case_{}".format(name),
     )
     def test_exportdb_not_supported(self, name: str, case: ExportCase) -> None:
-        self.skipTest("TODO(zhxchen17) Enable non supported tests.")
         model = case.model
         # pyre-ignore
         with torchdynamo.config.patch(asdict(_DynamoConfig())), self.assertRaises(
@@ -110,6 +109,7 @@ class ExampleTests(TestCase):
 
 
 instantiate_parametrized_tests(ExampleTests)
+
 
 if __name__ == "__main__":
     run_tests()
