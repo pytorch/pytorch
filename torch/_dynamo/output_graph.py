@@ -219,6 +219,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         frame_state,
         local_scope: Scope,
         global_scope: Scope,
+        f_code,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self)]
@@ -236,6 +237,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
+                # TODO: maybe should just pass the entire f_code in here?  Not
+                # sure...
+                co_fields={
+                    "co_name": f_code.co_name,
+                    "co_filename": f_code.co_filename,
+                    "co_firstlineno": f_code.co_firstlineno,
+                },
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
