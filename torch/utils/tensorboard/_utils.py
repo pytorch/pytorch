@@ -71,13 +71,14 @@ def make_grid(I, ncols=8):
     assert isinstance(I, np.ndarray), "plugin error, should pass numpy array here"
     if I.shape[1] == 1:
         I = np.concatenate([I, I, I], 1)
-    assert I.ndim == 4 and I.shape[1] == 3
+    assert I.ndim == 4 and (I.shape[1] == 3 or I.shape[1] == 4)
     nimg = I.shape[0]
+    C = I.shape[1]
     H = I.shape[2]
     W = I.shape[3]
     ncols = min(nimg, ncols)
     nrows = int(np.ceil(float(nimg) / ncols))
-    canvas = np.zeros((3, H * nrows, W * ncols), dtype=I.dtype)
+    canvas = np.zeros((C, H * nrows, W * ncols), dtype=I.dtype)
     i = 0
     for y in range(nrows):
         for x in range(ncols):
