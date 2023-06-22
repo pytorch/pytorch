@@ -90,10 +90,11 @@ def _is_zipfile(f) -> bool:
     return read_bytes == local_header_magic_number
 
 
-def register_package(priority: int,
-                     tagger: Callable[[Union[torch.Storage, torch.UntypedStorage]], Union[str, None]],
-                     deserializer: Callable[[Union[torch.Storage, torch.UntypedStorage], str],
-                                            Union[torch.Storage, torch.UntypedStorage, None]]):
+def register_package(
+    priority: int,
+    tagger: Callable[[Union[Storage, torch.storage.TypedStorage, torch.storage.UntypedStorage]], Optional[str]],
+    deserializer: Callable[[Union[Storage, torch.storage.TypedStorage, torch.storage.UntypedStorage], str],
+                           Optional[Union[Storage, torch.storage.TypedStorage, torch.storage.UntypedStorage]]]):
     '''
     Registers callables for tagging and deserializing storage objects with an associated priority.
     Tagging associates a device with a storage object at save time while deserializing moves a
