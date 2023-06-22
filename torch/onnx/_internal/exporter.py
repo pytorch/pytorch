@@ -640,8 +640,12 @@ def pre_export_passes(
     # ONNX does not support views and mutations.
     # Functionalize to get a semantically equivalent graph without mutations.
     module = passes.Functionalize(
-        diagnostic_context, module, enable_dynamic_axes=options.dynamic_shapes
+        diagnostic_context,
+        module,
+        enable_dynamic_axes=options.dynamic_shapes,
+        fake_mode=options.fake_mode,
     ).run(*fx_module_args)
+
     # Input mutations are detected and distilled after `Functionalize` pass.
     # Remove them since ONNX inference does not need them.
     module = passes.RemoveInputMutation(diagnostic_context, module).run(*fx_module_args)

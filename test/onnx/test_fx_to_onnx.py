@@ -181,11 +181,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
-                self.linear2 = torch.nn.Linear(2, 2)
 
             def forward(self, x):
                 out = self.linear(x)
-                out = self.linear2(out)
                 return out
 
         # User-instantiated FakeTensorMode
@@ -210,6 +208,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
 
         assert export_output is not None
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
