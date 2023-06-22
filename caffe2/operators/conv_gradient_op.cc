@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-std::vector<TensorShape> TensorInferenceForConvGradient(
+static std::vector<TensorShape> TensorInferenceForConvGradient(
     const OperatorDef& def,
     const std::vector<TensorShape>& in) {
   CAFFE_ENFORCE_EQ(in.size(), 3U, "ConvGradient requires 3 inputs");
@@ -34,7 +34,7 @@ std::vector<TensorShape> TensorInferenceForConvGradient(
   return out;
 }
 
-OpSchema::Cost CostInferenceForConvGradient(
+static OpSchema::Cost CostInferenceForConvGradient(
     const OperatorDef& def,
     const vector<TensorShape>& inputs) {
   CAFFE_ENFORCE_EQ(inputs.size(), 3U, "ConvGradient requires 3 inputs");
