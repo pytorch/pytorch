@@ -15,6 +15,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
     MultiThreadedTestCase
 )
 from torch.testing._internal.common_utils import (
