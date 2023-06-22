@@ -8,7 +8,7 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
+static Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
   api::Context* const context = api::context();
 
   Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -46,7 +46,7 @@ inline Tensor view(const Tensor& self_arg, IntArrayRef shape) {
   return view_internal(self_arg, shape);
 }
 
-Tensor _reshape_alias(
+static Tensor _reshape_alias(
     const Tensor& self_arg,
     const IntArrayRef shape,
     const IntArrayRef strides) {

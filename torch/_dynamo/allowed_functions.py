@@ -193,8 +193,8 @@ def _allowed_function_ids():
                 if isinstance(obj, torch._ops.HigherOrderOperator):
                     continue
 
-                # We want to trace through `grad`
-                if obj is torch.func.vmap:
+                # We want to trace through `grad` and `vmap`
+                if obj in (torch.func.vmap, torch.func.grad):
                     continue
 
                 if isinstance(obj, types.ModuleType):
