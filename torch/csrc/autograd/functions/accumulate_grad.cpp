@@ -60,6 +60,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   return variable_list();
 }
 
+#ifdef COMPILED_AUTOGRAD
 void AccumulateGrad::compiled_args(CompiledNodeArgs& args) {
   at::Tensor& grad = variable.mutable_grad();
   if (grad.defined()) {
@@ -82,6 +83,7 @@ variable_list AccumulateGrad::apply_with_saved(
   saved.set_grad_value(result);
   return variable_list();
 }
+#endif
 
 } // namespace autograd
 } // namespace torch

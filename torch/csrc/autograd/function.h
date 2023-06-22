@@ -29,6 +29,11 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
+#ifndef _WIN32
+// Windows build fails due to 65536 symbol limit
+#define COMPILED_AUTOGRAD
+#endif
+
 namespace torch {
 namespace autograd {
 
@@ -554,17 +559,35 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return false;
   }
 
+#ifdef COMPILED_AUTOGRAD
+  // Used by compiled autograd to
+  //   1) Extract tenstor/symint args
+  //   2) Collect node information for specialization and caching
   virtual void compiled_args(CompiledNodeArgs& args) {
     throw std::runtime_error(
         std::string("compiled_args not implemented: ") + name());
   }
 
+  // Used by compiled autograd to call apply() with different saved tensors
   virtual variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) {
     throw std::runtime_error(
         std::string("apply_with_saved not implemented: ") + name());
   }
+#else
+  // Used by compiled autograd to
+  //   1) Extract tenstor/symint args
+  //   2) Collect node information for specialization and caching
+  void compiled_args(CompiledNodeArgs& args){
+      TORCH_CHECK(false, "Windows is not supported")}
+
+  // Used by compiled autograd to call apply() with different saved tensors
+  variable_list
+      apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) {
+    TORCH_CHECK(false, "Windows is not supported")
+  }
+#endif
 
  protected:
   /// Performs the `Node`'s actual operation.

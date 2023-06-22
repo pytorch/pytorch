@@ -254,11 +254,12 @@ struct TORCH_API AccumulateGrad : public Node {
     }
   }
 
+#ifdef COMPILED_AUTOGRAD
   void compiled_args(CompiledNodeArgs& args) override;
-
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
+#endif
 
   Variable variable;
 };

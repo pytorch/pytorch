@@ -34,10 +34,13 @@ struct PyNode : public Node {
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;
+
+#ifdef COMPILED_AUTOGRAD
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) override;
+#endif
 
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
