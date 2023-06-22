@@ -1,0 +1,265 @@
+# @generated DO NOT EDIT MANUALLY
+
+# Template is at:    .github/templates/aarch64_binary_build_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: linux-aarch64-binary-manywheel
+
+on:
+  push:
+    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    branches:
+      - nightly
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/binaries/*'
+      - 'ciflow/binaries_wheel/*'
+  workflow_dispatch:
+
+env:
+  # Needed for conda builds
+  # Using public apline as arm64v8 is not available 
+  # at 308535385114.dkr.ecr.us-east-1.amazonaws.com just yet
+  ALPINE_IMAGE: "arm64v8/alpine"
+  ANACONDA_USER: pytorch
+  AWS_DEFAULT_REGION: us-east-1
+  BINARY_ENV_FILE: /tmp/env
+  BUILD_ENVIRONMENT: linux-aarch64-binary-manywheel
+  BUILDER_ROOT: /builder
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+  PYTORCH_ROOT: /pytorch
+  DESIRED_CUDA: cpu
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  SKIP_ALL_TESTS: 1
+concurrency:
+  group: linux-aarch64-binary-manywheel-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  wheel-py3_8-cpu-build: # Building
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-aarch64.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.8"
+      build_name: wheel-py3_8-cpu
+      build_environment: linux-aarch64-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  wheel-py3_8-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: wheel-py3_8-cpu-build
+    uses: ./.github/workflows/_binary-test-aarch64.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.8"
+      build_name: wheel-py3_8-cpu
+      build_environment: linux-aarch64-binary-manywheel
+      runs_on: linux.t4g.2xlarge
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  wheel-py3_8-cpu-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: wheel-py3_8-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.8"
+      build_name: wheel-py3_8-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_9-cpu-build: # Building
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-aarch64.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.9"
+      build_name: wheel-py3_9-cpu
+      build_environment: linux-aarch64-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  wheel-py3_9-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: wheel-py3_9-cpu-build
+    uses: ./.github/workflows/_binary-test-aarch64.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.9"
+      build_name: wheel-py3_9-cpu
+      build_environment: linux-aarch64-binary-manywheel
+      runs_on: linux.t4g.2xlarge
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  wheel-py3_9-cpu-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: wheel-py3_9-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.9"
+      build_name: wheel-py3_9-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_10-cpu-build: # Building
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-aarch64.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.10"
+      build_name: wheel-py3_10-cpu
+      build_environment: linux-aarch64-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  wheel-py3_10-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: wheel-py3_10-cpu-build
+    uses: ./.github/workflows/_binary-test-aarch64.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.10"
+      build_name: wheel-py3_10-cpu
+      build_environment: linux-aarch64-binary-manywheel
+      runs_on: linux.t4g.2xlarge
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  wheel-py3_10-cpu-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: wheel-py3_10-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.10"
+      build_name: wheel-py3_10-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_11-cpu-build: # Building
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-aarch64.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.11"
+      build_name: wheel-py3_11-cpu
+      build_environment: linux-aarch64-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  wheel-py3_11-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: wheel-py3_11-cpu-build
+    uses: ./.github/workflows/_binary-test-aarch64.yml
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.11"
+      build_name: wheel-py3_11-cpu
+      build_environment: linux-aarch64-binary-manywheel
+      runs_on: linux.t4g.2xlarge
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  wheel-py3_11-cpu-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: wheel-py3_11-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      BUILDER_ROOT: /builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DESIRED_PYTHON: "3.11"
+      build_name: wheel-py3_11-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+    uses: ./.github/workflows/_binary-upload.yml
