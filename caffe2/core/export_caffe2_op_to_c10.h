@@ -207,7 +207,8 @@ inline FunctionSchema make_function_schema_for_c10(
   /* Register the op schema with the c10 dispatcher */       \
   namespace caffe2 {                                         \
   namespace _c10_ops {                                       \
-  C10_EXPORT const FunctionSchema& schema_##OperatorName() { \
+  C10_EXPORT const FunctionSchema& schema_##OperatorName();  \
+  const FunctionSchema& schema_##OperatorName() {            \
     static const FunctionSchema schema =                     \
         ::caffe2::detail::make_function_schema_for_c10(      \
             OperatorSchema, OptionalAliasAnalysisKind);      \
