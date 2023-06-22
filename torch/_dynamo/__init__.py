@@ -64,6 +64,10 @@ def reset() -> None:
     compilation_metrics.clear()
     reset_frame_count()
 
+    import linecache
+
+    linecache.clearcache()
+
 
 def allow_in_graph(fn):
     """

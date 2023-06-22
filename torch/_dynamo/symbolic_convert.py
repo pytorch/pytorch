@@ -7,6 +7,7 @@ import functools
 import importlib
 import inspect
 import itertools
+import linecache
 import logging
 import operator
 import sys
@@ -104,6 +105,7 @@ from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariab
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
+starts_line_log = torch._logging.getArtifactLogger(__name__, "starts_line")
 
 
 @functools.lru_cache(None)
@@ -497,6 +499,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
+    inline_depth: int
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
@@ -599,6 +602,23 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.restore_graphstate(state)
             raise
 
+    def log_starts_line(self):
+        inline_depth_str = (
+            f"(inline depth: {self.inline_depth}) " if self.inline_depth > 0 else ""
+        )
+        starts_line_log.debug(
+            "TRACE starts_line %s%s %s:%s",
+            inline_depth_str,
+            self.f_code.co_name,
+            self.f_code.co_filename,
+            self.lineno,
+        )
+        line = linecache.getline(self.f_code.co_filename, self.lineno)
+        if line:
+            # strip the newline at the end
+            line = line[:-1]
+        starts_line_log.debug("    %s", (" " * 4 * self.inline_depth) + line)
+
     def step(self):
         """Process exactly one instruction, return False we should exit"""
         assert isinstance(self.instruction_pointer, int)
@@ -612,7 +632,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.next_instruction = None
         if inst.starts_line and self.lineno != inst.starts_line:
             self.lineno = inst.starts_line
-            log.debug("TRACE starts_line %s:%s", self.f_code.co_filename, self.lineno)
+            self.log_starts_line()
 
         if len(self.stack) == 0 and self.should_compile_partial_graph():
             self.checkpoint = inst, self.copy_graphstate()
@@ -1856,6 +1876,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         symbolic_globals: Dict[str, VariableTracker],
         f_code: types.CodeType,
         export: bool,
+        inline_depth: int,
     ):
         super().__init__()
 
@@ -1915,6 +1936,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ):
                 self.push(BuiltinVariable(None))
 
+        self.inline_depth = inline_depth
+        linecache.lazycache(f_code.co_filename, f_globals)
+        self.log_starts_line()
+
 
 class InstructionTranslator(InstructionTranslatorBase):
     def __init__(
@@ -1958,6 +1983,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_globals=collections.OrderedDict(),
             f_code=f_code,
             export=export,
+            inline_depth=0,
         )
 
         # as soon as we create the tracing context we should keep it active, so any calls
@@ -2278,6 +2304,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
             export=parent.export,
+            inline_depth=parent.inline_depth + 1,
         )
         self.parent = parent
         self.symbolic_result = None

@@ -3,6 +3,7 @@ import contextlib
 import copy
 import functools
 import itertools
+import linecache
 import logging
 import operator
 import re
@@ -83,6 +84,7 @@ from .variables.tensor import (
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
+graph_source_log = torch._logging.getArtifactLogger(__name__, "graph_source")
 
 
 class OutputGraphState(NamedTuple):
@@ -831,6 +833,20 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
+    def log_graph_source_code(self, name):
+        graph_source = f"GRAPH SOURCE CODE\n===== {name} =====\n"
+        for node in self.graph.nodes:
+            if not hasattr(node, "source_code_data"):
+                continue
+            graph_source += node.format_node() + "\n"
+            funcname, filename, lineno, depth = node.source_code_data
+            graph_source += (
+                f"function `{funcname}` {filename}:{lineno} (inline depth {depth})\n"
+            )
+            line = linecache.getline(filename, lineno)
+            graph_source += (" " * 4 * depth) + line + "\n"
+        graph_source_log.debug(graph_source)
+
     @torch._guards.TracingContext.clear_frame()
     def compile_and_call_fx_graph(self, tx, rv, root):
         """
@@ -863,6 +879,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
+
+        if torch._logging._internal.log_state.is_artifact_enabled("graph_source"):
+            self.log_graph_source_code(name)
 
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
@@ -1117,6 +1136,13 @@ class SubgraphTracer(fx.Tracer):
 
         # append stack trace to fx node
         tx = self.output_graph.current_tx
+
+        rv.node.source_code_data = (
+            tx.f_code.co_name,
+            tx.f_code.co_filename,
+            tx.lineno,
+            tx.inline_depth,
+        )
 
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
