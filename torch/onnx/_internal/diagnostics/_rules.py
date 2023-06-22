@@ -414,6 +414,26 @@ class _UnsupportedFxNodeAnalysis(infra.Rule):
         )
 
 
+class _FxNodeExplicitTypePromotion(infra.Rule):
+    """TODO"""
+
+    def format_message(self, target) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'Performing explicit type promotion for node {target}. '
+        """
+        return self.message_default_template.format(target=target)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, target
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'Performing explicit type promotion for node {target}. '
+        """
+        return self, level, self.format_message(target=target)
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -843,6 +863,26 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Result from FX graph analysis to reveal unsupported FX nodes."""
+
+    fx_node_explicit_type_promotion: _FxNodeExplicitTypePromotion = dataclasses.field(
+        default=_FxNodeExplicitTypePromotion.from_sarif(
+            **{
+                "id": "FXE0013",
+                "name": "fx-node-explicit-type-promotion",
+                "short_description": {"text": "TODO"},
+                "full_description": {"text": "TODO", "markdown": "TODO\n"},
+                "message_strings": {
+                    "default": {
+                        "text": "Performing explicit type promotion for node {target}. "
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """TODO"""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(

@@ -435,6 +435,12 @@ class FXGraphExtractor(abc.ABC):
             *fx_module_args
         )
 
+        # ONNX does not support concept of (implicit) type promotion.
+        # Insert type casts explicitly where needed.
+        module = passes.ExplicitTypePromotionPass(diagnostic_context, module).run(
+            *fx_module_args
+        )
+
         # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
         # The pass added nodes with static shape into original node metadata:
         # node.meta["static_shape"]: FakeTensor/int/float/SymInt/SynFloat

@@ -101,6 +101,11 @@ enum class Rule : uint32_t {
   kUnsupportedFxNodeAnalysis,
 
   /**
+   * @brief TODO
+   */
+  kFxNodeExplicitTypePromotion,
+
+  /**
    * @brief The formatted str for argument to display is too verbose.
    */
   kArgFormatTooVerbose,
@@ -123,6 +128,7 @@ static constexpr const char* const kPyRuleNames[] = {
     "fx_pass",
     "no_symbolic_function_for_call_function",
     "unsupported_fx_node_analysis",
+    "fx_node_explicit_type_promotion",
     "arg_format_too_verbose",
 };
 

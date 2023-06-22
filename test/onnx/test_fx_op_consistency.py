@@ -29,6 +29,8 @@ from typing import Optional, Tuple
 
 import onnx_test_common
 
+# import ops_type_promotion_test_data
+
 import parameterized
 
 import torch
@@ -132,6 +134,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         # "nn.functional.scaled_dot_product_attention"  non-deterministic
         "scatter_add",
         "scatter_reduce",
+        "square",
         "unflatten",
     ]
 )
@@ -147,14 +150,6 @@ TESTED_OPS: frozenset[str] = frozenset(
 #     are now fixed, removed the corresponding xfail.
 #     2b. If a test is not failing consistently, use skip.
 EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
-    xfail(
-        "acos", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Acos")
-    ),
-    xfail(
-        "acosh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Acosh")
-    ),
     xfail(
         "add", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Add")
@@ -238,22 +233,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="ONNX doesn't have partial view for tensor",
     ),
     xfail(
-        "asin", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Asin", "bool and int")
-    ),
-    xfail(
-        "asinh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Asinh", "bool and int")
-    ),
-    xfail(
-        "atan", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Atan", "bool and int")
-    ),
-    xfail(
-        "atanh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Atanh", "bool and int")
-    ),
-    xfail(
         "baddbmm",
         dtypes=(
             torch.uint8,
@@ -334,14 +313,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "cumsum", dtypes=(torch.int32,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Cumsum", "int32 has type issue.")
     ),
-    skip(
-        "cos", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Cos")
-    ),
-    skip(
-        "cosh", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Cosh")
-    ),
     xfail(
         "cross",
         reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
@@ -368,31 +339,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("aten.equal.default")
     ),
     xfail(
-        "erf",
-        dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Erf", "bool"),
-    ),
-    xfail(
-        "erf",
-        dtypes=onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Erf", "int"),
-    ),
-    xfail(
-        "exp",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Exp", "bool, int"),
-    ),
-    xfail(
-        "exp2",
-        dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Pow", "bool"),
-    ),
-    xfail(
-        "exp2",
-        dtypes=onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Pow", "int"),
-    ),
-    xfail(
         "floor",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Floor", "bool, int"),
@@ -406,11 +352,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "index_put",
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
-    ),
-    xfail(
-        "logit",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Log", "bool, int"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool1d",
@@ -477,6 +418,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="ONNX doesn't support reduce='mean' option",
     ),
     xfail(
+        "square",
+        dtypes=(torch.int8, torch.uint8, torch.int16),
+        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Pow", "int8, uint8, int16"),
+    ),
+    xfail(
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
     ),
@@ -519,16 +465,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
-    ),
-    xfail(
-        "nn.functional.celu",
-        matcher=lambda sample: sample.input.dtype != torch.float32,
-        reason=onnx_test_common.reason_onnx_does_not_support("Celu", "non-float32"),
-    ),
-    skip(
-        "nn.functional.elu",  # see https://github.com/pytorch/pytorch/issues/101947
-        matcher=lambda sample: sample.input.dtype != torch.float32,
-        reason=onnx_test_common.reason_onnx_does_not_support("elu", "non-float32"),
     ),
     skip(
         "nn.functional.conv1d",

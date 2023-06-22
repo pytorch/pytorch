@@ -313,6 +313,22 @@
     deprecated: false
     tags: []
 
+- id: FXE0013
+  name: fx-node-explicit-type-promotion
+  short_description:
+    text: TODO
+  full_description:
+    text: "TODO"
+    markdown: |
+      TODO
+  message_strings:
+    default:
+      text: "Performing explicit type promotion for node {target}. "
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
 - id: DIAGSYS0001
   name: arg-format-too-verbose
   short_description:
