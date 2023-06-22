@@ -3680,100 +3680,98 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_conv1d(opinfo, device, **kwargs):
-    if torch.device(device).type == 'cpu' or torch.device(device).type == 'cuda':
-        make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
-        # error inputs for negative strides
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2, 2)), make_arg((1,))),
-                        kwargs={'stride': (-1,)}), error_regex="non-positive stride is not supported")
+    # error inputs for negative strides
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2, 2)), make_arg((1,))),
+                    kwargs={'stride': (-1,)}), error_regex="non-positive stride is not supported")
 
-        # error inputs for negative padding
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2, 2)), make_arg((1,))),
-                        kwargs={'padding': (-1,)}), error_regex="negative padding is not supported")
+    # error inputs for negative padding
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2, 2)), make_arg((1,))),
+                    kwargs={'padding': (-1,)}), error_regex="negative padding is not supported")
 
-        # error inputs for negative dilation
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 2)), make_arg((1,))),
-                        kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
+    # error inputs for negative dilation
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 2)), make_arg((1,))),
+                    kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
-        # error inputs for bias shape not equal to the output channels
-        yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 3)), make_arg((2,)))),
-                         error_regex="expected bias to be 1-dimensional with 1 elements")
+    # error inputs for bias shape not equal to the output channels
+    yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 3)), make_arg((2,)))),
+                     error_regex="expected bias to be 1-dimensional with 1 elements")
 
-        # error inputs for input.ndim != weight.ndim
-        yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2)), make_arg((1,)))),
-                         error_regex="weight should have at least three dimensions")
+    # error inputs for input.ndim != weight.ndim
+    yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2)), make_arg((1,)))),
+                     error_regex="weight should have at least three dimensions")
 
-        # error inputs for the weight[0] are less than the number of groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
-                        kwargs={'padding': 'same', 'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
+    # error inputs for the weight[0] are less than the number of groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
+                    kwargs={'padding': 'same', 'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
 
-        # error inputs for the weight[0] are less than the number of groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
-                        kwargs={'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
+    # error inputs for the weight[0] are less than the number of groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
+                    kwargs={'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
 
-        # error inputs for invalid groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
-                        kwargs={'padding': 'same', 'groups': -1}), error_regex="non-positive groups is not supported")
+    # error inputs for invalid groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
+                    kwargs={'padding': 'same', 'groups': -1}), error_regex="non-positive groups is not supported")
 
-        # error inputs for invalid groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
-                        kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
+    # error inputs for invalid groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
+                    kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
 
 
 def error_inputs_conv2d(opinfo, device, **kwargs):
-    if torch.device(device).type == 'cpu' or torch.device(device).type == 'cuda':
-        make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
-        # error inputs for negative strides
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 2, 2, 3)), make_arg((1,))),
-                        kwargs={'stride': (-1,)}), error_regex="non-positive stride is not supported")
+    # error inputs for negative strides
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 2, 2, 3)), make_arg((1,))),
+                    kwargs={'stride': (-1,)}), error_regex="non-positive stride is not supported")
 
-        # error inputs for negative padding
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4, 3)), args=(make_arg((1, 2, 2, 4)), make_arg((1,))),
-                        kwargs={'padding': (-1,)}), error_regex="negative padding is not supported")
+    # error inputs for negative padding
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4, 3)), args=(make_arg((1, 2, 2, 4)), make_arg((1,))),
+                    kwargs={'padding': (-1,)}), error_regex="negative padding is not supported")
 
-        # error inputs for negative dilation
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4, 2)), args=(make_arg((1, 1, 2, 5)), make_arg((1,))),
-                        kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
+    # error inputs for negative dilation
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4, 2)), args=(make_arg((1, 1, 2, 5)), make_arg((1,))),
+                    kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
-        # error inputs for bias shape not equal to the output channels
-        yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 1, 3, 2)), make_arg((2,)))),
-                         error_regex="expected bias to be 1-dimensional with 1 elements")
+    # error inputs for bias shape not equal to the output channels
+    yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 1, 3, 2)), make_arg((2,)))),
+                     error_regex="expected bias to be 1-dimensional with 1 elements")
 
-        # error inputs for input.ndim != weight.ndim
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4, 3)), args=(make_arg((1, 2, 2)), make_arg((1,))),
-                        kwargs={'padding': 'same'}), error_regex="Expected 3-dimensional input for 3-dimensional weight")
+    # error inputs for input.ndim != weight.ndim
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4, 3)), args=(make_arg((1, 2, 2)), make_arg((1,))),
+                    kwargs={'padding': 'same'}), error_regex="Expected 3-dimensional input for 3-dimensional weight")
 
-        # error inputs for the weight[0] are less than the number of groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 1, 3)), make_arg((2,))),
-                        kwargs={'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
+    # error inputs for the weight[0] are less than the number of groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 1, 3)), make_arg((2,))),
+                    kwargs={'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
 
-        # error inputs for groups the weight[0] are less than the number of groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 1, 3)), make_arg((2,))),
-                        kwargs={'padding': 'same', 'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
+    # error inputs for groups the weight[0] are less than the number of groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 1, 3)), make_arg((2,))),
+                    kwargs={'padding': 'same', 'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
 
-        # error inputs for invalid groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 4, 5)), args=(make_arg((2, 2, 1, 4)), make_arg((2,))),
-                        kwargs={'padding': 'same', 'groups': -1}), error_regex="non-positive groups is not supported")
+    # error inputs for invalid groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4, 5)), args=(make_arg((2, 2, 1, 4)), make_arg((2,))),
+                    kwargs={'padding': 'same', 'groups': -1}), error_regex="non-positive groups is not supported")
 
-        # error inputs for invalid groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 4, 3)), make_arg((2,))),
-                        kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
+    # error inputs for invalid groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 4, 3)), make_arg((2,))),
+                    kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
 
 
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
@@ -3853,56 +3851,55 @@ def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_conv3d(opinfo, device, **kwargs):
-    if torch.device(device).type == 'cpu' or torch.device(device).type == 'cuda':
-        make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
-        # error inputs for negative strides
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 2, 2, 2)), make_arg((1,))),
-                        kwargs={'stride': (-1,)}), error_regex="non-positive stride is not supported")
+    # error inputs for negative strides
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 2, 2, 2)), make_arg((1,))),
+                    kwargs={'stride': (-1,)}), error_regex="non-positive stride is not supported")
 
-        # error inputs for negative padding
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 2, 2, 2)), make_arg((1,))),
-                        kwargs={'padding': (-1,)}), error_regex="negative padding is not supported")
+    # error inputs for negative padding
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 2, 2, 2)), make_arg((1,))),
+                    kwargs={'padding': (-1,)}), error_regex="negative padding is not supported")
 
-        # error inputs for negative dilation
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 2, 2, 2)), make_arg((1,))),
-                        kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
+    # error inputs for negative dilation
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 2, 2, 2)), make_arg((1,))),
+                    kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
-        # error inputs for bias shape not equal to the output channels
-        yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 3, 3, 3)), make_arg((2,)))),
-                         error_regex="expected bias to be 1-dimensional with 1 elements")
+    # error inputs for bias shape not equal to the output channels
+    yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 3, 3, 3)), make_arg((2,)))),
+                     error_regex="expected bias to be 1-dimensional with 1 elements")
 
-        # error inputs for input.ndim != weight.ndim
-        yield ErrorInput(
-            SampleInput(make_arg((1, 1, 3, 4, 5)), args=(make_arg((1, 1, 4, 3)), make_arg((1,))),
-                        kwargs={'padding': 'same'}), error_regex="Expected 4-dimensional input for 4-dimensional weight")
+    # error inputs for input.ndim != weight.ndim
+    yield ErrorInput(
+        SampleInput(make_arg((1, 1, 3, 4, 5)), args=(make_arg((1, 1, 4, 3)), make_arg((1,))),
+                    kwargs={'padding': 'same'}), error_regex="Expected 4-dimensional input for 4-dimensional weight")
 
-        # error inputs for the weight[0] are less than the number of groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
-                        make_arg((2,))), kwargs={'groups': 3}),
-            error_regex="expected weight to be at least 3 at dimension 0")
+    # error inputs for the weight[0] are less than the number of groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
+                    make_arg((2,))), kwargs={'groups': 3}),
+        error_regex="expected weight to be at least 3 at dimension 0")
 
-        # error inputs for the weight[0] are less than the number of groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
-                        make_arg((2,))), kwargs={'padding': 'same', 'groups': 3}),
-            error_regex="expected weight to be at least 3 at dimension 0")
+    # error inputs for the weight[0] are less than the number of groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
+                    make_arg((2,))), kwargs={'padding': 'same', 'groups': 3}),
+        error_regex="expected weight to be at least 3 at dimension 0")
 
-        # error inputs for invalid groups
-        yield ErrorInput(
-            SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
-                        make_arg((2,))), kwargs={'padding': 'same', 'groups': 0}),
-            error_regex="non-positive groups is not supported")
+    # error inputs for invalid groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
+                    make_arg((2,))), kwargs={'padding': 'same', 'groups': 0}),
+        error_regex="non-positive groups is not supported")
 
-        # error inputs for padding='same' not supported by strided convolutions
-        yield ErrorInput(
-            SampleInput(make_arg((18, 27, 9, 1, 9)), args=(make_arg((9, 9, 9, 1, 9)),
-                        make_arg((9,))), kwargs={'stride': 2, 'padding': 'same', 'groups': 3}),
-            error_regex="padding='same' is not supported for strided convolutions")
+    # error inputs for padding='same' not supported by strided convolutions
+    yield ErrorInput(
+        SampleInput(make_arg((18, 27, 9, 1, 9)), args=(make_arg((9, 9, 9, 1, 9)),
+                    make_arg((9,))), kwargs={'stride': 2, 'padding': 'same', 'groups': 3}),
+        error_regex="padding='same' is not supported for strided convolutions")
 
 
 def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
@@ -12588,6 +12585,9 @@ op_db: List[OpInfo] = [
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples',
                             dtypes=(torch.complex64,), device_type='cuda'),
+               # Flaky; AssertionError: Tensor-likes are not close!
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward',
+                            dtypes=(torch.float32,), device_type='cuda'),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
