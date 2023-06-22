@@ -308,7 +308,7 @@ ALLOW_LIST = [
     ("aten::to_sparse_bsr.out", datetime.date(2023, 12, 31)),
     ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
     ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
-    ("aten::_structured_sparse_linear", datetime.date(2023, 7, 1)),
+    ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
 
 ]
 
