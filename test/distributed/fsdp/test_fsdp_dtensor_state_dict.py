@@ -11,8 +11,8 @@ from torch.distributed.fsdp.api import (
     ShardedStateDictConfig,
     StateDictType,
 )
-
 from torch.testing._internal.common_utils import run_tests
+
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -20,6 +20,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
+# Simple and boring model to test interface and some corner cases that do not
+# require complicated wrapping strategy.
 class TestDummyModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -57,9 +59,6 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
-            state_dict_config=ShardedStateDictConfig(
-                use_dtensor=True, offload_to_cpu=False
-            ),
             optim_state_dict_config=ShardedOptimStateDictConfig(
                 use_dtensor=False, offload_to_cpu=False
             ),
@@ -80,11 +79,50 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
                 if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
                     self.assertEqual(k1, k2)
                     # check whether local_tensor are the same
-                    self.assertEqual(v1.to_local(), v2.local_shards()[0].tensor)
+                    self.assertEqual(v1.to_local(), v2.local_tensor())
                     # check whether device are the same
-                    self.assertEqual(
-                        v1.to_local().device, v2.local_shards()[0].tensor.device
-                    )
+                    self.assertEqual(v1.to_local().device, v2.local_tensor().device)
+
+
+# TODO: consolidate test cases once we test all DTensor usage
+class TestDtensorShardedModelStateDict(DTensorTestBase):
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor_sharded_model_state_dict(self):
+        model = FSDP(TestDummyModel().cuda())
+        model(model.get_input()).sum().backward()
+
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(
+                use_dtensor=True,
+                offload_to_cpu=False,
+            ),
+        )
+        dtensor_sd = model.state_dict()
+
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(
+                use_dtensor=False,
+                offload_to_cpu=False,
+            ),
+        )
+        sharded_tensor_sd = model.state_dict()
+
+        for dtensor_sd, sharded_tensor_sd in zip(
+            dtensor_sd.items(), sharded_tensor_sd.items()
+        ):
+            k1, v1 = dtensor_sd
+            k2, v2 = sharded_tensor_sd
+            if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
+                self.assertEqual(k1, k2)
+                # check whether local_tensor are the same
+                self.assertEqual(v1.to_local(), v2.local_tensor())
+                # check whether device are the same
+                self.assertEqual(v1.to_local().device, v2.local_tensor().device)
 
 
 if __name__ == "__main__":

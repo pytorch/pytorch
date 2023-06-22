@@ -3,6 +3,7 @@
 #include <qnnpack.h>
 
 #include "caffe2/core/logging.h"
+#include "caffe2/operators/quantized/int8_utils.h"
 
 namespace caffe2 {
 
