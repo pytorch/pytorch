@@ -1,6 +1,7 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
+import onnx
 import pytorch_test_common
 import torch
 from torch import nn
@@ -173,7 +174,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
 
     def test_symbolic_tracing_simple(self):
-        from torch._dynamo.output_graph import config
         from torch._subclasses import fake_tensor
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -188,11 +188,10 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         # User-instantiated FakeTensorMode
         fake_mode = fake_tensor.FakeTensorMode(
-            allow_non_fake_inputs=False,
-            allow_fallback_kernels=True,
+            allow_non_fake_inputs=True,
             shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+                allow_scalar_outputs=False,
+                allow_dynamic_output_shape_ops=False,
                 frame_id=0,
             ),
         )
@@ -200,7 +199,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         with fake_mode:
             x = torch.rand(5, 2, 2)
             model = Model()
-
         # Export the model with fake inputs and parameters
         export_options = ExportOptions(fake_mode=fake_mode)
         export_output = torch.onnx.dynamo_export(
@@ -208,6 +206,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
 
         assert export_output is not None
+        onnx.checker.check_model(export_output.model_proto, full_check=True)
 
 
 if __name__ == "__main__":

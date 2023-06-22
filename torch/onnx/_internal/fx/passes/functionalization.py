@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 import torch._ops
@@ -65,7 +65,7 @@ class Functionalize(_pass.Transform):
         diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
         enable_dynamic_axes: bool,
-        fake_mode: proxy_tensor.FakeTensorMode,
+        fake_mode: Optional[proxy_tensor.FakeTensorMode],
     ):
         super().__init__(diagnostic_context, module)
         self.enable_dynamic_axes = enable_dynamic_axes

@@ -478,7 +478,10 @@ class Exporter:
         )
 
         # Export TorchScript graph to ONNX ModelProto.
-        onnx_model = onnxscript_graph.to_model_proto(self.options.opset_version)
+        onnx_model = onnxscript_graph.to_model_proto(
+            self.options.opset_version,
+            include_initializers=self.options.fake_mode is None,
+        )
         return torch.onnx.ExportOutput(
             onnx_model,
             self.options.fx_tracer.input_adapter,
