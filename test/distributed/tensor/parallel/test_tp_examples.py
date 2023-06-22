@@ -23,12 +23,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    MLPModule,
     NUM_DEVICES,
     skip_unless_torch_gpu,
     with_comms,
 )
-
-from ._utils import MLPModule
 
 
 class MultiheadAttnWrap(nn.Module):

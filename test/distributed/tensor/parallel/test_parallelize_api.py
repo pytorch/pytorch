@@ -20,9 +20,9 @@ from torch.distributed.tensor.parallel.style import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    MLPModule,
     with_comms,
 )
-from ._utils import MLPModule
 
 
 class TensorParallelAPITests(DTensorTestBase):
