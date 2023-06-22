@@ -3680,7 +3680,7 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_conv1d(opinfo, device, **kwargs):
-    for device in ["cpu", "cuda"]:
+    if torch.device(device).type == 'cpu' or torch.device(device).type == 'cuda':
         make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
         # error inputs for negative strides
@@ -3728,7 +3728,7 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
 
 
 def error_inputs_conv2d(opinfo, device, **kwargs):
-    for device in ["cpu", "cuda"]:
+    if torch.device(device).type == 'cpu' or torch.device(device).type == 'cuda':
         make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
         # error inputs for negative strides
@@ -3853,7 +3853,7 @@ def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_conv3d(opinfo, device, **kwargs):
-    for device in ["cpu", "cuda"]:
+    if torch.device(device).type == 'cpu' or torch.device(device).type == 'cuda':
         make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
         # error inputs for negative strides
