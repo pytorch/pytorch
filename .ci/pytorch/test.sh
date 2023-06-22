@@ -314,7 +314,6 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
-  local dtype=amp
   local backend=inductor
   local modes=()
   if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
@@ -327,6 +326,11 @@ test_perf_for_dashboard() {
   local targets=(accuracy performance)
 
   for mode in "${modes[@]}"; do
+    if [[ "$mode" == "inference" ]]; then
+      dtype=bfloat16
+    elif [[ "$mode" == "training" ]]; then
+      dtype=amp
+    fi
     for target in "${targets[@]}"; do
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then
@@ -432,7 +436,7 @@ test_dynamo_benchmark() {
     if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
     else
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --amp "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
     fi
   fi

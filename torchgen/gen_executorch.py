@@ -168,7 +168,7 @@ class ComputeCodegenUnboxedKernels:
         kernel_key: Union[ETKernelKey, List[ETKernelKey]] = unbox_kernel_entry[1][0]
         kernel_meta: BackendMetadata = unbox_kernel_entry[1][1]
 
-        op_name = f.namespace + "::" + str(f.func.name)
+        op_name = f"{f.namespace}::{f.func.name}"
         if not self.selector.is_root_operator(op_name):
             return ""
 
