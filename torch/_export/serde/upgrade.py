@@ -164,6 +164,9 @@ class GraphModuleOpUpgrader:
         operators with a custom operator. The custom operator contains a CompositeImplicitAutograd kernel (the
         upgrading function itself). After retrace, this custom operator will be decomposed into the ops used in the
         upgrader. After all passes are applied, the exported program will be upgraded to the target version."""
+        if not self.upgrader_passes:
+            return exported_program
+
         args = [n.meta.get("val", None) for n in exported_program.graph.nodes if n.op == "placeholder"]
         args_real_tensors = [torch.ones(tuple(arg.size()), dtype=arg.dtype) if isinstance(arg, FakeTensor) else arg for
                              arg in args]
