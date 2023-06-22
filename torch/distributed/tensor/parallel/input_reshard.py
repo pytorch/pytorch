@@ -16,7 +16,7 @@ def input_reshard(
     input_reshard_dim: Optional[int] = None,
 ) -> torch.nn.Module:
     """
-    Wrap an nn.Module with input resharding so that we can shard
+    Register hooks to an nn.Module with input resharding so that we can shard
     per the given `tp_device_mesh` and `input_reshard_dim` and restore the
     input back when recomputing the activations in the backward. The reason
     why we can do this is that for Tensor Parallel(TP), the input are same
@@ -24,7 +24,7 @@ def input_reshard(
 
     Args:
         module (:class:`nn.Module`):
-            Module to be wrapped with input resharding.
+            Module to be registered with input resharding.
         tp_device_mesh (:class:`DeviceMesh`):
             Object which describes the mesh topology
             of devices for Tensor Parallel.
@@ -34,7 +34,7 @@ def input_reshard(
             Default: None
 
     Return:
-        A :class:`nn.Module` object wrapped with TP input resharding.
+        A :class:`nn.Module` object registered with TP input resharding.
     """
     cx: Optional[torch.autograd.graph.saved_tensors_hooks] = None
 
