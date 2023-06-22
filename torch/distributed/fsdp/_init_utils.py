@@ -191,7 +191,7 @@ def _init_inter_node_process_group(
 ) -> dist.ProcessGroup:
     """
     Returns an inter-node process group where each contained rank has
-    the same local rank. For example, given each column is a distinct node:
+    the same local rank. For example, given each row is a distinct node:
     0 1 2 3 4 5 6 7 8
     9 10 11 12 13 14 15
     This API would return inter-node process group {0, 8}, {1, 9}, {2, 10}, and so forth

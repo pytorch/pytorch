@@ -600,12 +600,17 @@ class BuiltinVariable(VariableTracker):
         if has_constant_handler:
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
-            print("CONSTANT FOLDING?", self.fn, args, kwargs)
-            return variables.ConstantVariable(
-                self.as_python_constant()(
+            result = self.as_python_constant()(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
+                )
+            if isinstance(result, dict):
+                vt_items = {}
+                for k, v in result.items():
+                    vt_items[k] = variables.ConstantVariable(v)
+                return ConstDictVariable(vt_items, user_cls=dict)
+            return variables.ConstantVariable(
+                result,
                 **options,
             )
 
