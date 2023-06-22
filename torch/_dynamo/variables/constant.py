@@ -12,7 +12,6 @@ from .base import typestr, VariableTracker
 class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
-        # assert not isinstance(value, dict), "WTF?"
         assert not isinstance(value, torch.Tensor)
         assert not isinstance(value, torch.SymInt)
         assert not isinstance(value, torch.SymFloat)
@@ -107,7 +106,6 @@ class ConstantVariable(VariableTracker):
                 and args[0].is_python_constant()
             )
 
-        print("CALLING METHOD ON CONST?", self.value)
         if isinstance(self.value, str) and name in str.__dict__.keys():
             assert not kwargs
             method = getattr(self.value, name)

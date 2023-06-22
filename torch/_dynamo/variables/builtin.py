@@ -1077,8 +1077,8 @@ class BuiltinVariable(VariableTracker):
                 return TorchHigherOrderOperatorVariable(
                     get_higher_order_op(member), **options
                 )
-            # elif is_allowed(member):
-            #     return TorchVariable(member, **options)
+            elif is_allowed(member):
+                return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable(member, **options)
             else:

@@ -548,16 +548,6 @@ class TorchVariable(VariableTracker):
             assert len(args) == 1, "Expected one arg (pg)"
             assert isinstance(args[0], ProcessGroupVariable), f"Expected PG, got {args[0]}"
             return ConstantVariable(self.value(args[0].as_python_constant()))
-        # elif (
-        #     inspect.isfunction(self.value)
-        #     and self.value is torch.distributed.distributed_c10d._get_default_group
-        # ):
-        #     # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
-        #     # ID_MATCH based on how it was constructed.
-
-        #     # We desugar it at trace-time into ranks by directly calling util
-        #     # bake the result into the trace
-        #     return ProcessGroupVariable(torch.distributed.distributed_c10d.GroupMember.WORLD)
         elif self.value == torch.nn.init._calculate_correct_fan:
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options

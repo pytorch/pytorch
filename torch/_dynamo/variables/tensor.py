@@ -973,9 +973,6 @@ class TypedStorageVariable(VariableTracker):
     ) -> "VariableTracker":
         if name == "_data_ptr":
             return ConstantVariable(self.value._data_ptr())
-            # return variables.LambdaVariable(
-            #     lambda *args, **kwargs: ConstantVariable(self.value._data_ptr())
-            # ).add_options(self)
         if name == "_size":
             if isinstance(self.value._size(), int):
                 return ConstantVariable(self.value._size())

@@ -275,13 +275,22 @@ def _builtin_constant_ids():
     }
     return rv
 
-
-def is_allowed(obj):
+# A subcheck of is_allowed, we utilize this for patching is_allowed around distributed.
+# We do this because we want to allow these to be traced, and hence covered in skipfiles, but we do not want them to 
+# become TorchVariable
+def _is_allowed_distributed(obj):
+    if not torch.distributed.is_available():
+        return True
     if obj in [torch.distributed._functional_collectives.all_gather_tensor]:
         return False
     if hasattr(obj, "__module__") and obj.__module__ in ["torch.distributed.distributed_c10d", "torch.distributed._functional_collectives"]:
         return False
     if isinstance(obj, torch.distributed.distributed_c10d.ProcessGroup):
+        return False
+    return True
+
+def is_allowed(obj):
+    if not _is_allowed_distributed(obj):
         return False
 
     """Is this safe to trace like torch.add ?"""
