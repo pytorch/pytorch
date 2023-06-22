@@ -1158,9 +1158,6 @@ class Scheduler:
         if len(node1.get_nodes()) + len(node2.get_nodes()) > config.max_fusion_size:
             return False  # heuristic not needed for correctness
 
-        if self.can_fusion_increase_peak_memory(node1, node2):
-            return False
-
         if node1.get_names() & node2.recursive_predecessors:
             # node2 depends on node1 outputs
             if not self.can_fuse_vertical(node1, node2):
@@ -1169,6 +1166,8 @@ class Scheduler:
         elif node1_is_foreach and node2_is_foreach:
             return False
         else:  # nodes don't depend on each other, but may have common reads
+            if self.can_fusion_increase_peak_memory(node1, node2):
+                return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
     def can_fuse_vertical(self, node1, node2):
