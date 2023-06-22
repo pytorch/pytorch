@@ -138,6 +138,8 @@ joint_graph_constant_folding = True
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
 
+# Enable mutiple streams for codegen
+multiple_streams = True
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")

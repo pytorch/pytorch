@@ -1766,7 +1766,7 @@ class TritonKernel(Kernel):
                 sizes.append("1")
         return f"[{', '.join(sizes)}]"
 
-    def call_kernel(self, name: str):
+    def call_kernel(self, name: str, stream_id=0):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -1791,6 +1791,7 @@ class TritonKernel(Kernel):
             call_args,
             grid,
             V.graph.scheduler.current_device.index,
+            stream_id=stream_id,
         )
 
     def warn_mix_layout(self, kernel_name):
@@ -2137,8 +2138,10 @@ class TritonScheduling:
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
-
-        kernel.call_kernel(kernel_name)
+        if len(node_schedule) > 1:
+            print("findhao-> node_schedule: ", node_schedule)
+        stream_id = V.graph.stream_graph.name_mapping[node_schedule[0].get_name()].stream_id
+        kernel.call_kernel(kernel_name, stream_id)
         print(f"findhao-> kernel_name: {kernel_name}")
         if config.warn_mix_layout:
             kernel.warn_mix_layout(kernel_name)

@@ -206,6 +206,7 @@ class GraphLowering(torch.fx.Interpreter):
         ] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
+        self.stream_graph = None
 
     @staticmethod
     def decide_layout_opt(gm) -> bool:

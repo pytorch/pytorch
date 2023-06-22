@@ -786,7 +786,8 @@ class Scheduler:
         self.compute_last_usage()
         # import pdb
         # breakpoint()
-        stream_scheduler.stream_schedule(self.nodes)
+        if config.multiple_streams:
+            stream_scheduler.stream_schedule(self.nodes)
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()

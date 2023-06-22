@@ -1,6 +1,7 @@
 import logging
 log = logging.getLogger(__name__)
-from heapq import heappush, heappop
+from .virtualized import V
+
 
 def temporary_log_path(temp_log_path):
     # Store original configuration
@@ -57,6 +58,7 @@ class SSNode:
 class SSGraph:
     def __init__(self, nodes) -> None:
         self.ssnodes = []
+        # {buf name: SSNode}
         self.name_mapping = {}
         # It records the levels back from the OUTPUT node. {ssnode: level, }
         self.reverse_level = {}
@@ -107,6 +109,7 @@ class SSGraph:
             for successor in cur_node.successors.values():
                 if successor not in self.reverse_level:
                     if successor not in tmp_queue:
+                        # Yueming TODO: This can be delayed.
                         tmp_queue.append(cur_node)
                     break;
             else:
@@ -166,6 +169,8 @@ class SSGraph:
         # breakpoint()
         for i in range(self.stream_pool_size + 1):
             self.stream_pool.append(0)
+        # Yueming TODO: do we need keep this fake 0?
+        self.stream_pool[0] = len(self.ssnodes) + 2
         self.dig_node(self.ssnodes[0])
     
     def print_graph(self):
@@ -218,5 +223,7 @@ class SSGraph:
 
 def stream_schedule(snodes):
     pass
-    graph = SSGraph(snodes)
-    graph.print_graph()
+    ssgraph = SSGraph(snodes)
+    ssgraph.print_graph()
+    V.graph.stream_graph = ssgraph
+    return ssgraph

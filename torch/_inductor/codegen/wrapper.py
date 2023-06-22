@@ -455,11 +455,19 @@ class WrapperCodeGen(CodeGen):
     ):
         self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
 
+    def generate_stream_creation(self):
+        self.header.writeline(f"")
+        for i in range(1, V.graph.stream_graph.stream_pool_size + 1):
+            self.header.writeline(f"stream{i}_raw = torch.cuda.Stream()")
+            self.header.writeline(f"stream{i} = stream{i}_raw.cuda_stream")
+        self.header.writeline(f"stream0_raw = torch.cuda.default_stream()")
+
     @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
+        if config.multiple_streams:
+            self.generate_stream_creation()
         result.splice(self.header)
-
         out_names = V.graph.get_output_names()
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
@@ -704,14 +712,12 @@ class WrapperCodeGen(CodeGen):
         stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(
-        self, name, call_args, grid=None, device_index=None, cuda=True
+        self, name, call_args, grid=None, device_index=None, cuda=True, stream_id=0
     ):
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
             grid_str = ", ".join(pexpr(item) for item in grid)
-            stream_name = self.write_get_cuda_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = self.write_get_cuda_stream(stream_id)
             self.writeline(
                 f"{name}.run({call_args_str}, grid=grid({grid_str}), stream={stream_name})"
             )
