@@ -9,7 +9,7 @@ from .triton_utils import config_of, signature_of
 
 
 class ForeachKernel(Kernel):
-    MAX_NUM_ARGS = 370  # number where I would no longer get triton errors
+    MAX_NUM_ARGS = 250  # number where I would no longer get triton errors
 
     @staticmethod
     def horizontal_partition(nodes):
