@@ -599,11 +599,6 @@ def _sharded_pre_load_state_dict_hook(
             "are flattened and sharded."
         )
 
-    tensors_to_flatten: List[torch.Tensor] = []
-    shared_param_fqns = [
-        fqn for fqn, _, _ in _shared_param_name_infos(module, fsdp_state)
-    ]
-    loaded_shapes: List[torch.Size] = []
     device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
         if not _is_composable(fsdp_state):
@@ -612,31 +607,44 @@ def _sharded_pre_load_state_dict_hook(
             fqn_from_global_root = f"{prefix}{fqn}"
         param = state_dict.pop(fqn_from_global_root)
         # All-gather the param (ShardedTensor)
-        param, shards = _ext_pre_load_state_dict_transform(param)
 
-        loaded_shapes.append(param.size())
-        assert len(shards) < 2, (
-            "Expects 0 or 1 shard per rank "
-            f"but got {len(shards)} shards on rank {fsdp_state.rank}."
-        )
-        param_numel = param.size().numel()
-        dim_0_size = param.size()[0]
-        chunk_size = (
-            math.ceil(dim_0_size / fsdp_state.world_size) * param_numel // dim_0_size
-        )
-        if len(shards) == 1:
-            local_tensor = shards[0].tensor.flatten()
-            pg_device = _get_pg_default_device(fsdp_state.process_group)
-            if local_tensor.device.type != pg_device.type:
-                local_tensor = local_tensor.to(pg_device)
+        if not fsdp_state._state_dict_config.use_dtensor:
+            param, shards = _ext_pre_load_state_dict_transform(param)
+            assert len(shards) < 2, (
+                "Expects 0 or 1 shard per rank "
+                f"but got {len(shards)} shards on rank {fsdp_state.rank}."
+            )
+            param_numel = param.size().numel()
+            dim_0_size = param.size()[0]
+            chunk_size = (
+                math.ceil(dim_0_size / fsdp_state.world_size) * param_numel // dim_0_size
+            )
+            if len(shards) == 1:
+                local_tensor = shards[0].tensor.flatten()
+                pg_device = _get_pg_default_device(fsdp_state.process_group)
+                if local_tensor.device.type != pg_device.type:
+                    local_tensor = local_tensor.to(pg_device)
+                num_padding = chunk_size - local_tensor.numel()
+                if num_padding > 0:
+                    local_tensor = F.pad(local_tensor, [0, num_padding])
+            else:
+                local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
+            tensor = torch.empty(
+                chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
+            )
+        else: 
+            param_numel = param.numel()
+            dim_0_size = param.size()[0]
+            chunk_size = (
+                math.ceil(dim_0_size / fsdp_state.world_size) * param_numel // dim_0_size
+            )
+            local_tensor = param.to_local()
             num_padding = chunk_size - local_tensor.numel()
             if num_padding > 0:
                 local_tensor = F.pad(local_tensor, [0, num_padding])
-        else:
-            local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
-        tensor = torch.empty(
-            chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
-        )
+            else: 
+                local_tensor = torch.zeros(chunk_size, dtype=local_tensor.dtype, device=local_tensor.device)
+
         if local_tensor.is_cpu:
             tensor_list = list(
                 torch.chunk(tensor, dist.get_world_size(fsdp_state.process_group))

@@ -85,7 +85,9 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
                     # check whether local_tensor are the same
                     self.assertEqual(v1.to_local(), v2.local_tensor())
                     # check whether device are the same
-                    self.assertEqual(v1.to_local().device, v2.local_tensor().device)
+                    self.assertEqual(
+                        v1.to_local().device, v2.local_tensor().device
+                    )
 
 
 # TODO: consolidate test cases once we test all DTensor usage
@@ -122,6 +124,38 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
         ):
             k1, v1 = dtensor_sd
             k2, v2 = sharded_tensor_sd
+            if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
+                self.assertEqual(k1, k2)
+                # check whether local_tensor are the same
+                self.assertEqual(v1.to_local(), v2.local_tensor())
+                # check whether device are the same
+                self.assertEqual(v1.to_local().device, v2.local_tensor().device)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor_sharded_model_load_state_dict(self):
+        model = FSDP(TestDummyModel().cuda())
+
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(
+                use_dtensor=True,
+                offload_to_cpu=False,
+            ),
+        )
+        ref_dtensor_sd = model.state_dict()
+
+        model(model.get_input()).sum().backward()
+
+        model.load_state_dict(ref_dtensor_sd)
+        new_state_dict = model.state_dict()
+
+        for ref_dtensor_sd, new_state_dict in zip(
+            ref_dtensor_sd.items(), new_state_dict.items()
+        ):
+            k1, v1 = ref_dtensor_sd
+            k2, v2 = new_state_dict
             if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
                 self.assertEqual(k1, k2)
                 # check whether local_tensor are the same
