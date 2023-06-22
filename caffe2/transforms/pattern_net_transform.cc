@@ -47,7 +47,7 @@ std::vector<int> PatternNetTransform::GetPatternTraversalOrder(
   return ordered_ops;
 }
 
-bool compare_ops(
+static bool compare_ops(
     const OperatorDef& p_op,
     const OperatorDef& g_op,
     bool arg_match) {

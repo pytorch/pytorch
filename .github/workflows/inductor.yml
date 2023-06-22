@@ -77,6 +77,10 @@ jobs:
           { config: "inductor_timm_cpu_accuracy", shard: 1, num_shards: 2, runner: "linux.4xlarge" },
           { config: "inductor_timm_cpu_accuracy", shard: 2, num_shards: 2, runner: "linux.4xlarge" },
           { config: "inductor_torchbench_cpu_accuracy", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+          { config: "inductor_huggingface_dynamic_cpu_accuracy", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+          { config: "inductor_timm_dynamic_cpu_accuracy", shard: 1, num_shards: 2, runner: "linux.12xlarge" },
+          { config: "inductor_timm_dynamic_cpu_accuracy", shard: 2, num_shards: 2, runner: "linux.12xlarge" },
+          { config: "inductor_torchbench_dynamic_cpu_accuracy", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
 
   linux-focal-cpu-py3_8-gcc7-inductor-test:
