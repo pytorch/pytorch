@@ -3287,6 +3287,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_check_type(torch.randn(4), [torch.Tensor])
         self.assertEqual(ref, res)
 
+    # Test for https://github.com/pytorch/pytorch/issues/103132
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    def test_inference_mode_dynamic_shapes(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, param):
+                z = torch.matmul(param, param)
+                return z
+
+        model = Repro()
+        # Need a 3d tensor to actually cause the error:
+        # we go down a path of the C++ matmul decomp that calls sizes().
+        inp = torch.randn(4, 4, 4, requires_grad=True)
+        model = torch.compile(model, backend="aot_eager", dynamic=True)
+        with torch.inference_mode():
+            model(inp)
+
     def test_kwargs_out_list_variable(self):
         class Repro(torch.nn.Module):
             def __init__(self):
