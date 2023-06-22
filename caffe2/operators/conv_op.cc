@@ -93,7 +93,7 @@ Y:
 
 )DOC";
 
-std::function<void(OpSchema&)> ConvDocGenerator(const char* dim) {
+static std::function<void(OpSchema&)> ConvDocGenerator(const char* dim) {
   return [=](OpSchema& schema) {
     string doc = R"DOC(
 The convolution operator consumes an input vector, a {dim}filter blob
