@@ -129,7 +129,7 @@ jobs:
 
         # Setup the environment
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: huydhn/pytorch/.github/actions/checkout-pytorch@test-actions-checkout
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux

@@ -96,7 +96,7 @@ jobs:
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: huydhn/pytorch/.github/actions/checkout-pytorch@test-actions-checkout
         with:
           no-sudo: true
 
