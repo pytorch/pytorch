@@ -13,8 +13,10 @@ class MutableLocalBase:
     Base class for Variable.mutable_local
 
     typ:
-    - 'new' (If the mutable_local represents a new variable)
-    - 'existing' (If the mutable_local represents an existing variable)
+    - 'new' (If the Variable represents a new variable that is created while
+             Dynamo is introspecting)
+    - 'existing' (If the Variable represents an existing variable that
+                  Dynamo began tracking while introspecting)
     """
 
     def __init__(self, typ):

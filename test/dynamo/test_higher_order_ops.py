@@ -1695,7 +1695,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"HigherOrderOperator: Mutating a variable not in the current scope (replace_all)": 2},
+            {
+                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)": 2
+            },
         )
         self.assertEqual(actual, expected)
 
