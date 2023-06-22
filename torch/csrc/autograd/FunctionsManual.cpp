@@ -1451,7 +1451,7 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
-Tensor sparse_mask_like_grad(
+static Tensor sparse_mask_like_grad(
     const Tensor& x,
     const Tensor& gx,
     bool accumulate_matches) {
