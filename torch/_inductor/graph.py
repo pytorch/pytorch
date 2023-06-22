@@ -5,7 +5,7 @@ import re
 import sys
 import time
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -196,6 +196,13 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = user_visible_outputs
+        self.cache_key: str = ""  # This is the cache key for the compiled artifact
+        self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
+        self.cache_linemap: List[
+            Tuple[int, str]
+        ] = (
+            []
+        )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
 
     def decide_layout_opt(self) -> bool:
         """
@@ -720,7 +727,7 @@ class GraphLowering(torch.fx.Interpreter):
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )
-                    if user.op == "output" and result.get_numel() != 1:
+                    if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()
 
@@ -869,7 +876,12 @@ class GraphLowering(torch.fx.Interpreter):
         from .codecache import PyCodeCache
 
         code, linemap = self.codegen()
-        mod = PyCodeCache.load(code, linemap=linemap)
+        linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
+        key, path = PyCodeCache.write(code)
+        mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
+        self.cache_key = key
+        self.cache_path = path
+        self.cache_linemap = linemap
 
         for name, value in self.constants.items():
             setattr(mod, name, value)

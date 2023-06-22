@@ -210,7 +210,7 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-static Tensor mkldnn_reorder_linear_weight(
+Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
     c10::optional<int64_t> batch_size_opt) {
   if (self.scalar_type() == ScalarType::BFloat16) {
@@ -236,7 +236,7 @@ static Tensor mkldnn_reorder_linear_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
+ideep::tensor::desc get_conv_transpose_expected_weights_desc(
     const ideep::tensor::dims& weights_dims,
     ideep::tensor::data_type w_dtype,
     const ideep::tensor::dims& strides,
@@ -275,7 +275,7 @@ static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
   }
 }
 
-static Tensor mkldnn_reorder_conv_transpose2d_weight(
+Tensor mkldnn_reorder_conv_transpose2d_weight(
     const Tensor& self,
     IntArrayRef padding,
     IntArrayRef output_padding,
@@ -373,7 +373,7 @@ Tensor mkldnn_reorder_conv3d_weight(
 #if AT_MKL_ENABLED() && AT_MKLDNN_ENABLED()
 #include <mkl.h>
 
-static Tensor mkl_reorder_linear_weight(
+Tensor mkl_reorder_linear_weight(
     const Tensor& weight,
     const int64_t batch_size) {
   TORCH_CHECK(
