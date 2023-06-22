@@ -841,7 +841,6 @@ class NumpyVariable(VariableTracker):
     def as_proxy(self):
         # return self.value
         if isinstance(self.value, type) and config.numpy_ndarray_as_tensor:
-            import numpy as np
 
             # convert numpy dtype to torch types
             if self.value in numpy_dtype_to_torch_dtype:
