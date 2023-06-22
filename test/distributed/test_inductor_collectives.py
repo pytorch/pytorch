@@ -247,7 +247,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf0.copy_(arg0_1)") \
             .check("buf1 = buf0") \
             .check("buf1_work = dist.all_reduce(buf1") \
-            .check("_register_tensor_work(buf1, buf1_work)") \
+            .check("fun_col._register_tensor_work(buf1, buf1_work)") \
             .check("_wait_tensor(buf0)") \
             .check("return (buf2, )") \
             .run(code)
@@ -279,7 +279,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check_not("buf1.copy_(") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
-            .check("_register_tensor_work(buf2, buf2_work)") \
+            .check("fun_col._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
             .check("buf4 = empty_strided") \
@@ -318,7 +318,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
-            .check("_register_tensor_work(buf2, buf2_work)") \
+            .check("fun_col._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
             .check("return (buf3, buf4, buf5") \
@@ -486,6 +486,21 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
+    def test_dynamo_trace_allgather_coalesced(self):
+        def func(inp, *, tag, ranks, group_size):
+            ar = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(inp, tag, ranks, group_size)
+            return ar
+
+        inputs = [torch.ones(4, 4, device="cuda"), torch.ones(6, 6, device="cuda")]
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert counter.frame_count == 1
+        assert counter.op_count == 3  # It generates 2 getattr to unpack the array
+        assert same(out, correct)
+
+
     def test_backwards(self):
         """
         It's probably not that common to need backwards support for collectives.
@@ -513,6 +528,51 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         x = torch.rand((2, 3, 4), device="meta")
         out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
         self.assertEqual(x.size(), out.size())
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(torch._inductor.config.triton, "descriptive_names", False)
+    def test_inductor_all_gather_coalesced(self):
+        """
+        make sure that an intermediate that's going to be reuse isn't mutated unless copied
+        """
+        torch._inductor.config.debug = True
+
+        def func(inp, *, tag, ranks, group_size):
+            x = inp + 1
+            tensor_list = torch.ops.c10d_functional.all_gather_into_tensor_coalesced([x, inp], tag, ranks, group_size)
+            y = x + 2
+            ar0 = torch.ops.c10d_functional.wait_tensor(tensor_list[0])
+            ar1 = torch.ops.c10d_functional.wait_tensor(tensor_list[1])
+            # ensure other is not incorrectly aliasing ar's buffer
+            other = torch.ones_like(inp) + 22
+            return ar0, y, other, ar1
+
+        inputs = torch.ones(4, 4, device="cuda")
+
+        compiled = torch.compile(func)
+        code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        FileCheck() \
+            .check("buf0 = empty_strided(") \
+            .check("buf5 = empty_strided(") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf5") \
+            .check("buf1 = empty_strided") \
+            .check("buf2 = empty_strided") \
+            .check_not("copy_(") \
+            .check("buf3_inputs = [buf0,arg0_1]") \
+            .check("buf3 = [buf1,buf2]") \
+            .check("buf3_work = fun_col._all_gather_into_tensor_coalesced_fallback("
+                   "output_tensors=buf3, input_tensors=buf3_inputs") \
+            .check("fun_col._register_tensor_work(buf3, buf3_work)") \
+            .check("_wait_tensor(buf1)") \
+            .check("buf4 = buf1") \
+            .check("buf6 = buf0; del buf0  # reuse") \
+            .check("_wait_tensor(buf2)") \
+            .check("buf7 = buf2") \
+            .check("return (buf4, buf5, buf6, buf7") \
+            .run(code)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert same(out, correct), f"{out} va {correct}"
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
