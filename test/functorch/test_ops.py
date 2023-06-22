@@ -1270,6 +1270,7 @@ class TestOperators(TestCase):
         skip('nn.functional.scaled_dot_product_attention', device_type='cuda'),
         skip('nn.functional.multi_head_attention_forward'),  # randomness
         skip('nn.functional.alpha_dropout'),  # randomness
+        decorate('nn.functional.conv3d', decorator=skipIfRocm),  # Tensor-likes are not close!
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         skip('to_sparse', ''),  # non-dense output
         skip('ormqr', ''),  # takes too long
