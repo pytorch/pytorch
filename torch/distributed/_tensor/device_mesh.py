@@ -172,7 +172,7 @@ class DeviceMesh(object):
         self_mesh = self.mesh.to(self.device_type)
         mesh_list = [self_mesh.clone() for _ in range(get_world_size())]
         mesh_tensor = torch.cat(mesh_list)
-        funcol.all_gather_tensor(mesh_tensor, gather_dim=0, group=_get_default_group())
+        mesh_tensor = funcol.all_gather_tensor(mesh_tensor, gather_dim=0, group=_get_default_group())
         mesh_tensor_split = torch.split(
             mesh_tensor, split_size_or_sections=get_world_size()
         )
