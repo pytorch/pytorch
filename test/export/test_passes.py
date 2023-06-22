@@ -361,7 +361,7 @@ class TestPasses(TestCase):
 
         inp = torch.tensor([5])
         res, dep_token = gm(inp)
-        self.assertTrue(torch._dynamo.utils.same(res, f(inp)))
+        self.assertEqual(res, f(inp))
         self.assertEqual(res.shape, torch.Size([5, 4]))
         self.assertEqual(dep_token.shape, torch.Size([]))
 
@@ -401,7 +401,7 @@ class TestPasses(TestCase):
             gm(torch.ones(11, 8))
 
         inp = torch.ones(6, 8)
-        self.assertTrue(torch._dynamo.utils.same(gm(inp)[0], f(inp)))
+        self.assertEqual(gm(inp)[0], f(inp))
         FileCheck().check_count(
             "torch.ops.aten._functional_assert_async.msg", 3, exactly=True
         ).run(gm.code)
