@@ -22,10 +22,6 @@ import functools
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
 
-def is_symint_node(node):
-    assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
-    return "val" in node.meta and isinstance(node.meta['val'], torch.SymInt)
-
 def must_recompute(node):
     return node.meta.get("recompute", False)
 
@@ -41,6 +37,12 @@ def has_recomputable_rng_ops(fx_g):
         if must_recompute(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
             return True
     return False
+
+def sym_node_size(node):
+    if isinstance(node.meta["val"], (torch.SymInt, torch.SymBool)):
+        return 1
+    assert isinstance(node.meta["val"], torch.SymFloat)
+    return 4
 
 class InvalidNodeBase:
     def __repr__(self):
@@ -609,7 +611,7 @@ def cleanup_recompute_tags(joint_module):
 
 
 def min_cut_rematerialization_partition(
-    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None,
+    joint_module: fx.GraphModule, _joint_inputs, compiler="inductor", recomputable_ops=None,
     *, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
@@ -838,10 +840,9 @@ def min_cut_rematerialization_partition(
         # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
-        if is_symint_node(node):
-            weight = 1
-        elif is_sym_node(node):
-            weight = math.inf
+
+        if is_sym_node(node):
+            weight = sym_node_size(node)
         elif is_non_tensor_node:
             weight = math.inf
         else:
