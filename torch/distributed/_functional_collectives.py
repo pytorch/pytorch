@@ -115,13 +115,17 @@ class _WaitRegistration:
                 del data_ptr_to_work[ptr]
 
 
-def _register_tensor_work(tensor_or_list, work):
-    reg = _WaitRegistration(work)
+def _register_tensor_work(tensor_or_list, work_or_list):
     if not isinstance(tensor_or_list, list):
         tensor_or_list = [tensor_or_list]
-    for tensor in tensor_or_list:
-        reg._register(tensor)
-
+    if not isinstance(work_or_list, list):
+        reg = _WaitRegistration(work_or_list)
+        for tensor in tensor_or_list:
+            reg._register(tensor)
+    else:
+        for tensor, work in zip(tensor_or_list, work_or_list):
+            reg = _WaitRegistration(work)
+            reg._register(tensor)
 
 def _wait_reg_dec(ptr, wait_reg):
     wait_reg.decrement_live_tensor(ptr)
@@ -258,14 +262,15 @@ def _all_gather_into_tensor_coalesced(self, tag, rankset, group_size):
         return out_tensor
 
     out_tensors = [mk_out_tensor(t) for t in self]
-    # all_gather_coalesced is useless, it doesn't work under NCCL and does lots of copies under Gloo
-    # all_gather is useless too because it's single tensor
-    # NCCL's PG::all_gather with multiple tensors is broken, it only works for the multi-device setting
-    #  and fails if you mix same-size with different-size tensor lists.
-    # TODO use c10d._coalescing_manager
-    for shard, out_tensor in zip(self, out_tensors):
-        work = dist.all_gather(list(torch.chunk(out_tensor, group_size)), shard, group=group, async_op=True)
-        _register_tensor_work(out_tensor, work)
+
+    work_list = _all_gather_into_tensor_coalesced_fallback(
+        output_tensors=out_tensors,
+        input_tensors=self,
+        group=group,
+        async_op=False)
+
+
+    _register_tensor_work(out_tensors, work_list)
     return out_tensors
 
 
@@ -612,3 +617,24 @@ traceable_collective_remaps = {
     legacy_allgather: all_gather_tensor_inplace,
     legacy_reducescatter: reduce_scatter_tensor_inplace,
 }
+
+def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, group, async_op=False):
+    # all_gather_coalesced is useless, it doesn't work under NCCL and does lots of copies under Gloo
+    # all_gather is useless too because it's single tensor
+    # NCCL's PG::all_gather with multiple tensors is broken, it only works for the multi-device setting
+    #  and fails if you mix same-size with different-size tensor lists.
+    # _coalescing_manager crashed NCCL when used with all_gather_into_tensor.
+    work_list = []
+    if input_tensors[0].is_cpu:
+        out_tensors_sliced = [
+            list(torch.chunk(out_tensor, dist.get_world_size(group)))
+            for out_tensor in output_tensors
+        ]
+        for shard, out_tensor in zip(input_tensors, out_tensors_sliced):
+            work = c10d.all_gather(out_tensor, shard, group=group, async_op=async_op)
+            work_list.append(work)
+    else:
+        for shard, out_tensor in zip(input_tensors, output_tensors):
+            work = c10d.all_gather_into_tensor(out_tensor, shard, group=group, async_op=async_op)
+            work_list.append(work)
+    return work_list
