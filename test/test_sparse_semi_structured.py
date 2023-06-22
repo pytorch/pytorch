@@ -17,15 +17,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 
-<<<<<<< HEAD
 from torch.testing._internal.common_dtype import all_types_and_complex
-=======
-from torch.testing._internal.common_dtype import (
-    all_types_and_complex
-)
-# CUSPARSELT_SUPPORTED_DTYPES = [torch.int8, torch.float16, torch.bfloat16, torch.float32]
-CUSPARSELT_SUPPORTED_DTYPES = [torch.float16]
->>>>>>> 3eec43d1fdb (placeholder)
 
 from torch.testing._internal.common_utils import (
     parametrize,
@@ -73,7 +65,6 @@ class TestSparseSemiStructured(TestCase):
         assert isinstance(A, torch.Tensor)
         assert isinstance(A_sparse, SparseSemiStructuredTensor)
 
-<<<<<<< HEAD
         with self.assertRaisesRegex(
             NotImplementedError,
             "You must pass in a mask to to_sparse_semi_structured, currently mask=None.",
@@ -89,15 +80,6 @@ class TestSparseSemiStructured(TestCase):
         """
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
         A_sparse = to_sparse_semi_structured(A, mask=A.bool())
-=======
-    @unittest.skip("asdf")
-    @dtypes(*CUSPARSELT_SUPPORTED_DTYPES)
-    def test_mm_sparse_first_NT_T(self, dtype, device):
-        A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype)
-        A_sparse = to_sparse_semi_structured(A)
-
-        B = torch.rand((128, 128), device=A_sparse.device).to(dtype)
->>>>>>> 3eec43d1fdb (placeholder)
 
         B = torch.rand((128, 128), device=A_sparse.device).to(dtype)
 
@@ -179,17 +161,10 @@ class TestSparseSemiStructured(TestCase):
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     @parametrize("inference_mode", [subtest(False), subtest(True)])
-<<<<<<< HEAD
     def test_linear(self, inference_mode, device):
         """
         Test nn.Linear has the same numerics
         """
-=======
-    @parametrize("contiguous_output", [subtest(False), subtest(True)])
-    def test_linear(self, inference_mode, contiguous_output, device):
-        SparseSemiStructuredTensor._fuse_transpose = contiguous_output
-
->>>>>>> 3eec43d1fdb (placeholder)
         input = torch.rand(128, 128, device=device).half()
         model = nn.Linear(128, 128).to(device).half()
         m, n = model.weight.shape
@@ -211,22 +186,14 @@ class TestSparseSemiStructured(TestCase):
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     def test_values(self):
         A = rand_sparse_semi_structured_mask(128, 128)
-<<<<<<< HEAD
         A_sparse = to_sparse_semi_structured(A, mask=A.bool())
-=======
-        A_sparse = to_sparse_semi_structured(A)
->>>>>>> 3eec43d1fdb (placeholder)
         assert A_sparse.values().shape == (128, 64)
         assert (A_sparse.values() == 1).all()
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
     def test_indices(self):
         A = rand_sparse_semi_structured_mask(128, 128)
-<<<<<<< HEAD
         A_sparse = to_sparse_semi_structured(A, mask=A.bool())
-=======
-        A_sparse = to_sparse_semi_structured(A)
->>>>>>> 3eec43d1fdb (placeholder)
         assert A_sparse.indices().shape == (128, 8)
 
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
@@ -236,11 +203,7 @@ class TestSparseSemiStructured(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Error original_tensor.shape"):
             A_sparse = to_sparse_semi_structured(A, mask=A.bool())
 
-<<<<<<< HEAD
     @unittest.skipIf(not _IS_SM8X, "semi-structured sparsity not supported on this library version")
-=======
-    @unittest.skip("cutlass dtypes")
->>>>>>> 3eec43d1fdb (placeholder)
     @dtypes(*all_types_and_complex())
     def test_unsupported_dtype(self, dtype, device):
         A = rand_sparse_semi_structured_mask(128, 128, dtype=dtype, device=device)

@@ -18,6 +18,8 @@ else:
     DType = int
     DimOrDims = Optional[Tuple[int]]
 
+if torch._C._is_cusparselt_enabled():
+    torch._C._init_cusparselt()
 
 __all__ = [
     'addmm',
