@@ -90,7 +90,32 @@ def _is_zipfile(f) -> bool:
     return read_bytes == local_header_magic_number
 
 
-def register_package(priority, tagger, deserializer):
+def register_package(priority: int,
+                     tagger: Callable[[Union[torch.Storage, torch.UntypedStorage]], Union[str, None]],
+                     deserializer: Callable[[Union[torch.Storage, torch.UntypedStorage], str],
+                                            Union[torch.Storage, torch.UntypedStorage, None]]):
+    '''
+    Registers callables for tagging and deserializing storage objects with an associated priority.
+    Tagging associates a device with a storage object at save time while deserializing moves a
+    storage object to an appropriate device at load time. Taggers and deserializers are run in the
+    order given by their priority until a tagger/deserializer returns a value that is not `None`.
+
+    To override the deserialization behavior for a device in the global registry, one can register a
+    tagger with a higher priority than the existing tagger.
+
+    This function can also be used to register taggers and deserializers for new devices.
+
+    Args:
+        priority: Indicates the priority associated with the tagger and deserializer, where a lower
+            value indicates higher priority.
+        tagger: Callable that takes in a storage object and returns its tagged device as a string
+            or None.
+        deserializer: Callable that takes in storage object and a device string and returns a storage
+            object on the appropriate device or None.
+
+    Returns:
+        None
+    '''
     queue_elem = (priority, tagger, deserializer)
     _package_registry.append(queue_elem)
     _package_registry.sort()
