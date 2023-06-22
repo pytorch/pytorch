@@ -52,7 +52,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
         transposed: bool = False,
     ):
         """
-        Create a new instance of the class. When original_tensor is passed in, we compress it and store the compresed representation.
+        Create a new instance of the class.
+
+        When original_tensor is passed in, we compress it and store the compresed representation.
         We can also create new instance of the class from the compressed representation without the original tensor.
 
         Args:
