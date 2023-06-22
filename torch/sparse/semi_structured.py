@@ -43,14 +43,24 @@ class SparseSemiStructuredTensor(torch.Tensor):
     """
 
     @staticmethod
-    def __new__(cls, custom_shape: torch.Size, compressed_tensor: torch.Tensor, transposed: bool = False):
+    def __new__(
+        cls,
+        original_tensor: Optional[torch.Tensor],
+        original_shape: Optional[torch.Size] = None,
+        mask: Optional[torch.Tensor] = None,
+        compressed_tensor: Optional[torch.Tensor] = None,
+        transposed: bool = False,
+    ):
         """
-        Create a new instance of the class.
+        Create a new instance of the class. When original_tensor is passed in, we compress it and store the compresed representation.
+        We can also create new instance of the class from the compressed representation without the original tensor.
 
         Args:
-            custom_shape (tuple): The custom shape for the new instance.
-            compressed_tensor (torch.Tensor): The compressed tensor to use for the new instance.
-            transposed (bool): Indicates whether the tensor is transposed.
+            original_tensor: The original dense tensor, or None, if we have already compressed the tensor.
+            original_shape: The shape of the original dense tensor
+            mask: Mask to be applied to the original tensor.
+            compressed_tensor: A flattened tensor to store the specified elements and mask metadata.
+            transposed: Whether the tensor is transposed or not.
 
         Returns:
             torch.Tensor: A torch.Tensor wrapper subclass.
@@ -59,24 +69,34 @@ class SparseSemiStructuredTensor(torch.Tensor):
             None
 
         """
+        if original_tensor is not None:
+            previous_tensor = original_tensor
+            original_shape = original_tensor.shape
+        else:
+            previous_tensor = compressed_tensor
+
         kwargs = {}
-        kwargs["device"] = compressed_tensor.device  # type: ignore[assignment]
-        kwargs["dtype"] = compressed_tensor.dtype  # type: ignore[assignment]
-        kwargs["layout"] = compressed_tensor.layout  # type: ignore[assignment]
+        kwargs["device"] = previous_tensor.device  # type: ignore[assignment]
+        kwargs["dtype"] = previous_tensor.dtype  # type: ignore[assignment]
+        kwargs["layout"] = previous_tensor.layout  # type: ignore[assignment]
         kwargs["requires_grad"] = False  # type: ignore[assignment]
 
-        return torch.Tensor._make_wrapper_subclass(cls, custom_shape, **kwargs)  # type: ignore[attr-defined]
+        return torch.Tensor._make_wrapper_subclass(cls, original_shape, **kwargs)  # type: ignore[attr-defined]
 
     def __init__(
         self,
-        custom_shape: torch.Size,
-        compressed_tensor: torch.Tensor,
-        transposed: bool,
+        original_tensor: Optional[torch.Tensor],
+        original_shape: Optional[torch.Size] = None,
+        mask: Optional[torch.Tensor] = None,
+        compressed_tensor: Optional[torch.Tensor] = None,
+        transposed: bool = False,
     ) -> None:
         """SparseSemiStructuredTensor constructor.
 
         Args:
-            custom_shape: The shape of the original dense tensor
+            original_tensor: The original dense tensor, or None, if we have already compressed the tensor.
+            original_shape: The shape of the original dense tensor
+            mask: Mask to be applied to the original tensor.
             compressed_tensor: A flattened tensor to store the specified elements and mask metadata.
             transposed: Whether the tensor is transposed or not.
 
@@ -84,8 +104,93 @@ class SparseSemiStructuredTensor(torch.Tensor):
             None
 
         Raises:
-            None
+            NotImplementedError: If ``mask=None``, as we currently do not support inferring a mask from the dense tensor.
+            RuntimeError: If original_tensor is not a supported dtype, dim, shape, or device.
         """
+        warnings.warn(
+            (
+                "The PyTorch API of SparseSemiStructuredTensor is in prototype stage "
+                "and will change in the near future. Please open a Github issue "
+                "for features requests and see our documentation on the torch.sparse "
+                "module for further information about the project."
+            ),
+            UserWarning,
+        )
+
+        # if original tensor is passed in, we need to compress it and store the compressed representation.
+        if original_tensor is not None:
+            # check if mask passed in
+            if mask is None:
+                raise NotImplementedError("You must pass in a mask to to_sparse_semi_structured, currently mask=None.")
+
+            # check device
+            if not original_tensor.is_cuda:
+                raise RuntimeError(
+                    (
+                        f"Error original_tensor.device= {original_tensor.device} is not supported! "
+                        "Only CUDA tensors are currently supported."
+                    )
+                )
+
+            # check dim
+            if original_tensor.dim() != 2:
+                raise RuntimeError(
+                    (
+                        f"Error original_tensor.dim = {original_tensor.dim()} is not supported! "
+                        "Only 2d tensors are currently supported."
+                    )
+                )
+
+            # check dtype
+            if original_tensor.dtype not in _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG:
+                raise RuntimeError(
+                    (
+                        f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
+                        "dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
+                    )
+                )
+
+            # check shape
+            m, n = original_tensor.shape
+            min_size = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[original_tensor.dtype].min_size
+            if m < min_size or m % min_size or n < min_size or n % min_size:
+                # TODO in the future we can add in padding to support dimensions that aren't perfect multiples
+                raise RuntimeError(
+                    (
+                        f"Error original_tensor.shape {original_tensor.shape} is not supported! "
+                        "Both dimensions must be larger than and a multiple of {min_size}"
+                    )
+                )
+
+            # This code calculates the size of the compressed tensor.
+            # compression factor is different based on dtype it's given by the formula below for 2:4 sparsity:
+            # compression_factor = 1/2 + 1/bitwidth(dtype)
+            original_size = original_tensor.nelement()
+            compression_factor = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[
+                original_tensor.dtype
+            ].compression_factor
+            compressed_size = original_size * compression_factor // 16
+
+            compressed_tensor = torch.empty(
+                (compressed_size,),
+                dtype=original_tensor.dtype,
+                device=original_tensor.device,
+            )
+
+            # TODO This is a temporoary hack to get the mask in compressed form so we can store the compressed tensor.
+            # In the future, we will add in a conversion function from the mask to the meta that we can use instead.
+            placeholder = torch.ones(
+                (128, n), dtype=original_tensor.dtype, device=original_tensor.device
+            )
+            specified = original_tensor.masked_select(mask).view(m, n // 2)
+            _, meta = torch._structured_sparse_linear(placeholder, specified, mask)
+            # set the specified elements
+            compressed_tensor[: m * n // 2] = specified.view(-1)
+            # set the metadata
+            compressed_tensor[m * n // 2 :] = meta.view(original_tensor.dtype).view(-1)
+
+        # set values
+        self.original_tensor = None
         self.compressed_tensor = compressed_tensor
         self.transposed = transposed
 
@@ -129,9 +234,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # Since this code runs below autograd, a detach corresponds to only returning a new object
         if func is torch.ops.aten.detach.default:
             return SparseSemiStructuredTensor(
-                args[0].shape,
-                args[0].compressed_tensor,
-                args[0].transposed,
+                args[0].original_tensor,
+                original_shape=args[0].shape,
+                mask=None,
+                compressed_tensor=args[0].compressed_tensor,
+                transposed=args[0].transposed,
             )
 
         # Because we cannot go from the compressed representation back to the dense representation currently,
@@ -139,9 +246,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # is the first or second argument, we expect an even / odd number of calls to transpose respectively.
         if func is torch.ops.aten.t.default:
             return SparseSemiStructuredTensor(
-                args[0].shape,
-                args[0].compressed_tensor,
-                not args[0].transposed,
+                args[0].original_tensor,
+                original_shape=args[0].shape,
+                mask=None,
+                compressed_tensor=args[0].compressed_tensor,
+                transposed=not args[0].transposed,
             )
 
         # handle addmm
@@ -240,8 +349,7 @@ def to_sparse_semi_structured(
         SparseSemiStructuredTensor: A sparse semi-structured tensor created from the given original_tensor and mask
 
     Raises:
-        NotImplementedError: If ``mask=None``, as we currently do not support inferring a mask from the dense tensor.
-        RuntimeError: If original_tensor is not a supported dtype, dim, shape, or device.
+        None
 
     Example:
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
@@ -270,87 +378,4 @@ def to_sparse_semi_structured(
                 [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0',
        dtype=torch.int16))
     """
-    warnings.warn(
-        (
-            "The PyTorch API of SparseSemiStructuredTensor is in prototype stage "
-            "and will change in the near future. Please open a Github issue "
-            "for features requests and see our documentation on the torch.sparse "
-            "module for further information about the project."
-        ),
-        UserWarning,
-    )
-
-    # check if mask passed in
-    if mask is None:
-        raise NotImplementedError("You must pass in a mask to to_sparse_semi_structured, currently mask=None.")
-
-    # check device
-    if not original_tensor.is_cuda:
-        raise RuntimeError(
-            (
-                f"Error original_tensor.device= {original_tensor.device} is not supported! "
-                "Only CUDA tensors are currently supported."
-            )
-        )
-
-    # check dim
-    if original_tensor.dim() != 2:
-        raise RuntimeError(
-            (
-                f"Error original_tensor.dim = {original_tensor.dim()} is not supported! "
-                "Only 2d tensors are currently supported."
-            )
-        )
-
-    # check dtype
-    if original_tensor.dtype not in _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG:
-        raise RuntimeError(
-            (
-                f"Error original_tensor.dtype {original_tensor.dtype} is not a supported dtype! "
-                "dtype must be one of: {_DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG}"
-            )
-        )
-
-    # check shape
-    m, n = original_tensor.shape
-    min_size = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[original_tensor.dtype].min_size
-    if m < min_size or m % min_size or n < min_size or n % min_size:
-        # TODO in the future we can add in padding to support dimensions that aren't perfect multiples
-        raise RuntimeError(
-            (
-                f"Error original_tensor.shape {original_tensor.shape} is not supported! "
-                "Both dimensions must be larger than and a multiple of {min_size}"
-            )
-        )
-
-    # This code calculates the size of the compressed tensor.
-    # compression factor is different based on dtype it's given by the formula below for 2:4 sparsity:
-    # compression_factor = 1/2 + 1/bitwidth(dtype)
-    original_size_bytes = original_tensor.nelement() * original_tensor.element_size()
-    compression_factor = _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG[
-        original_tensor.dtype
-    ].compression_factor
-    compressed_size_bytes = original_size_bytes * compression_factor // 16
-    compressed_size = compressed_size_bytes // original_tensor.element_size()
-
-    compressed_tensor = torch.empty(
-        (compressed_size,),
-        dtype=original_tensor.dtype,
-        device=original_tensor.device,
-    )
-
-    # TODO This is a temporoary hack to get the mask in compressed form so we can store the compressed tensor.
-    # In the future, we will add in a conversion function from the mask to the meta that we can use instead.
-    placeholder = torch.ones(
-        (128, n), dtype=original_tensor.dtype, device=original_tensor.device
-    )
-    specified = original_tensor.masked_select(mask).view(m, n // 2)
-    _, meta = torch._structured_sparse_linear(placeholder, specified, mask)
-    # set the specified elements
-    compressed_tensor[: m * n // 2] = specified.view(-1)
-    # set the metadata
-    compressed_tensor[m * n // 2 :] = meta.view(original_tensor.dtype).view(-1)
-
-    return SparseSemiStructuredTensor(
-        original_tensor.shape, compressed_tensor, transposed=transposed
-    )
+    return SparseSemiStructuredTensor(original_tensor, mask=mask, transposed=transposed)
