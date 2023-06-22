@@ -39,6 +39,7 @@ __all__ = [
     'register_package',
     'check_module_version_greater_or_equal',
     'validate_cuda_device',
+    'validate_hpu_device',
     'location_tag',
     'default_restore_location',
     'normalize_storage_type',
@@ -145,6 +146,9 @@ def _cuda_tag(obj):
     if obj.device.type == 'cuda':
         return 'cuda:' + str(obj.device.index)
 
+def _hpu_tag(obj):
+    if obj.device.type == 'hpu':
+        return 'hpu:' + str(obj.device.index)
 
 def _mps_tag(obj):
     if obj.device.type == 'mps':
@@ -196,6 +200,38 @@ def _cuda_deserialize(obj, location):
                 return torch.UntypedStorage(obj.nbytes(), device=torch.device(location))
         else:
             return obj.cuda(device)
+
+
+def validate_hpu_device(location):
+    hpu = getattr(torch, "hpu", None)
+    assert hpu is not None, "HPU device module is not loaded"
+    device = hpu._utils._get_device_index(location, optional=True)
+
+    if not hpu.is_available():
+        raise RuntimeError('Attempting to deserialize object on a HPU '
+                           'device but torch.hpu.is_available() is False. '
+                           'If you are running on a CPU-only machine, '
+                           'please use torch.load with map_location=torch.device(\'cpu\') '
+                           'to map your storages to the CPU.')
+    device_count = hpu.device_count()
+    if device >= device_count:
+        raise RuntimeError('Attempting to deserialize object on HPU device '
+                           f'{device} but torch.hpu.device_count() is {device_count}. Please use '
+                           'torch.load with map_location to map your storages '
+                           'to an existing device.')
+    return device
+
+
+def _hpu_deserialize(obj, location):
+    hpu = getattr(torch, "hpu", None)
+    assert hpu is not None, "HPU device module is not loaded"
+    if location.startswith('hpu'):
+        device = validate_hpu_device(location)
+        if getattr(obj, "_torch_load_uninitialized", False):
+            with hpu.device(device):
+                return torch.UntypedStorage(obj.nbytes(), device=torch.device(location))
+        else:
+            return obj.hpu(device)
 
 
 def _mps_deserialize(obj, location):
@@ -251,6 +287,7 @@ register_package(20, _cuda_tag, _cuda_deserialize)
 register_package(21, _mps_tag, _mps_deserialize)
 register_package(22, _meta_tag, _meta_deserialize)
 register_package(23, _privateuse1_tag, _privateuse1_deserialize)
+register_package(24, _hpu_tag, _hpu_deserialize)
 
 
 def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
