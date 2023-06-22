@@ -93,10 +93,9 @@ def cpp_wrapper_cache_dir(name):
 
 
 class CacheBase:
-    def __init__(self):
-        if not torch.cuda.is_available():
-            return
-
+    @staticmethod
+    @functools.lru_cache(None)
+    def get_system():
         try:
             import triton
 
@@ -104,20 +103,31 @@ class CacheBase:
         except ModuleNotFoundError:
             triton_version = None
 
-        self.system = {
-            "device": torch.cuda.get_device_properties(
-                torch.cuda.current_device()
-            ).name,
+        system = {
+            "device": {
+                "name": torch.cuda.get_device_properties(
+                    torch.cuda.current_device()
+                ).name,
+            },
             "version": {
                 "cuda": torch.version.cuda,
                 "triton": triton_version,
             },
         }
-        self.system["hash"] = hashlib.sha256(
-            json.dumps(self.system, sort_keys=True).encode("utf-8")
+
+        system["hash"] = hashlib.sha256(
+            json.dumps(system, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
-        self.local_cache_path = os.path.join(cache_dir(), "cache")
+        return system
+
+    def __init__(self):
+        if not torch.cuda.is_available():
+            return
+
+        self.system = CacheBase.get_system()
+
+        self.local_cache_path = os.path.join(cache_dir(), self.system["hash"])
         self.global_cache_path = (
             os.path.join(os.path.dirname(config.global_cache_dir), self.system["hash"])
             if config.global_cache_dir is not None
@@ -129,9 +139,6 @@ class CacheBase:
             return {}
         with open(self.local_cache_path, "r") as local_cache_fp:
             local_cache = json.load(local_cache_fp)
-        if local_cache["system"]["hash"] != self.system["hash"]:
-            os.remove(self.local_cache_path)
-            return {}
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache):
