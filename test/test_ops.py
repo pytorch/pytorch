@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from functools import partial
 import warnings
 import unittest
+import inspect
 import itertools
 import torch
 import contextlib
@@ -101,6 +102,16 @@ _ref_test_ops = tuple(
     )
 )
 _ops_and_refs = op_db + python_ref_db
+
+def reduction_dtype_filter(op):
+    if(not isinstance(op, ReductionPythonRefInfo) or not op.supports_out
+       or torch.int16 not in op.dtypes):
+        return False
+
+    argspec = inspect.getfullargspec(op.op)
+    if 'dtype' not in argspec.kwonlyargs:
+        return False
+    return True
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
 # numpy ref to compare them too, If both CPU and CUDA are compared to numpy
@@ -980,6 +991,39 @@ class TestCommon(TestCase):
                 else:
                     with self.assertRaises(RuntimeError, msg=msg_fail):
                         op_out(out=out)
+
+
+    @ops(filter(reduction_dtype_filter, _ops_and_refs), dtypes=(torch.int16,))
+    def test_out_integral_dtype(self, device, dtype, op):
+        def helper(with_out, expectFail, op_to_test, inputs, *args, **kwargs):
+            out = None
+            try:
+                if with_out:
+                    out = torch.empty(0, dtype=torch.int32, device=device)
+                    op_to_test(inputs, out=out, *args, **kwargs)
+                else:
+                    out = op_to_test(inputs, *args, **kwargs)
+                self.assertFalse(expectFail)
+            except RuntimeError as err:
+                self.assertEqual(
+                    str(err), "dtype argument and out dtype must match in reduction")
+                self.assertTrue(expectFail)
+            return out
+        samples = op.sample_inputs(device, dtype)
+        for sample in samples:
+            if 'dtype' not in sample.kwargs:
+                helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
+                helper(True, False, op, sample.input, *sample.args, **sample.kwargs)
+                sample.kwargs['dtype'] = torch.int16
+                helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
+                helper(True, True, op, sample.input, *sample.args, **sample.kwargs)
+                sample.kwargs['dtype'] = torch.int32
+                helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
+                helper(True, False, op, sample.input, *sample.args, **sample.kwargs)
+            else:
+                helper(False, False, op, sample.input, *sample.args, **sample.kwargs)
+                helper(True, sample.kwargs['dtype'] != torch.int32, op, sample.input,
+                       *sample.args, **sample.kwargs)
 
     # Tests that the forward and backward passes of operations produce the
     #   same values for the cross-product of op variants (method, inplace)
@@ -1926,7 +1970,7 @@ fake_skips = (
     "nn.functional.embedding_bag",  # sometimes errors
     "nn.functional.nll_loss",  # sometimes errors
     "nn.functional.max_pool1d",  # The tensor has a non-zero number of elements
-    "to_sparse",  # Could not run 'aten::to_sparse' with arguments from the 'Meta' backend
+    "to_sparse",  # Could not run 'aten::_to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
     "_segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
@@ -1971,32 +2015,6 @@ aliasing_failures = (
     "histogramdd",
 )
 
-# tests which have inconsistent fake tensor stride propagation
-# XXX: no new tests should be added to this list as a result of a
-# decomp or prim, see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-fake_tensor_stride_failing_ops = {
-    "fft.fft2",
-    "fft.fft",
-    "fft.fftn",
-    "fft.hfft2",
-    "fft.hfft",
-    "fft.hfftn",
-    "fft.ifft2",
-    "fft.ifft",
-    "fft.ifftn",
-    "fft.ihfft2",
-    "fft.ihfft",
-    "fft.ihfftn",
-    "fft.irfft2",
-    "fft.irfft",
-    "fft.irfftn",
-    "fft.rfft2",
-    "fft.rfft",
-    "fft.rfftn",
-    "svd",
-    "linalg.svd",
-}
-
 fake_backward_skips = {
     "linalg.cond",
     "linalg.matrix_norm",
@@ -2013,7 +2031,7 @@ fake_backward_skips = {
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
     xfail("_segment_reduce", "lengths"),
     skip('nn.functional.ctc_loss'),
-} | {skip(stride_skip) for stride_skip in fake_tensor_stride_failing_ops}
+}
 
 fake_autocast_backward_xfails = {
     skip("nn.functional.binary_cross_entropy"),
@@ -2069,11 +2087,9 @@ class TestFakeTensor(TestCase):
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
 
-                    check_strides = name not in fake_tensor_stride_failing_ops
-
                     # prims/decomps must correctly model strides,
                     # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-                    prims.utils.compare_tensor_meta(fake_out, real_out, check_strides)
+                    prims.utils.compare_tensor_meta(fake_out, real_out, True)
 
                     if name not in aliasing_failures:
                         fake_aliasing = outputs_alias_inputs((input, args, kwargs), res_fake)
