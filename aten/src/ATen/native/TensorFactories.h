@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/TensorIterator.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -11,7 +12,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 // Different combinations of row, col, and offset can lead to two cases:
 //
 // Case 1 - Trapezoid (Triangle as a special case): row + offset <= col
@@ -96,6 +97,24 @@ inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tens
   }
 }
 
+// Called by `empty*` functions when deterministic algorithms are enabled to
+// fill the tensor with NaN if it is floating point or complex type, or fill
+// with max value if it is integer type
+inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
+  if (tensor.is_floating_point() || tensor.is_complex()) {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      kBFloat16, kHalf, tensor.scalar_type(), "fill_empty_deterministic_", [&]() {
+        tensor.fill_(std::numeric_limits<scalar_t>::quiet_NaN());
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(
+      kBool, tensor.scalar_type(), "fill_empty_deterministic_", [&]() {
+        tensor.fill_(std::numeric_limits<scalar_t>::max());
+    });
+  }
+  return tensor;
+}
+
 // The ZeroTensor allocator ignores whatever allocation is requested and always
 // gives you nullptr
 struct ZeroTensorAllocator final : public at::Allocator {
@@ -118,5 +137,4 @@ using binary_fn = void (*)(TensorIterator&);
 DECLARE_DISPATCH(binary_fn, complex_stub);
 DECLARE_DISPATCH(binary_fn, polar_stub);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
