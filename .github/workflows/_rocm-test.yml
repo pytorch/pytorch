@@ -93,10 +93,10 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Check for keep-going label and re-enabled test issues
+      - name: Check for keep-going label
         # This uses the filter-test-configs action because it conviniently
-        # checks for labels and re-enabled test issues.  It does not actually do
-        # any filtering.  All filtering is done in the build step.
+        # checks for labels.  It does not actually do any filtering.  All
+        # filtering is done in the build step.
         id: keep-going
         uses: ./.github/actions/filter-test-configs
         with:
@@ -130,7 +130,7 @@ jobs:
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
+          PR_BODY: ${{ github.event.pull_request.body }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -147,6 +147,20 @@ jobs:
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
+
+          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
+
+          # sanitize the input commit message and PR body here:
+          #
+          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
+          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
+
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -170,7 +184,8 @@ jobs:
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
-            -e REENABLED_ISSUES \
+            -e PR_BODY \
+            -e COMMIT_MESSAGES \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e CONTINUE_THROUGH_ERROR \
