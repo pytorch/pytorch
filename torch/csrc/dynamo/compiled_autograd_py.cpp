@@ -11,11 +11,29 @@
 namespace torch {
 namespace dynamo {
 using namespace torch::autograd;
+using c10::SymInt;
 
 static PyObject* wrap_variable_list(const variable_list& inputs) {
   PyObject* pyinput = PyList_New(inputs.size());
   for (const auto i : c10::irange(inputs.size())) {
     PyList_SET_ITEM(pyinput, i, THPVariable_Wrap(inputs[i]));
+  }
+  return pyinput;
+}
+
+static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
+  PyObject* pyinput = PyTuple_New(inputs.size());
+  for (const auto i : c10::irange(inputs.size())) {
+    PyTuple_SET_ITEM(pyinput, i, PyLong_FromSsize_t(inputs[i]));
+  }
+  return pyinput;
+}
+
+static PyObject* convert_hook_list(std::vector<c10::SafePyObject>& inputs) {
+  // inplace, consumes the input hooks
+  PyObject* pyinput = PyTuple_New(inputs.size());
+  for (const auto i : c10::irange(inputs.size())) {
+    PyTuple_SET_ITEM(pyinput, i, inputs[i].release());
   }
   return pyinput;
 }
@@ -31,6 +49,17 @@ static variable_list unwrap_variable_list(PyObject* pyresult) {
   return result;
 }
 
+static std::vector<SymInt> unwrap_symint_list(PyObject* pyresult) {
+  TORCH_CHECK(PyList_CheckExact(pyresult));
+  auto result_len = PyList_GET_SIZE(pyresult);
+  std::vector<SymInt> result;
+  result.reserve(result_len);
+  for (const auto i : c10::irange(result_len)) {
+    result.emplace_back(py::cast<c10::SymInt>(PyList_GET_ITEM(pyresult, i)));
+  }
+  return result;
+}
+
 static PyObject* check(PyObject* pyresult) {
   if (C10_UNLIKELY(pyresult == nullptr)) {
     // see https://github.com/pytorch/pytorch/pull/34845
@@ -39,6 +68,11 @@ static PyObject* check(PyObject* pyresult) {
     throw err;
   }
   return pyresult;
+}
+
+static void check(bool result) {
+  if (C10_UNLIKELY(!result))
+    check(nullptr);
 }
 
 struct CacheNode {
@@ -109,14 +143,23 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
-static variable_list call_begin_capture(
+static TraceState call_begin_capture(
     PyObject* self,
-    const variable_list& inputs) {
+    AutogradCompilerCall& compiler_call,
+    size_t num_outputs) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
-  THPObjectPtr pyinput(wrap_variable_list(inputs));
-  THPObjectPtr pyresult(
-      check(PyObject_CallMethodOneArg(self, method_name, pyinput.get())));
-  return unwrap_variable_list(pyresult.get());
+  THPObjectPtr pyinput(wrap_variable_list(compiler_call.inputs));
+  THPObjectPtr pysizeinput(wrap_int_list(compiler_call.size_inputs));
+  THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
+      self, method_name, pyinput.get(), pysizeinput.get(), NULL)));
+
+  PyObject *fake_inputs, *fake_sizes;
+  check(PyArg_ParseTuple(pyresult.get(), "OO", &fake_inputs, &fake_sizes));
+  return TraceState(
+      unwrap_variable_list(fake_inputs),
+      unwrap_symint_list(fake_sizes),
+      compiler_call.accumulate_grad,
+      num_outputs);
 }
 
 static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
@@ -132,7 +175,7 @@ variable_list compiled_autograd(
     const edge_list& output_edges) {
   TORCH_CHECK(
       output_edges.empty() || !accumulate_grad,
-      "outputs with accumulate_grad not yet implemented")
+      "outputs+accumulate_grad not yet implemented")
   pybind11::gil_scoped_acquire gil;
   NoGradGuard no_grad; // TODO(jansel): double backward
 
@@ -226,13 +269,12 @@ variable_list compiled_autograd(
     THPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
 
-    variable_list proxy_inputs =
-        call_begin_capture(py_compiler, compiler_call.inputs);
+    TraceState state =
+        call_begin_capture(py_compiler, compiler_call, output_edges.size());
 
     std::vector<variable_list> node_outputs;
     node_outputs.reserve(calls.size() + 1);
-    node_outputs.emplace_back(proxy_inputs);
-    TraceState state(proxy_inputs, accumulate_grad, output_edges.size());
+    node_outputs.emplace_back(state.proxy_inputs);
     for (auto& call : calls) {
       // TODO(jansel): consider adding some of this stuff:
       // at::ThreadLocalStateGuard tls_guard(local_graph_task->thread_locals_);
@@ -274,14 +316,14 @@ variable_list compiled_autograd(
           pyinputs = check(PyObject_CallMethod(
               py_compiler,
               "tensor_pre_hook",
-              "OOi",
+              "Oii",
               pyinputs.get(),
               hook.first,
               hook.second));
         }
-        for (const auto& hook : call.pre_hooks) {
+        for (const auto hook : call.pre_hooks) {
           pyinputs = check(PyObject_CallMethod(
-              py_compiler.get(), "pre_hook", "OO", pyinputs.get(), hook));
+              py_compiler.get(), "pre_hook", "Oi", pyinputs.get(), hook));
         }
         inputs = unwrap_variable_list(pyinputs);
       }
@@ -292,11 +334,11 @@ variable_list compiled_autograd(
       if (call.post_hooks.size() > 0) {
         THPObjectPtr pyinputs(wrap_variable_list(inputs));
         THPObjectPtr pyoutputs(wrap_variable_list(outputs));
-        for (const auto& hook : call.post_hooks) {
+        for (const auto hook : call.post_hooks) {
           pyoutputs = check(PyObject_CallMethod(
               py_compiler.get(),
               "post_hook",
-              "OOO",
+              "OOi",
               pyoutputs.get(),
               pyinputs.get(),
               hook));
@@ -318,8 +360,10 @@ variable_list compiled_autograd(
 
   {
     THPObjectPtr inputs(wrap_variable_list(compiler_call.inputs));
-    THPObjectPtr pyresult(
-        check(PyObject_CallOneArg(cache->compiled_fn, inputs)));
+    THPObjectPtr sizes(wrap_int_list(compiler_call.size_inputs));
+    THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
+    THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
+        cache->compiled_fn, inputs.get(), sizes.get(), hooks.get(), NULL)));
     variable_list outputs = unwrap_variable_list(pyresult);
     if (accumulate_grad) {
       TORCH_CHECK(outputs.size() == compiler_call.set_grad_targets.size());

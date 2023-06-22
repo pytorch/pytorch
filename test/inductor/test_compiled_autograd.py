@@ -17,6 +17,21 @@ def compiler_fn(gm):
     return torch.compile(gm, backend=inner_compiler, fullgraph=True)
 
 
+# TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
+
+
+def hook1(grad):
+    return grad * 2
+
+
+def hook2(grads):
+    return (grads[0] + 1,)
+
+
+def hook3(gI, gO):
+    return (torch.sin(gI[0]) + gO[0],)
+
+
 class TestCompiledAutograd(TestCase):
     def _common(self, fn):
         with torch.autograd.set_multithreading_enabled(False):
@@ -77,7 +92,7 @@ class TestCompiledAutograd(TestCase):
                 )
                 x = torch.randn([1, 4])
 
-                model[0].weight.register_hook(lambda grad: grad * 2)
+                model[0].weight.register_hook(hook1)
 
                 result = model(x).sum()
                 result.backward()
@@ -96,7 +111,7 @@ class TestCompiledAutograd(TestCase):
                 x = torch.randn([1, 4])
 
                 result = model(x).sum()
-                result.grad_fn.register_prehook(lambda grad: (grad[0] + 1,))
+                result.grad_fn.register_prehook(hook2)
                 result.backward()
                 yield model[0].weight.grad
                 yield model[0].bias.grad
@@ -113,7 +128,7 @@ class TestCompiledAutograd(TestCase):
                 x = torch.randn([1, 4])
 
                 result = model(x).sum()
-                result.grad_fn.register_hook(lambda gI, gO: (torch.sin(gI[0]) + gO[0],))
+                result.grad_fn.register_hook(hook3)
                 result.backward()
                 yield model[0].weight.grad
                 yield model[0].bias.grad

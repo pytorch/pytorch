@@ -1,8 +1,10 @@
 import contextlib
 import functools
+from typing import List
 
 import torch
-from torch._dynamo.source import ConstantSource
+from torch._dynamo.external_utils import call_hook
+from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
@@ -15,35 +17,61 @@ from torch.fx.experimental.proxy_tensor import (
     PythonKeyTracer,
     track_tensor_tree,
 )
+from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 
 
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
         self.compiler_fn = compiler_fn
         self.stack = contextlib.ExitStack()
+        self.shape_env = ShapeEnv()
         self.fake_tensor_mode = FakeTensorMode(
             allow_fallback_kernels=True,
             allow_non_fake_inputs=True,
+            shape_env=self.shape_env,
         )
         self.fx_tracer = PythonKeyTracer()
-        self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "fake")
-        self.gm = None
+        self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
+        self.hooks_proxy = None
 
-    def wrap_fake(self, x, name):
+    def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
-        return self.fake_tensor_mode.from_tensor(x, source=ConstantSource(name))
+        return self.fake_tensor_mode.from_tensor(x, source=source)
 
-    def begin_capture(self, inputs):
+    def source(self, name, idx):
+        return GetItemSource(LocalSource(name), idx)
+
+    def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
         counters["compiled_autograd"]["captures"] += 1
         print("BEGIN_CAPTURE", len(inputs))
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-
-        inputs = [self.wrap_fake(x, f"inputs[{i}]") for i, x in enumerate(inputs)]
         args_proxy = self.fx_tracer.create_proxy("placeholder", "inputs", (), {})
+        sizes_proxy = self.fx_tracer.create_proxy("placeholder", "sizes", (), {})
+        self.hooks_proxy = self.fx_tracer.create_proxy("placeholder", "hooks", (), {})
+
+        # tensor inputs to fake tensors
+        inputs = [
+            self.wrap_fake(x, self.source("inputs", idx))
+            for idx, x in enumerate(inputs)
+        ]
         proxies = [args_proxy[i] for i in range(len(inputs))]
         self.bind_tensors_to_proxies(inputs, proxies)
+
+        # size inputs to symints
+        sizes = [
+            self.shape_env.create_symintnode(
+                self.shape_env.create_symbol(
+                    val,
+                    self.source("sizes", idx),
+                    dynamic_dim=DimDynamic.DYNAMIC,
+                ),
+                hint=val,
+            )
+            for idx, val in enumerate(sizes)
+        ]
+        self.bind_tensors_to_proxies(sizes, sizes_proxy)
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
@@ -52,31 +80,47 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
-        return inputs
+        return inputs, sizes
 
-    def tensor_pre_hook(self, inputs, hook, i: int):
+    def tensor_pre_hook(self, inputs, hook_id, i: int):
+        hook = self.hooks_proxy[hook_id]
         proxy = self.fx_tracer.create_proxy(
-            "call_function", hook, (self.to_proxy(inputs[i]),), {}
+            "call_function",
+            call_hook,
+            (
+                hook,
+                self.to_proxy(inputs[i]),
+            ),
+            {},
         )
         with disable_proxy_modes_tracing():
             inputs[i] = inputs[i].clone()
             self.bind_tensors_to_proxies([inputs[i]], [proxy])
         return inputs
 
-    def pre_hook(self, inputs, hook):
+    def pre_hook(self, inputs, hook_id):
+        hook = self.hooks_proxy[hook_id]
         proxies = self.fx_tracer.create_proxy(
-            "call_function", hook, (self.to_proxy(inputs),), {}
+            "call_function",
+            call_hook,
+            (
+                hook,
+                self.to_proxy(inputs),
+            ),
+            {},
         )
         with disable_proxy_modes_tracing():
             inputs = [x.clone() for x in inputs]
             self.bind_tensors_to_proxies(inputs, proxies)
         return inputs
 
-    def post_hook(self, outputs, inputs, hook):
+    def post_hook(self, outputs, inputs, hook_id):
+        hook = self.hooks_proxy[hook_id]
         proxies = self.fx_tracer.create_proxy(
             "call_function",
-            hook,
+            call_hook,
             (
+                hook,
                 self.to_proxy(outputs),
                 self.to_proxy(inputs),
             ),

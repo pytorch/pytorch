@@ -93,9 +93,9 @@ struct NodeCall {
   std::vector<OutputRef> input_refs;
 
   // borrowed references
-  std::vector<std::pair<PyObject*, int>> tensor_pre_hooks;
-  std::vector<PyObject*> pre_hooks;
-  std::vector<PyObject*> post_hooks;
+  std::vector<std::pair<int, int>> tensor_pre_hooks;
+  std::vector<int> pre_hooks;
+  std::vector<int> post_hooks;
   std::vector<std::pair<int, int>> graph_output;
 };
 
@@ -115,9 +115,15 @@ struct AutogradCompilerCall {
     size_inputs.emplace_back(s.guard_int(__FILE__, __LINE__));
   }
 
+  int emplace_hook(c10::SafePyObject&& fn) {
+    hooks.emplace_back(std::move(fn));
+    return hooks.size() - 1;
+  }
+
   std::vector<int64_t> size_inputs;
   std::vector<at::Tensor> inputs;
   std::vector<at::Tensor> set_grad_targets;
+  std::vector<c10::SafePyObject> hooks;
   bool accumulate_grad;
 };
 
@@ -306,16 +312,22 @@ class CompiledNodeArgs {
         typeid(*node), _specialization_key, _specialization_key_size);
   }
 
-  void add_tensor_pre_hook(PyObject* obj, int index) {
-    _node_call.tensor_pre_hooks.emplace_back(std::make_pair(obj, index));
+  void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
+    auto fn_id = _compiler.emplace_hook(std::move(obj));
+    collect_size(fn_id);
+    _node_call.tensor_pre_hooks.emplace_back(std::make_pair(fn_id, index));
   }
 
-  void add_pre_hook(PyObject* obj) {
-    _node_call.pre_hooks.emplace_back(obj);
+  void add_pre_hook(c10::SafePyObject&& obj) {
+    auto fn_id = _compiler.emplace_hook(std::move(obj));
+    collect_size(fn_id);
+    _node_call.pre_hooks.emplace_back(fn_id);
   }
 
-  void add_post_hook(PyObject* obj) {
-    _node_call.post_hooks.emplace_back(obj);
+  void add_post_hook(c10::SafePyObject&& obj) {
+    auto fn_id = _compiler.emplace_hook(std::move(obj));
+    collect_size(fn_id);
+    _node_call.post_hooks.emplace_back(fn_id);
   }
 
   void collect_size(size_t s) {
@@ -359,18 +371,41 @@ class CompiledNodeArgs {
 };
 
 struct TraceState {
-  TraceState(const variable_list& pi, bool accumulate_grad_, size_t num_outputs)
-      : index(0),
+  TraceState(
+      const variable_list& pi,
+      const std::vector<c10::SymInt>& ss,
+      bool accumulate_grad_,
+      size_t num_outputs)
+      : proxy_inputs_index(0),
+        sym_sizes_index(0),
         proxy_inputs(pi),
+        sym_sizes(ss),
         outputs(num_outputs),
         accumulate_grad(accumulate_grad_) {}
+
   ~TraceState() {
-    if (C10_UNLIKELY(index != proxy_inputs.size())) {
+    if (C10_UNLIKELY(proxy_inputs_index != proxy_inputs.size())) {
       TORCH_WARN("not all proxy_inputs consumed")
     }
+    if (C10_UNLIKELY(sym_sizes_index != sym_sizes.size())) {
+      TORCH_WARN("not all sym_sizes consumed")
+    }
   }
-  size_t index;
-  const variable_list& proxy_inputs;
+
+  const at::Tensor& next_proxy_input() {
+    TORCH_CHECK(proxy_inputs_index < proxy_inputs.size());
+    return proxy_inputs[proxy_inputs_index++];
+  }
+
+  c10::SymInt next_sym_size() {
+    TORCH_CHECK(sym_sizes_index < sym_sizes.size());
+    return sym_sizes[sym_sizes_index++];
+  }
+
+  size_t proxy_inputs_index;
+  size_t sym_sizes_index;
+  variable_list proxy_inputs;
+  std::vector<c10::SymInt> sym_sizes;
   variable_list outputs;
   bool accumulate_grad;
 };
@@ -380,8 +415,7 @@ class SwapSavedVariables {
   void before(at::Tensor& t) {
     stashed_tensors.emplace_back(t);
     if (t.defined()) {
-      TORCH_CHECK(state.index < state.proxy_inputs.size());
-      t = state.proxy_inputs[state.index++];
+      t = state.next_proxy_input();
     }
   }
 
@@ -394,8 +428,7 @@ class SwapSavedVariables {
     bool defined = t.unpack(node).defined();
     stashed_variables.emplace_back(std::move(t));
     if (defined) {
-      TORCH_CHECK(state.index < state.proxy_inputs.size());
-      t = SavedVariable(state.proxy_inputs[state.index++], false);
+      t = SavedVariable(state.next_proxy_input(), false);
     }
   }
 
@@ -403,13 +436,30 @@ class SwapSavedVariables {
     t = std::move(stashed_variables[stashed_variables_index++]);
   }
 
-  // TODO(jansel): need to change these to handle sizes
-  void before(at::TensorGeometry& t) {}
-  void before(torch::autograd::generated::TypeAndSize& t) {}
-  void before(c10::SymInt& t) {}
-  void after(at::TensorGeometry& t) {}
-  void after(torch::autograd::generated::TypeAndSize& t) {}
-  void after(c10::SymInt& t) {}
+  void before(c10::SymInt& t) {
+    stashed_symints.emplace_back(std::move(t));
+    t = state.next_sym_size();
+  }
+  void after(c10::SymInt& t) {
+    t = std::move(stashed_symints[stashed_symints_index++]);
+  }
+
+  void before(at::TensorGeometry& t) {
+    before(t.mutable_sizes());
+    before(t.mutable_strides());
+    before(t.mutable_storage_offset());
+    t.set_symbolic_sizes_strides(true);
+    t.recompute_numel();
+  }
+  void after(at::TensorGeometry& t) {
+    after(t.mutable_sizes());
+    after(t.mutable_strides());
+    after(t.mutable_storage_offset());
+    t.set_symbolic_sizes_strides(false);
+    t.recompute_numel();
+  }
+  void before(torch::autograd::generated::TypeAndSize& t);
+  void after(torch::autograd::generated::TypeAndSize& t);
 
   template <typename T>
   void before(std::vector<T>& t) {
@@ -486,7 +536,8 @@ class SwapSavedVariables {
       : state(s),
         node(n),
         stashed_tensors_index(0),
-        stashed_variables_index(0) {}
+        stashed_variables_index(0),
+        stashed_symints_index(0) {}
 
   ~SwapSavedVariables() {
     if (C10_UNLIKELY(
@@ -501,8 +552,10 @@ class SwapSavedVariables {
 
   size_t stashed_tensors_index;
   size_t stashed_variables_index;
+  size_t stashed_symints_index;
   std::vector<at::Tensor> stashed_tensors;
   std::vector<SavedVariable> stashed_variables;
+  std::vector<c10::SymInt> stashed_symints;
 };
 
 } // namespace autograd
