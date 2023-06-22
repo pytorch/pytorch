@@ -3347,16 +3347,7 @@ class FallbackKernel(ExternKernelAlloc):
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
-        fake_incorrect_kernels = (
-            aten._fft_r2c.default,
-            aten._fft_r2c.out,
-            aten._fft_c2r.default,
-            aten._fft_c2c.default,
-            aten._fft_c2c.out,
-            aten._linalg_svd.default,
-            aten._linalg_svd.U,
-            aten._fused_moving_avg_obs_fq_helper_functional,
-        )
+        fake_incorrect_kernels = (aten._fused_moving_avg_obs_fq_helper_functional,)
         context = (
             V.graph.fake_mode if kernel not in fake_incorrect_kernels else nullcontext()
         )
