@@ -66,7 +66,7 @@ class _FunctionalizeSideEffectfulOps(ExportPassBase):
             return super().call_operator(op, args, kwargs, meta)
 
         if self._dep_token is None:
-            self._dep_token = self.call_operator(
+            self._dep_token = super().call_operator(
                 aten._make_dep_token,
                 args=(),
                 kwargs={},
