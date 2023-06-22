@@ -1,5 +1,4 @@
 import dataclasses
-import inspect
 import weakref
 import re
 from collections import OrderedDict
@@ -23,16 +22,13 @@ from torch._decomp import core_aten_decompositions
 from torch._dynamo.eval_frame import Constraint
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch.utils._pytree as pytree
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
-    ShapeEnv,
     StrictMinMaxConstraint,
 )
-
 from torch._dynamo.exc import UserError, UserErrorType
 from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeError
 
@@ -143,11 +139,6 @@ def export(
     if constraints is None:
         constraints = []
 
-    if not isinstance(f, torch.nn.Module):
-        for parameter in inspect.signature(f).parameters.values():
-            if parameter.kind == parameter.VAR_KEYWORD:
-                raise UserError(UserErrorType.INVALID_INPUT, "Kwargs to torch.export is not supported")
-
     with torch._dynamo.config.patch(dataclasses.asdict(ExportDynamoConfig())):  # type: ignore[attr-defined]
         try:
             gm_torch_level, _ = torch._dynamo.export(
@@ -170,16 +161,7 @@ def export(
                     fake_val = node.meta["val"]
                     fake_inps.append(fake_val)
 
-            fake_mode = FakeTensorMode(
-                allow_fallback_kernels=False,
-                allow_non_fake_inputs=True,
-                shape_env=ShapeEnv(
-                    assume_static_by_default=True,
-                ),
-            )
-
-            if detected_fake_mode := detect_fake_mode(fake_inps):
-                fake_mode = detected_fake_mode
+            fake_mode = detect_fake_mode(fake_inps)
 
             fake_args = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, args)
 
@@ -189,7 +171,7 @@ def export(
             flat_args, in_spec = pytree.tree_flatten(args)
             out_spec = orig_out_spec = gm_torch_level._out_spec
             # this means it is scalar return value, so will make it tuple
-            if not isinstance(return_val, (list, tuple)):
+            if not isinstance(return_val, (list, tuple, dict)):
                 out_spec = pytree.tree_flatten((return_val,))[1]
 
             orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
