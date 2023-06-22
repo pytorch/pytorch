@@ -173,10 +173,10 @@ class DeviceMesh(object):
         mesh_list = [self_mesh.clone() for _ in range(get_world_size())]
         mesh_tensor = torch.cat(mesh_list)
         mesh_tensor = funcol.all_gather_tensor(mesh_tensor, gather_dim=0, group=_get_default_group())
-        mesh_tensor_split = torch.split(
-            mesh_tensor, split_size_or_sections=get_world_size()
+        mesh_tensor_chunked = torch.chunk(
+            mesh_tensor, get_world_size()
         )
-        for other_rank, other_mesh in enumerate(mesh_tensor_split):
+        for other_rank, other_mesh in enumerate(mesh_tensor_chunked):
             if not torch.equal(self_mesh, other_mesh):
                 raise RuntimeError(
                     f"DeviceMesh initialization does not allow different mesh argument:"
