@@ -68,14 +68,16 @@ class SparseSemiStructuredTensor(torch.Tensor):
             torch.Tensor: A torch.Tensor wrapper subclass.
 
         Raises:
-            None
+            ValueError: If both original_tensor and compressed_tensor are None.
 
         """
         if original_tensor is not None:
             previous_tensor = original_tensor
             original_shape = original_tensor.shape
-        else:
+        elif compressed_tensor is not None:
             previous_tensor = compressed_tensor
+        else:
+            raise ValueError("Both compressed_tensor and original_tensor are None!")
 
         kwargs = {}
         kwargs["device"] = previous_tensor.device  # type: ignore[assignment]
