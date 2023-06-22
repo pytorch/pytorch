@@ -405,6 +405,9 @@ public:
   Vectorized<T> frac() const {
     return *this - this->trunc();
   }
+  Vectorized<T> signbit() const {
+    return map(std::signbit);
+  }
   template <
     typename U = T,
     typename std::enable_if_t<is_floating_point_v<U>, int> = 0>
