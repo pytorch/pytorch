@@ -1,7 +1,7 @@
 """Utilities for converting and operating on ONNX, JIT and torch types."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple, Union, Set
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 
@@ -9,12 +9,16 @@ import torch
 def from_complex_to_float(dtype: torch.dtype) -> torch.dtype:
     return _COMPLEX_TO_FLOAT[dtype]
 
+
 def from_torch_dtype_to_onnx_dtype_str(dtype: Union[torch.dtype, type]) -> Set[str]:
     return _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[dtype]
 
+
 # NOTE: this is a mapping from torch dtype to a set of compatible onnx types
 # It's used in dispatcher to find the best match overload for the input dtypes
-_TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[Union[torch.dtype, type], Set[str]] = {
+_TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
+    Union[torch.dtype, type], Set[str]
+] = {
     torch.bfloat16: {"tensor(bfloat16)"},
     torch.bool: {"tensor(bool)"},
     torch.float64: {"tensor(double)"},
