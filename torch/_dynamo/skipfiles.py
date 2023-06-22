@@ -8,6 +8,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import glob
 import importlib
 import inspect
 import linecache
@@ -121,6 +122,7 @@ FILENAME_ALLOWLIST |= {
     if inspect.isclass(obj)
 }
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
 
 # Do trace through match and replace patterns used in PT2E QAT
 # Note: These patterns are comprised of torch ops and for internal use only.
@@ -132,6 +134,15 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
 }
 
+# TODO (zhxchen17) Make exportdb importable here.
+FILENAME_ALLOWLIST |= set(
+    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
+)
+
+# torch.func.grad: need to allow this file to be able to look at `grad_impl`
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_functorch/apis.py",
+}
 
 SKIP_DIRS_RE = None
 
@@ -168,10 +179,12 @@ def add(import_name: str):
 
 def check(filename, allow_torch=False):
     """Should skip this file?"""
+    print(f">>>>>> should skip this file: {filename}, torch file: {torch.distributed._tensor.api.__file__}")
     if filename is None:
         return True
     if filename in FILENAME_ALLOWLIST:
         return False
+
     if allow_torch and is_torch(filename):
         return False
     if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):

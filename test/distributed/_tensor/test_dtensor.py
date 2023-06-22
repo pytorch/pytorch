@@ -318,6 +318,20 @@ class DTensorTest(DTensorTestBase):
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
         self.assertEqual(sharded_tensor.device.type, self.device_type)
 
+    @with_comms
+    def test_dtensor_save_load(self):
+        import io
+
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+        local_tensor = torch.randn(3, 3)
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+        buffer = io.BytesIO()
+        torch.save(sharded_tensor, buffer)
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer)
+        self.assertEqual(sharded_tensor, reloaded_st)
+
 
 class DTensorMeshTest(DTensorTestBase):
     @property
@@ -621,11 +635,25 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
     def world_size(self) -> int:
         return 2
 
+    def test_dynamo_dtensor_from_local(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            dt = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+            return dt.to_local() + 2
+
+        x = torch.ones(1)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_dynamo_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
-            return x.to_local()
+            return x.redistribute(mesh, [Shard(0)]).to_local()
 
         x = DTensor.from_local(torch.rand(1), mesh, [Replicate()], run_check=False)
         ref = fn(x)
@@ -633,6 +661,21 @@ class TestDynamoDTensor(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
+
+    def test_simple(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        x = DTensor.from_local(torch.rand(1), mesh, [Replicate()], run_check=False)
+        print(torch.overrides.is_tensor_like(x))
+        print(hasattr(type(x), "__torch_function__"))
+
+    def test_tensor_constructor(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            return DTensor(x, mesh, [Replicate()], run_check=False)
+        
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        opt_fn(torch.rand(1))
 
 
 if __name__ == "__main__":

@@ -152,6 +152,7 @@ def _allowed_function_ids():
         # these functions, rather than keep them opaque-ly in the graph.
         disallowed_modules = (
             "torch.optim.",
+            "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",
@@ -159,6 +160,7 @@ def _allowed_function_ids():
             "torch._C.inductor.",
             "torch.fx.",
             "torch.distributed.fsdp.",
+            "torch.distributed._tensor.",
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
@@ -191,6 +193,10 @@ def _allowed_function_ids():
 
                 if isinstance(obj, torch._ops.HigherOrderOperator):
                     continue
+                # We want to trace through `grad`
+                if obj is torch.func.grad:
+                    continue
+
                 if isinstance(obj, types.ModuleType):
                     if obj.__name__.startswith("torch.") and _is_allowed_module_prefix(
                         obj
