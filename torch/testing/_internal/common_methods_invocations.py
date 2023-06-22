@@ -19358,6 +19358,11 @@ python_ref_db = [
                          dtypes=(torch.complex64, torch.complex128)),
         ),
     ),
+    PythonRefInfo(
+        "_refs.logaddexp2",
+        torch_opinfo_name="logaddexp2",
+        supports_nvfuser=False,
+    ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.floor_divide",
         torch_opinfo_name="floor_divide",
@@ -20068,6 +20073,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.ravel",
         torch_opinfo_name="ravel",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.renorm",
+        torch_opinfo_name="renorm",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
