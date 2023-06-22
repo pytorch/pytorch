@@ -191,7 +191,7 @@ def _init_inter_node_process_group(
 ) -> dist.ProcessGroup:
     """
     Returns an inter-node process group where each contained rank has
-    the same local rank. For example, given each column is a distinct node:
+    the same local rank. For example, given each row is a distinct node:
     0 1 2 3 4 5 6 7 8
     9 10 11 12 13 14 15
     This API would return inter-node process group {0, 8}, {1, 9}, {2, 10}, and so forth
@@ -367,10 +367,6 @@ def _init_core_state(
     state._use_orig_params = use_orig_params
     state.training_state = TrainingState.IDLE
     state._is_root = None
-    _streams: Dict[str, torch.cuda.Stream] = {}
-    state._streams = _streams
-    _stream_to_name: Dict[torch.cuda.Stream, str] = {}
-    state._stream_to_name = _stream_to_name
     state._free_event_queue = _FreeEventQueue()
     state._debug_level = dist.get_debug_level()
     state._exec_order_data = exec_order_utils._ExecOrderData(
