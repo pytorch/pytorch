@@ -68,7 +68,7 @@ jobs:
         # This has already been cached in the docker image
         lintrunner init 2> /dev/null
 
-        RC = 0
+        RC=0
 
         # Run lintrunner on just the changed files (a fast validation)
         if ! lintrunner --force-color --tee-json=lint.json > /dev/null 2>&1; then
