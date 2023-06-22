@@ -598,8 +598,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
             .check("buf0 = empty_strided(") \
-            .check("buf4 = empty_strided(") \
-            .check("triton_poi__0.run(arg0_1, buf0, buf4") \
+            .check("buf5 = empty_strided(") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf5") \
             .check("buf1 = empty_strided") \
             .check("buf2 = empty_strided") \
             .check_not("copy_(") \
@@ -608,11 +608,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                    "output_tensors=buf3, input_tensors=buf3_inputs") \
             .check("fun_col._register_tensor_work(buf3, buf3_work)") \
             .check("_wait_tensor(buf1)") \
-            .check("buf5 = buf1") \
+            .check("buf4 = buf1") \
+            .check("buf6 = buf0; del buf0  # reuse") \
             .check("_wait_tensor(buf2)") \
-            .check("buf6 = buf2") \
-            .check("buf7 = buf0; del buf0  # reuse") \
-            .check("return (buf5, buf4, buf7, buf6") \
+            .check("buf7 = buf2") \
+            .check("return (buf4, buf5, buf6, buf7") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
