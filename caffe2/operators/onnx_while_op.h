@@ -47,7 +47,7 @@ class ONNXWhileOp final : public Operator<Context> {
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  bool RunOnDevice() override {
+  bool RunOnDevice() {
     return DispatchHelper<TensorTypes<int, bool, long>>::call(this, Input(1));
   }
 
