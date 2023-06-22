@@ -740,7 +740,6 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         matched_input_elements_positions: List[int],
         matched_output_elements_positions: List[int],
         example_fake_inputs: List[torch.Tensor],
-        fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
     ):
         super().__init__(m)
 
@@ -748,6 +747,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             val: example_fake_inputs[ix]
             for ix, val in enumerate(matched_input_elements_positions)
         }
+        fake_mode = _guards.detect_fake_mode(example_fake_inputs)
 
         self.new_args = []
         for i in range(0, len(flat_args)):
@@ -1032,7 +1032,6 @@ def export(
         matched_input_elements_positions,
         matched_output_elements_positions,
         example_fake_inputs,
-        fake_mode,
     ).transform()
 
     # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check

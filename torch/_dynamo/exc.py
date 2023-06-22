@@ -111,7 +111,6 @@ class UserErrorType(Enum):
     STANDARD_LIBRARY = auto()
     CONSTRAIN_VIOLATION = auto()
     DYNAMIC_DIM = auto()
-    INVALID_INPUT = auto()
 
 
 class UserError(Unsupported):
