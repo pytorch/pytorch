@@ -1165,6 +1165,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         output_idx = None
         for idx, output in enumerate(V.graph.graph_outputs):
+            if (
+               isinstance(output, ir.NoneAsConstantBuffer)
+               or isinstance(output, ir.ShapeAsConstantBuffer)
+            ):
+                continue
             if buffer == output.data:
                 output_idx = idx
                 break

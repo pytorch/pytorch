@@ -700,7 +700,6 @@ class AotCodeCache:
                         cuda=cuda,
                         aot_mode=graph.aot_mode,
                     ).split(" ")
-                    print("aot compilation command: %s" % " ".join(cmd))
                     log.debug("aot compilation command: %s", " ".join(cmd))
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
