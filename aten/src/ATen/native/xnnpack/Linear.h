@@ -32,6 +32,16 @@ ContextLinear create(
 Tensor run(const ContextLinear& context, const Tensor& input);
 } // namespace linear
 } // namespace internal
+
+bool use_linear(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias);
+
+Tensor linear(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias);
 } // namespace xnnpack
 } // namespace native
 } // namespace at
