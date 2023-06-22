@@ -147,6 +147,7 @@ class DeviceMesh(object):
                     f"DeviceMesh only support homogeneous hardware, but found "
                     f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
                 )
+        device_handle.set_device(get_rank() % num_devices_per_host)
 
         # calculate the coordinates of the current global rank on the mesh
         rank_coords = (self.mesh == get_rank()).nonzero()
