@@ -146,7 +146,8 @@ class GraphModuleOpUpgrader:
                 else:
                     raise RuntimeError from e
             old_op_target = getattr(torch.ops.aten, upgrader_name).default
-            # for example, the operator instance of "aten::div" is torch.op.aten.div.default. We need to append the "default" at the end.
+            # for example, the operator instance of "aten::div" is torch.op.aten.div.default. We need to append the
+            # "default" at the end.
             op_name, overload_name = (op_name, "default") if "." not in op_name else tuple(op_name.split(".")[:2])
             new_op_target = getattr(getattr(torch.ops.aten, op_name), overload_name)
             # Note that the graph will have op names in the graph, but actually they are of old versions.
