@@ -46,6 +46,7 @@ def _use_grad_for_differentiable(func):
             # In the future, we will either 1) continue to graph break on backward, so this graph break does not matter
             # or 2) have a fully fused forward and backward graph, which will have no_grad by default, and we can remove this
             # graph break to allow the fully fused fwd-bwd-optimizer graph to be compiled.
+            # see https://github.com/pytorch/pytorch/issues/104053
             torch.set_grad_enabled(self.defaults['differentiable'])
             torch._dynamo.graph_break()
             ret = func(self, *args, **kwargs)
