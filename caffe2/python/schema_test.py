@@ -94,12 +94,12 @@ class TestDB(unittest.TestCase):
         s = schema.Tuple(np.int32, str, np.float32)
         s2 = schema.Struct(
             ('field_0', schema.Scalar(dtype=np.int32)),
-            ('field_1', schema.Scalar(dtype=np.str)),
+            ('field_1', schema.Scalar(dtype=str)),
             ('field_2', schema.Scalar(dtype=np.float32))
         )
         self.assertEqual(s, s2)
         self.assertEqual(s[0], schema.Scalar(dtype=np.int32))
-        self.assertEqual(s[1], schema.Scalar(dtype=np.str))
+        self.assertEqual(s[1], schema.Scalar(dtype=str))
         self.assertEqual(s[2], schema.Scalar(dtype=np.float32))
         self.assertEqual(
             s[2, 0],

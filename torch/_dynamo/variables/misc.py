@@ -416,7 +416,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     """
 
     def __init__(self, value, value_type=None, inference=False, **kwargs):
+        saved_tensors = kwargs.pop("_saved_tensors", [])
         super().__init__(value=value, value_type=value_type, **kwargs)
+        self._saved_tensors = saved_tensors
         self.inference = inference
 
     @staticmethod
