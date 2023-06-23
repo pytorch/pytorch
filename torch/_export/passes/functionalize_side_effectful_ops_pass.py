@@ -15,7 +15,7 @@ _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS: Dict[OpOverload, OpOverload]
 }
 
 
-class _FunctionalizeSideEffectfulOps(ExportPassBase):
+class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
     """
     Functionalize ops with side effect in graph module by replacing the op with
     functional version of it. A new dependency token (`dep_token`) will be
@@ -53,6 +53,7 @@ class _FunctionalizeSideEffectfulOps(ExportPassBase):
 
         gm = copy.deepcopy(graph_module)
         self._dep_token = None
+        self._next_dep_token_index = None
         return super().call(gm)
 
     def call_operator(
