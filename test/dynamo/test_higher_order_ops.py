@@ -607,10 +607,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         result = f(x)
         self.assertEqual(result, inner(x))
-        # It's unclear if this is correct: dynamo graph breaks on wrap but
-        # then interposes on wrap.__call__, which invokes fn(*args),
-        # leading to two graphs being compiled
-        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 0)
 
     def test_fallback_on_graph_break_complicated(self):
         cnt = CompileCounter()
@@ -631,10 +628,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         result = f(x)
         self.assertEqual(result, inner(x))
-        # It's unclear if this is correct: dynamo graph breaks on wrap but
-        # then interposes on wrap.__call__, which invokes fn(*args),
-        # leading to four graphs being compiled: clone, sin, sin, clone
-        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_modules(self):
         counters.clear()
@@ -688,7 +682,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         x = torch.randn(3)
         result = f(x)
         self.assertEqual(result, [1, torch.sin(x), 2.0])
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 0)
         self.assertEqual(
             dict(counters["graph_break"]),
             {"HigherOrderOperator body's output must consist of tensors only": 1},
@@ -708,7 +702,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         result = f(x)
 
         self.assertEqual(result, ((x.sin(), x.cos()),))
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 0)
         self.assertEqual(
             dict(counters["graph_break"]),
             {"HigherOrderOperator body's output must consist of tensors only": 1},
@@ -727,7 +721,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         x = torch.randn(3)
         result = f(x)
         self.assertEqual(result, [{"a": -x}])
-        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.frame_count, 0)
         self.assertEqual(
             dict(counters["graph_break"]),
             {"HigherOrderOperator body's output must consist of tensors only": 1},
