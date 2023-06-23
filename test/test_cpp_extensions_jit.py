@@ -919,7 +919,7 @@ class TestCppExtensionJIT(common.TestCase):
 
         t = torch.randn(3, requires_grad=True)
 
-        msg = r"functorch functions \(vmap, grad, vjp, etc.\) incorrectly used with C\+\+ Function."
+        msg = r"cannot use C\+\+ torch::autograd::Function with functorch"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.func.vmap(identity_m.identity)(t)
 
