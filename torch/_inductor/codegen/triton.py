@@ -735,7 +735,7 @@ class TritonKernel(Kernel):
 
         self.persistent_reduction = self.should_use_persistent_reduction()
         self.no_x_dim = (
-            and self.reduction_hint == ReductionHint.INNER
+            self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
             and len(self.numels) == 2
             and self.numels[-1] >= 256
