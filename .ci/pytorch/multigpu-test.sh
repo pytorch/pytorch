@@ -46,4 +46,5 @@ time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_ex
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
 time python test/run_test.py --verbose -i test_optim -- -k optimizers_with_varying_tensors
+time python test/run_test.py --verbose -i test_foreach -- -k test_tensors_grouping
 assert_git_not_dirty
