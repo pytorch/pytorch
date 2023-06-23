@@ -735,7 +735,6 @@ Tensor& _sparse_csr_mm_out(
     const Tensor& mat1,
     const Tensor& mat2,
     Tensor& result) {
-  // auto zero = at::zeros({mat1.size(0), mat2.size(1)}, result.options());
   auto zero = at::zeros_like(result);
   return at::addmm_out(result, zero, mat1, mat2, 0.0, 1.0);
 }
