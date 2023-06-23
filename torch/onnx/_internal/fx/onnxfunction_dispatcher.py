@@ -162,7 +162,8 @@ class OnnxFunctionDispatcher:
             unsupported_fx_node=node,
         )
         diagnostic_context.log(diagnostic)
-        # Tie breaker: if there are multiple nearest matches, we will choose the one
+
+        # NOTE: Tie breaker: if there are multiple nearest matches, we will choose the one
         # that is custom first
         symbolic_function_list: list[registration.SymbolicFunction] = sorted(
             overload_match_ranking,

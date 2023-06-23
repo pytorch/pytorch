@@ -5077,6 +5077,8 @@ class TestCudaComm(TestCase):
         self.assertTrue("test_memory_profiler_viz" in plot)
         self.assertTrue('category' in plot)
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_cycles(self):
         fired = False
 

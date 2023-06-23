@@ -9,6 +9,9 @@ import onnxscript  # type: ignore[import]
 import torch
 import torch.fx
 from onnxscript.function_libs.torch_lib import ops  # type: ignore[import]
+from onnxscript.function_libs.torch_lib.tensor_typing import (  # type: ignore[import]
+    TReal,
+)
 from onnxscript.onnx_opset import opset15 as op  # type: ignore[import]
 from parameterized import parameterized  # type: ignore[import]
 from torch.onnx._internal.diagnostics import infra
@@ -123,7 +126,7 @@ class TestDispatcher(common_utils.TestCase):
             ),
         ]
     )
-    def test_get_aten_name_supported(self, node, expected_name):
+    def test_get_aten_name_on_supported_fx_node(self, node, expected_name):
         self.assertEqual(
             self.dispatcher.get_aten_name(node, self.diagnostic_context),
             expected_name,
@@ -163,7 +166,7 @@ class TestDispatcher(common_utils.TestCase):
             ),
         ]
     )
-    def test_get_aten_name_unsupported(self, node):
+    def test_get_aten_name_on_unsupported_fx_node(self, node):
         with self.assertRaises(RuntimeError):
             self.dispatcher.get_aten_name(node, self.diagnostic_context)
 
@@ -234,6 +237,72 @@ class TestDispatcher(common_utils.TestCase):
                 op_overload.kwargs,
                 self.diagnostic_context,
             )
+
+    @parameterized.expand(
+        [
+            (
+                torch.fx.Node(
+                    graph=torch.fx.Graph(),
+                    name="aten::add.Tensor",
+                    op="call_function",
+                    target=torch.ops.aten.add.Tensor,
+                    args=(torch.tensor(3), torch.tensor(4)),
+                    kwargs={},
+                ),
+            ),
+            (
+                torch.fx.Node(
+                    graph=torch.fx.Graph(),
+                    name="aten::add.Tensor",
+                    op="call_function",
+                    target=torch.ops.aten.add.Tensor,
+                    args=(torch.tensor(3), torch.tensor(4)),
+                    kwargs={"alpha": 1},
+                ),
+            ),
+        ]
+    )
+    def test_respect_custom_ops_in_find_the_perfect_or_nearest_match_onnxfunction(
+        self, node
+    ):
+        custom_domain = onnxscript.values.Opset(domain="custom", version=1)
+
+        @onnxscript.script(custom_domain)
+        def test_custom_op(x: TReal, y: TReal) -> TReal:
+            return op.Add(x, y)
+
+        @onnxscript.script(custom_domain)
+        def test_default_op(x: TReal, y: TReal) -> TReal:
+            return op.Add(x, y)
+
+        custom_overloads = set(
+            {
+                registration.SymbolicFunction(
+                    test_custom_op, op_name="test::test_op", is_custom=True
+                )
+            }
+        )
+        function_overloads = (
+            set(
+                {
+                    registration.SymbolicFunction(
+                        test_default_op, op_name="test::test_op"
+                    )
+                }
+            )
+            | custom_overloads
+        )
+
+        symbolic_fn = self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
+            node,
+            "aten::add",
+            function_overloads,
+            custom_overloads,  # custom function overloads
+            node.args,
+            node.kwargs,
+            self.diagnostic_context,
+        )
+        self.assertEqual(symbolic_fn, test_custom_op)
 
 
 class TestOpSchemaWrapper(common_utils.TestCase):
