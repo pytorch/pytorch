@@ -4344,6 +4344,73 @@ except ImportError:
         "Inductor support for distributed collectives depends on building torch.distributed"
     )
 
+try:
+    fbgemm = torch.ops.fbgemm
+except AttributeError:
+    log.info("Inductor couldn't find fbgemm so these ops will not be registered")
+    fbgemm = None
+
+if fbgemm is not None:
+    @register_lowering(fbgemm.jagged_to_padded_dense_forward)
+    def jagged_to_padded_dense_forward(
+        jagged_values: TensorBox,
+        jagged_offsets: List[TensorBox],
+        max_lengths: List[int],  # list of ints/symints
+        padding_value: float = 0.0,
+    ):
+        device = jagged_values.get_device()
+        dtype = jagged_values.get_dtype()
+
+        # only handle the common case of a single jagged dimension
+        if (
+            len(jagged_offsets) != 1
+            or device.type != "cuda"
+            or device != jagged_offsets[0].get_device()
+            or len(max_lengths) != len(jagged_offsets)
+            or len(jagged_values.get_size()) != 2
+            or not is_integer_type(jagged_offsets[0])
+        ):
+            return pytree.tree_map(
+                TensorBox.create,
+                ir.FallbackKernel.create(
+                    fbgemm.jagged_to_padded_dense_forward,
+                    jagged_values,
+                    jagged_offsets,
+                    max_lengths,
+                    padding_value,
+                ),
+            )
+
+        jagged_offsets = jagged_offsets[0]
+
+        inner_dim = jagged_values.get_size()[1]
+        batches = jagged_offsets.get_size()[0] - 1
+        limit = jagged_values.get_size()[0] + 1
+
+        output_dims = [batches, max_lengths[0], inner_dim]
+
+        values_loader = jagged_values.make_loader()
+        offsets_loader = jagged_offsets.make_loader()
+
+        def inner_fn(index):
+            b, x, y = index
+            begin = ops.indirect_indexing(offsets_loader([b]), limit)
+            end = ops.indirect_indexing(offsets_loader([b + 1]), limit)
+            val = ops.masked(
+                ops.lt(
+                    ops.index_expr(begin + x, torch.int64),
+                    ops.index_expr(end, torch.int64)),
+                lambda: values_loader([begin + x, y]),
+                padding_value)
+            return val
+
+        return Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=inner_fn,
+            ranges=output_dims
+        )
+
 # populate lowerings defined in kernel/*
 from . import kernel
 
