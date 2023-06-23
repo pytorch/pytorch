@@ -4351,6 +4351,7 @@ except AttributeError:
     fbgemm = None
 
 if fbgemm is not None:
+
     @register_lowering(fbgemm.jagged_to_padded_dense_forward)
     def jagged_to_padded_dense_forward(
         jagged_values: TensorBox,
@@ -4399,16 +4400,15 @@ if fbgemm is not None:
             val = ops.masked(
                 ops.lt(
                     ops.index_expr(begin + x, torch.int64),
-                    ops.index_expr(end, torch.int64)),
+                    ops.index_expr(end, torch.int64),
+                ),
                 lambda: values_loader([begin + x, y]),
-                padding_value)
+                padding_value,
+            )
             return val
 
         return Pointwise.create(
-            device=device,
-            dtype=dtype,
-            inner_fn=inner_fn,
-            ranges=output_dims
+            device=device, dtype=dtype, inner_fn=inner_fn, ranges=output_dims
         )
 
 # populate lowerings defined in kernel/*
