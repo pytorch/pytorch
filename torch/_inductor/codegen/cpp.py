@@ -217,8 +217,9 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 def cpp_prefix():
     path = Path(__file__).parent / "cpp_prefix.h"
     with path.open() as f:
+        content = f.read()
         _, filename = codecache.write(
-            f.read(),
+            content,
             "h",
         )
     return f'#include "{filename}"'
