@@ -120,7 +120,7 @@ def register_package(
         `None`
 
     Example:
-        >>> # xdoctest: +SKIP("omitted definitionof _validate_ipu_device")
+        >>> # xdoctest: +SKIP("omitted definition of _validate_ipu_device")
         >>> def _ipu_tag(obj):
         >>>     if obj.device.type == 'ipu':
         >>>         return 'ipu'
