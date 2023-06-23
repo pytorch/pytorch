@@ -1572,6 +1572,33 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m, example_inputs, is_per_channel=True, verify_convert=True,
         )
 
+    def test_qat_update_shared_qspec(self):
+        """
+        Test the case where nodes used in SharedQuantizationSpec were replaced
+        during QAT subgraph rewriting.
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.hardtanh = torch.nn.Hardtanh()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.hardtanh(x)
+                return x
+        m = M()
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        self._verify_symmetric_qnnpack_qat_numerics(
+            M(), example_inputs, is_per_channel=False, verify_convert=True,
+        )
+        self._verify_symmetric_qnnpack_qat_numerics(
+            M(), example_inputs, is_per_channel=True, verify_convert=True,
+        )
+
+
 @skipIfNoQNNPACK
 class TestQuantizePT2EOps(QuantizationTestCase):
     def test_gru(self):
