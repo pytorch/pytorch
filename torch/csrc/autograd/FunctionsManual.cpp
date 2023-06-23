@@ -1451,7 +1451,7 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
-static Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
+Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
   if (x.is_coalesced() && gx.is_coalesced()) {
     if (x._nnz() >= gx._nnz()) {
       // search into x is faster

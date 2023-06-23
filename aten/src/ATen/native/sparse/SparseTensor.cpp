@@ -662,7 +662,7 @@ DEFINE_DISPATCH(sparse_mask_projection_out_stub);
 
 using OptTensor = c10::optional<Tensor>;
 
-static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
+std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inputs(
     const std::string& method_name,
     const Tensor& t,
     const Tensor& mask) {

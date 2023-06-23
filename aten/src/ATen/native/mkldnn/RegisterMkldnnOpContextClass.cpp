@@ -13,7 +13,7 @@ namespace mkldnn {
 
 using namespace internal::convolution;
 
-static bool is_mkldnn_bf16_supported() {
+bool is_mkldnn_bf16_supported() {
 #if defined(__aarch64__)
   return mkldnn_bf16_device_check_arm();
 #else
