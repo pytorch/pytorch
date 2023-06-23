@@ -84,7 +84,7 @@ jobs:
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       # Needed for conda builds
-      # Using public apline as arm64v8 is not available 
+      # Using public apline as arm64v8 is not available
       # at 308535385114.dkr.ecr.us-east-1.amazonaws.com just yet
       ALPINE_IMAGE: "arm64v8/alpine"
       ANACONDA_USER: pytorch
@@ -140,7 +140,7 @@ jobs:
         shell: bash
         run: |
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-  
+
       - name: Clean workspace
         shell: bash
         run: |
@@ -192,7 +192,7 @@ jobs:
         with:
           name: ${{ inputs.build_name }}
           path: "${{ runner.temp }}/artifacts/"
-        
+
       - name: Pull Docker image
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
