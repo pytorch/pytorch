@@ -41,7 +41,7 @@ void Histogram::Add(const float* f, int len) {
   }
 }
 
-static void RemapHistograms(Histogram& src_hist, Histogram& dst_hist) {
+void RemapHistograms(Histogram& src_hist, Histogram& dst_hist) {
   auto src_bins = *(src_hist.GetHistogram());
   float src_bin_width = (src_hist.Max() - src_hist.Min()) / src_bins.size();
   float dst_bin_width =

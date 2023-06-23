@@ -165,7 +165,7 @@ struct RNNParams {
   }
 };
 
-static std::vector<int64_t> _hidden_size(const RNNParams& rnn) {
+std::vector<int64_t> _hidden_size(const RNNParams& rnn) {
   return {rnn.num_layers * rnn.num_directions, rnn.mini_batch, rnn.hidden_size};
 }
 
@@ -196,7 +196,7 @@ std::vector<int64_t> _output_size(const RNNParams& rnn) {
 //                           |   nt2   |
 //                           +---------+
 //
-static Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
+Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
   auto weight_t = weight.contiguous();
   if (static_cast<ideep::rnn_kind>(fn_mode) == ideep::rnn_kind::GRU) {
     std::vector<Tensor> gates = weight_t.chunk(3, /*gates*/0);
@@ -205,7 +205,7 @@ static Tensor _shuffle_weight(const Tensor& weight, int64_t fn_mode) {
   return weight_t;
 }
 
-static Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_t fn_mode) {
+Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_t fn_mode) {
   if (static_cast<ideep::rnn_kind>(fn_mode) == ideep::rnn_kind::GRU) {
     std::vector<Tensor> b1 = bias_ih.chunk(3, /*output_channels*/0);
     std::vector<Tensor> b2 = bias_hh.chunk(3, /*output_channels*/0);
@@ -468,7 +468,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 //   b. padded sequence input support
 //
 
-static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
+std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
     const Tensor& input_, TensorList weight, int64_t weight_stride0,
     const Tensor& hx_, const Tensor& cx_,
     int64_t mode, int64_t hidden_size,
@@ -566,6 +566,8 @@ std::pair<Tensor, hidden_type> mkldnn_impl(
           pack_hidden<hidden_type>(std::get<1>(mkldnn_output), std::get<2>(mkldnn_output))};
 }
 
+} // anonymous namespace
+
 void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
     const Tensor& input, TensorList hx, TensorList params, bool has_biases,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
@@ -575,7 +577,6 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
   hy = std::get<0>(result.second);
   cy = std::get<1>(result.second);
 }
-} // anonymous namespace
 
 REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
 
