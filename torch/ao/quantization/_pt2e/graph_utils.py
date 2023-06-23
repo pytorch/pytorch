@@ -35,8 +35,8 @@ def get_equivalent_types() -> List[Set]:
 
 def update_equivalent_types_dict(customized_equivalent_types=None):
     """Help function for user who wants to customize the _EQUIVALENT_TYPES and _EQUIVALENT_TYPES_DICT.
-    when customized_equivalent_types passes in,
-    re-generate _EQUIVALENT_TYPES and _EQUIVALENT_TYPES_DICT
+    When customized_equivalent_types passes in,
+    re-generate _EQUIVALENT_TYPES and _EQUIVALENT_TYPES_DICT.
     """
     if customized_equivalent_types is not None:
         global _EQUIVALENT_TYPES
