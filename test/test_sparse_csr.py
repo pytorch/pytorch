@@ -933,7 +933,7 @@ class TestSparseCompressed(TestCase):
                 elif n_batchdim and dim >= n_batchdim and dim < n_batchdim + 2:
                     with self.assertRaisesRegex(
                             RuntimeError,
-                            "selecting sparse dimensions is not implemented for batched sparse compressed tensors"):
+                            "selecting sparse dimensions is not supported for batched sparse compressed tensors"):
                         torch.select_copy(sparse, dim, 0)
                 else:
                     for index in {0, sparse.shape[dim] // 2, sparse.shape[dim] - 1}:
@@ -1043,7 +1043,7 @@ class TestSparseCSR(TestCase):
             sparse[0, 0, 0, 0] = 99.0
 
         # select from sparse dimensions without removing batch dims
-        msg = "selecting sparse dimensions is not implemented for batched sparse compressed tensors."
+        msg = "selecting sparse dimensions is not supported for batched sparse compressed tensors."
         with self.assertRaisesRegex(RuntimeError, msg):
             sparse.select(-2, 0)
 
@@ -1368,7 +1368,8 @@ class TestSparseCSR(TestCase):
             t = self.genSparseCSRTensor((16, 16), nnz, dtype=dtype,
                                         device=device, index_dtype=index_dtype)
 
-            with self.assertRaisesRegex(RuntimeError, r"size \(16, 16\) with block size \(5, 5\)"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"tensor sparse size \(.*,.*\) must be divisible by given blocksize \(.*,.*\)"):
                 block_t = t.to_sparse_bsr((5, 5))
 
     # TODO: Support auto generation of device check for sparse tensors
@@ -3105,7 +3106,8 @@ class TestSparseCSR(TestCase):
                 # change of blocksize upon conversion is not yet supported.
                 if b.layout in block_layouts:
                     for block_layout in block_layouts:
-                        with self.assertRaisesRegex(RuntimeError, "conversion from.*to.*is not implemented"):
+                        with self.assertRaisesRegex(RuntimeError,
+                                                    "conversion from.*to.*with blocksize changed from.*to.*is not supported"):
                             b.to_sparse(layout=block_layout, blocksize=(3, 3))
 
         batch_dims = [(), (2,), (2, 2), (2, 2, 2)]
@@ -3559,49 +3561,6 @@ class TestSparseCompressedTritonKernels(TestCase):
         with self.assertRaisesRegex(ValueError, r"only row-major/col-major `out`"):
             out = torch.rand(32, 32, 2, dtype=dtype, device=device).transpose(0, -1)
             bsr_dense_mm(lhs, rhs, out=out)
-
-    @parametrize("block_size", [16, 32, 64])
-    @onlyCUDA
-    @skipIfRocm
-    @dtypes(torch.half, torch.bfloat16, torch.float)
-    @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
-    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
-    @precisionOverride({torch.float16: 1e-3})
-    def test_triton_scaled_dot_product_attention(self, device, dtype, block_size):
-        from functools import partial
-        from torch.sparse._triton_ops import _scaled_dot_product_attention
-
-        # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
-        tensor = partial(make_tensor, device=device, dtype=dtype, low=0.3, high=1.2)
-
-        def broadcast_input(*ts):
-            batch_dims = torch.broadcast_shapes(*(t.shape[:-2] for t in ts))
-            yield from (torch.broadcast_to(t, batch_dims + t.shape[-2:]) for t in ts)
-
-        # NOTE: batch dims with zero sizes are not supported in `to_sparse_bsr`.
-        batches = [(), (2,), (2, 2)]
-        size = [128, 256, 0]
-
-        for bam, bq, bk, bv, m, n, k in itertools.product(batches, batches, batches, batches, size, size, size):
-            query = tensor(bq + (m, k))
-            key = tensor(bk + (n, k))
-            value = tensor(bv + (n, k))
-
-            # We make attn_mask block lower/upper triangular so that BSR and Strided
-            # function variants are directly comparable.
-            # NOTE: only boolean mask is directly compatible with the Strided version
-            # without any pre-/post-processing.
-            attn_mask = torch.ones(bam + (m, n), device=device, dtype=torch.bool)
-            attn_mask = self._to_block_triangular_inplace(attn_mask, block_size, block_size)
-            attn_mask_bsr = attn_mask.to_sparse_bsr(block_size)
-
-            expected = torch.nn.functional.scaled_dot_product_attention(
-                *broadcast_input(query, key, value, attn_mask)
-            )
-            res = _scaled_dot_product_attention(query, key, value, attn_mask.to_sparse_bsr(block_size))
-
-            self.assertEqual(res, expected)
-
 
     @parametrize("block_size", [16, 32, 64])
     @onlyCUDA

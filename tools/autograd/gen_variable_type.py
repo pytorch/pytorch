@@ -305,6 +305,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_eig",
     "diagonal_copy",
     "diagonal_scatter",
+    "sparse_mask",
     "select_backward",
     "diagonal_backward",
     "slice_backward",
