@@ -1451,11 +1451,14 @@ Tensor mm_mat1_sparse_backward(
       mat2.layout());
 }
 
-static Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
+static Tensor sparse_mask_like_grad(
+    const Tensor& x,
+    const Tensor& gx,
+    bool accumulate_matches) {
   if (x.is_coalesced() && gx.is_coalesced()) {
     if (x._nnz() >= gx._nnz()) {
       // search into x is faster
-      return gx._sparse_mask_projection(x);
+      return gx._sparse_mask_projection(x, accumulate_matches);
     } else {
       // search into gx is faster
       return gx.sparse_mask(x);
@@ -1463,16 +1466,27 @@ static Tensor sparse_mask_like_grad(const Tensor& x, const Tensor& gx) {
   } else if (x.is_coalesced()) {
     return gx.sparse_mask(x);
   } else if (gx.is_coalesced()) {
-    return gx._sparse_mask_projection(x);
+    return gx._sparse_mask_projection(x, accumulate_matches);
   } else {
     if (x._nnz() >= gx._nnz()) {
       // gx.coalesce() is likely faster
-      return gx.coalesce()._sparse_mask_projection(x);
+      return gx.coalesce()._sparse_mask_projection(x, accumulate_matches);
     } else {
       // x.coalesce() is likely faster
       return gx.sparse_mask(x.coalesce());
     }
   }
+}
+
+Tensor sparse_mask_backward(
+    const Tensor& grad,
+    const Tensor& mask,
+    const c10::Layout self_layout) {
+  // NOTE: sparse_mask accumulates matches, so the backward step has to
+  // accumulate as well.
+  const auto self_grad =
+      sparse_mask_like_grad(mask, grad, /*accumulate_matches=*/true);
+  return self_layout == at::kStrided ? self_grad.to_dense() : self_grad;
 }
 
 Tensor sparse_sparse_matmul_backward(
@@ -1500,12 +1514,14 @@ Tensor sparse_sparse_matmul_backward(
       grad_order == 0 || grad_order == 1,
       ": grad_order not in [0, 1] at sparse_sparse_matmul_backward function");
 
+  // NOTE: _sparse_sparse_matmul returns a coalesced gradient,
+  // hence there is no need in accumulating matches.
   if (grad_order == 0) {
     auto a_grad = _sparse_sparse_matmul(grad, b.conj().t());
-    return sparse_mask_like_grad(a, a_grad);
+    return sparse_mask_like_grad(a, a_grad, /*accumulate_matches=*/false);
   }
   auto b_grad = _sparse_sparse_matmul(a.conj().t(), grad);
-  return sparse_mask_like_grad(b, b_grad);
+  return sparse_mask_like_grad(b, b_grad, /*accumulate_matches=*/false);
 }
 
 Tensor renorm_backward(
@@ -4870,9 +4886,9 @@ infinitely_differentiable_native_group_norm_backward(
 
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
     const Tensor& grad_out,
-    const Tensor& i1,
-    const Tensor& i2,
-    const Tensor& i3,
+    const c10::optional<Tensor>& i1,
+    const c10::optional<Tensor>& i2,
+    const c10::optional<Tensor>& i3,
     IntArrayRef expand1,
     IntArrayRef expand2,
     IntArrayRef expand3,
@@ -4882,13 +4898,13 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
   if (grad_out.defined()) {
     if (grad_mask[0])
       grad_i1 =
-          at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
+          at::_trilinear(grad_out, *i2, *i3, sumdim, expand2, expand3, expand1);
     if (grad_mask[1])
       grad_i2 =
-          at::_trilinear(i1, grad_out, i3, expand1, sumdim, expand3, expand2);
+          at::_trilinear(*i1, grad_out, *i3, expand1, sumdim, expand3, expand2);
     if (grad_mask[2])
       grad_i3 =
-          at::_trilinear(i1, i2, grad_out, expand1, expand2, sumdim, expand3);
+          at::_trilinear(*i1, *i2, grad_out, expand1, expand2, sumdim, expand3);
   }
   return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
 }

@@ -306,6 +306,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "linalg_eig",
     "diagonal_copy",
     "diagonal_scatter",
+    "sparse_mask",
     "select_backward",
     "diagonal_backward",
     "slice_backward",
@@ -1218,7 +1219,9 @@ def emit_body(
                 )
                 assert wrap_opt_if_match is not None
 
-                wrap_opt_if_condition = wrap_opt_if_match.group(0).strip()
+                # Condition is between 'wrap_opt_if(var_name,' and ')'.
+                condition_slice = slice(len(rf"wrap_opt_if\({arg.nctype.name},"), -1)
+                wrap_opt_if_condition = wrap_opt_if_match.group(0)[condition_slice].strip()
                 # replace 'grad_input_mask[num]' with 'grad_fn->should_compute_output(num)'
                 wrap_opt_if_condition = re.sub(
                     r"grad_input_mask\[(\d+)\]",
