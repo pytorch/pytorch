@@ -32,6 +32,7 @@ STORAGE_KEY_SEPARATOR = ','
 
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
 MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
+STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
 
 __all__ = [
     'SourceChangeWarning',
@@ -92,9 +93,9 @@ def _is_zipfile(f) -> bool:
 
 def register_package(
     priority: int,
-    tagger: Callable[[Union[Storage, torch.storage.TypedStorage, torch.storage.UntypedStorage]], Optional[str]],
-    deserializer: Callable[[Union[Storage, torch.storage.TypedStorage, torch.storage.UntypedStorage], str],
-                           Optional[Union[Storage, torch.storage.TypedStorage, torch.storage.UntypedStorage]]]):
+    tagger: Callable[[STORAGE], Optional[str]],
+    deserializer: Callable[[STORAGE, str], Optional[STORAGE]]
+):
     '''
     Registers callables for tagging and deserializing storage objects with an associated priority.
     Tagging associates a device with a storage object at save time while deserializing moves a
@@ -116,7 +117,19 @@ def register_package(
             object on the appropriate device or None.
 
     Returns:
-        None
+        `None`
+
+    Example:
+        >>> # xdoctest: +SKIP("omitted definitionof _validate_ipu_device")
+        >>> def _ipu_tag(obj):
+        >>>     if obj.device.type == 'ipu':
+        >>>         return 'ipu'
+        >>> def _ipu_deserialize(obj, location):
+        >>>     if location.startswith('ipu'):
+        >>>         # fn to validate ipu is available and location is valid
+        >>>         device = _validate_ipu_device(location)
+        >>>         return obj.ipu(device)
+        >>> register_package(11, _ipu_tag, _ipu_deserialize)
     '''
     queue_elem = (priority, tagger, deserializer)
     _package_registry.append(queue_elem)
@@ -317,7 +330,7 @@ register_package(23, _privateuse1_tag, _privateuse1_deserialize)
 register_package(24, _hpu_tag, _hpu_deserialize)
 
 
-def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
+def location_tag(storage: STORAGE):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
         if location:
