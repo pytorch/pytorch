@@ -5,7 +5,7 @@ namespace caffe2 {
 
 using namespace nom::repr;
 
-void setDeviceOption(NNGraph::NodeRef n, caffe2::DeviceOption& d) {
+static void setDeviceOption(NNGraph::NodeRef n, caffe2::DeviceOption& d) {
   getOrAddCaffe2Annotation(n);
   auto op = nn::get<NeuralNetOperator>(n);
   auto c2Annot = dyn_cast<caffe2::Caffe2Annotation>(op->getMutableAnnotation());

@@ -1,9 +1,33 @@
 """Utilities for converting and operating on ONNX, JIT and torch types."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    runtime_checkable,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
+
+
+# Enable both TorchScriptTensor and torch.Tensor to be tested
+# for dtype in OpSchemaWrapper.
+@runtime_checkable
+class TensorLike(Protocol):
+    @property
+    def dtype(self) -> Optional[torch.dtype]:
+        ...
+
+
+def is_torch_complex_dtype(tensor: TensorLike) -> bool:
+    # NOTE: torch.Tensor can use torch.is_complex() to check if it's a complex tensor
+    return tensor.dtype in _COMPLEX_TO_FLOAT
 
 
 def from_complex_to_float(dtype: torch.dtype) -> torch.dtype:
