@@ -361,7 +361,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             model = apply_fsdp_with_checkpointing(model, wrap_policy, is_inner)
             correct_outputs = model(inputs)
             cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
-            opt_model = torch.compile(model, backend=cnt)
+            opt_model = torch._dynamo.optimize(cnt)(model)
             outputs = opt_model(inputs)
             self.assertTrue(same(correct_outputs, outputs))
             # Each FSDP module is a separate graph
@@ -441,7 +441,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
                 reset_rng_state()
                 opt_model = apply_fsdp_with_checkpointing(model, wrap_policy, check_fn)
-                opt_model = torch.compile(opt_model)
+                opt_model = torch._dynamo.optimize("inductor")(opt_model)
                 opt_outputs = opt_model(**inputs)
                 opt_loss = opt_outputs.loss
                 opt_loss.backward()
