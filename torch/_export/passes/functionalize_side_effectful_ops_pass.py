@@ -29,12 +29,12 @@ class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
     Will be transformed to:
     ```
     def f(x):
-        dep_token = _make_dep_token()
-        dep_token_2 = _functional_sym_constrain_range(
+        dep_token0 = _make_dep_token()
+        dep_token1 = _functional_sym_constrain_range(
             x.shape[0], min=1, max=3, dep_token=dep_token
         )
 
-        return x.add(3), dep_token_2
+        return x.add(3), dep_token1
     ```
     """
 
