@@ -4351,7 +4351,10 @@ except ImportError:
 try:
     fbgemm = torch.ops.fbgemm
 
-    @register_lowering(fbgemm.jagged_to_padded_dense_forward)
+    # force AttributeError to occur here, if op is not available
+    jagged_to_padded_dense_forward_op = fbgemm.jagged_to_padded_dense_forward
+
+    @register_lowering(jagged_to_padded_dense_forward_op)
     def jagged_to_padded_dense_forward(
         jagged_values: TensorBox,
         jagged_offsets: List[TensorBox],
