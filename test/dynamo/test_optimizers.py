@@ -25,15 +25,28 @@ def make_test(optim_cls, closure=None, **kwargs):
 
     def test_fn(self):
         nonlocal opt
+
+        # run the patcher so that step has the expected structure
+        torch._dynamo.eval_frame.TorchPatcher.patch()
+
+        # unwrap step to avoid a deliberate graph break due to
+        # a limitation of functionalization/no_grad detection
+        # see the [Note on graph break] in optimizer.py
+        # This ignores the outer _use_grad_if_differentiable wrapper, which is fine for now
+        # as dynamo does not support differentiable optimizers anyway
+        step_fn = opt.step.__wrapped__
         if closure is not None:
 
             def fn():
-                opt.step(closure)
+                step_fn(opt, closure)
 
         else:
-            fn = opt.step
 
-        torch.compile(fn, backend="eager", fullgraph=True)()
+            def fn():
+                step_fn(opt)
+
+        with torch.set_grad_enabled(False):
+            torch.compile(fn, backend="eager", fullgraph=True)()
 
     return test_fn
 

@@ -239,12 +239,11 @@ class _BufferCommHook:
 # is completed.
 class _DDPSink(Function):
     @staticmethod
-    def forward(ctx, reducer, state_dict, *inputs):
+    def forward(ctx, ddp_weakref, *inputs):
         # set_materialize_grads(False) will ensure that None gradients stay as
         # None and are not filled with zeros.
         ctx.set_materialize_grads(False)
-        ctx.reducer = reducer
-        ctx.state_dict = state_dict
+        ctx.ddp_weakref = ddp_weakref
         ret = tuple(
             inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
         )
@@ -254,12 +253,19 @@ class _DDPSink(Function):
     def backward(ctx, *grad_outputs):
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
-        if ctx.state_dict["static_graph"] and ctx.state_dict["num_iterations"] == 1:
+        ddp_weakref = ctx.ddp_weakref()
+        reducer = ddp_weakref.reducer
+        static_graph = ddp_weakref.static_graph
+        delay_ar_enqueued = (
+            static_graph and ddp_weakref._static_graph_delay_allreduce_enqueued
+        )
+        if static_graph and not delay_ar_enqueued:
             Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
-                ctx.reducer._delay_all_reduce
+                reducer._delay_all_reduce
             )
+            ddp_weakref._static_graph_delay_allreduce_enqueued = True
 
-        return (None, None, *grad_outputs)
+        return (None, *grad_outputs)
 
 
 class _DDPJoinHook(JoinHook):
@@ -1047,7 +1053,6 @@ class DistributedDataParallel(Module, Joinable):
         (4) Logging construction-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
-        self.num_iterations = 0
         # Notice, the parameters order is not in the order in which they are used,
         # especially in models with control flow.
         #
@@ -1381,7 +1386,6 @@ class DistributedDataParallel(Module, Joinable):
         if torch.is_grad_enabled() and self.require_backward_grad_sync:
             assert self.logger is not None
             self.logger.set_runtime_stats_and_log()
-            self.num_iterations += 1
             self.reducer.prepare_for_forward()
 
         # Notify the join context that this process has not joined, if
@@ -1466,13 +1470,8 @@ class DistributedDataParallel(Module, Joinable):
         # TODO: DDPSink is currently enabled for unused parameter detection and
         # static graph training for first iteration.
         if (self.find_unused_parameters and not self.static_graph) or (
-            self.static_graph and self.num_iterations == 1
+            self.static_graph and not self._static_graph_delay_allreduce_enqueued
         ):
-            state_dict = {
-                "static_graph": self.static_graph,
-                "num_iterations": self.num_iterations,
-            }
-
             (
                 output_tensor_list,
                 treespec,
@@ -1491,8 +1490,7 @@ class DistributedDataParallel(Module, Joinable):
             # undefined gradient which the reducer then handles to ensure
             # param.grad field is not touched and we don't error out.
             passthrough_tensor_list = _DDPSink.apply(
-                self.reducer,
-                state_dict,
+                weakref.ref(self),
                 *output_tensor_list,
             )
             for i in range(len(output_placeholders)):
@@ -2204,6 +2202,7 @@ class DistributedDataParallel(Module, Joinable):
             )
             return
         self.static_graph = True
+        self._static_graph_delay_allreduce_enqueued = False
         self.reducer._set_static_graph()
         assert self.logger is not None
         self.logger._set_static_graph()
