@@ -478,7 +478,7 @@ static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
-      at::autocast::is_xpu_enabled()) {
+      at::autocast::is_xpu_enabled() || at::autocast::is_ipu_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -499,6 +499,26 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (at::autocast::is_cpu_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::autocast::set_ipu_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_ipu_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -530,6 +550,18 @@ static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (!THPDtype_Check(arg)) {
+    throw TypeError(
+        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
+  at::autocast::set_autocast_ipu_dtype(targetType);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
@@ -542,6 +574,15 @@ static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
 static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
+  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
+  Py_INCREF(dtype);
+  return dtype;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  at::ScalarType current_dtype = at::autocast::get_autocast_ipu_dtype();
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
   return dtype;
@@ -843,6 +884,10 @@ static PyMethodDef methods[] = { // NOLINT
     {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
     {"set_autocast_gpu_dtype", set_autocast_gpu_dtype, METH_O, nullptr},
     {"get_autocast_gpu_dtype", get_autocast_gpu_dtype, METH_NOARGS, nullptr},
+    {"set_autocast_ipu_enabled", set_autocast_ipu_enabled, METH_O, nullptr},
+    {"is_autocast_ipu_enabled", is_autocast_ipu_enabled, METH_NOARGS, nullptr},
+    {"set_autocast_ipu_dtype", set_autocast_ipu_dtype, METH_O, nullptr},
+    {"get_autocast_ipu_dtype", get_autocast_ipu_dtype, METH_NOARGS, nullptr},
     {"autocast_increment_nesting",
      autocast_increment_nesting,
      METH_NOARGS,
