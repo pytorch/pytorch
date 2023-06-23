@@ -16,7 +16,7 @@ bool WeightedSumGradientOp<CPUContext>::RunOnDevice() {
   return DoRunWithType<float>();
 }
 
-static std::vector<TensorShape> WeightedSumShapeInference(
+std::vector<TensorShape> WeightedSumShapeInference(
     const OperatorDef& /* unused */,
     const vector<TensorShape>& in) {
   vector<TensorShape> out(1);
@@ -24,7 +24,7 @@ static std::vector<TensorShape> WeightedSumShapeInference(
   return out;
 }
 
-static OpSchema::Cost CostInferenceForWeightedSum(
+OpSchema::Cost CostInferenceForWeightedSum(
     const OperatorDef& /* unused */,
     const vector<TensorShape>& in) {
   CAFFE_ENFORCE_EQ(
