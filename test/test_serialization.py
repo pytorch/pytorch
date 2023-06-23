@@ -970,6 +970,23 @@ class TestSerialization(TestCase, SerializationMixin):
 
         self.assertEqual(state['weight'].size(), big_model.weight.size())
 
+    def test_lr_scheduler_serialization(self):
+        sgd = torch.optim.SGD([
+            torch.tensor(torch.randn(100, 100, 2000), requires_grad=True)
+        ], lr=0.1, momentum=0.9)
+        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(sgd, 6.0, total_steps=10)
+
+        with BytesIOContext() as f:
+            torch.save(lr_scheduler.state_dict(), f)
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(0)
+            lr_scheduler_state = torch.load(f)
+
+        self.assertEqual(lr_scheduler_state['base_lrs'], lr_scheduler.base_lrs)
+        self.assertFalse(hasattr(lr_scheduler_state['anneal_func'], '__self__'))  # check method is not bound
+        self.assertTrue(size < 1024 * 1024)  # Must be less than 1MB
+
     def test_serialization_python_attr(self):
         def _test_save_load_attr(t):
             t.foo = 'foo'

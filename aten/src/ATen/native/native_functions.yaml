@@ -175,12 +175,24 @@
     CPU: _assert_async_msg_cpu
     CUDA: _assert_async_msg_cuda
 
+- func: _functional_assert_async.msg(Tensor self, str assert_msg, Tensor dep_token) -> Tensor
+  dispatch:
+    CPU: _functional_assert_async_msg_cpu
+
 - func: _assert_tensor_metadata(Tensor a, SymInt[]? size=None, SymInt[]? stride=None, ScalarType? dtype=None) -> ()
 
 - func: sym_constrain_range(Scalar size, int? min=None, int? max=None) -> ()
   dispatch:
     CPU: sym_constrain_range_cpu
     CUDA: sym_constrain_range_cuda
+
+- func: _functional_sym_constrain_range(Scalar size, int? min, int? max, Tensor dep_token) -> Tensor
+  dispatch:
+    CPU: _functional_sym_constrain_range_cpu
+
+- func: _make_dep_token(*, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    CPU: _make_dep_token_cpu
 
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method

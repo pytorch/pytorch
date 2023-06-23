@@ -354,6 +354,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         torch.nn.MaxPool2d,
         torch.nn.ReLU6,
         torch.nn.Hardtanh,
+        torch.flatten,
         torch.mean,
         torch.squeeze,
         "mean",
