@@ -235,6 +235,11 @@ def fake_tensor_prop(
     example_inputs: List[torch.Tensor],
     force_allow_non_fake_inputs=False,
 ):
+    """
+    If we can not detect fake mode from the context of inputs, create one.
+
+    The created fake mode will be returned.
+    """
     fake_mode = detect_fake_mode(example_inputs)
     if not fake_mode:
         fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
@@ -249,6 +254,8 @@ def fake_tensor_prop(
             FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
                 *example_inputs
             )
+
+    return fake_mode
 
 
 @DebugContext.wrap
@@ -309,8 +316,7 @@ def compile_fx_inner(
     # .view() call.
     view_to_reshape(gm)
 
-    fake_mode = detect_fake_mode(example_inputs)
-    fake_tensor_prop(gm, example_inputs)
+    fake_mode = fake_tensor_prop(gm, example_inputs)
 
     # pattern matcher passes might not preserve striding information
     # on node.meta["val"]. if in the future we rely on these being
