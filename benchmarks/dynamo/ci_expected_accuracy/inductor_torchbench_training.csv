@@ -25,7 +25,7 @@ lennard_jones,pass,8
 maml_omniglot,pass,8
 mnasnet1_0,pass,8
 mobilenet_v2,pass,8
-moco,pass,85
+moco,pass,19
 nvidia_deeprecommender,pass,8
 phlippe_densenet,pass,8
 phlippe_resnet,pass,8
@@ -48,5 +48,5 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,8
 tts_angular,pass,10
 vgg16,pass,8
-vision_maskrcnn,fail_accuracy,167
+vision_maskrcnn,fail_accuracy,51
 yolov3,pass,11

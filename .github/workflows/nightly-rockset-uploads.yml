@@ -4,9 +4,14 @@ on:
   schedule:
     # Choose a random time near midnight PST because it may be delayed if there are high loads
     - cron:  37 7 * * *
+  pull_request:
+    paths:
+      - 'tools/stats/upload_external_contrib_stats.py'
+      - 'tools/stats/upload_test_stat_aggregates.py'
+      - '.github/workflows/nightly-rockset-uploads.yml'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:

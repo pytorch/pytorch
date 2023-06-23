@@ -1,3 +1,4 @@
+
 import torch
 
 import torch._inductor.config as cfg
@@ -19,7 +20,7 @@ def semi_structured_sparse_compress_2by4(dense):
     meta_dtype = torch.int8
     if dense.dtype == torch.int8:
         meta_dtype = torch.int32
-    elif dense.dtype == torch.half:
+    elif dense.dtype in [torch.half, torch.bfloat16]:
         meta_dtype = torch.int16
     else:
         raise RuntimeError(f"Invalid datatype {dense.dtype} of dense matrix")
