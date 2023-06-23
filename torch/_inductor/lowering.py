@@ -4412,6 +4412,7 @@ try:
         return Pointwise.create(
             device=device, dtype=dtype, inner_fn=inner_fn, ranges=output_dims
         )
+
 except AttributeError:
     log.info("Inductor couldn't find fbgemm so these ops will not be registered")
 
