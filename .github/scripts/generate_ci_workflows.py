@@ -339,17 +339,6 @@ AARCH64_BINARY_BUILD_WORKFLOWS = [
             isolated_workflow=True,
         ),
     ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.LINUX_AARCH64,
-        package_type="conda",
-        build_configs=generate_binary_build_matrix.generate_conda_matrix(
-            OperatingSystem.LINUX_AARCH64
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-            isolated_workflow=True,
-        ),
-    ),
 ]
 
 def main() -> None:
