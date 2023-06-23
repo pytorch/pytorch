@@ -225,7 +225,7 @@ def _fill_tensor_shape_type(
             onnxscript_value.dtype = torch.int64
         elif isinstance(expected_value, torch.SymFloat):
             onnxscript_value.dtype = torch.float32
-        elif expected_value.dtype in _type_utils.COMPLEX_TO_FLOAT:
+        elif fx_type_utils.is_torch_complex_dtype(expected_value.dtype):
             # Like torch.view_as_real, we flatten complex tensors to real tensors with
             # additional last dimension of 2
             onnxscript_value.shape = (
@@ -236,7 +236,9 @@ def _fill_tensor_shape_type(
                 2,
             )
             # complex64 -> float32, complex128 -> float64, etc.
-            onnxscript_value.dtype = _type_utils.COMPLEX_TO_FLOAT[expected_value.dtype]
+            onnxscript_value.dtype = fx_type_utils.from_complex_to_float(
+                expected_value.dtype
+            )
             # Dispatcher needs to know the value is complex
             onnxscript_value.is_complex = True
         else:

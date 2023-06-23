@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Dict, List, Set
 
+import torch
 from torch.onnx._internal.fx import _pass, diagnostics
 
 
@@ -59,8 +60,11 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                     aten_name = self.onnxfunction_dispatcher.get_aten_name(
                         node, self.diagnostic_context
                     )
+                    input_args = [
+                        arg for arg in node.args if isinstance(arg, torch.Tensor)
+                    ]
                     self.onnxfunction_dispatcher.get_function_overloads(
-                        node, aten_name, self.diagnostic_context
+                        node, aten_name, input_args, self.diagnostic_context
                     )
                 except diagnostics.RuntimeErrorWithDiagnostic as e:
                     errors.append(e)
