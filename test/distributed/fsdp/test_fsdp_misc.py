@@ -482,20 +482,53 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             )
 
     @skip_if_lt_x_gpu(2)
-    def test_multi_device_not_supported(self):
-        """Tests that wrapping a multi-device module (i.e. with submodules on
-        both GPU and CPU) with FSDP raises an error."""
+    def test_cpu_gpu_module(self):
+        """Tests a CPU + GPU module raises warning, modules on
+           multiple GPUs error.
+        """
+        torch.cuda.set_device(self.rank)
 
-        class MultiDeviceModule(nn.Module):
+
+        class CPUGPUModule(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.a = nn.Linear(1, 1).cuda()
                 self.b = nn.Linear(1, 1)
 
+
+        with self.assertWarnsRegex(
+            UserWarning, "FSDP wrapping module with params"
+        ):
+            FSDP(CPUGPUModule(), device_id=torch.cuda.current_device())
+
+        # without device_id, we hit an error
+        with self.assertRaisesRegex(
+            RuntimeError, "please pass in device_id"
+        ):
+            FSDP(CPUGPUModule())
+
+    @skip_if_lt_x_gpu(2)
+    def test_multigpu_module(self):
+        """
+        Module on multiple GPUs wrapped in FSDP should raise an error.
+        """
+        torch.cuda.set_device(self.rank)
+
+
+        class MultiGPUModule(nn.Module):
+            def __init__(self, rank):
+                super().__init__()
+                self.rank = rank
+                self.a = nn.Linear(1, 1).cuda(self.rank)
+                self.b = nn.Linear(1, 1).cuda(
+                    (self.rank + 1) % dist.get_world_size()
+                )
+
+
         with self.assertRaisesRegex(
             RuntimeError, "FSDP only supports single device modules"
         ):
-            FSDP(MultiDeviceModule())
+            FSDP(MultiGPUModule(self.rank))
 
     @skip_if_lt_x_gpu(2)
     def test_no_params(self):
