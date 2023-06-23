@@ -232,6 +232,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
         return out
 
     aten_fns = get_overloads(aten_fn)
+    foreach_ops.update(aten_fns)
     lowerings.update({fn: wrapped for fn in aten_fns})
     return wrapped
 
@@ -435,11 +436,6 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     for t in args
                 )
 
-        def realize_inputs(*args):
-            for arg in args:
-                if isinstance(arg, TensorBox):
-                    arg.data.realize()
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         # Note: we'll fallback on type promotion until
@@ -451,6 +447,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
                 out[(args[0].get_device(), use_foreach)].append((i, args))
             return out
+
+        realize_outputs = False
+        for node in V.graph.current_node.users:
+            for user in node.users:
+                if not (user.op == "call_function" and user.target in foreach_ops):
+                    realize_outputs = True
 
         # replicate scalar input to match lenghth of list input
         if len(inputs) > 1 and not isinstance(inputs[1], (list, tuple)):
@@ -464,9 +466,6 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 output_ind,
                 args,
             ) in group:
-                if device.type == "cuda" and use_foreach:
-                    realize_inputs(*args)
-
                 if allow_alpha:
                     output = pw_fn(*args, alpha=alpha)
                 else:
@@ -474,7 +473,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach:
+                if device.type == "cuda" and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:
