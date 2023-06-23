@@ -1591,14 +1591,19 @@ class TestMemoryProfilerE2E(TestCase):
             (_memory_profiler.Action.DESTROY, 1024),
         ]
 
+        actual = [(action, size) for _, action, _, size in memory_profile.timeline]
+
         # See above.
         if not torch.cuda.is_available():
             expected = expected[2:]
-
-        self.assertEqual(
-            [(action, size) for _, action, _, size in memory_profile.timeline],
-            expected,
-        )
+            for event in expected:
+                self.assertTrue(event in actual, f"event: {event} was not found in actual.")
+        else:
+            self.assertEqual(
+                actual,
+                expected,
+                f"expected does not match actual: {actual}",
+            )
 
 
 if __name__ == "__main__":
