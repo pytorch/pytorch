@@ -168,7 +168,7 @@ class TORCH_API Tensor : public NeuralNetData {
     return D->getKind() == NNDataKind::Tensor;
   }
 
-  NeuralNetData* clone() override {
+  NeuralNetData* clone() {
     return new Tensor(name_);
   }
 
