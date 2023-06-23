@@ -88,8 +88,8 @@ Applies rectified linear unit operation to the input data element-wise. The Relu
 $$Y = max(0,X)$$
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/relu_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/relu_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/relu_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/relu_op.cc
 
 <details>
 

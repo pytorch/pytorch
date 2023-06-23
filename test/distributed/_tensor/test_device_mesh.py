@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import os
-import sys
 
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
@@ -11,21 +10,29 @@ from torch.distributed.distributed_c10d import (
     get_global_rank,
     get_process_group_ranks,
     get_world_size,
+    init_process_group,
     is_initialized,
+    is_nccl_available,
     ProcessGroup,
 )
-from torch.testing._internal.common_distributed import TEST_SKIPS
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
-def _get_device_type_and_backend():
-    device_type = "cuda" if torch.cuda.is_available() else "cpu"
-    backend = "nccl" if device_type == "cuda" else "gloo"
-    return device_type, backend
+def _get_device_type(world_size):
+    if (
+        torch.cuda.is_available()
+        and torch.cuda.device_count() >= world_size
+        and is_nccl_available()
+    ):
+        device_type = "cuda"
+    else:
+        device_type = "cpu"
+    return device_type
 
 
 def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0):
@@ -40,20 +47,12 @@ class DeviceMeshTest(DTensorTestBase):
     def world_size(self):
         return 4
 
-    @with_comms
-    def test_eligible_default_pg_for_mesh(self):
-        mesh_tensor = torch.arange(self.world_size).reshape(2, -1)
-        mesh = DeviceMesh(self.device_type, mesh_tensor)
-
     def test_init_process_group(self):
-        device_type, backend = _get_device_type_and_backend()
-        # skip the test if not enough GPUs
-        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
         self.assertTrue(not is_initialized())
         _set_env_var(world_size=self.world_size, rank=self.rank)
-        mesh = DeviceMesh(device_type, mesh_tensor)
+        DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg()
 
@@ -89,10 +88,26 @@ class DeviceMeshTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
             mesh.get_dim_groups()
 
-        if self.rank == 1:
-            assert mesh.get_coordinate() is not None
-        else:
-            assert mesh.get_coordinate() is None
+    def test_fake_pg_device_mesh(self):
+        fake_store = FakeStore()
+        init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        mesh = DeviceMesh(device_type, torch.arange(self.world_size))
+
+        local_tensor = torch.randn(2, 8)
+        global_tensor = mesh.all_gather(local_tensor)
+        self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
+
+    @with_comms
+    def test_validate_device_mesh(self):
+        mesh = torch.arange(self.world_size).reshape(2, -1)
+        mesh_subpg_1 = mesh[0]
+        mesh_subpg_2 = mesh[1]
+        with self.assertRaisesRegex(RuntimeError, "different mesh"):
+            if self.rank in mesh_subpg_1:
+                mesh = DeviceMesh(self.device_type, mesh_subpg_1)
+            else:
+                mesh = DeviceMesh(self.device_type, mesh_subpg_2)
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
@@ -112,8 +127,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
         for dim, dim_group in enumerate(dim_to_subgroups):
             self.assertTrue(dim < mesh_tensor.ndim)
             dim_ranks = mesh_tensor.swapdims(-1, dim).reshape(-1, 2)
-            # print(dim_ranks)
-            # dim_ranks = expected_ranks_by_dim[dim]
 
             dim_group_size = get_world_size(dim_group)
             self.assertIsInstance(dim_group, ProcessGroup)
@@ -186,11 +199,15 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
         for shard_dim in range(tensor_to_split.ndim):
             shard_placement = Shard(shard_dim)
+
             tensor_to_scatter = tensor_to_split.clone()
-            tensor_splitted_list = tensor_to_split.tensor_split(
-                device_mesh.size(), dim=shard_dim
+            tensor_splitted_list = list(
+                torch.chunk(tensor_to_split, self.world_size, dim=shard_dim)
             )
-            padded_tensor_list, pad_idx = shard_placement._split_tensor(
+            for _ in range(self.world_size - len(tensor_splitted_list)):
+                tensor_splitted_list.append(torch.tensor([], device=self.device_type))
+
+            padded_tensor_list, pad_sizes = shard_placement._split_tensor(
                 tensor_to_scatter,
                 device_mesh.size(),
                 with_padding=True,
@@ -199,14 +216,23 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             scattered_tensor = torch.empty_like(padded_tensor_list[my_rank])
             device_mesh.scatter(scattered_tensor, padded_tensor_list, mesh_dim=0)
-            # unpad scattered_tensor
-            if pad_idx != 0 and my_rank >= pad_idx:
-                scattered_tensor = shard_placement._unpad_tensor(scattered_tensor)
 
-            self.assertEqual(
-                scattered_tensor.size(), tensor_splitted_list[my_rank].size()
-            )
-            self.assertEqual(scattered_tensor, tensor_splitted_list[my_rank])
+            if pad_sizes[my_rank] != 0:
+                scattered_tensor = shard_placement._unpad_tensor(
+                    scattered_tensor, pad_sizes[my_rank]
+                )
+
+            if scattered_tensor.numel() == 0:
+                # We need to check numel() instead of size if a tensor is ([]) after unpadding,
+                # since the size could be ([0, 8]) after unpadding.
+                self.assertEqual(
+                    scattered_tensor.numel(), tensor_splitted_list[my_rank].numel()
+                )
+            else:
+                self.assertEqual(
+                    scattered_tensor.size(), tensor_splitted_list[my_rank].size()
+                )
+                self.assertEqual(scattered_tensor, tensor_splitted_list[my_rank])
 
     @with_comms
     def test_all_gather_1d(self):
@@ -232,7 +258,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
         for shard_dim in range(tensor_to_split.ndim):
             shard_placement = Shard(shard_dim)
-            tensor_padded_list, pad_idx = shard_placement._split_tensor(
+            tensor_padded_list, pad_sizes = shard_placement._split_tensor(
                 tensor_to_split,
                 device_mesh.size(),
                 with_padding=True,
@@ -242,13 +268,19 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             big_tensor = device_mesh.all_gather(
                 local_tensor, mesh_dim=0, gather_dim=shard_dim
             )
-            if pad_idx != 0:
-                big_tensor = shard_placement._unpad_concat_tensor(
-                    big_tensor, pad_idx, device_mesh.size()
-                )
+            big_tensor_chunks = list(
+                torch.chunk(big_tensor, device_mesh.size(), dim=shard_dim)
+            )
+            unpadded_list = [
+                shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
+                if pad_sizes[i] > 0
+                else big_tensor_chunks[i]
+                for i, big_tensor in enumerate(big_tensor_chunks)
+            ]
+            all_gathered_tensor = torch.cat(unpadded_list, dim=shard_dim)
 
-            self.assertEqual(big_tensor.size(), tensor_to_split.size())
-            self.assertEqual(big_tensor, tensor_to_split)
+            self.assertEqual(all_gathered_tensor.size(), tensor_to_split.size())
+            self.assertEqual(all_gathered_tensor, tensor_to_split)
 
     @with_comms
     def test_reduce_scatter_1d(self):
@@ -278,14 +310,22 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         )
 
         for shard_dim in range(tensor_to_split.ndim):
-            tensor_splitted_list = tensor_to_split.tensor_split(
-                device_mesh.size(), dim=shard_dim
+            shard_placement = Shard(shard_dim)
+            tensor_to_scatter = tensor_to_split.clone()
+
+            tensor_splitted_list = list(
+                torch.chunk(tensor_to_split, self.world_size, dim=shard_dim)
+            )
+            for _ in range(self.world_size - len(tensor_splitted_list)):
+                tensor_splitted_list.append(torch.tensor([], device=self.device_type))
+
+            padded_tensor_list, pad_sizes = shard_placement._split_tensor(
+                tensor_to_scatter,
+                device_mesh.size(),
+                with_padding=True,
+                contiguous=True,
             )
 
-            shard_placement = Shard(shard_dim)
-            padded_tensor_list, pad_idx = shard_placement._split_tensor(
-                tensor_to_split, device_mesh.size(), with_padding=True, contiguous=True
-            )
             tensor_to_reduce = torch.cat(padded_tensor_list, shard_dim)
 
             res_num = ((0 + self.world_size - 1) * self.world_size) / 2
@@ -294,16 +334,26 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 tensor_to_reduce, mesh_dim=0, scatter_dim=shard_dim
             )
 
-            if pad_idx <= device_mesh.get_coordinate()[0]:
-                scattered_tensor = shard_placement._unpad_tensor(scattered_tensor)
+            # unpad scattered_tensor
+            if pad_sizes[my_rank] > 0:
+                scattered_tensor = shard_placement._unpad_tensor(
+                    scattered_tensor, pad_sizes[my_rank]
+                )
 
-            self.assertEqual(
-                scattered_tensor.size(), tensor_splitted_list[my_rank].size()
-            )
-            self.assertEqual(
-                scattered_tensor,
-                torch.ones_like(tensor_splitted_list[my_rank]) * res_num,
-            )
+            if scattered_tensor.numel() == 0:
+                # We need to check numel() instead of size if a tensor is ([]) after unpadding,
+                # since the size could be ([0, 8]) after unpadding.
+                self.assertEqual(
+                    scattered_tensor.numel(), tensor_splitted_list[my_rank].numel()
+                )
+            else:
+                self.assertEqual(
+                    scattered_tensor.size(), tensor_splitted_list[my_rank].size()
+                )
+                self.assertEqual(
+                    scattered_tensor,
+                    torch.ones_like(tensor_splitted_list[my_rank]) * res_num,
+                )
 
     @with_comms
     def test_all_gather_nd(self):

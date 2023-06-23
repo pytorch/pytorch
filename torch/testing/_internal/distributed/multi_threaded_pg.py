@@ -1,7 +1,7 @@
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from functools import partial, reduce
 
 import torch
@@ -12,12 +12,14 @@ from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceOptions,
     AllToAllOptions,
+    BarrierOptions,
     BroadcastOptions,
     ReduceScatterOptions,
     ScatterOptions,
     Store,
     ReduceOp,
 )
+from torch.distributed.distributed_c10d import _CollOp, P2POp
 from torch.futures import Future
 from torch.utils._pytree import tree_flatten
 
@@ -82,12 +84,14 @@ class AllReduce:
 
     @torch.no_grad()
     def work(self, data):
-        tensors = []
-        for src_rank in range(0, len(data)):
-            tensors.append(data[src_rank][0])
-        res = _reduce_ops[self.op](tensors)
-        for src_rank in range(len(data)):
-            data[src_rank][0].copy_(res)
+        for i in range(len(data[0])):
+            tensors = []
+            for src_rank in range(0, len(data)):
+                tensors.append(data[src_rank][i])
+            res = _reduce_ops[self.op](tensors)
+            with torch.no_grad():
+                for src_rank in range(len(data)):
+                    data[src_rank][i].copy_(res)
 
 
 class AllGather:
@@ -102,6 +106,7 @@ class AllGather:
             for dest in data:
                 dest_tensor = dest[0][0][src_rank]
                 dest_tensor.copy_(src_tensor)
+
 
 class Scatter:
     def __init__(self, src):
@@ -289,6 +294,15 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
+    def allreduce_coalesced(self, tensor_list, opts=AllreduceOptions()):
+        coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
+        res = coll.join(self._rank, tensor_list)
+        ProcessLocalGroup._end_coll(coll, self)
+        return res
+
+    def barrier(self, opts=BarrierOptions()):
+        return self.allreduce(tensor_list=[torch.ones(1)])
+
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
         coll = ProcessLocalGroup._start_coll(AllGather(), self)
         res = coll.join(self._rank, (output_tensors, input_tensor))
@@ -322,6 +336,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         res = coll.join(self._rank, (output_tensor, scatter_list))
         ProcessLocalGroup._end_coll(coll, self)
         return res
+
+    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        tensor_list = list(torch.chunk(input_tensor, self._world_size))
+        return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
     def __init__(self, rank, world_size):
         super().__init__(rank, world_size)
@@ -367,13 +385,16 @@ class WorldData:
     group_count: int
     tags_to_pg: Dict[str, List[dist.ProcessGroup]]
     pg_to_tag: Dict[dist.ProcessGroup, str]
+    pg_coalesce_state: Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]
+    pg_default_device: Dict[dist.ProcessGroup, torch.device]
+
 
 class ThreadLocalWorld:
     _world = threading.local()
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {})
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {}, {}, {})
         return ThreadLocalWorld._world.world
 
     @property
@@ -415,6 +436,14 @@ class ThreadLocalWorld:
     @property
     def pg_to_tag(self):
         return self._get_world().pg_to_tag
+
+    @property
+    def pg_coalesce_state(self) -> Dict[dist.ProcessGroup, List[Union[_CollOp, P2POp]]]:
+        return self._get_world().pg_coalesce_state
+
+    @property
+    def pg_default_device(self) -> Dict[dist.ProcessGroup, torch.device]:
+        return self._get_world().pg_default_device
 
 
 _old_pg_world = None

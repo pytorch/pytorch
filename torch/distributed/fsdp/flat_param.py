@@ -8,6 +8,7 @@ from itertools import accumulate, chain
 from typing import (
     Any,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterator,
@@ -28,10 +29,13 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
+    _FSDPDeviceHandle,
+    _named_parameters_with_duplicates,
     _set_fsdp_flattened,
     HandleTrainingState,
 )
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
+from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
 from ._utils import _no_dispatch_record_stream, _same_storage_as_data_ptr
@@ -170,7 +174,17 @@ class FlatParamShardMetadata(NamedTuple):
     param_offsets: Tuple[Tuple[int, int], ...]
 
 
-class FlatParameter(nn.Parameter):
+class _FlatParameterMeta(_ParameterMeta):
+    # Make `isinstance(t, FlatParameter)` return True for custom tensor
+    # instances that have the _is_flat_param flag for BC
+    def __instancecheck__(self, instance):
+        # NB: do NOT test the super implementation
+        return isinstance(instance, torch.Tensor) and getattr(
+            instance, "_is_flat_param", False
+        )
+
+
+class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
     """
     This is the flat parameter used by :class:`FullyShardedDataParallel`. It is
     comprised of one or more original parameters, which are flattened and
@@ -196,6 +210,11 @@ class FlatParameter(nn.Parameter):
     (``_numels``). The former may have length longer than the other data
     structures, while the latter has the same length as the number of actual
     original parameters like the other per-parameter data structures.
+
+    NOTE: This is not a real class; instead, you will always get a Parameter
+    back out if you try to create one of these.  This is similar to the trick
+    we implemented for Parameter to get it to work with subclasses; this
+    is primarily so that FlatParameter supports combination with FakeTensor.
 
     Attributes:
         _unpadded_unsharded_size (torch.Size): Unsharded flat parameter's size
@@ -286,7 +305,46 @@ class FlatParameter(nn.Parameter):
             of zeros) as needed.
     """
 
+    _unpadded_unsharded_size: torch.Size
+    _padded_unsharded_size: torch.Size
+    _sharded_size: torch.Size
+    _num_params: int
+    _param_infos: Tuple[ParamInfo, ...]
+    _shapes: Tuple[torch.Size, ...]
+    _fqns: Tuple[str, ...]
+    _param_extensions: Tuple[Optional[Any], ...]
+    _numels_with_padding: Tuple[int, ...]
+    _numels: Tuple[int, ...]
+    _shard_param_infos: Tuple[_ShardParamInfo, ...]
+    _shared_param_infos: Tuple[SharedParamInfo, ...]
+    _modules: Set[nn.Module]
+    _shard_numel_padded: int
+    _local_shard: Tensor
+    _full_param_padded: Tensor
+    _full_prec_full_param_padded: Tensor
+    _post_backward_hook_state: Tuple[Any, Any]
+    _mp_shard: Tensor
+    _cpu_grad: Tensor
+    _saved_grad_shard: Tensor
+    _params: Optional[List[nn.Parameter]]
+    _shared_params: Optional[List[nn.Parameter]]
+    _tensors: Optional[List[Optional[Tensor]]]
+    _is_grad_none_mask: Optional[List[bool]]
+
+    _is_padding_mask: List[bool]
+
+    def __new__(cls, data=None, requires_grad=True):
+        assert cls is FlatParameter, "subclasses FlatParameter not supported"
+        r = nn.Parameter.__new__(nn.Parameter, data, requires_grad)  # type: ignore[call-arg]
+        r._is_flat_param = True  # type: ignore[attr-defined]
+        return r
+
+    # NB: This is not a regular method, because FlatParameter are not actually
+    # instances of this class (see __new__ above).  So you must indirectly
+    # call this directly through the classmethod.
+    @classmethod
     def _init_metadata(
+        cls,
         self,
         param_infos: List[ParamInfo],
         numels: List[int],
@@ -340,21 +398,17 @@ class FlatParameter(nn.Parameter):
             assert shared_params is not None and len(shared_params) == len(
                 shared_param_infos
             )
-            self._params: Optional[List[nn.Parameter]] = []
+            self._params = []
             for param, is_padding in zip(params, is_padding_mask):
                 if not is_padding:
                     self._params.append(param)
-            self._shared_params: Optional[List[nn.Parameter]] = shared_params
+            self._shared_params = shared_params
             # Mark the original parameters to avoid flattening them into
             # another `FlatParameter` during recursive construction
             for param in chain(self._params, self._shared_params):
                 _set_fsdp_flattened(param)
-            self._is_grad_none_mask: Optional[List[bool]] = [
-                False for _ in range(self._num_params)
-            ]
-            self._tensors: Optional[List[Optional[Tensor]]] = [
-                None for _ in range(self._num_params)
-            ]
+            self._is_grad_none_mask = [False for _ in range(self._num_params)]
+            self._tensors = [None for _ in range(self._num_params)]
         else:
             self._params = None
             self._shared_params = None
@@ -433,6 +487,7 @@ class FlatParamHandle:
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
         self.device = device
+        self._device_handle = _FSDPDeviceHandle.from_device(self.device)
         self.process_group = process_group
         self.rank = process_group.rank()
         self.world_size = process_group.size()
@@ -524,8 +579,8 @@ class FlatParamHandle:
         is_padding_mask: List[bool] = []
         total_numel = total_numel_without_padding = 0
         for submodule_name, submodule in module.named_modules(remove_duplicate=False):
-            for param_name, param in submodule.named_parameters(
-                recurse=False, remove_duplicate=False
+            for param_name, param in _named_parameters_with_duplicates(
+                submodule, recurse=False
             ):
                 if param not in params_set:
                     continue
@@ -555,7 +610,8 @@ class FlatParamHandle:
                             is_padding_mask.append(True)
                             numels.append(numel_to_pad)
                             total_numel += numel_to_pad
-                    param, extension = _ext_pre_flatten_transform(param)
+                    transform_t, extension = _ext_pre_flatten_transform(param)
+                    param = cast(nn.Parameter, transform_t)
                     param_extensions.append(extension)
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
                     params_to_flatten.append(param)
@@ -612,7 +668,8 @@ class FlatParamHandle:
             aligned_numel=0,
             requires_grad=flat_param_requires_grad,
         )
-        self.flat_param._init_metadata(
+        FlatParameter._init_metadata(
+            self.flat_param,
             param_infos,
             numels,
             shapes,
@@ -636,7 +693,7 @@ class FlatParamHandle:
         device: Optional[torch.device] = None
         # For `use_orig_params=True`, permit non-uniform `requires_grad`
         for tensor in tensors:
-            if type(tensor) is FlatParameter:
+            if isinstance(tensor, FlatParameter):
                 raise ValueError("Cannot flatten a `FlatParameter`")
             if dtype is None and not tensor.is_floating_point():
                 raise ValueError("Cannot flatten integer dtype tensors")
@@ -1230,11 +1287,23 @@ class FlatParamHandle:
             padded_unsharded_flat_param.numel() == expected_numel,
             f"Expects {expected_numel} numel but got {padded_unsharded_flat_param.numel()}",
         )
-        dist.all_gather_into_tensor(
-            padded_unsharded_flat_param,
-            sharded_flat_param,
-            self.process_group,
-        )
+
+        # HACK this should be handled by C10D
+        if sharded_flat_param.is_cpu:  # type: ignore[attr-defined]
+            tensor_list = list(
+                torch.chunk(
+                    padded_unsharded_flat_param, dist.get_world_size(self.process_group)
+                )
+            )
+            work = dist.all_gather(
+                tensor_list, sharded_flat_param, group=self.process_group
+            )
+        else:
+            dist.all_gather_into_tensor(
+                padded_unsharded_flat_param,
+                sharded_flat_param,
+                self.process_group,
+            )
         return padded_unsharded_flat_param
 
     def _use_unsharded_flat_param(
@@ -1289,7 +1358,7 @@ class FlatParamHandle:
         # default stream suffices since the default stream waits for the
         # unshard stream.
         _no_dispatch_record_stream(
-            self.flat_param._mp_shard, torch.cuda.current_stream()  # type: ignore[attr-defined]
+            self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
         )
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
@@ -1316,7 +1385,7 @@ class FlatParamHandle:
         num_grad_none[0] = flat_param.grad is None
         dist.all_reduce(num_grad_none, group=self.process_group)
         if num_grad_none[0] == self.world_size:
-            flat_param._saved_grad_shard = None  # type: ignore[attr-defined]
+            flat_param._saved_grad_shard = None  # type: ignore[assignment]
             self._use_unsharded_grad_views()
             return
 
@@ -1327,13 +1396,13 @@ class FlatParamHandle:
         if flat_param.grad is None:
             # In the case that only some ranks have `None` gradient, we use
             # zeros to approximate as a best effort attempt
-            if self._debug_level == dist.DebugLevel.DETAIL:
+            if self._debug_level == dist.DebugLevel.INFO:
                 warnings.warn(
                     f"[Rank {self.rank}] Only some but not all ranks have a "
                     "`None` `FlatParameter` gradient, so FSDP is using zeros to "
                     "approximate those ranks' sharded gradients being `None`"
                 )
-            flat_param._saved_grad_shard = None  # type: ignore[attr-defined]
+            flat_param._saved_grad_shard = None  # type: ignore[assignment]
             sharded_grad = torch.zeros(flat_param._sharded_size, device=self.device)  # type: ignore[attr-defined]
         else:
             self._check_sharded(flat_param.grad)
@@ -1560,7 +1629,9 @@ class FlatParamHandle:
         self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
-        _no_dispatch_record_stream(unsharded_flat_param, torch.cuda.current_stream())
+        _no_dispatch_record_stream(
+            unsharded_flat_param, self._device_handle.current_stream()
+        )
         _free_storage(unsharded_flat_param)
 
     def _use_sharded_flat_param(self) -> None:
@@ -1765,14 +1836,21 @@ class FlatParamHandle:
                 f"{self.flat_param._fqns[i]} is missing",
             )
             param = getattr(module, param_name)
-            if param.shape != view.shape or param.dtype != view.dtype:
-                # NOTE: This is a hack using `.data` to side step the
-                # check that parameter/gradient sizes and dtypes match. Here,
-                # `param` can have the sharded size, and `grad` can have the
-                # unsharded size. Orthogonally, `param` can have the full
-                # precision dtype from `reshard()`, and `grad` can have the
-                # parameter low precision dtype. Both of these mismatches
-                # happen when running in `no_sync()`.
+            if (
+                param.shape != view.shape
+                or param.dtype != view.dtype
+                or param.device != view.device
+            ):
+                # NOTE: This is a hack using `.data` to side step the check
+                # that parameter/gradient sizes/dtypes/devices match. From
+                # calling `reshard()`, `param` has the sharded size, has the
+                # full precision dtype, and if CPU offloading is enabled, is on
+                # CPU. Thus, one or more of the following cases can hold when
+                # in `no_sync()`, where `view` is the original parameter's
+                # gradient:
+                # 1. `view` can have the unsharded size.
+                # 2. `view` can have the parameter low precision dtype.
+                # 3. `view` can be on GPU.
                 if param.grad is None:
                     param.grad = torch.empty_like(param)
                 param.grad.data = view
@@ -1795,6 +1873,7 @@ class FlatParamHandle:
             if (
                 param.shape != prim_param.grad.shape
                 or param.dtype != prim_param.grad.dtype
+                or param.device != prim_param.grad.device
             ):
                 # NOTE: This is the same hack to use `.data` to side step the
                 # size check.
@@ -2040,6 +2119,12 @@ class FlatParamHandle:
                 # For `NO_SHARD` + CPU offloading, `_cpu_grad` is always in
                 # memory and owns the gradient storage, so it will never
                 # require gradient writeback.
+                if not self.uses_sharded_strategy and self._offload_params:
+                    # Explicitly continue to handle the case of `no_sync()`,
+                    # where `param.grad` is a view into the GPU gradient
+                    # referenced by `flat_param.grad`, while `flat_param_grad`
+                    # is `flat_param._cpu_grad`, which is on CPU
+                    continue
                 needs_grad_writeback = (
                     flat_param_grad is None
                     or not _same_storage_as_data_ptr(
@@ -2104,7 +2189,7 @@ class FlatParamHandle:
             len(expected_shape) == 1,
             f"Expects a 1D expected shape but got {expected_shape}",
         )
-        if self._debug_level == dist.DebugLevel.DETAIL:
+        if self._debug_level == dist.DebugLevel.INFO:
             rank = self.rank if hasattr(self, "rank") else dist.get_rank()
             src_shape = src_tensor.shape if src_tensor is not None else None
             src_device = src_tensor.device if src_tensor is not None else None
@@ -2238,6 +2323,7 @@ class FlatParamHandle:
         # - CPU offloading: `_cpu_grad`
         # - No CPU offloading + sharded strategies: `_saved_grad_shard`
         # - No CPU offloading + `NO_SHARD`: `grad`
+        grad: Optional[Tensor]
         if hasattr(flat_param, "_cpu_grad"):
             grad = flat_param._cpu_grad  # type: ignore[attr-defined]
         elif hasattr(flat_param, "_saved_grad_shard"):

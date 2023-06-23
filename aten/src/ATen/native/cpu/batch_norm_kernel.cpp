@@ -81,7 +81,7 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
 
   Tensor alpha = at::empty({n_channel}, input.options());
   Tensor beta = at::empty({n_channel}, input.options());
-  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* alpha_data = alpha.mutable_data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
   batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, scalar_t>(
@@ -132,7 +132,7 @@ void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
 
   Tensor alpha = at::empty({n_channel}, input.options());
   Tensor beta = at::empty({n_channel}, input.options());
-  scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
+  scalar_t* alpha_data = alpha.mutable_data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
   batch_norm_cpu_collect_linear_and_constant_terms<scalar_t, scalar_t>(
@@ -311,7 +311,7 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
   const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  scalar_t* grad_input_data = grad_input.defined() ? grad_input.data_ptr<scalar_t>() : nullptr;
+  scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr;
   const bool grad_input_null = grad_input_data == nullptr;
@@ -429,7 +429,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  scalar_t* grad_input_data = grad_input.defined() ? grad_input.data_ptr<scalar_t>() : nullptr;
+  scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr;
 
@@ -608,7 +608,7 @@ void batch_norm_cpu_contiguous_impl<BFloat16>(Tensor& output, const Tensor& inpu
   // use float as acc type
   Tensor alpha = at::empty({n_channel}, input.options().dtype(kFloat));
   Tensor beta = at::empty({n_channel}, input.options().dtype(kFloat));
-  float* alpha_data = alpha.data_ptr<float>();
+  float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
   const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
@@ -671,7 +671,7 @@ void batch_norm_cpu_channels_last_impl<BFloat16>(Tensor& output, const Tensor& i
 
   Tensor alpha = at::empty({n_channel}, input.options().dtype(kFloat));
   Tensor beta = at::empty({n_channel}, input.options().dtype(kFloat));
-  float* alpha_data = alpha.data_ptr<float>();
+  float* alpha_data = alpha.mutable_data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
   const bool mixed_type = is_mixed_type(input, weight, bias, save_mean, save_invstd, running_mean, running_var);
@@ -901,7 +901,7 @@ void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& gra
   const BFloat16* grad_output_data = grad_output.data_ptr<BFloat16>();
   const BFloat16* input_data = input.data_ptr<BFloat16>();
 
-  BFloat16* grad_input_data = grad_input.defined() ? grad_input.data_ptr<BFloat16>() : nullptr;
+  BFloat16* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<BFloat16>() : nullptr;
   param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
   param_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<param_t>() : nullptr;
   const bool grad_input_null = grad_input_data == nullptr;
@@ -1024,7 +1024,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
   const BFloat16* grad_output_data = grad_output.data_ptr<BFloat16>();
   const BFloat16* input_data = input.data_ptr<BFloat16>();
 
-  BFloat16* grad_input_data = grad_input.defined() ? grad_input.data_ptr<BFloat16>() : nullptr;
+  BFloat16* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<BFloat16>() : nullptr;
   param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
   param_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<param_t>() : nullptr;
 

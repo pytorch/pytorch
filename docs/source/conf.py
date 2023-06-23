@@ -361,10 +361,10 @@ torch_version = str(torch.__version__)
 #
 # The short X.Y version.
 # TODO: change to [:2] at v1.0
-version = 'master (' + torch_version + ' )'
+version = 'main (' + torch_version + ' )'
 # The full version, including alpha/beta/rc tags.
 # TODO: verify this works as expected
-release = 'master'
+release = 'main'
 
 # Customized html_title here.
 # Default is " ".join(project, release, "documentation") if not set
@@ -456,7 +456,7 @@ html_theme_options = {
     'collapse_navigation': False,
     'display_version': True,
     'logo_only': True,
-    'analytics_id': 'UA-117752657-2',
+    'analytics_id': 'GTM-T8XT4PS',
 }
 
 html_logo = '_static/img/pytorch-logo-dark-unstable.png'

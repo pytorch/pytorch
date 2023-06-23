@@ -858,7 +858,7 @@ class TestJitTraceAutocast(JitTestCase):
         with torch.cpu.amp.autocast(enabled=True):
             self.assertEqual(fn_s(x), fn(x))
 
-        self.assertTrue(any(["is_autocast_cpu_enabled" in x.kind() for x in fn_s.graph.nodes()]))
+        self.assertTrue(any("is_autocast_cpu_enabled" in x.kind() for x in fn_s.graph.nodes()))
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_script_autocast_cuda(self):
@@ -877,7 +877,7 @@ class TestJitTraceAutocast(JitTestCase):
         with torch.cuda.amp.autocast(enabled=True):
             self.assertEqual(fn_s(x), fn(x))
 
-        self.assertTrue(any(["is_autocast_enabled" in x.kind() for x in fn_s.graph.nodes()]))
+        self.assertTrue(any("is_autocast_enabled" in x.kind() for x in fn_s.graph.nodes()))
 
 
     def test_scripted_aliasing(self):
