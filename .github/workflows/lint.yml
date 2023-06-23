@@ -236,6 +236,29 @@ jobs:
         python3 -m unittest discover -vs tools/test -p 'test_*.py'
         python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
 
+  test_run_test:
+    name: Test `run_test.py` is usable without boto3/rockset
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: linux.20_04.4x
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          fetch-depth: 1
+      - name: Setup Python 3.8
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+          architecture: x64
+      - name: Install torch
+        run: |
+          pip install torch
+      - name: Run run_test.py (nonretryable)
+        run: |
+          # Run test_cuda on CPU node, which is a no-op
+          python3 test/run_test.py --include test_cuda --verbose
+
   test_collect_env:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Test collect_env

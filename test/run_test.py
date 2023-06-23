@@ -13,7 +13,7 @@ import sys
 import tempfile
 from datetime import datetime
 from distutils.version import LooseVersion
-from typing import Any, cast, Dict, List, Optional
+from typing import Any, cast, Dict, List, NamedTuple, Optional
 
 import pkg_resources
 
@@ -52,6 +52,13 @@ try:
 
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError as e:
+
+    class ShardedTest(NamedTuple):
+        name: str
+        shard = 0
+        num_shards = 1
+
+    NUM_PROCS = 2
     HAVE_TEST_SELECTION_TOOLS = False
     print(
         f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
@@ -1432,13 +1439,16 @@ def get_selected_tests(options) -> List[ShardedTest]:
     else:
         print("Found test time stats from artifacts")
 
-    # Do sharding
-    test_file_times_config = test_file_times.get(test_config, {})
-    shards = calculate_shards(
-        num_shards, selected_tests, test_file_times_config, must_serial=must_serial
-    )
-    _, tests_from_shard = shards[which_shard - 1]
-    selected_tests = tests_from_shard
+    if HAVE_TEST_SELECTION_TOOLS:
+        # Do sharding
+        test_file_times_config = test_file_times.get(test_config, {})
+        shards = calculate_shards(
+            num_shards, selected_tests, test_file_times_config, must_serial=must_serial
+        )
+        _, tests_from_shard = shards[which_shard - 1]
+        selected_tests = tests_from_shard
+    else:
+        selected_tests = [ShardedTest(name=x) for x in selected_tests]
 
     return selected_tests
 
