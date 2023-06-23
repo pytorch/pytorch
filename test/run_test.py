@@ -51,10 +51,10 @@ try:
     )
 
     HAVE_TEST_SELECTION_TOOLS = True
-except ImportError:
+except ImportError as e:
     HAVE_TEST_SELECTION_TOOLS = False
     print(
-        "Unable to import test_selections from tools/testing. Running without test selection stats..."
+        f"Unable to import test_selections from tools/testing. Running without test selection stats.... Reason: {e}"
     )
 
 
@@ -171,6 +171,7 @@ TESTS = discover_tests(
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
+        "_nvfuser",  # executed by test_jit_cuda_fuser.py, test_nvfuser_dynamo.py, and test_nvfuser_frontend.py
     ],
     blocklisted_tests=[
         "test_bundled_images",
