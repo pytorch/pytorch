@@ -3169,12 +3169,17 @@ def max_pool2d_with_indices_backward(
             x_stride = x.get_stride()
         except AttributeError:
             x_stride = None
-    if (
-        (x_stride is not None and x_stride[1] == 1)
-        or (gO_stride is not None and gO_stride[1] == 1)
-        or any(d != 1 for d in dilation)
-    ):
-        # don't codegen channels-last, it's very slow
+
+    is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
+        gO_stride is not None and gO_stride[1] == 1
+    )
+    autotune = (
+        config.coordinate_descent_tuning
+        or config.max_autotune
+        or config.max_autotune_pointwise
+    )
+    if any(d != 1 for d in dilation) or (is_channels_last and not autotune):
+        # don't codegen channels-last when autotune is not enabled, it's very slow
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
