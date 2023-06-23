@@ -1316,6 +1316,7 @@ class TorchPatcher:
         #     TorchDynamo does not trigger again on the frames created by
         #     utils.checkpoint innards.
         torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
+        torch.distributed.fsdp._runtime_utils._check_flat_params_on_expected_device._dynamo_marked_constant = True
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

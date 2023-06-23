@@ -619,6 +619,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
                 if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")
+            print("INVOKING ", fn_, self)
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(

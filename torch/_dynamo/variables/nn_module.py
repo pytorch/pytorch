@@ -802,3 +802,9 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         else:
             # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
             self.source = NotNNModuleSource(source)
+
+    def as_python_constant(self):
+        return self.value
+
+    # def as_proxy(self):
+    #     return self.value
