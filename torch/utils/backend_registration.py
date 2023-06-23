@@ -3,8 +3,7 @@ import torch
 from torch._C import _rename_privateuse1_backend, _get_privateuse1_backend_name
 from typing import List, Optional, Union
 
-__all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend",
-           "get_custom_mod_func"]
+__all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
 
 # TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
 # renamed-backend name for `privateuse1`, but the func will cause an
@@ -302,7 +301,7 @@ def generate_methods_for_privateuse1_backend(for_tensor: bool = True, for_module
     if for_storage:
         _generate_storage_methods_for_privateuse1_backend(custom_backend_name, unsupported_dtype)
 
-def get_custom_mod_func(func_name: str):
+def _get_custom_mod_func(func_name: str):
     r"""
     Return the func named `func_name` defined in custom device module. If not defined,
     return `None`. And the func is registered with `torch.utils.rename_privateuse1_backend('foo')`
@@ -320,10 +319,10 @@ def get_custom_mod_func(func_name: str):
                 ....
         torch.utils.rename_privateuse1_backend("foo")
         torch._register_device_module("foo", DummyfooModule)
-        foo_is_available_func = torch.utils.get_custom_mod_func("is_available")
+        foo_is_available_func = torch.utils.backend_registration._get_custom_mod_func("is_available")
         if foo_is_available_func:
             foo_is_available = foo_is_available_func()
-        func_ = torch.utils.get_custom_mod_func("func_name")
+        func_ = torch.utils.backend_registration._get_custom_mod_func("func_name")
         if func_:
             result = func_(*args, **kwargs)
     Attention: This func is only used for custom device.
