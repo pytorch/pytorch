@@ -180,7 +180,6 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   const uint32_t numThreads = iter.numel();
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
-      NSError* error = nil;
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       const IntArrayRef& iterShape = iter.shape();
@@ -202,8 +201,6 @@ void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
           MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
                                                              options:0] autorelease];
-      TORCH_CHECK(
-          kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];

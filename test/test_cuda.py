@@ -19,11 +19,12 @@ import warnings
 import subprocess
 import random
 from random import randint
+import json
 
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
-from torch.cuda._memory_viz import profile_plot
+from torch.cuda._memory_viz import profile_plot, _profile_to_snapshot
 from torch.cuda._memory_viz import trace_plot
 from torch.cuda._memory_viz import segment_plot
 
@@ -34,18 +35,13 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
     get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-# We cannot import TEST_CUDA and TEST_MULTIGPU from torch.testing._internal.common_cuda here,
-# because if we do that, the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed
-# multiple times as well during the execution of this test suite, and it will
-# cause CUDA OOM error on Windows.
-TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
@@ -63,13 +59,9 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (torch.cuda.get_allocator_backend() == "cudaMallocAsync")
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
-TEST_CUDNN = TEST_CUDA
 TEST_BF16 = False
 TEST_PYNVML = not torch.cuda._HAS_PYNVML
 if TEST_CUDA:
-    torch.ones(1).cuda()  # initialize cuda context
-    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
-                                torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
     TEST_BF16 = torch.cuda.is_bf16_supported()
@@ -5080,9 +5072,10 @@ class TestCudaComm(TestCase):
             x = torch.rand(128, 128, device='cuda')
             x * x + x * x
         plot = profile_plot(prof)
+        plot = json.dumps(_profile_to_snapshot(prof))
         self.assertTrue("test_cuda.py" in plot)
         self.assertTrue("test_memory_profiler_viz" in plot)
-        self.assertTrue('"elements_category": [' in plot)
+        self.assertTrue('category' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
@@ -5100,16 +5093,15 @@ class TestCudaComm(TestCase):
                 cpp = stacks == "all"
                 record_context = context is not None
                 ss = torch.cuda.memory._snapshot()
-                tplot = trace_plot(ss)
-                self.assertTrue(record_context == ("test_memory_plots" in tplot))
-                self.assertTrue(cpp == ("::rand" in tplot))
 
-                self.assertTrue(str(128 * 128 * 4) in tplot)
+                tplot = trace_plot(ss)
                 splot = segment_plot(ss)
-                self.assertTrue(record_context == ("test_memory_plots" in splot))
-                self.assertTrue(str(128 * 128 * 4) in splot)
-                self.assertTrue(cpp == ("::rand" in splot))
-                torch.cuda.memory._record_memory_history(None)
+                text = json.dumps(ss)
+
+                self.assertTrue(record_context == ("test_memory_plots" in text))
+                self.assertTrue(cpp == ("::rand" in text))
+                self.assertTrue(str(128 * 128 * 4) in text)
+
             finally:
                 torch.cuda.memory._record_memory_history(None)
 
