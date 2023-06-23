@@ -20,16 +20,16 @@ OpsetVersion = int
 
 @dataclasses.dataclass(frozen=True, eq=True)
 class SymbolicFunction:
-    """A wrapper of symbolic function from torchlib.
+    """A wrapper of onnx-script function.
 
+    op_name: The qualified name of the function. In the form of 'domain::op'.
     onnx_function: The symbolic function from torchlib.
-    is_complex: Whether the function is a complex function.
     is_custom: Whether the function is a custom function.
 
     """
 
     onnx_function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]
-    is_complex: bool = False
+    op_name: str
     is_custom: bool = False
 
 
@@ -37,11 +37,23 @@ class OnnxRegistry:
     """Registry for ONNX functions.
 
     The registry maintains a mapping from qualified names to symbolic functions under a
-    fixed opset version. It is used to register custom symbolic functions and to dispatch
-    calls to the appropriate function.
+    fixed opset version. It supports registering custom onnx-script functions and for
+    dispatcher to dispatch calls to the appropriate function.
 
     Attributes:
-        _registry: A dictionary mapping qualified names to _SymbolicFunction objects.
+        _registry: A dictionary mapping qualified names to a set of SymbolicFunctions.
+
+    Public Methods:
+        register_custom_op: Registers a custom operator.
+        get_functions: Returns the set of SymbolicFunctions for the given op.
+        is_registered_op: Returns whether the given op is registered.
+        all_registered_op: Returns the set of all registered op names.
+
+    Private Methods:
+        _register: Registers a SymbolicFunction to an operator.
+        _initiate_registry_from_torchlib: Populates the registry with ATen functions from torchlib.
+        _get_custom_functions: Returns the set of custom functions for the given name.
+
     """
 
     def __init__(self, opset_version: int = 18) -> None:
@@ -66,56 +78,73 @@ class OnnxRegistry:
         """
         for aten_name, aten_overloads_func in torchlib_registry.items():
             for overload_func in aten_overloads_func.overloads:
-                self.register(aten_name, overload_func)
-            for complex_func in aten_overloads_func.complex:
-                self.register(aten_name, complex_func)
+                symbolic_function = SymbolicFunction(
+                    onnx_function=overload_func, op_name=aten_name, is_custom=False
+                )
+                self._register(symbolic_function)
 
     @_beartype.beartype
-    def register(self, name: str, symbolic_function: SymbolicFunction) -> None:
-        """Registers overloaded functions to an ATen operator (overload).
+    def _register(self, symbolic_function: SymbolicFunction) -> None:
+        """Registers a SymbolicFunction to an operator.
 
         Args:
-            name: The qualified name of the function to register. In the form of 'domain::op'.
+            symbolic_function: The SymbolicFunction to register.
+        """
+        self._registry[symbolic_function.op_name].add(symbolic_function)
+
+    @_beartype.beartype
+    def register_custom_op(
+        self,
+        name: str,
+        func: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"],
+    ) -> None:
+        """Registers a custom operator.
+
+        Args:
+            name: The qualified name of the operator to register. In the form of 'domain::op'.
                 E.g. 'aten::add' or 'aten::pow.int'.
-            opset: The opset version of the function to register.
-            func: The symbolic function to register.
-            custom: Whether the function is a custom function that overrides existing ones.
+            func: The onnx-sctip function to register.
 
         Raises:
-            ValueError: If the separator '::' is not in the name.
+            ValueError: If the name is not in the form of 'domain::op'.
         """
         if "::" not in name:
             raise ValueError(
                 f"The name must be in the form of 'domain::op', not '{name}'"
             )
-        self._registry[name].add(symbolic_function)
+        symbolic_function = SymbolicFunction(
+            onnx_function=func, op_name=name, is_custom=True
+        )
+        self._register(symbolic_function)
 
     @_beartype.beartype
-    def get_functions(
-        self, name: str, complex: bool = False
-    ) -> Optional[Set[SymbolicFunction]]:
-        """Returns the _SymbolicFunctionGroup object for the given name.
+    def get_functions(self, name: str) -> Optional[Set[SymbolicFunction]]:
+        """Returns the set of SymbolicFunctions for the given op.
 
         Args:
-            name: The qualified name of the functions to retrieve.
-            complex: Whether to return complex functions.
+            name: The qualified op name of the functions to retrieve.
 
         Returns:
-            The SymbolicFunction object corresponding to the given name, or None if the name is not in the registry.
+            Thethe set of SymbolicFunctions corresponding to the given name, or None if
+            the name is not in the registry.
         """
         functions = self._registry.get(name)
         if functions is None:
             return None
-        if complex:
-            return self._get_complex_functions(functions)
         return functions
 
-    # Do we need get default functions?
     @_beartype.beartype
-    def get_custom_functions(
-        self, name: str, complex: bool = False
-    ) -> Optional[Set[SymbolicFunction]]:
-        functions = self.get_functions(name, complex=complex)
+    def _get_custom_functions(self, name: str) -> Optional[Set[SymbolicFunction]]:
+        """Returns the set of custom functions for the given name.
+
+        Args:
+            name: The qualified op name of the functions to retrieve.
+
+        Returns:
+            The set of custom SymbolicFunctions corresponding to the given name, or None
+            if the name is not in the registry.
+        """
+        functions = self.get_functions(name)
         if functions is None:
             return None
 
@@ -125,20 +154,11 @@ class OnnxRegistry:
         return custom_functions
 
     @_beartype.beartype
-    def _get_complex_functions(
-        self, functions: Set[SymbolicFunction]
-    ) -> Optional[Set[SymbolicFunction]]:
-        complex_functions = {func for func in functions if func.is_complex}
-        if not complex_functions:
-            return None
-        return complex_functions
-
-    @_beartype.beartype
     def is_registered_op(self, name: str) -> bool:
         """Returns whether the given op is registered.
 
         Args:
-            name: The qualified name of the function to check.
+            name: The qualified op name of the function to check.
 
         Returns:
             True if the given op is registered, otherwise False.
@@ -147,6 +167,6 @@ class OnnxRegistry:
         return functions is not None
 
     @_beartype.beartype
-    def all_functions(self) -> Set[str]:
+    def all_registered_op(self) -> Set[str]:
         """Returns the set of all registered function names."""
         return set(self._registry)

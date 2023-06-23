@@ -9,8 +9,6 @@ from typing import (
     Callable,
     Dict,
     Optional,
-    Protocol,
-    runtime_checkable,
     Sequence,
     Set,
     Tuple,
@@ -32,17 +30,6 @@ from torch.onnx._internal.fx import (
 if TYPE_CHECKING:
     import onnx.defs  # type: ignore[import]
     import onnxscript  # type: ignore[import]
-
-
-# Enable both TorchScriptTensor and torch.Tensor to be tested
-# for dtype in OpSchemaWrapper.
-
-
-@runtime_checkable
-class _TensorLike(Protocol):
-    @property
-    def dtype(self) -> Optional[torch.dtype]:
-        ...
 
 
 class OnnxFunctionDispatcher:
@@ -88,7 +75,9 @@ class OnnxFunctionDispatcher:
     def dispatch(
         self,
         node: torch.fx.Node,
-        onnx_args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
+        onnx_args: Sequence[
+            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+        ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]:
@@ -128,7 +117,9 @@ class OnnxFunctionDispatcher:
         aten_name: str,
         all_functions: Set[registration.SymbolicFunction],
         custom_functions: Optional[Set[registration.SymbolicFunction]],
-        onnx_args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
+        onnx_args: Sequence[
+            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+        ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
@@ -173,11 +164,12 @@ class OnnxFunctionDispatcher:
         diagnostic_context.log(diagnostic)
         # Tie breaker: if there are multiple nearest matches, we will choose the one
         # that is custom first
-        return sorted(
+        symbolic_function_list: list[registration.SymbolicFunction] = sorted(
             overload_match_ranking,
             key=lambda k: (overload_match_ranking[k], k.is_custom),
             reverse=True,
         )
+        return symbolic_function_list[0].onnx_function
 
     @_beartype.beartype
     def get_aten_name(
@@ -252,7 +244,6 @@ class OnnxFunctionDispatcher:
         self,
         node: torch.fx.Node,
         aten_name: str,
-        onnx_args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Tuple[
         Set[registration.SymbolicFunction], Optional[Set[registration.SymbolicFunction]]
@@ -270,15 +261,10 @@ class OnnxFunctionDispatcher:
 
         function_group = None
         custom_function_group = None
-        complex_input = any(torch.is_complex(arg) for arg in onnx_args if isinstance(arg, _TensorLike))  # type: ignore[arg-type]
 
         if self.onnx_registry.is_registered_op(aten_name):
-            function_group = self.onnx_registry.get_functions(
-                aten_name, complex=complex_input
-            )
-            custom_function_group = self.onnx_registry.get_custom_functions(
-                aten_name, complex=complex_input
-            )
+            function_group = self.onnx_registry.get_functions(aten_name)
+            custom_function_group = self.onnx_registry._get_custom_functions(aten_name)
 
         # Fall back to overloadpacket name: eg: aten.add.Tensor -> aten::add
         elif hasattr(
@@ -288,11 +274,9 @@ class OnnxFunctionDispatcher:
         ):
             function_group = self.onnx_registry.get_functions(
                 node.target.overloadpacket._qualified_op_name,  # type: ignore[union-attr]
-                complex=complex_input,
             )
-            custom_function_group = self.onnx_registry.get_custom_functions(
+            custom_function_group = self.onnx_registry._get_custom_functions(
                 node.target.overloadpacket._qualified_op_name,  # type: ignore[union-attr]
-                complex=complex_input,
             )
 
         if function_group is not None:
@@ -418,7 +402,9 @@ class _OpSchemaWrapper:
     @_beartype.beartype
     def perfect_match_inputs(
         self,
-        args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
+        args: Sequence[
+            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+        ],
         kwargs: Dict[str, fx_type_utils.Argument],
     ) -> bool:
         """Check if the inputs perfectly match the OpSchema requirements.
@@ -460,7 +446,9 @@ class _OpSchemaWrapper:
     @_beartype.beartype
     def _record_matching_score(
         self,
-        args: Sequence[Optional[Union[_TensorLike, str, int, float, bool, list]]],
+        args: Sequence[
+            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+        ],
         kwargs: Dict[str, fx_type_utils.Argument],
     ):
         """Calculate the inputs matching score of the OpSchema requirements to find the nearest match.
@@ -499,16 +487,21 @@ class _OpSchemaWrapper:
 
 @_beartype.beartype
 def _find_onnx_data_type(
-    torch_input: Optional[Union[_TensorLike, str, int, float, bool, list, tuple]]
+    torch_input: Optional[
+        Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple]
+    ]
 ) -> Set[str]:
     """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
-    if isinstance(torch_input, _TensorLike) and torch_input.dtype is not None:
+    if (
+        isinstance(torch_input, fx_type_utils.TensorLike)
+        and torch_input.dtype is not None
+    ):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(torch_input.dtype)
     if isinstance(torch_input, (int, float, bool, str)):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(type(torch_input))
     if isinstance(torch_input, (list, tuple)) and torch_input:  # [Tensor, Tensor]
         set_dtype = _find_onnx_data_type(torch_input[0])
-        if any(isinstance(input, _TensorLike) for input in torch_input):
+        if any(isinstance(input, fx_type_utils.TensorLike) for input in torch_input):
             # NOTE: Any Tensor involved in a list would make it a seq(tensor(onnx_type))
             return {f"seq({dtype})" for dtype in set_dtype}
         else:
@@ -516,7 +509,10 @@ def _find_onnx_data_type(
             return set_dtype
     if (
         torch_input is None
-        or (isinstance(torch_input, _TensorLike) and torch_input.dtype is None)
+        or (
+            isinstance(torch_input, fx_type_utils.TensorLike)
+            and torch_input.dtype is None
+        )
         or (isinstance(torch_input, (list, tuple)) and not torch_input)
     ):
         # NOTE: None, No dtype, and empty list are edge cases, we allow it to be any type to relax the type check
