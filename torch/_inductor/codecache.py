@@ -714,7 +714,11 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so = f"{input_path[:-4]}.so"
+                output_so_dir = input_path[:-4]
+                if not os.path.exists(output_so_dir):
+                    os.makedirs(output_so_dir, exist_ok=False)
+                so_name = f"{config.dll_name}.so"
+                output_so = os.path.join(output_so_dir, so_name)
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
                         input=input_path,

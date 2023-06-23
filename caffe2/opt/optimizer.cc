@@ -7,7 +7,7 @@
 namespace caffe2 {
 namespace opt {
 
-static void workspaceOptimizations(nom::repr::NNModule* nn, Workspace* ws, int level) {
+void workspaceOptimizations(nom::repr::NNModule* nn, Workspace* ws, int level) {
   switch (level) {
     case 1:
       opt::fuseConvBN(nn, ws);
@@ -17,7 +17,7 @@ static void workspaceOptimizations(nom::repr::NNModule* nn, Workspace* ws, int l
   }
 }
 
-static void graphOptimzations(nom::repr::NNModule* nn, int level) {
+void graphOptimzations(nom::repr::NNModule* nn, int level) {
   switch (level) {
     case 1:
 #ifdef USE_NNPACK
