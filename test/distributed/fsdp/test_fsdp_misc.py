@@ -483,8 +483,8 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(2)
     def test_cpu_gpu_module(self):
-        """Tests a CPU + GPU module raises warning, modules on
-           multiple GPUs error.
+        """Tests a CPU + GPU module raises warning if device_id is passed
+        in, errors if device_id is not.
         """
         torch.cuda.set_device(self.rank)
 
