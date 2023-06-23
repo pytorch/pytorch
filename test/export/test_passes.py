@@ -373,7 +373,7 @@ class TestPasses(TestCase):
             "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
         ).run(gm.code)
 
-        dep_token_node = next(n for n in gm.graph.nodes if n.name == "dep_token_4")
+        dep_token_node = next(n for n in gm.graph.nodes if n.name == "dep_token3")
         constrain_node = next(
             n
             for n in gm.graph.nodes
