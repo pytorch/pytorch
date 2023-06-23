@@ -1084,6 +1084,33 @@ class Scheduler:
         ) - combined_names
         return any(check(self.name_to_fused_node[n]) for n in combined_predecessors)
 
+    def can_fusion_increase_peak_memory(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ):
+        """
+        This function prevents fusion for nodes that can increase memory
+        footprint. This problem is more common in horizontal fusion, where nodes
+        that are far apart in the original order get fused, lengthening the live
+        intervals of tensors. This is very evident in models with activation
+        checkpointing, where the recomputed nodes from different checkpointed
+        regions get fused and significantly increase the memory footprint.
+
+        The current attempt is a quick, possibly hacky, heuristic to prevent the
+        fusion of nodes that are far away in the original order.
+
+        A better but difficult to implement heursitic would be to use live
+        intervals of the buffers, find region of peak pressure in the original
+        program and prevent fusion that crosses that peak region. We might need
+        special care or good approximation in this implementation, as fusion of
+        node changes live intervals, and re-computing live intervals and peak
+        memory after each fusion can introduce large compilation overhead.
+        """
+        proximity_score = max(
+            abs(node1.min_order - node2.max_order),
+            abs(node2.min_order - node1.max_order),
+        )
+        return proximity_score > 64
+
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Determine if it is possible to combine node1 and node2 into a
@@ -1138,6 +1165,8 @@ class Scheduler:
         elif node1_is_foreach and node2_is_foreach:
             return False
         else:  # nodes don't depend on each other, but may have common reads
+            if self.can_fusion_increase_peak_memory(node1, node2):
+                return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
     def can_fuse_vertical(self, node1, node2):

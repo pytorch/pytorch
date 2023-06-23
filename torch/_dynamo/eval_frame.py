@@ -1317,6 +1317,10 @@ class TorchPatcher:
         #     utils.checkpoint innards.
         torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
 
+        torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
+        torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
+        torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
+
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
         def inner_fn(*args, **kwargs):

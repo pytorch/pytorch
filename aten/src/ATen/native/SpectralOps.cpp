@@ -502,7 +502,7 @@ Tensor& fft_rfftn_symint_out(const Tensor& self,
   return out;
 }
 
-static ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
+ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
     c10::string_view fname, const Tensor& self,
     const at::OptionalSymIntArrayRef& s,
     const at::OptionalIntArrayRef& dims,
