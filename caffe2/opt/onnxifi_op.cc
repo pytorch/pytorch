@@ -541,7 +541,7 @@ void OnnxifiOp<CPUContext>::setOutputShapeAndType(
   }
 }
 
-string mapOnnxStateToString(onnxEventState state) {
+static string mapOnnxStateToString(onnxEventState state) {
   switch (state) {
     case ONNXIFI_EVENT_STATE_NONSIGNALLED:
       return "ONNXIFI_EVENT_STATE_NONSIGNALLED";
@@ -550,7 +550,7 @@ string mapOnnxStateToString(onnxEventState state) {
   }
 }
 
-string mapOnnxStatusToString(onnxStatus status) {
+static string mapOnnxStatusToString(onnxStatus status) {
   switch (status) {
     case ONNXIFI_STATUS_SUCCESS:
       return "ONNXIFI_STATUS_SUCCESS";

@@ -1,11 +1,11 @@
-from dataclasses import dataclass
 import copy
+from dataclasses import dataclass, replace
 import math
 import operator
 import traceback
 from collections import OrderedDict
 from functools import partial
-from typing import Dict, List, NamedTuple, Tuple
+from typing import Dict, List, NamedTuple, Tuple, TYPE_CHECKING
 
 import sympy
 
@@ -13,11 +13,15 @@ import torch
 import torch.fx
 from torch.fx.experimental.symbolic_shapes import SymInt
 from torch._export.pass_base import ExportPassBase, ProxyValue, PassResult
-from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._functorch.aot_autograd import FQN
 
 
 __all__ = ["_AddRuntimeAssertionsForConstraintsPass", "InputDim", "RangeConstraint"]
+
+if TYPE_CHECKING:
+    # Avoid circular dependency
+    from torch._export.exported_program import ExportedProgram, ExportGraphSignature
 
 
 class InputDim(NamedTuple):
@@ -52,6 +56,41 @@ def _convert_range_to_int(range: RangeConstraint):
 
 
 class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
+    @classmethod
+    def update_exported_program_signature(
+        cls,
+        old_ep: "ExportedProgram",
+        new_ep: "ExportedProgram",
+    ) -> "ExportGraphSignature":
+        def _get_output_node_names(gm: torch.fx.GraphModule) -> List[FQN]:
+            output_node = next(n for n in gm.graph.nodes if n.op == "output")
+            return [str(arg) for arg in output_node.args[0]]
+
+        # Update output names since after adding run time assertions, the names of
+        # outputs could change.
+        # The assumption here is that `_AddRuntimeAssertionsForConstraintsPass`:
+        # - Won't change graph outputs order semantically so it's possible to create
+        #   map from old to new output names based on position.
+        # - Will keep input names unchanged so no need to update inputs related
+        #   fields (`user_inputs`, `inputs_to_parameters`, `inputs_to_buffers`, ...)
+        outputs = _get_output_node_names(old_ep.graph_module)
+        new_outputs = _get_output_node_names(new_ep.graph_module)
+        assert len(outputs) == len(new_outputs)
+        outputs_map = dict(zip(outputs, new_outputs))
+        gs = old_ep.graph_signature
+        # Need to update graph signature fields related to output since after adding
+        # runtime assertions, the output names could change.
+        new_user_outputs = [outputs_map[u] for u in gs.user_outputs]
+        new_buffers_to_mutate = {
+            outputs_map[u]: b for u, b in gs.buffers_to_mutate.items()
+        }
+
+        return replace(
+            copy.deepcopy(new_ep.graph_signature),
+            user_outputs=new_user_outputs,
+            buffers_to_mutate=new_buffers_to_mutate,
+        )
+
     def __init__(
         self,
         range_constraints: Dict[sympy.Symbol, RangeConstraint],
@@ -188,11 +227,6 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 assert_msg
             )
 
-    def _create_dummy_node_metadata(self):
-        return NodeMetadata({
-            "stack_trace": traceback.format_exc(-1)
-        })
-
     def _insert_assert_async_inplace(self, graph, operator, args, assert_msg):
         """
         Inserts assert_async call_function nodes in the graph. This function is
@@ -244,6 +278,7 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 for i, sym in enumerate(val.shape):
                     cbs, msgs = add_assertions(sym)
                     for cb, msg in zip(cbs, msgs):
+
                         def sym_size_cb(proxy, assert_msg, dim):
                             dim_proxy = super(_AddRuntimeAssertionsForConstraintsPass, self).call_operator(
                                 torch.ops.aten.sym_size.int,
@@ -252,9 +287,11 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                                 self._create_dummy_node_metadata(),
                             )
                             cb(proxy=dim_proxy, assert_msg=assert_msg)
+
                         call_backs.append(partial(sym_size_cb, dim=i))
                         messages.append(f".shape[{i}]" + msg)
             return call_backs, messages
+
         callbacks, messages = add_assertions(val)
         for cb, msg in zip(callbacks, messages):
             cb(proxy=ret, assert_msg=f"{ret.node}" + msg)
