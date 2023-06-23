@@ -43,6 +43,7 @@ struct ParamsEqual {
 template <typename T>
 struct ParamsWrapper {
   T pod;
+  static_assert(std::is_standard_layout_v<T>, "ParamsWrapper wraps non-POD data");
 
   ParamsWrapper() {
     memset(&(this->pod), 0, sizeof(T));
