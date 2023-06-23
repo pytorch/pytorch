@@ -3257,6 +3257,21 @@ exit(2)
         loss.backward()
         optimizer.step()
 
+    def test_matmul_device_mismatch(self):
+        cpu = torch.rand((10, 10))
+        cuda = cpu.cuda()
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            cpu @ cuda
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            cuda @ cpu
+
+        for s, m1, m2 in product((cpu, cuda), repeat=3):
+            if s.device == m1.device == m2.device:
+                torch.addmm(s, m1, m2)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+                    torch.addmm(s, m1, m2)
+
     @unittest.skipIf(TEST_MULTIGPU, "Testing on one GPU is sufficient")
     def test_lazy_init(self):
         """ Validate that no CUDA calls are made during `import torch` call"""
@@ -3591,21 +3606,6 @@ class TestCudaComm(TestCase):
         gathered = torch.cuda.comm.gather(results)
         self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
 
-
-    def test_matmul_device_mismatch(self):
-        cpu = torch.rand((10, 10))
-        cuda = cpu.cuda()
-        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
-            cpu @ cuda
-        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
-            cuda @ cpu
-
-        for s, m1, m2 in product((cpu, cuda), repeat=3):
-            if s.device == m1.device == m2.device:
-                torch.addmm(s, m1, m2)
-            else:
-                with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
-                    torch.addmm(s, m1, m2)
 
     @unittest.skipIf(not TEST_MULTIGPU, "Test needs multiple GPUs")
     def test_scatter_namedtuple(self):
