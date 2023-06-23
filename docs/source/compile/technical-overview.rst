@@ -29,7 +29,7 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
 
 .. seealso::
 
-   * `TorchDynamo deep-dive video <https://www.youtube.com/watch?v=egZB5Uxki0I>`__
+   * `TorchDynamo dddeep-dive video <https://www.youtube.com/watch?v=egZB5Uxki0I>`__
    * `dev-discuss topics <https://dev-discuss.pytorch.org/search?q=TorchDynamo%20order%3Alatest>`__
 
 .. toctree::
