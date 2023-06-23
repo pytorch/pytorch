@@ -3,8 +3,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/TensorIterator.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 static std::string shapes_as_str(TensorList tensors) {
   std::ostringstream os;
@@ -91,5 +90,4 @@ static AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   return AdvancedIndex(self, indices);
 }
 
-} // at
-} // native
+} // namespace at::native

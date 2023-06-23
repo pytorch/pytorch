@@ -1,26 +1,33 @@
 import dataclasses
-from enum import Enum
 import io
 import json
 import logging
 import math
 import operator
-import sympy
 import typing
+
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
+import sympy
+
 import torch
-from torch.fx.experimental import symbolic_shapes
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 import torch._export.exported_program as ep
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.fx.experimental import symbolic_shapes
 from torch.utils._pytree import pytree_to_str, str_to_pytree
-from .schema import (   # type: ignore[attr-defined]
+
+from .schema import (  # type: ignore[attr-defined]
+    _Union,
     Argument,
     BackwardSignature,
     CallSpec,
     Device,
     ExportedProgram,
     Graph,
+    GraphArgument,
     GraphModule,
     GraphSignature,
     Layout,
@@ -37,7 +44,6 @@ from .schema import (   # type: ignore[attr-defined]
     TensorArgument,
     TensorMeta,
     TensorValue,
-    _Union,
 )
 
 
@@ -49,6 +55,7 @@ __all__ = [
     "ExportedProgramDeserializer",
 ]
 
+from .upgrade import GraphModuleOpUpgrader
 
 log = logging.getLogger(__name__)
 
@@ -178,13 +185,20 @@ def serialize_metadata(node: torch.fx.Node) -> Dict[str, str]:
     ret = {}
     if stack_trace := node.meta.get("stack_trace"):
         ret["stack_trace"] = stack_trace
-    module_fqn = node.meta.get("module_fqn")
-    # Need an explicit None check instead of walrus operator, because
-    # module_fqn can be the empty string if the node belongs to the root.
-    # The walrus operator returns False on an empty string :(
-    if module_fqn is not None:
-        ret["module_fqn"] = module_fqn
-    # TODO(angelayi) add nn_module_stack and source_fn
+
+    if nn_module_stack := node.meta.get("nn_module_stack"):
+        # Serialize to "fx_node_name:(orig_ref,type_str)"
+        nn_module_list = [
+            f"{k}:({v[0]},{serialize_operator(v[1])})"
+            for k, v in nn_module_stack.items()
+        ]
+        ret["nn_module_stack"] = ";".join(nn_module_list)
+
+    if source_fn := node.meta.get("source_fn"):
+        # Serialize to "fx_node_name,op_str"
+        op = serialize_operator(source_fn[1])
+        ret["source_fn"] = f"{source_fn[0]},{op}"
+
     return ret
 
 
@@ -192,13 +206,47 @@ def deserialize_metadata(metadata) -> Dict[str, str]:
     ret = {}
     if stack_trace := metadata.get("stack_trace"):
         ret["stack_trace"] = stack_trace
-    # Need an explicit None check instead of walrus operator, because
-    # module_fqn can be the empty string if the node belongs to the root.
-    # The walrus operator returns False on an empty string :(
-    module_fqn = metadata.get("module_fqn")
-    if module_fqn is not None:
-        ret["module_fqn"] = module_fqn
-    # TODO(angelayi) add nn_module_stack and source_fn
+
+    def deserialize_meta_func(serialized_target: str):
+        module = None
+        if serialized_target.startswith("torch.nn"):
+            module = torch.nn
+            serialized_target_names = serialized_target.split(".")[2:]
+        elif serialized_target.startswith("torch"):
+            module = torch
+            serialized_target_names = serialized_target.split(".")[1:]
+        else:
+            return deserialize_operator(serialized_target)
+
+        target = module
+        for name in serialized_target_names:
+            if not hasattr(target, name):
+                return serialized_target
+            else:
+                target = getattr(target, name)
+        return target
+
+    if nn_module_stack_str := metadata.get("nn_module_stack"):
+        # Originally serialized to "fx_node_name:(orig_ref,type_str)"
+        nn_module_stack_list = nn_module_stack_str.split(";")
+        nn_module_stack = {}
+        for kv in nn_module_stack_list:
+            key_idx = kv.find(":")
+            key = kv[:key_idx]
+            assert kv[key_idx + 1] == "("
+            assert kv[-1] == ")"
+            values = kv[key_idx + 2: -1].split(",")
+            assert len(values) == 2
+            module = deserialize_meta_func(values[1])
+            nn_module_stack[key] = (values[0], module)
+        ret["nn_module_stack"] = nn_module_stack
+
+    if source_fn_str := metadata.get("source_fn"):
+        # Originally serializes to "fx_node_name,op_str"
+        source_fn = source_fn_str.split(",")
+        op = deserialize_meta_func(source_fn[1])
+        ret["source_fn"] = (source_fn[0], op)
+
     return ret
 
 
@@ -363,22 +411,36 @@ def _is_single_tensor_return(target: torch._ops.OpOverload) -> bool:
     return len(returns) == 1 and isinstance(returns[0].real_type, torch.TensorType)
 
 
+@dataclass
+class GraphState:
+    inputs: List[Argument] = field(default_factory=list)
+    outputs: List[Argument] = field(default_factory=list)
+    nodes: List[Node] = field(default_factory=list)
+    tensor_values: Dict[str, TensorValue] = field(default_factory=dict)
+    sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
+    sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
+
+
 class GraphModuleSerializer:
     def __init__(self, graph_signature: ep.ExportGraphSignature, call_spec: ep.CallSpec):
-        self.inputs: List[Argument] = []
-        self.outputs: List[Argument] = []
-        self.nodes: List[Node] = []
-        self.tensor_values: Dict[str, TensorValue] = {}
-        self.sym_int_values: Dict[str, SymInt] = {}
-        self.sym_bool_values: Dict[str, SymBool] = {}
+        self.graph_state = GraphState()
         self.graph_signature = graph_signature
         self.call_spec = call_spec
 
+    @contextmanager
+    def save_graph_state(self):
+        saved = self.graph_state
+        self.graph_state = GraphState()
+        try:
+            yield
+        finally:
+            self.graph_state = saved
+
     def handle_placeholder(self, node: torch.fx.Node):
         assert node.op == "placeholder"
-        self.inputs.append(Argument.create(as_tensor=TensorArgument(name=node.name)))
+        self.graph_state.inputs.append(Argument.create(as_tensor=TensorArgument(name=node.name)))
 
-        self.tensor_values[node.name] = TensorValue(
+        self.graph_state.tensor_values[node.name] = TensorValue(
             meta=serialize_tensor_meta(node.meta["val"])
         )
 
@@ -386,8 +448,10 @@ class GraphModuleSerializer:
         assert node.op == "output"
         assert len(node.args) == 1, "FX.Node's args should have one arg"
         node_args = node.args[0]
+        if isinstance(node_args, torch.fx.Node):
+            node_args = (node_args,)
         assert isinstance(node_args, tuple)
-        self.outputs = [self.serialize_input(arg) for arg in node_args]
+        self.graph_state.outputs = [self.serialize_input(arg) for arg in node_args]
 
     def handle_call_function(self, node: torch.fx.Node):
         assert node.op == "call_function"
@@ -422,11 +486,25 @@ class GraphModuleSerializer:
                 # TODO: create a new tensor_values here, meta might have faketensor info
                 metadata=serialize_metadata(node),
             )
+        elif isinstance(node.target, torch._ops.HigherOrderOperator):
+            assert isinstance(
+                node.meta["val"], FakeTensor
+            ), "Only single tensor output is supported for HigherOrderOperator serialization."
+
+            inputs = [NamedArgument(
+                name="",  # TODO(zhxchen17) This is sad, should be improved when HOO has schema arg names.
+                arg=self.serialize_input(a),
+            ) for a in node.args]
+            ex_node = Node(
+                target=serialize_operator(node.target),
+                inputs=inputs,
+                outputs=[Argument.create(as_tensor=self.serialize_tensor_output(node.name, node.meta['val']))],
+                metadata=serialize_metadata(node),
+            )
         else:
-            # TODO(angelayi) Higher order ops
             raise SerializeError(f"Serializing {node.target} is not supported")
 
-        self.nodes.append(ex_node)
+        self.graph_state.nodes.append(ex_node)
 
     def handle_get_attr(self, node):
         pass
@@ -472,18 +550,21 @@ class GraphModuleSerializer:
 
     def is_sym_int_arg(self, arg) -> bool:
         return isinstance(arg, int) or (
-            isinstance(arg, torch.fx.Node) and arg.name in self.sym_int_values
+            isinstance(arg, torch.fx.Node) and arg.name in self.graph_state.sym_int_values
         )
 
     def is_sym_bool_arg(self, arg) -> bool:
         return isinstance(arg, bool) or (
-            isinstance(arg, torch.fx.Node) and arg.name in self.sym_bool_values
+            isinstance(arg, torch.fx.Node) and arg.name in self.graph_state.sym_bool_values
         )
 
     def serialize_input(self, arg) -> Argument:
         if isinstance(arg, torch.fx.Node):
             if arg.op == "get_attr":
-                return Argument.create(as_tensor=TensorArgument(name=str(arg.target)))
+                assert isinstance(arg.target, str)
+                with self.save_graph_state():
+                    graph = self.serialize_graph(getattr(arg.graph.owning_module, arg.target))
+                return Argument.create(as_graph=GraphArgument(name=arg.target, graph=graph))
             elif self.is_sym_int_arg(arg):
                 return Argument.create(as_sym_int=SymIntArgument.create(as_name=arg.name))
             elif self.is_sym_bool_arg(arg):
@@ -545,18 +626,18 @@ class GraphModuleSerializer:
             raise SerializeError(f"Unsupported argument type: {type(arg)}")
 
     def serialize_tensor_output(self, name, meta_val) -> TensorArgument:
-        assert name not in self.tensor_values
-        self.tensor_values[name] = TensorValue(meta=serialize_tensor_meta(meta_val))
+        assert name not in self.graph_state.tensor_values
+        self.graph_state.tensor_values[name] = TensorValue(meta=serialize_tensor_meta(meta_val))
         return TensorArgument(name=name)
 
     def serialize_sym_int_output(self, name, meta_val) -> SymIntArgument:
-        assert name not in self.sym_int_values
-        self.sym_int_values[name] = serialize_sym_int(meta_val)
+        assert name not in self.graph_state.sym_int_values
+        self.graph_state.sym_int_values[name] = serialize_sym_int(meta_val)
         return SymIntArgument.create(as_name=name)
 
     def serialize_sym_bool_output(self, name, meta_val) -> SymIntArgument:
-        assert name not in self.sym_bool_values
-        self.sym_bool_values[name] = serialize_sym_bool(meta_val)
+        assert name not in self.graph_state.sym_bool_values
+        self.graph_state.sym_bool_values[name] = serialize_sym_bool(meta_val)
         return SymBoolArgument.create(as_name=name)
 
     def serialize_outputs(self, node: torch.fx.Node) -> List[Argument]:
@@ -635,22 +716,25 @@ class GraphModuleSerializer:
 
             return [Argument.create(as_tensor=arg) for arg in arg_list]
 
-    def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
+    def serialize_graph(self, graph_module: torch.fx.GraphModule) -> Graph:
+        assert isinstance(graph_module, torch.fx.GraphModule)
         for node in graph_module.graph.nodes:
             try:
-                self.node = node
                 getattr(self, f"handle_{node.op}")(node)
             except Exception as e:
                 raise SerializeError(f"Failed serializing node {node} in graph:\n{graph_module.graph}") from e
 
-        graph = Graph(
-            inputs=self.inputs,
-            nodes=self.nodes,
-            tensor_values=self.tensor_values,
-            sym_int_values=self.sym_int_values,
-            sym_bool_values=self.sym_bool_values,
-            outputs=self.outputs,
+        return Graph(
+            inputs=self.graph_state.inputs,
+            nodes=self.graph_state.nodes,
+            tensor_values=self.graph_state.tensor_values,
+            sym_int_values=self.graph_state.sym_int_values,
+            sym_bool_values=self.graph_state.sym_bool_values,
+            outputs=self.graph_state.outputs,
         )
+
+    def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
+        graph = self.serialize_graph(graph_module)
 
         return GraphModule(
             graph=graph,
@@ -991,10 +1075,15 @@ class ExportedProgramDeserializer:
         range_constraints = self.deserialize_range_constraints(
             symbol_name_to_range, symbol_name_to_symbol,
         )
+        model_opset_version: Optional[Dict[str, int]] = serialized_exported_program.opset_version
+        self._validate_model_opset_version(model_opset_version)
+
+        upgrader = GraphModuleOpUpgrader(self.expected_opset_version, model_opset_version)
+
         state_dict = deserialize_state_dict(serialized_state_dict)
         equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
 
-        return ep.ExportedProgram(
+        exported_program = ep.ExportedProgram(
             state_dict,
             graph_module.graph,
             sig,
@@ -1003,6 +1092,47 @@ class ExportedProgramDeserializer:
             range_constraints,
             equality_constraints,
         )
+        return upgrader.upgrade(exported_program)
+
+    def _validate_model_opset_version(self, model_opset_version: Optional[Dict[str, int]]):
+        """Compare model_opset_version with expected_opset_version and raise error if we can't resolve the version
+        difference.
+        E.g., model_opset_version = {"aten": 3, "custom": 4}
+        expected_opset_version = {"aten": 4, "custom": 4}
+        This means we can use an upgrader for ATen to reconcile the deserialized model.
+
+        The logic of this method:
+
+        For common op namespaces:
+        1. if model version < expected version, this case can be handled by upgraders.
+        2. if model version > expected version, we need downgraders but not implemented yet.
+        3. if model version == expected version, we don't need extra handling.
+
+        For op namespace only in model_opset_version, we should give a warning because it is missing from
+        expected_opset_version.
+        """
+        if not model_opset_version:
+            raise RuntimeError("Serialized model should have opset version.")
+        common_namespaces = {key for key in model_opset_version if key in self.expected_opset_version}
+        for namespace in common_namespaces:
+            assert (
+                isinstance(model_version := model_opset_version[namespace], int)
+            ), f"model_opset_version value should be int, got {model_opset_version[namespace]}"
+
+            assert (
+                isinstance(compiler_version := self.expected_opset_version[namespace], int)
+            ), f"expected_opset_version value should be int, got {self.expected_opset_version[namespace]}"
+
+            # TODO(larryliu0820): Add support for upgrader & downgrader
+            if model_version != compiler_version:
+                raise NotImplementedError(
+                    f"Model opset version {model_opset_version} doesn't match to compiler opset version "
+                    f"{self.expected_opset_version}! Upgrader/downgrader is not implemented yet."
+                )
+        for namespace in model_opset_version:
+            if namespace in common_namespaces:
+                continue
+            log.warning("Compiler doesn't have a version table for op namespace: {ns}. ", extra={"ns": namespace})
 
 
 class EnumEncoder(json.JSONEncoder):
@@ -1034,9 +1164,9 @@ def _dict_to_dataclass(cls, data):
         return obj
     elif dataclasses.is_dataclass(cls):
         obj = cls(**data)  # type: ignore[assignment]
-        for field in dataclasses.fields(cls):
-            name = field.name
-            new_field_obj = _dict_to_dataclass(field.type, getattr(obj, name))
+        for f in dataclasses.fields(cls):
+            name = f.name
+            new_field_obj = _dict_to_dataclass(f.type, getattr(obj, name))
             setattr(obj, name, new_field_obj)
         return obj
     elif isinstance(data, list):
