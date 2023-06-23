@@ -16,7 +16,7 @@ from torch.optim.optimizer import register_optimizer_step_post_hook
 
 from .profiler import (
     _KinetoProfile,
-    ExecutionGraphObserver,
+    ExecutionTraceObserver,
     profile,
     ProfilerAction,
     schedule,
@@ -34,7 +34,7 @@ __all__ = [
     "kineto_available",
     "DeviceType",
     "record_function",
-    "ExecutionGraphObserver",
+    "ExecutionTraceObserver",
 ]
 
 from . import itt

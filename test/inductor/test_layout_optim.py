@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import copy
 import os
+import random
 
 import torch
 from torch import nn
@@ -37,10 +38,23 @@ class TestLayoutOptim(TestCase):
 
         import torch.distributed as dist
 
-        port = 10001
-        dist.init_process_group(
-            backend="nccl", init_method=f"tcp://localhost:{port}", world_size=1, rank=0
-        )
+        # not use a fixed port for stress test
+        tot_retry = 5
+        for retry_no in range(tot_retry):
+            try:
+                port = random.randint(10000, 60000)
+                dist.init_process_group(
+                    backend="nccl",
+                    init_method=f"tcp://localhost:{port}",
+                    world_size=1,
+                    rank=0,
+                )
+                break
+            except RuntimeError:
+                if retry_no == tot_retry - 1:
+                    raise
+                else:
+                    continue
 
     def verify_accuracy(
         self, model_class, use_ddp_wrapper=USE_DDP_WRAPPER, is_train=False
@@ -237,6 +251,28 @@ class TestLayoutOptim(TestCase):
                 return (torch.rand(2, 3, 16, 16),)
 
         self.verify_accuracy_for_infer(Model)
+
+    def test_dynamic_shape_specialization(self):
+        """
+        Previously in aot_autograd.py we compare strides of FakeTensor
+        with real tensor. That cause dynamic dimensions of the FakeTensor
+        being specialized to static shapes. This test protects against that.
+        """
+
+        def f(a, b):
+            x = a.sin()
+            y = b.cos()
+            z = x + y
+            return z
+
+        for size in [4, 8, 16]:
+            a = torch.randn(2, size, requires_grad=True).cuda()
+            b = torch.randn(2, size).cuda()
+            actual = torch.compile(f, dynamic=True)(a, b)
+            self.assertTrue(torch.allclose(f(a, b), actual))
+
+            # Trigger the compiling of the backward graph
+            actual.sum().backward()
 
 
 if __name__ == "__main__":
