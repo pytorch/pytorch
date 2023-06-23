@@ -1,4 +1,5 @@
 import collections
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
@@ -8,19 +9,23 @@ from ..source import AttrSource, Source
 from ..utils import dict_values, identity, istype, odict_values
 
 
+class MutableLocalSource(Enum):
+    """
+    If the VariableTracker.mutable_local represents a Variable that:
+    - already existed that Dynamo began tracking while introspection (Existing)
+    - is a new variable that is created during Dynamo introspection (Local)
+    """
+
+    Existing = 0
+    Local = 1
+
+
 class MutableLocalBase:
     """
     Base class for Variable.mutable_local
-
-    typ:
-    - 'new' (If the Variable represents a new variable that is created while
-             Dynamo is introspecting)
-    - 'existing' (If the Variable represents an existing variable that
-                  Dynamo began tracking while introspecting)
     """
 
-    def __init__(self, typ):
-        assert typ in ("existing", "new")
+    def __init__(self, typ: MutableLocalSource):
         # In HigherOrderOperator tracing, we need to distinguish
         # between MutableLocals inside the HigherOrderOperator and
         # ones outside it. For example, it is not safe to mutate
@@ -44,10 +49,12 @@ class MutableLocalBase:
         #             Dynamo introspection of a HigherOrderOp.
         #             The exact number corresponds to the level
         #             of nested HigherOrderOps.
-        if typ == "existing":
+        if typ is MutableLocalSource.Existing:
             self.scope = 0
-        else:
+        elif typ is MutableLocalSource.Local:
             self.scope = current_scope_id()
+        else:
+            unimplemented(f"Unsupported MutableLocalSource: {typ}")
 
 
 class MutableLocal(MutableLocalBase):
@@ -58,7 +65,7 @@ class MutableLocal(MutableLocalBase):
     """
 
     def __init__(self):
-        super().__init__("new")
+        super().__init__(MutableLocalSource.Local)
 
     def __hash__(self):
         return id(self)
@@ -67,11 +74,17 @@ class MutableLocal(MutableLocalBase):
         return self is other
 
 
+def _is_top_level_scope(scope_id):
+    return scope_id == 1
+
+
 def is_side_effect_safe(m: MutableLocalBase):
     scope_id = current_scope_id()
-    # We are allowed to mutate existing variables only if no HigherOrderOperators
-    # are involved
-    if m.scope == 0 and scope_id == 1:
+
+    # In the top-level scope (if no HigherOrderOperators are involved),
+    # we are allowed to modify variables created in this scope as well
+    # as existing variables.
+    if _is_top_level_scope(scope_id):
         return True
     # Otherwise, only allow local mutation of variables created in the current scope
     return m.scope == scope_id

@@ -14,7 +14,12 @@ from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import LocalSource, Source
 from .utils import nn_module_new, object_new
-from .variables.base import is_side_effect_safe, MutableLocalBase, VariableTracker
+from .variables.base import (
+    is_side_effect_safe,
+    MutableLocalBase,
+    MutableLocalSource,
+    VariableTracker,
+)
 
 
 class MutableSideEffects(MutableLocalBase):
@@ -25,7 +30,7 @@ class MutableSideEffects(MutableLocalBase):
     """
 
     def __init__(self, source: Source, is_modified: bool = False):
-        super().__init__("existing")
+        super().__init__(MutableLocalSource.Existing)
         self.source = source
         self.is_modified = is_modified
 
@@ -35,20 +40,20 @@ class AttributeMutation(MutableLocalBase):
     VariableTracker.mutable_local marker to track changes to attributes
     """
 
-    def __init__(self, typ: str, source: Source):
+    def __init__(self, typ: MutableLocalSource, source: Source):
         super().__init__(typ)
         self.source = source
 
 
 class AttributeMutationExisting(AttributeMutation):
     def __init__(self, source: Source):
-        super().__init__("existing", source)
+        super().__init__(MutableLocalSource.Existing, source)
         self.source = source
 
 
 class AttributeMutationNew(AttributeMutation):
     def __init__(self, source: Source, cls_source: Source):
-        super().__init__("new", source)
+        super().__init__(MutableLocalSource.Local, source)
         self.cls_source = cls_source
 
 

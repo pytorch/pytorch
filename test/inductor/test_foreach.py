@@ -281,9 +281,10 @@ class ForeachTests(TestCase):
                 torch.rand(20, 20, device="cuda:0"),
             ),
             reference_in_float=False,
+            check_lowp=False,
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @all_ops
@@ -331,7 +332,7 @@ class ForeachTests(TestCase):
 
             def fn(a0, a1):
                 c0 = torch.add(a0, a0)
-                c1 = torch.mul(a1, a1)
+                c1 = torch.add(a1, a1)
                 return op([c0, c1])
 
         else:
@@ -342,12 +343,10 @@ class ForeachTests(TestCase):
                 return op([a0, a1], [c0, c1])
 
         self.check_model_cuda(
-            fn,
-            gen_args(op),
-            reference_in_float=False,
+            fn, gen_args(op), reference_in_float=False, check_lowp=False
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops
@@ -367,7 +366,7 @@ class ForeachTests(TestCase):
             ),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @all_ops
@@ -396,9 +395,10 @@ class ForeachTests(TestCase):
             fn,
             gen_args(op),
             reference_in_float=False,
+            check_lowp=False,
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     @requires_cuda()
     @bin_ops
@@ -420,9 +420,10 @@ class ForeachTests(TestCase):
                 torch.rand(20, 20, device="cuda:0"),
             ),
             reference_in_float=False,
+            check_lowp=False,
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     @requires_cuda()
     @bin_ops

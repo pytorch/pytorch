@@ -1,3 +1,4 @@
+import contextlib
 import threading
 
 # Global variable to identify which SubgraphTracer we are in.
@@ -12,6 +13,11 @@ def current_scope_id():
     return _current_scope_id.value
 
 
-def modify_current_scope_id(delta):
+@contextlib.contextmanager
+def enter_new_scope():
     global _current_scope_id
-    _current_scope_id.value = current_scope_id() + delta
+    try:
+        _current_scope_id.value = current_scope_id() + 1
+        yield
+    finally:
+        _current_scope_id.value = current_scope_id() - 1
