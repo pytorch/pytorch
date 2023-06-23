@@ -1,22 +1,25 @@
 # Owner(s): ["module: onnx"]
 """Unit tests for the internal registration wrapper module."""
+from __future__ import annotations
 
 import logging
 import operator
+from typing import TypeVar, Union
 
 import onnxscript  # type: ignore[import]
 
 import torch
 import torch.fx
+from onnxscript import BFLOAT16, DOUBLE, FLOAT, FLOAT16  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import ops  # type: ignore[import]
-from onnxscript.function_libs.torch_lib.tensor_typing import (  # type: ignore[import]
-    TReal,
-)
 from onnxscript.onnx_opset import opset15 as op  # type: ignore[import]
 from parameterized import parameterized  # type: ignore[import]
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import onnxfunction_dispatcher, registration
 from torch.testing._internal import common_utils
+
+# TODO: this can only be global. https://github.com/microsoft/onnxscript/issues/805
+TCustomFloat = TypeVar("TCustomFloat", bound=Union[FLOAT16, FLOAT, DOUBLE, BFLOAT16])
 
 
 class TestRegistration(common_utils.TestCase):
@@ -245,7 +248,7 @@ class TestDispatcher(common_utils.TestCase):
                     graph=torch.fx.Graph(),
                     name="aten::add.Tensor",
                     op="call_function",
-                    target=torch.ops.aten.add.Tensor,
+                    target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
                     args=(torch.tensor(3), torch.tensor(4)),
                     kwargs={},
                 ),
@@ -255,7 +258,7 @@ class TestDispatcher(common_utils.TestCase):
                     graph=torch.fx.Graph(),
                     name="aten::add.Tensor",
                     op="call_function",
-                    target=torch.ops.aten.add.Tensor,
+                    target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
                     args=(torch.tensor(3), torch.tensor(4)),
                     kwargs={"alpha": 1},
                 ),
@@ -268,11 +271,11 @@ class TestDispatcher(common_utils.TestCase):
         custom_domain = onnxscript.values.Opset(domain="custom", version=1)
 
         @onnxscript.script(custom_domain)
-        def test_custom_op(x: TReal, y: TReal) -> TReal:
+        def test_custom_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
             return op.Add(x, y)
 
         @onnxscript.script(custom_domain)
-        def test_default_op(x: TReal, y: TReal) -> TReal:
+        def test_default_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
             return op.Add(x, y)
 
         custom_overloads = set(
