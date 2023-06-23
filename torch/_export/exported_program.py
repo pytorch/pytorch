@@ -18,7 +18,7 @@ from .passes.add_runtime_assertions_for_constraints_pass import (
     InputDim,
     RangeConstraint,
 )
-from .passes.functionalize_side_effectful_ops import _FunctionalizeSideEffectfulOps
+from .passes.functionalize_side_effectful_ops_pass import _FunctionalizeSideEffectfulOpsPass
 
 
 __all__ = ["ExportedProgram"]
@@ -196,7 +196,7 @@ class ExportedProgram:
         )
         ep = _update_graph_signature(old_ep=self, new_ep=self.transform(p), p=p)
         if functionalize_assertions:
-            p = _FunctionalizeSideEffectfulOps()
+            p = _FunctionalizeSideEffectfulOpsPass()
             ep = _update_graph_signature(old_ep=ep, new_ep=ep.transform(p), p=p)
 
         return ep
