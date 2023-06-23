@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import functools
 import itertools
@@ -5,7 +6,6 @@ import logging
 import sys
 import unittest
 import warnings
-import contextlib
 
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
@@ -229,13 +229,22 @@ def inner_compile_with_cpp_wrapper(inner_compile):
 
     return wrapper
 
-def fake_tensor_prop(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], force_allow_non_fake_inputs=False):
+
+def fake_tensor_prop(
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    force_allow_non_fake_inputs=False,
+):
     fake_mode = detect_fake_mode(example_inputs)
     if not fake_mode:
         fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
         FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
     else:
-        ctx = contextlib.nullcontext() if not force_allow_non_fake_inputs else unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+        ctx = (
+            contextlib.nullcontext()
+            if not force_allow_non_fake_inputs
+            else unittest.mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+        )
         with ctx:
             FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
                 *example_inputs
