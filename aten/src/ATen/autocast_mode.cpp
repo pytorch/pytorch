@@ -49,6 +49,14 @@ void set_hpu_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastHPU, !new_enabled);
 }
 
+bool is_xla_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXLA);
+}
+
+void set_xla_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXLA, !new_enabled);
+}
+
 bool is_privateuseone_enabled() {
   return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1);
 }
@@ -98,6 +106,9 @@ thread_local at::ScalarType autocast_ipu_dtype = at::kHalf;
 // autocast_hpu_dtype is the lower_precision_fp used by AutocastHPU.
 thread_local at::ScalarType autocast_hpu_dtype = at::kBFloat16;
 
+// autocast_xla_dtype is the lower_precision_fp used by AutocastXLA.
+thread_local at::ScalarType autocast_xla_dtype = at::kBFloat16;
+
 // should we enabled the cache inside autocast.
 thread_local bool cache_enabled = true;
 
@@ -141,6 +152,10 @@ at::ScalarType get_autocast_hpu_dtype() {
   return autocast_hpu_dtype;
 }
 
+at::ScalarType get_autocast_xla_dtype() {
+  return autocast_xla_dtype;
+}
+
 at::ScalarType get_autocast_privateuseone_dtype() {
   return autocast_privateuseone_dtype;
 }
@@ -166,6 +181,10 @@ void set_autocast_ipu_dtype(at::ScalarType dtype) {
 
 void set_autocast_hpu_dtype(at::ScalarType dtype) {
   autocast_hpu_dtype = dtype;
+}
+
+void set_autocast_xla_dtype(at::ScalarType dtype) {
+  autocast_xla_dtype = dtype;
 }
 
 void set_autocast_privateuseone_dtype(at::ScalarType dtype) {
