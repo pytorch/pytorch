@@ -17,7 +17,7 @@
 #include <unordered_map>
 
 #if !defined(USE_ROCM) && \
-    ((NCCL_MACJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14)))
+    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14)))
 #define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
 
@@ -392,8 +392,9 @@ void check_inputs(
 
     check_tensor(
         input,
-        i == static_cast<decltype(i)>(root) ? at::optional<at::Tensor>{output}
-                                            : at::nullopt,
+        i == static_cast<std::remove_cv_t<decltype(i)>>(root)
+            ? at::optional<at::Tensor>{output}
+            : at::nullopt,
         input_multiplier,
         output_multiplier,
         numel,
@@ -415,6 +416,7 @@ AutoNcclGroup::AutoNcclGroup() {
   // nccl < 2.0 cannot be called concurrently with cudaFree
   (c10::cuda::getFreeMutex())->lock();
 #endif
+  comm_nonblocking_ = false;
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   detail::NCCL_CHECK(ncclGroupStart());
 #endif
@@ -619,7 +621,9 @@ void reduce(
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
-        static_cast<decltype(i)>(root) == i ? output.data_ptr() : nullptr,
+        static_cast<std::remove_cv_t<decltype(i)>>(root) == i
+            ? output.data_ptr()
+            : nullptr,
         count,
         data_type,
         to_nccl_red_op(op),

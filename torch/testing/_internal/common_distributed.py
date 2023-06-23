@@ -737,7 +737,7 @@ class MultiProcessTestCase(TestCase):
                 if subprocess_error:
                     break
                 # All processes have joined cleanly if they all a valid exitcode
-                if all([p.exitcode is not None for p in self.processes]):
+                if all(p.exitcode is not None for p in self.processes):
                     break
                 # Check if we should time out the test. If so, we terminate each process.
                 elapsed = time.time() - start_time
@@ -1029,7 +1029,6 @@ class MultiThreadedTestCase(TestCase):
         """
         Run the current test associated with `test_name` using the threaded process group.
         """
-
         c10d.init_process_group(
             backend="threaded", rank=rank, world_size=world_size, store=self.__class__.global_store
         )

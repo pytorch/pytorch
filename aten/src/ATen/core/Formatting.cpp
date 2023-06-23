@@ -213,7 +213,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
   }
 }
 
-void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
+static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
 {
   std::vector<int64_t> counter(self.ndimension()-2);
   bool start = true;

@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Optional, Any, Union
+from typing import Optional, Any, Union, Type
 
 import torch
 import torch.nn as nn
@@ -245,6 +245,10 @@ def get_default_qconfig(backend='x86', version=0):
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_weight_observer)
         elif backend == 'onednn':
+            if not torch.cpu._is_cpu_support_vnni():
+                warnings.warn(
+                    "Default qconfig of oneDNN backend with reduce_range of false may have accuracy issues "
+                    "on CPU without Vector Neural Network Instruction support.")
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
         elif backend == 'x86':
@@ -491,7 +495,7 @@ def _add_module_to_qconfig_obs_ctr(
 
     return QConfig(activation, weight)
 
-_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, ObserverBase, FakeQuantizeBase]
+_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, Type[ObserverBase], Type[FakeQuantizeBase]]
 
 def _obs_or_fq_ctr_equals(obs_or_fq1: _ObserverOrFakeQuantizeConstructor, obs_or_fq2: _ObserverOrFakeQuantizeConstructor):
     if isinstance(obs_or_fq1, _PartialWrapper) and isinstance(obs_or_fq2, _PartialWrapper):

@@ -116,8 +116,8 @@ using jit_modules_t = std::vector<std::string>;
 using extra_args_t = std::unordered_map<std::string, c10::IValue>;
 
 struct FallbackPair {
-  ProfilerEventStub cuda_event_start_ = nullptr;
-  ProfilerEventStub cuda_event_end_ = nullptr;
+  ProfilerVoidEventStub device_event_start_ = nullptr;
+  ProfilerVoidEventStub device_event_end_ = nullptr;
 };
 
 template <>
@@ -127,29 +127,32 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       uint64_t correlation_id,
       time_t end_time_ns,
       std::vector<op_input_t>&& inputs,
+      std::vector<op_input_t>&& concrete_inputs,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
-      FallbackPair&& gpu_fallback,
+      FallbackPair&& device_fallback,
       bool allow_tf32_cublas,
       std::unique_ptr<perf_counters_t>&& perf_event_counters)
       : TorchOpBasicFields(std::move(f)),
         correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
         inputs_{std::move(inputs)},
+        concrete_inputs_{std::move(concrete_inputs)},
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
-        gpu_fallback_{std::move(gpu_fallback)},
+        device_fallback_{std::move(device_fallback)},
         allow_tf32_cublas_{allow_tf32_cublas},
         perf_event_counters_{std::move(perf_event_counters)} {}
   uint64_t correlation_id_;
   time_t end_time_ns_;
   std::vector<op_input_t> inputs_;
+  std::vector<op_input_t> concrete_inputs_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
-  FallbackPair gpu_fallback_;
+  FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
 };
@@ -356,8 +359,9 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       using extra_fields_t = typename std::remove_cv<
           typename std::remove_reference<decltype(extra_fields)>::type>::type;
 
-      c10::guts::if_constexpr<std::is_base_of<T, extra_fields_t>::value>(
-          [&](auto _) { fn(_(extra_fields)); });
+      if constexpr (std::is_base_of_v<T, extra_fields_t>) {
+        fn(extra_fields);
+      }
     });
   }
 
@@ -430,30 +434,50 @@ struct KinetoObserverContext : public at::ObserverContext {
 
 constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;
 
+constexpr int SCALAR_LIST_LENGTH_LIMIT = 30;
+
 // InputOutputEncoder
-// Stores each op_events' shapes and dtypes into a contiguous AppendOnlyList
-// so that we no longer create vectors for shapes and dtypes on every op.
-// Those vectors can be created during post-processing.
+// Stores each op_events' shapes and dtypes, and concrete values into a
+// contiguous AppendOnlyList so that we no longer create vectors for shapes
+// and dtypes on every op. Those vectors can be created during
+// post-processing.
+// It splits the data into two categories: input shapes and concrete inputs.
 class InputOutputEncoder final {
  public:
   void push(c10::ArrayRef<const c10::IValue> values);
 
-  // Used during post-processing to create vectors for shapes and dtype.
-  auto getNextShapesAndDtypes();
+  // Used during post-processing to unpack the encoded data.
+  // Each method returns a "supplier" lambda which takes no arguments;
+  // invoking the lambda once will return a list of args that represent
+  // the inputs for one op.
+  // The data is split into two streams: "input shapes" and "concrete inputs".
+  // Note: "auto" only works because these are only used in collection.cpp,
+  // where they are implemented.
+  auto getInputShapeGenerator();
+  auto getConcreteInputGenerator();
+
+  bool isSupportedScalarList(const c10::IValue& list_candidate);
 
   void clear();
 
- private:
   enum class Tag {
     Tensor = 0,
     UndefinedTensor,
     TensorListBegin, // TODO: generalize to other lists.
+    ScalarList,
     Scalar,
     Other,
     TERMINATOR
   };
 
+  enum class IOType { Shapes, ConcreteInputs, None };
+
+ private:
   void push(const at::Tensor& t);
+
+  // Implementation detail for getInputShapeGenerator and
+  // getConcreteInputGenerator
+  auto getIValueGenerator(const IOType& io_type);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
   AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
@@ -555,8 +579,9 @@ class TORCH_API ThreadLocalSubqueue {
     // with_flops
     AppendOnlyList<extra_args_t, BlockSize> extra_args_;
 
-    // ProfilerState::KINETO_GPU_FALLBACK
-    AppendOnlyList<FallbackPair, BlockSize> gpu_fallback_;
+    // ProfilerState::KINETO_GPU_FALLBACK or
+    // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK
+    AppendOnlyList<FallbackPair, BlockSize> device_fallback_;
   } torch_ops_;
 
   // reportBackendEventToActiveKinetoProfiler
@@ -603,6 +628,14 @@ class TORCH_API RecordQueue {
   std::mutex sub_queue_mutex_;
   std::unique_ptr<python_tracer::PythonTracerBase> python_tracer_;
 };
+
+TORCH_API bool get_record_concrete_inputs_enabled();
+TORCH_API void set_record_concrete_inputs_enabled_fn(std::function<bool()>);
+TORCH_API void set_record_concrete_inputs_enabled_val(bool);
+
+TORCH_API bool get_fwd_bwd_enabled();
+TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
+TORCH_API void set_fwd_bwd_enabled_val(bool);
 
 } // namespace impl
 } // namespace profiler

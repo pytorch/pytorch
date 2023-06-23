@@ -67,7 +67,8 @@ from torchgen.model import (
     Type,
     Variant,
 )
-from torchgen.utils import FileManager, split_name_params, YamlLoader
+from torchgen.utils import FileManager, split_name_params
+from torchgen.yaml_utils import YamlLoader
 
 from .gen_trace_type import should_trace
 
@@ -88,6 +89,10 @@ _SKIP_PYTHON_BINDINGS = [
     "is_sparse_csr",
     "size",
     "stride",
+    "sym_size",
+    "sym_stride",
+    "sym_storage_offset",
+    "sym_numel",
     ".*_backward",
     ".*_backward_(out|input|weight|bias)",
     ".*_forward",
@@ -360,7 +365,9 @@ def gen(
     def gen_tags_enum() -> Dict[str, str]:
         return {
             "enum_of_valid_tags": (
-                "".join([f'\n.value("{tag}", at::Tag::{tag})' for tag in valid_tags])
+                "".join(
+                    [f'\n.value("{tag}", at::Tag::{tag})' for tag in sorted(valid_tags)]
+                )
             )
         }
 
@@ -1011,24 +1018,20 @@ def method_def(
     """
     pycname = get_pycname(name)
 
+    if name.dunder_method:
+        # PyMethodDef entry for binary op, throws not implemented error
+        pycname = f"TypeError_to_NotImplemented_<{pycname}>"
+
     if is_noarg(overloads):
-        pyfunc_cast = ""
         flags = "METH_NOARGS" if method else "METH_VARARGS | METH_KEYWORDS"
     else:
-        pyfunc_cast = "castPyCFunctionWithKeywords"
+        pycname = f"castPyCFunctionWithKeywords({pycname})"
         flags = "METH_VARARGS | METH_KEYWORDS"
 
     if module == "torch":
         flags += " | METH_STATIC"
 
-    if name.dunder_method:
-        # PyMethodDef entry for binary op, throws not implemented error
-        return f"""\
-{{"{name}", {pyfunc_cast}(TypeError_to_NotImplemented_<{pycname}>), {flags}, NULL}},"""
-    else:
-        # PyMethodDef entry
-        return f"""\
-{{"{name}", {pyfunc_cast}({pycname}), {flags}, NULL}},"""
+    return f'{{"{name}", {pycname}, {flags}, NULL}},'
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

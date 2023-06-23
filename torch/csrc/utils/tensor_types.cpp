@@ -19,7 +19,7 @@ using namespace at;
 namespace torch {
 namespace utils {
 
-const char* parse_privateuseone_backend() {
+static const char* parse_privateuseone_backend() {
   static std::string backend_name = "torch." + get_privateuse1_backend();
   return backend_name.c_str();
 }

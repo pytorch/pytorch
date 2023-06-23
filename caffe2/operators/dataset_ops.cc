@@ -1327,7 +1327,7 @@ Append input `B` to the end of input `A`.
 - Input `A` may have to be re-allocated in order for accommodate to the new size. Currently, an exponential growth ratio is used in order to ensure amortized constant time complexity.
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/dataset_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/dataset_ops.cc
 
 <details>
 
