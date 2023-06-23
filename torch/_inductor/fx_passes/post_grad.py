@@ -5,6 +5,8 @@ import operator
 
 import torch
 import torch._inductor as inductor
+
+from ..._dynamo.utils import counters
 from .. import config, ir, pattern_matcher
 
 from ..lowering import lowerings as L
@@ -15,6 +17,7 @@ from ..pattern_matcher import (
     filter_nodes,
     get_arg_value,
     Ignored,
+    inference_graph,
     init_once_fakemode,
     KeywordArg,
     ListOf,
@@ -22,6 +25,7 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
+    register_replacement,
     stable_topological_sort,
 )
 from ..virtualized import V
@@ -74,6 +78,7 @@ def lazy_init():
     from .quantization import register_quantization_lowerings
 
     register_quantization_lowerings()
+    register_addmm_activation_replacement()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -342,6 +347,76 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.addmm](inp, mat1, mat2)
     else:
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
+
+
+def addmm_relu_pattern(input, mat1, mat2):
+    output = aten.addmm(input, mat1, mat2)
+    return aten.relu(output)
+
+
+def addmm_relu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, use_gelu=False)
+
+
+def addmm_gelu_pattern(input, mat1, mat2):
+    output = aten.addmm(input, mat1, mat2)
+    return aten.gelu(output)
+
+
+def addmm_gelu_replacement(input, mat1, mat2):
+    return aten._addmm_activation(input, mat1, mat2, use_gelu=True)
+
+
+def should_replace_addmm_activation(match):
+    if config.max_autotune_gemm:
+        # keep addmm for tuning
+        return False
+
+    input = match.kwargs["input"].meta["val"]
+    # conditions of epilogue fusion in _addmm_activation
+    return input.is_cuda and input.dim() == 1 and input.is_contiguous()
+
+
+def register_addmm_activation_replacement():
+    if torch.cuda.is_available():
+        # workaround https://github.com/pytorch/pytorch/issues/97894
+        device = "cuda"
+    else:
+        device = "cpu"
+
+    # sizes/values dont actually matter for initial trace
+    # once we get a possible match we re-trace with the actual values and verify the match still holds
+
+    inp = functools.partial(torch.empty, (5,), device=device)
+    mat1 = functools.partial(torch.empty, (3, 4), device=device)
+    mat2 = functools.partial(torch.empty, (4, 5), device=device)
+
+    counters_ref = counters["inductor"].copy()
+
+    for pattern, replacement, args in [
+        (
+            addmm_relu_pattern,
+            addmm_relu_replacement,
+            [inp(), mat1(), mat2()],
+        ),
+        (
+            addmm_gelu_pattern,
+            addmm_gelu_replacement,
+            [inp(), mat1(), mat2()],
+        ),
+    ]:
+        register_replacement(
+            pattern,
+            replacement,
+            args,
+            inference_graph,
+            pass_patterns[2],
+            extra_check=should_replace_addmm_activation,
+        )
+
+    counters[
+        "inductor"
+    ] = counters_ref  # clear view matches encountered during mm tracing
 
 
 def is_valid_splitwithsizes_cat(match):
