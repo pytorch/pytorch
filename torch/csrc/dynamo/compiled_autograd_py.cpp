@@ -12,6 +12,7 @@ namespace torch {
 namespace dynamo {
 using namespace torch::autograd;
 using c10::SymInt;
+enum IsDynamic : uint8_t { STATIC = 0, DYNAMIC = 1 };
 
 static PyObject* wrap_variable_list(const variable_list& inputs) {
   PyObject* pyinput = PyList_New(inputs.size());
@@ -48,18 +49,6 @@ static variable_list unwrap_variable_list(PyObject* pyresult) {
   }
   return result;
 }
-
-static std::vector<SymInt> unwrap_symint_list(PyObject* pyresult) {
-  TORCH_CHECK(PyList_CheckExact(pyresult));
-  auto result_len = PyList_GET_SIZE(pyresult);
-  std::vector<SymInt> result;
-  result.reserve(result_len);
-  for (const auto i : c10::irange(result_len)) {
-    result.emplace_back(py::cast<c10::SymInt>(PyList_GET_ITEM(pyresult, i)));
-  }
-  return result;
-}
-
 static PyObject* check(PyObject* pyresult) {
   if (C10_UNLIKELY(pyresult == nullptr)) {
     // see https://github.com/pytorch/pytorch/pull/34845
@@ -96,6 +85,7 @@ struct CacheNode {
   void clear() {
     next.clear();
     key_storage.clear();
+    expected_sizes.clear();
     compiled_fn = nullptr;
   }
 
@@ -109,9 +99,83 @@ struct CacheNode {
   CacheNode& operator=(const CacheNode&) = delete;
   CacheNode& operator=(CacheNode&&) = delete;
 
+  bool check_dynamic_sizes(AutogradCompilerCall& call) {
+    /*
+    We start off by assuming everything is static, then we mark things
+    as dynamic when we see them change.  This function:
+      1) Checks for a cache hit
+      2) Updates expected_sizes to track what is dynamic
+      3) Populates call.dyn_size_inputs by filtering call.all_size_inputs
+    */
+    bool cache_hit = compiled_fn.get() != nullptr;
+    auto len = call.all_size_inputs.size();
+    const int64_t* data = call.all_size_inputs.data();
+    if (expected_sizes.empty()) {
+      expected_sizes.reserve(len);
+      for (const auto i : c10::irange(len)) {
+        // static shape until we see it change
+        expected_sizes.emplace_back(std::make_pair(STATIC, data[i]));
+      }
+    } else {
+      TORCH_CHECK(expected_sizes.size() == call.all_size_inputs.size());
+      for (const auto i : c10::irange(len)) {
+        auto& expected = expected_sizes[i];
+        if (expected.first == DYNAMIC || expected.second != data[i]) {
+          cache_hit = cache_hit && expected.first == DYNAMIC;
+          expected = std::make_pair(DYNAMIC, data[i]);
+          if (call.dyn_size_inputs.empty())
+            call.dyn_size_inputs.reserve(len);
+          call.dyn_size_inputs.emplace_back(data[i]);
+        }
+      }
+    }
+    if (!cache_hit) {
+      compiled_fn = nullptr;
+    }
+    return cache_hit;
+  }
+
+  PyObject* wrap_dynamic_inputs() {
+    size_t dynamic_count = 0;
+    size_t idx = 0;
+    for (const auto& i : expected_sizes) {
+      if (i.first == DYNAMIC) {
+        ++dynamic_count;
+      }
+    }
+    PyObject* pyinput = PyTuple_New(dynamic_count);
+    for (const auto& i : expected_sizes) {
+      if (i.first == DYNAMIC) {
+        PyTuple_SET_ITEM(pyinput, idx++, PyLong_FromSsize_t(i.second));
+      }
+    }
+    TORCH_CHECK(idx == dynamic_count);
+    return pyinput;
+  }
+
+  std::vector<c10::optional<SymInt>> unwrap_dynamic_inputs(PyObject* pyresult) {
+    TORCH_CHECK(PyList_CheckExact(pyresult));
+    size_t idx = 0;
+    size_t result_len = PyList_GET_SIZE(pyresult);
+    std::vector<c10::optional<SymInt>> result;
+    result.reserve(expected_sizes.size());
+    for (const auto& i : expected_sizes) {
+      if (i.first == DYNAMIC) {
+        TORCH_CHECK(idx < result_len);
+        result.emplace_back(
+            py::cast<c10::SymInt>(PyList_GET_ITEM(pyresult, idx++)));
+      } else {
+        result.emplace_back();
+      }
+    }
+    TORCH_CHECK(idx == result_len && result.size() == expected_sizes.size());
+    return result;
+  }
+
   // TODO(jansel): benchmark map vs unordered_map
   std::unordered_map<CacheKey, std::unique_ptr<CacheNode>> next;
   std::vector<CacheKeyBuffer> key_storage;
+  std::vector<std::pair<IsDynamic, int64_t>> expected_sizes;
   THPObjectPtr compiled_fn;
 };
 
@@ -145,11 +209,12 @@ static struct PyModuleDef _module = {
 
 static TraceState call_begin_capture(
     PyObject* self,
+    CacheNode& cache,
     AutogradCompilerCall& compiler_call,
     size_t num_outputs) {
   static PyObject* method_name = PyUnicode_InternFromString("begin_capture");
   THPObjectPtr pyinput(wrap_variable_list(compiler_call.inputs));
-  THPObjectPtr pysizeinput(wrap_int_list(compiler_call.size_inputs));
+  THPObjectPtr pysizeinput(cache.wrap_dynamic_inputs());
   THPObjectPtr pyresult(check(PyObject_CallMethodObjArgs(
       self, method_name, pyinput.get(), pysizeinput.get(), NULL)));
 
@@ -157,7 +222,7 @@ static TraceState call_begin_capture(
   check(PyArg_ParseTuple(pyresult.get(), "OO", &fake_inputs, &fake_sizes));
   return TraceState(
       unwrap_variable_list(fake_inputs),
-      unwrap_symint_list(fake_sizes),
+      cache.unwrap_dynamic_inputs(fake_sizes),
       compiler_call.accumulate_grad,
       num_outputs);
 }
@@ -264,13 +329,15 @@ variable_list compiled_autograd(
     }
   }
 
-  if (!cache->compiled_fn) {
+  // TODO(jansel): many of the dynamic sizes seem to be stored as ints rather
+  // than symints
+  if (!cache->check_dynamic_sizes(compiler_call)) {
     // cache miss, need to capture FX graph
     THPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
 
-    TraceState state =
-        call_begin_capture(py_compiler, compiler_call, output_edges.size());
+    TraceState state = call_begin_capture(
+        py_compiler, *cache, compiler_call, output_edges.size());
 
     std::vector<variable_list> node_outputs;
     node_outputs.reserve(calls.size() + 1);
@@ -360,10 +427,14 @@ variable_list compiled_autograd(
 
   {
     THPObjectPtr inputs(wrap_variable_list(compiler_call.inputs));
-    THPObjectPtr sizes(wrap_int_list(compiler_call.size_inputs));
+    THPObjectPtr sizes(wrap_int_list(compiler_call.dyn_size_inputs));
     THPObjectPtr hooks(convert_hook_list(compiler_call.hooks));
     THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-        cache->compiled_fn, inputs.get(), sizes.get(), hooks.get(), NULL)));
+        cache->compiled_fn.get(),
+        inputs.get(),
+        sizes.get(),
+        hooks.get(),
+        NULL)));
     variable_list outputs = unwrap_variable_list(pyresult);
     if (accumulate_grad) {
       TORCH_CHECK(outputs.size() == compiler_call.set_grad_targets.size());

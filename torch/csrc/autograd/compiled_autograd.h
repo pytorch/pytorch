@@ -112,7 +112,7 @@ struct AutogradCompilerCall {
   }
 
   void add_size_input(const c10::SymInt& s) {
-    size_inputs.emplace_back(s.guard_int(__FILE__, __LINE__));
+    all_size_inputs.emplace_back(s.expect_int());
   }
 
   int emplace_hook(c10::SafePyObject&& fn) {
@@ -120,7 +120,8 @@ struct AutogradCompilerCall {
     return hooks.size() - 1;
   }
 
-  std::vector<int64_t> size_inputs;
+  std::vector<int64_t> all_size_inputs;
+  std::vector<int64_t> dyn_size_inputs;
   std::vector<at::Tensor> inputs;
   std::vector<at::Tensor> set_grad_targets;
   std::vector<c10::SafePyObject> hooks;
@@ -373,7 +374,7 @@ class CompiledNodeArgs {
 struct TraceState {
   TraceState(
       const variable_list& pi,
-      const std::vector<c10::SymInt>& ss,
+      const std::vector<c10::optional<c10::SymInt>>& ss,
       bool accumulate_grad_,
       size_t num_outputs)
       : proxy_inputs_index(0),
@@ -397,7 +398,7 @@ struct TraceState {
     return proxy_inputs[proxy_inputs_index++];
   }
 
-  c10::SymInt next_sym_size() {
+  c10::optional<c10::SymInt> next_sym_size() {
     TORCH_CHECK(sym_sizes_index < sym_sizes.size());
     return sym_sizes[sym_sizes_index++];
   }
@@ -405,7 +406,7 @@ struct TraceState {
   size_t proxy_inputs_index;
   size_t sym_sizes_index;
   variable_list proxy_inputs;
-  std::vector<c10::SymInt> sym_sizes;
+  std::vector<c10::optional<c10::SymInt>> sym_sizes;
   variable_list outputs;
   bool accumulate_grad;
 };
@@ -437,8 +438,11 @@ class SwapSavedVariables {
   }
 
   void before(c10::SymInt& t) {
-    stashed_symints.emplace_back(std::move(t));
-    t = state.next_sym_size();
+    stashed_symints.emplace_back(t);
+    auto opt_value = state.next_sym_size();
+    if (opt_value.has_value()) {
+      t = *opt_value; // dynamic shape
+    }
   }
   void after(c10::SymInt& t) {
     t = std::move(stashed_symints[stashed_symints_index++]);
