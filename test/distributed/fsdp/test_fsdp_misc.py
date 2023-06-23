@@ -483,11 +483,10 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(2)
     def test_cpu_gpu_module(self):
-        """Tests a CPU + GPU module raises warning if device_id is passed
+        """Tests a CPU + GPU module supported if device_id is passed
         in, errors if device_id is not.
         """
         torch.cuda.set_device(self.rank)
-
 
         class CPUGPUModule(nn.Module):
             def __init__(self):
@@ -495,16 +494,13 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 self.a = nn.Linear(1, 1).cuda()
                 self.b = nn.Linear(1, 1)
 
-
-        with self.assertWarnsRegex(
-            UserWarning, "FSDP wrapping module with params"
-        ):
-            FSDP(CPUGPUModule(), device_id=torch.cuda.current_device())
+        cpu_gpu = CPUGPUModule()
+        fsdp = FSDP(cpu_gpu, device_id=torch.cuda.current_device())
+        for param in fsdp.parameters():
+            self.assertEqual(param.device, torch.device(torch.cuda.current_device()))
 
         # without device_id, we hit an error
-        with self.assertRaisesRegex(
-            RuntimeError, "please pass in device_id"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "please pass in device_id"):
             FSDP(CPUGPUModule())
 
     @skip_if_lt_x_gpu(2)
@@ -514,16 +510,12 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         """
         torch.cuda.set_device(self.rank)
 
-
         class MultiGPUModule(nn.Module):
             def __init__(self, rank):
                 super().__init__()
                 self.rank = rank
                 self.a = nn.Linear(1, 1).cuda(self.rank)
-                self.b = nn.Linear(1, 1).cuda(
-                    (self.rank + 1) % dist.get_world_size()
-                )
-
+                self.b = nn.Linear(1, 1).cuda((self.rank + 1) % dist.get_world_size())
 
         with self.assertRaisesRegex(
             RuntimeError, "FSDP only supports single device modules"

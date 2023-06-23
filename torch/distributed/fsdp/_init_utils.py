@@ -512,7 +512,7 @@ def _init_param_handles_from_module(
         state._ignored_modules,
         state._ignored_params,
     )
-    _check_single_device_module(root_module, state._ignored_params)
+    _check_single_device_module(root_module, state._ignored_params, device_id)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
     # Initialize and shard `FlatParamHandle`s one by one following reverse
     # depth-first order (i.e. reverse `.modules()` order), which represents a
@@ -760,16 +760,8 @@ def _check_single_device_module(
     # by another algorithm and may already be on GPU. We'd like to enforce device_id
     # to not be None, otherwise we'd flatten parameters in a mixed module which is
     # not supported.
-    if (
-        len(devices) == 2 and torch.device("cpu") in devices
-    ):
-        if device_id is not None:
-            warnings.warn(
-                f"FSDP wrapping module with params on multiple devices: {devices}"
-                "This could occur in cases where another parallelism algorithm has already"
-                "moved some parameters to a non-CPU device."
-            )
-        else:
+    if len(devices) == 2 and torch.device("cpu") in devices:
+        if device_id is None:
             raise RuntimeError(
                 f"To support partial CPU / GPU module, please pass in device_id argument."
             )
