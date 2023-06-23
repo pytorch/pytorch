@@ -190,9 +190,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         fake_mode = fake_tensor.FakeTensorMode(
             allow_non_fake_inputs=True,
             shape_env=ShapeEnv(
-                allow_scalar_outputs=False,
-                allow_dynamic_output_shape_ops=False,
-                frame_id=0,
+                allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
             ),
         )
         # Fakefy input+model before exporting it

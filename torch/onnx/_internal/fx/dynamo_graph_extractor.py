@@ -178,7 +178,7 @@ class DynamoExport(exporter.FXGraphExtractor):
     ) -> torch.fx.GraphModule:
         # TODO: Discuss whether we want to keep the non-symbolic tracing export
         if options.fake_mode is None:
-            # args will be converted to symbolic tensor. Let's copy to avoid side effects.
+            # args will be converted to fake tensor. Let's copy to avoid side effects.
             args = copy.deepcopy(model_args)
             kwargs = copy.deepcopy(model_kwargs)
         else:
