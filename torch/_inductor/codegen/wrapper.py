@@ -443,6 +443,27 @@ class WrapperCodeGen(CodeGen):
         ssnode = V.graph.stream_graph.name_mapping[node_name]
         kernel_IndentedBuffer.writeline(f"event_{ssnode.get_name()}.record(stream{ssnode.stream_id}_raw)")  
 
+    def generate_codegen_size_asserts(self, node_name, call_strs):
+        wrapper_code = V.graph.wrapper_code
+        kernel_IndentedBuffer = IndentedBuffer()
+        wrapper_code.cuda_event_dependency(node_name, kernel_IndentedBuffer)
+        ssnode = V.graph.stream_graph.name_mapping[node_name]
+        if ssnode.cuda_event:
+            wrapper_code.cuda_event_create(node_name, kernel_IndentedBuffer)
+        stream_id = ssnode.stream_id
+        if stream_id != 0:
+            kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
+            with kernel_IndentedBuffer.indent():
+                for call_str in call_strs:
+                    kernel_IndentedBuffer.writeline(call_str)
+        else:
+            for call_str in call_strs:
+                wrapper_code.writeline(call_str)
+        if ssnode.cuda_event:
+            wrapper_code.cuda_event_record(node_name, kernel_IndentedBuffer)
+        for line in [ _ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
+            wrapper_code.writeline(line)
+
     def generate_extern_kernel_w_stream(self, node_name, call_strs):
         kernel_IndentedBuffer = IndentedBuffer()
         self.cuda_event_dependency(node_name, kernel_IndentedBuffer)

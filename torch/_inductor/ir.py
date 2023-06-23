@@ -2821,11 +2821,14 @@ class ExternKernel(InputsKernel):
 
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts and not V.graph.cpp_wrapper:
+            from .codegen.wrapper import WrapperCodeGen
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
-            wrapper.writeline(
-                f"assert_size_stride({self.get_name()}, {size}, {stride})"
-            )
+            code_line = f"assert_size_stride({self.get_name()}, {size}, {stride})"
+            if isinstance(wrapper, WrapperCodeGen):
+                wrapper.generate_codegen_size_asserts(self.get_name(), [code_line])
+            else:
+                wrapper.writeline(code_line)
 
     def get_group_stride(self):
         """

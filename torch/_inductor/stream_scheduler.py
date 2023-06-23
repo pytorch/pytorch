@@ -128,8 +128,6 @@ class SSGraph:
                 user_ssnode = self.name_mapping[user]
                 user_ssnode.successors[ssnode.get_name()] = ssnode
                 ssnode.predecessors[user_ssnode.get_name()] = user_ssnode
-                # ssnode.successors[user_ssnode.get_name()] = user_ssnode
-                # user_ssnode.predecessors[ssnode.get_name()] = ssnode
         
         for ssnode in self.ssnodes:
             if ssnode.to_output_node:
