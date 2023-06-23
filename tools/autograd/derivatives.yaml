@@ -1365,8 +1365,8 @@
 
 # [Note: Sometimes view derivatives]
 # The following situation applies to other operations as well.
-# TODO: This note is only referenced once by to_dense. Make this
-# more generic if it's been referenced more than once.
+# TODO: This note is only referenced by to_dense and to_sparse*. Make
+# this more generic if it's been referenced more than once.
 #
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
@@ -1696,22 +1696,46 @@
 - name: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
   self: to_dense_backward(grad, self, masked_grad)
 
-- name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse.sparse_dim
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+#
+- name: _to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+# DO NOT define a backward for to_sparse
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_csr
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_csc
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_bsr
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_bsc
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
@@ -1817,7 +1841,7 @@
   result: auto_linear
 
 - name: sparse_mask(Tensor self, Tensor mask) -> Tensor
-  self: grad.to_dense().sparse_mask(mask).to_dense()
+  self: sparse_mask_backward(grad, mask, self.layout())
   mask: non_differentiable
 
 - name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
@@ -1846,7 +1870,11 @@
 
 # NN
 - name: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
-  i1, i2, i3: _trilinear_backward(grad, i1, i2, i3, expand1, expand2, expand3, sumdim, grad_input_mask)
+  i1, i2, i3: "_trilinear_backward(grad,
+               wrap_opt_if(i1, grad_input_mask[1] || grad_input_mask[2]),
+               wrap_opt_if(i2, grad_input_mask[0] || grad_input_mask[2]),
+               wrap_opt_if(i3, grad_input_mask[0] || grad_input_mask[1]),
+               expand1, expand2, expand3, sumdim, grad_input_mask)"
   result: "_trilinear(i1_t, i2_p, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
            _trilinear(i1_p, i2_t, i3_p, expand1, expand2, expand3, sumdim, unroll_dim) +
            _trilinear(i1_p, i2_p, i3_t, expand1, expand2, expand3, sumdim, unroll_dim)"
