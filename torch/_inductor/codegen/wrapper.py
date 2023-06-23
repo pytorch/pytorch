@@ -425,10 +425,15 @@ class WrapperCodeGen(CodeGen):
 
     def cuda_event_dependency(self, node_name, kernel_IndentedBuffer):
         ssnode = V.graph.stream_graph.name_mapping[node_name]
-        for name in ssnode.predecessors:
-            predecessor = ssnode.predecessors[name]
-            if predecessor.stream_id != ssnode.stream_id:
-                kernel_IndentedBuffer.writeline(f"stream{ssnode.stream_id}_raw.wait_event(event_{predecessor.get_name()})")
+        def update_event_dependency(tmp_ssnode):
+            for name in tmp_ssnode.predecessors:
+                predecessor = tmp_ssnode.predecessors[name]
+                if predecessor.stream_id != tmp_ssnode.stream_id:
+                    kernel_IndentedBuffer.writeline(f"stream{tmp_ssnode.stream_id}_raw.wait_event(event_{predecessor.get_name()})")
+        update_event_dependency(ssnode)
+        for predecessor in ssnode.predecessors.values():
+            if predecessor.is_nop_node:
+                update_event_dependency(predecessor)
 
     def cuda_event_create(self, node_name, kernel_IndentedBuffer):
         ssnode = V.graph.stream_graph.name_mapping[node_name]
@@ -454,6 +459,9 @@ class WrapperCodeGen(CodeGen):
         else:
             for call_str in call_strs:
                 writer.writeline(call_str)
+        
+        if ssnode.cuda_event:
+            self.cuda_event_record(node_name, kernel_IndentedBuffer)
         
         for line in [ _ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
             self.writeline(line)

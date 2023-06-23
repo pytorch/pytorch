@@ -40,6 +40,7 @@ class SSNode:
         is_fused: mark if this node is a fused node.
     """
     def __init__(self, original_node) -> None:
+        from .scheduler import NopKernelSchedulerNode
         self.successors = {}
         self.predecessors = {}
         self.name = original_node.get_name() if original_node else ""
@@ -50,6 +51,7 @@ class SSNode:
         self.snode_names = []
         # mark if this node needs to generate a CUDA event
         self.cuda_event = False
+        self.is_nop_node = isinstance(original_node, NopKernelSchedulerNode)
         if hasattr(original_node, "snodes"):
             self.is_fused = True
             for snode in original_node.snodes:
@@ -94,13 +96,14 @@ class SSGraph:
         self.reverse_level = {}
         self.reverse_level_predecessors = {}
         self.critical_path = []
-        self.stream_pool_size = 7
+        self.stream_pool_size = 20
         self.stream_pool = []
         self.build_graph(nodes)
         self.stream_scheduling()
 
 
     def build_graph(self, nodes):
+
         output_node = SSNode(None)
         output_node.name = "OUTPUT"
         self.name_mapping["OUTPUT"] = output_node
