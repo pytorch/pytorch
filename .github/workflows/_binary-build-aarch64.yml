@@ -223,5 +223,4 @@ jobs:
         if: always()
         shell: bash
         run: |
-          # Not using Chown action as it has alpine image hardcoded and does not work with aarch64
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
