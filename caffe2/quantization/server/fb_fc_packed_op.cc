@@ -30,14 +30,14 @@ REGISTER_CPU_OPERATOR(
 using namespace std::placeholders;
 
 vector<int64_t>
-static GetFbgemmTensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
+GetFbgemmTensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
   const unique_ptr<fbgemm::PackedGemmMatrixFP16>* tc =
       static_cast<const unique_ptr<fbgemm::PackedGemmMatrixFP16>*>(c);
   device->set_device_type(PROTO_CPU);
   *capacity = (*tc)->numRows() * (*tc)->numCols() * 2;
   return {(*tc)->numCols(), (*tc)->numRows()};
 }
-static bool Caffe2InitializeFbgemm(int*, char***) {
+bool Caffe2InitializeFbgemm(int*, char***) {
   RegisterTensorInfoFunction(
       TypeMeta::Id<unique_ptr<fbgemm::PackedGemmMatrixFP16>>(),
       GetFbgemmTensorInfo);
