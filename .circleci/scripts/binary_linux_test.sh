@@ -96,7 +96,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "$(uname -m)" == aarch64 ]]; then
-    # Using "extra-index-url" until all needed aarch64 dependencies are 
+    # Using "extra-index-url" until all needed aarch64 dependencies are
     # added to "https://download.pytorch.org/whl/nightly/"
     pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
   else
