@@ -1,3 +1,2 @@
 from .const_prop_pass import ConstPropPass
 from .replace_view_ops_with_view_copy_ops_pass import ReplaceViewOpsWithViewCopyOpsPass
-from .functionalize_side_effectful_ops import _FunctionalizeSideEffectfulOps

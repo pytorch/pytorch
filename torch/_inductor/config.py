@@ -51,6 +51,9 @@ split_cat_fx_passes = True
 # enable reordering pass
 reordering = True
 
+# inductor engine name
+dll_name = "inductor_engine.so"
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 

@@ -43,11 +43,9 @@ class ExportPassBase(PassBase):
     transformations.
     """
 
-    @classmethod
-    def _create_dummy_node_metadata(cls):
-        return NodeMetadata({
-            "stack_trace": traceback.format_exc(-1)
-        })
+    @staticmethod
+    def _create_dummy_node_metadata():
+        return NodeMetadata({"stack_trace": traceback.format_exc(-1)})
 
     @classmethod
     def update_exported_program_signature(

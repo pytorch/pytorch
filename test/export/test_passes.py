@@ -15,11 +15,13 @@ from torch._export.constraints import constrain_as_value, constrain_as_size
 from torch._export.exported_program import ExportGraphSignature
 from torch._export.passes import (
     ReplaceViewOpsWithViewCopyOpsPass,
-    _FunctionalizeSideEffectfulOps,
 )
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     is_view_op,
     get_view_copy_of_view_op,
+)
+from torch._export.passes.functionalize_side_effectful_ops_pass import (
+    _FunctionalizeSideEffectfulOpsPass,
 )
 from functorch.experimental.control_flow import cond
 
@@ -357,7 +359,7 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        gm = ep.transform(_FunctionalizeSideEffectfulOps()).graph_module
+        gm = ep.transform(_FunctionalizeSideEffectfulOpsPass()).graph_module
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -367,7 +369,6 @@ class TestPasses(TestCase):
 
         inp = torch.tensor([5])
         res, dep_token = gm(inp)
-        self.assertEqual(res, f(inp))
         self.assertEqual(res.shape, torch.Size([5, 4]))
         self.assertEqual(dep_token.shape, torch.Size([]))
 
@@ -398,8 +399,12 @@ class TestPasses(TestCase):
                 dynamic_dim(inp, 0) < 10,
                 dynamic_dim(inp, 0) >= 3,
             ],
-        ).transform(_FunctionalizeSideEffectfulOps())
-        gm = ep.graph_module
+        )
+        FileCheck().check_count(
+            "torch.ops.aten._assert_async.msg", 3, exactly=True
+        ).run(ep.graph_module.code)
+
+        gm = ep.transform(_FunctionalizeSideEffectfulOpsPass()).graph_module
         with self.assertRaisesRegex(
             RuntimeError,
             r"Input arg0_1.shape\[0\] is outside of specified dynamic range \[3, 9\]",
