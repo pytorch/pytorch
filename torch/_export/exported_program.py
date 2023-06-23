@@ -7,7 +7,7 @@ from torch._functorch.aot_autograd import FQN, GraphInputName, GraphOutputName
 
 
 import torch
-from torch.fx.passes.pass_manager import PassManager
+from torch.fx.passes.infra.pass_manager import PassManager
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch.fx.experimental.symbolic_shapes import SymInt
@@ -162,6 +162,8 @@ class ExportedProgram:
             copy.deepcopy(self.range_constraints),
             copy.deepcopy(self.equality_constraints),
         )
+        transformed_ep.graph_module.meta.update(self.graph_module.meta)
+        transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
     def _add_runtime_assertions(self) -> "ExportedProgram":
