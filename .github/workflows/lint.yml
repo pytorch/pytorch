@@ -79,7 +79,9 @@ jobs:
         RC=0
 
         # Run lintrunner on just the changed files (a fast validation)
-        if ! lintrunner --force-color --tee-json=lint.json > /dev/null 2>&1; then
+        lintrunner --force-color --tee-json=lint.json > /dev/null 2>&1
+        RC=$?
+        if [ $RC -ne 0 ]; then
           echo ""
           echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`. (If you don't get the same results, run \`lintrunner init\` to update your local linter)\e[0m"
           echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
