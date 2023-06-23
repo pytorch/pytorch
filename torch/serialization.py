@@ -330,7 +330,7 @@ register_package(23, _privateuse1_tag, _privateuse1_deserialize)
 register_package(24, _hpu_tag, _hpu_deserialize)
 
 
-def location_tag(storage: STORAGE):
+def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
         if location:
