@@ -76,7 +76,7 @@ def run_mypy() -> None:
                 directory,
             ]
         )
-        assert not stderr, directory
+        assert not stderr, f"In {directory}, mypy raised error: {stderr}"
         stdout = stdout.replace("*", "")
 
         # Parse the output
@@ -121,7 +121,7 @@ def test_fail(path):
     errors = defaultdict(lambda: "")
 
     output_mypy = OUTPUT_MYPY
-    assert path in output_mypy
+    assert path in output_mypy, f"{path} not in {output_mypy}"
     for error_line in output_mypy[path]:
         error_line = _strip_filename(error_line)
         match = re.match(
@@ -213,7 +213,7 @@ def test_reveal(path):
         lines = _parse_reveals(fin)
 
     output_mypy = OUTPUT_MYPY
-    assert path in output_mypy
+    assert path in output_mypy, f"{path} not in {output_mypy}"
     for error_line in output_mypy[path]:
         match = re.match(
             r"^.+\.py:(?P<lineno>\d+):\d+: note: .+$",
