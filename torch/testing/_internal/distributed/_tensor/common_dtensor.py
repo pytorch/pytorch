@@ -171,7 +171,7 @@ def with_comms(func: TestFunc) -> TestFunc:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         self.init_pg(backend=pg_backend)
-        func(self)  # type: ignore[misc]
+        func(self, *args, **kwargs)  # type: ignore[misc]
         self.destroy_pg()
 
     return wrapper

@@ -3,13 +3,6 @@ custom_classes: []
 include_all_non_op_selectives: false
 include_all_operators: false
 kernel_metadata: {}
-et_kernel_metadata:
-  custom::add_3.out:
-    - v1/6;0,1,2,3|6;0,1,2,3|6;0,1,2,3
-    - v1/3;0,1,2,3|3;0,1,2,3|3;0,1,2,3
-  aten::add.out:
-    - v1/6;0,1,2,3|6;0,1,2,3|6;0,1,2,3
-    - v1/3;0,1,2,3|3;0,1,2,3|3;0,1,2,3
 operators:
   aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams.out:
     debug_info:
