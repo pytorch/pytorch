@@ -3706,6 +3706,8 @@ class TestCudaComm(TestCase):
             cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
             self.assertTrue(torch.equal(x, cat))
 
+
+class TestCudaMallocAsync(TestCase):
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot(self):
         try:
@@ -3833,8 +3835,6 @@ class TestCudaComm(TestCase):
             self.assertTrue(fired)
         finally:
             disarm()
-
-
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
