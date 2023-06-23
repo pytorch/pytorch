@@ -54,8 +54,14 @@ def run_mypy() -> None:
 
     The mypy results are cached in `OUTPUT_MYPY` for further use.
 
+    The cache refresh can be skipped using
+        TORCH_TYPING_TEST_CLEAR_CACHE=0 python test_typing.py
     """
-    if os.path.isdir(CACHE_DIR):
+    # Ref https://github.com/numpy/numpy/blob/dd231b0/numpy/typing/tests/test_typing.py#L78-L82
+    if (
+        os.path.isdir(CACHE_DIR)
+        and bool(os.environ.get("TORCH_TYPING_TEST_CLEAR_CACHE", True))
+    ):
         shutil.rmtree(CACHE_DIR)
 
     for directory in (REVEAL_DIR, PASS_DIR, FAIL_DIR):
@@ -82,7 +88,7 @@ def get_test_cases(directory):
     for root, _, files in os.walk(directory):
         for fname in files:
             if os.path.splitext(fname)[-1] == ".py":
-                fullpath = os.path.join(root, fname)
+                fullpath = os.path.abspath(os.path.join(root, fname))
                 # Use relative path for nice py.test name
                 relpath = os.path.relpath(fullpath, start=directory)
 
@@ -119,7 +125,7 @@ def test_fail(path):
     for error_line in output_mypy[path]:
         error_line = _strip_filename(error_line)
         match = re.match(
-            r"(?P<lineno>\d+): (error|note): .+$",
+            r"(?P<lineno>\d+):\d+: (error|note): .+$",
             error_line,
         )
         if match is None:
@@ -210,16 +216,16 @@ def test_reveal(path):
     assert path in output_mypy
     for error_line in output_mypy[path]:
         match = re.match(
-            r"^.+\.py:(?P<lineno>\d+): note: .+$",
+            r"^.+\.py:(?P<lineno>\d+):\d+: note: .+$",
             error_line,
         )
         if match is None:
             raise ValueError(f"Unexpected reveal line format: {error_line}")
-        lineno = int(match.group("lineno")) - 1
+        lineno = int(match.group("lineno"))
         assert "Revealed type is" in error_line
 
-        marker = lines[lineno]
-        _test_reveal(path, marker, error_line, 1 + lineno)
+        marker = lines[lineno - 1]
+        _test_reveal(path, error_line, marker, lineno)
 
 
 _REVEAL_MSG = """Reveal mismatch at line {}
@@ -230,7 +236,11 @@ Observed reveal: {!r}
 
 
 def _test_reveal(path: str, reveal: str, expected_reveal: str, lineno: int) -> None:
-    if reveal not in expected_reveal:
+    """Test if revealed type matches with expectation.
+
+    reveal is the whole mypy output line; expected_reveal is the string of the type.
+    """
+    if expected_reveal not in reveal:
         raise AssertionError(_REVEAL_MSG.format(lineno, expected_reveal, reveal))
 
 
