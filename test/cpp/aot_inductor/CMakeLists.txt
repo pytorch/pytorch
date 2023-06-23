@@ -31,7 +31,7 @@ target_link_libraries(test_aot_inductor PRIVATE
 )
 
 target_include_directories(test_aot_inductor PRIVATE
-  ${TORCH_SRC_DIR}/_inductor/aot_cpp_include
+  ${TORCH_SRC_DIR}/_inductor/aot_inductor_include
 )
 
 if(USE_CUDA)
