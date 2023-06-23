@@ -1221,7 +1221,9 @@ def emit_body(
 
                 # Condition is between 'wrap_opt_if(var_name,' and ')'.
                 condition_slice = slice(len(rf"wrap_opt_if\({arg.nctype.name},"), -1)
-                wrap_opt_if_condition = wrap_opt_if_match.group(0)[condition_slice].strip()
+                wrap_opt_if_condition = wrap_opt_if_match.group(0)[
+                    condition_slice
+                ].strip()
                 # replace 'grad_input_mask[num]' with 'grad_fn->should_compute_output(num)'
                 wrap_opt_if_condition = re.sub(
                     r"grad_input_mask\[(\d+)\]",
