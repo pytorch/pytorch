@@ -734,7 +734,6 @@ Operator Tags
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
-.. py:module:: torch.utils.viz
 
 .. automodule:: torch.autograd
 .. currentmodule:: torch.autograd
