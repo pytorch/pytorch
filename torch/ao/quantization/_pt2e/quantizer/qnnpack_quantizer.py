@@ -685,6 +685,9 @@ class QNNPackQuantizer(Quantizer):
         self._annotate_input_out_obs_sharing_op(
             torch.nn.modules.Hardtanh, gm, quantization_config
         )
+        self._annotate_input_out_obs_sharing_op(
+            torch.nn.modules.ReLU6, gm, quantization_config
+        )
 
     def _annotate_mean(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
