@@ -149,17 +149,6 @@ inline at::vec::Vectorized<bfloat16> cvt_fp32_to_bf16(
   return res;
 }
 
-inline at::vec::Vectorized<float> cvt_uint8_to_fp32_with_same_elem_num(
-    at::vec::Vectorized<uint8_t> src) {
-  // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
-  return at::vec::convert_uint8_to_float_with_same_elem_num(src);
-}
-
-inline at::vec::Vectorized<uint8_t> cvt_fp32_to_uint8(
-    at::vec::Vectorized<float> src) {
-  return at::vec::convert_float_to_uint8(src);
-}
-
 inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<float> src) {
   auto zeros = at::vec::Vectorized<float>(0);
   auto ones = at::vec::Vectorized<float>(1);
