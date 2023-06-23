@@ -2994,6 +2994,7 @@ class RandomSeeds(ExternKernelOut):
             inputs=[],
             constant_args=[limits.min, limits.max, [count]],
             kernel="aten.randint.low_out",
+            cpp_kernel="at::randint_out",
         )
 
 
