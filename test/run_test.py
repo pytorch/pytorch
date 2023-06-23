@@ -13,7 +13,7 @@ import sys
 import tempfile
 from datetime import datetime
 from distutils.version import LooseVersion
-from typing import Any, cast, Dict, List, NamedTuple, Optional
+from typing import Any, cast, Dict, List, Optional, Union
 
 import pkg_resources
 
@@ -53,10 +53,8 @@ try:
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError as e:
 
-    class ShardedTest(NamedTuple):
-        name: str
-        shard = 0
-        num_shards = 1
+    class ShardedTest:
+        pass
 
     NUM_PROCS = 2
     HAVE_TEST_SELECTION_TOOLS = False
@@ -615,7 +613,7 @@ def run_test(
         and test_module.time is not None
         else None
     )
-    print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
+    print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
     with open(log_path, "w") as f:
         ret_code = retry_shell(
@@ -985,7 +983,7 @@ def get_pytest_args(
     if not is_cpp_test:
         # C++ tests need to be run with pytest directly, not via python
         pytest_args.extend(["-p", "no:xdist", "--use-pytest"])
-        if not options.continue_through_error:
+        if not options.continue_through_error and HAVE_TEST_SELECTION_TOOLS:
             pytest_args.append(f"--sc={stepcurrent_key}")
     else:
         # Use pytext-dist to run C++ tests in parallel as running them sequentially using run_test
@@ -1447,18 +1445,20 @@ def get_selected_tests(options) -> List[ShardedTest]:
         )
         _, tests_from_shard = shards[which_shard - 1]
         selected_tests = tests_from_shard
-    else:
-        selected_tests = [ShardedTest(name=x) for x in selected_tests]
 
     return selected_tests
 
 
-def run_test_module(test: ShardedTest, test_directory: str, options) -> Optional[str]:
+def run_test_module(
+    test: Union[ShardedTest, str], test_directory: str, options
+) -> Optional[str]:
     maybe_set_hip_visible_devies()
 
     # Printing the date here can help diagnose which tests are slow
-    print_to_stderr("Running {} ... [{}]".format(str(test), datetime.now()))
-    handler = CUSTOM_HANDLERS.get(test.name, run_test)
+    print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
+    handler = CUSTOM_HANDLERS.get(
+        test.name if isinstance(test, ShardedTest) else test, run_test
+    )
     return_code = handler(test, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
@@ -1486,7 +1486,11 @@ def run_tests(
 
     # parallel = in parallel with other files
     # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
-    selected_tests_parallel = [x for x in selected_tests if not must_serial(x.name)]
+    selected_tests_parallel = [
+        x
+        for x in selected_tests
+        if not must_serial(x.name if isinstance(x, ShardedTest) else x)
+    ]
     selected_tests_serial = [
         x for x in selected_tests if x not in selected_tests_parallel
     ]
