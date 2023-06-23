@@ -19,8 +19,7 @@ RegisterEngineAllocator cpu_alloc(
   }
 );
 
-namespace at::native::mkldnn{
-void clear_computation_cache();
+namespace at { namespace native { namespace mkldnn {
 
 void clear_computation_cache() {
   // Reset computation_cache for forward convolutions
@@ -28,6 +27,6 @@ void clear_computation_cache() {
   ideep::convolution_forward::t_store().clear();
 }
 
-} // namespace  at::native::mkldnn
+}}} // namespace  at::native::mkldnn
 
 #endif // AT_MKLDNN_ENALBED()

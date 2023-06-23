@@ -123,13 +123,6 @@ class ForeachKernel(Kernel):
             code.splice("pid = tl.program_id(0)")
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size}")
 
-            # Initialize all range variables to avoid a triton bug
-            # with defining vars in if/else blocks
-            for i in range(next(self.iter_vars_count)):
-                code.splice("# Note: initialize vars to work around triton bug")
-                code.splice(f"x{i} = tl.arange(0, XBLOCK)")
-                code.splice("xmask = tl.arange(0, XBLOCK) > XBLOCK")
-
             for sub_kernel in self.sub_kernels:
                 num_elems = int(sympy_product(sub_kernel.numels))
                 self.codegen_pid_range(code, num_elems)

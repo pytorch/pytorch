@@ -14,9 +14,14 @@ from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
 
 import torch
 from torch._subclasses import fake_tensor
-from torch.onnx import _type_utils
+from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher, op_validation
+from torch.onnx._internal.fx import (
+    diagnostics,
+    onnxfunction_dispatcher,
+    op_validation,
+    type_utils as fx_type_utils,
+)
 from torch.utils import _pytree
 
 
@@ -71,7 +76,7 @@ def _location_from_fx_stack_trace(
 
 @_beartype.beartype
 def _retrieve_or_adapt_input_to_graph_set(
-    fx_node_arg: _type_utils.Argument,
+    fx_node_arg: fx_type_utils.Argument,
     fx_name_to_onnxscript_value: Dict[
         str,
         Union[
@@ -149,7 +154,9 @@ def _retrieve_or_adapt_input_to_graph_set(
             sequence_elements.append(fx_name_to_onnxscript_value[tensor.name])
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
-        onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
+        onnx_tensor = int(
+            jit_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type()
+        )
 
     # all other cases, we do nothing.
     return onnx_tensor
@@ -175,7 +182,7 @@ def filter_incompatible_and_dtype_convert_kwargs(kwargs):
                 continue
             else:
                 filtered["dtype"] = int(
-                    _type_utils.JitScalarType.from_dtype(value).onnx_type()
+                    jit_type_utils.JitScalarType.from_dtype(value).onnx_type()
                 )
             continue
         filtered[key] = value
@@ -235,7 +242,7 @@ def _fill_tensor_shape_type(
 @_beartype.beartype
 def _fill_in_default_kwargs(
     node: torch.fx.Node,
-) -> Tuple[List[_type_utils.Argument], Dict[str, _type_utils.Argument]]:
+) -> Tuple[List[fx_type_utils.Argument], Dict[str, fx_type_utils.Argument]]:
     """Find and Fill in the not provided kwargs with default values."""
 
     # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
@@ -249,8 +256,8 @@ def _fill_in_default_kwargs(
 
     # This function assumes the order of arguments in FX op is the
     # same as the order of arguments in TorchScript op.
-    complete_args: List[_type_utils.Argument] = []
-    complete_kwargs: Dict[str, _type_utils.Argument] = {}
+    complete_args: List[fx_type_utils.Argument] = []
+    complete_kwargs: Dict[str, fx_type_utils.Argument] = {}
 
     if inspect.isbuiltin(node.target):
         complete_args = list(node.args)
@@ -269,8 +276,8 @@ def _fill_in_default_kwargs(
 
 @_beartype.beartype
 def _wrap_fx_args_as_onnxscript_args(
-    complete_args: List[_type_utils.Argument],
-    complete_kwargs: Dict[str, _type_utils.Argument],
+    complete_args: List[fx_type_utils.Argument],
+    complete_kwargs: Dict[str, fx_type_utils.Argument],
     fx_name_to_onnxscript_value: Dict[
         str,
         Union[
@@ -292,7 +299,7 @@ def _wrap_fx_args_as_onnxscript_args(
             ]
         ]
     ],
-    Dict[str, _type_utils.Argument],
+    Dict[str, fx_type_utils.Argument],
 ]:
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
