@@ -2427,6 +2427,37 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
       "nccl:_reduce_scatter_base");
 }
 
+c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const ReduceScatterOptions& opts) {
+  return collective(
+      inputs,
+      outputs,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        if (!avoidRecordStreams_) {
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
+        }
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        auto ncclReduceOp = getNcclReduceOp(
+            opts.reduceOp, input, ncclDataType, comm, /*dev_in_group=*/0);
+        return ncclReduceScatter(
+            input.data_ptr(),
+            output.data_ptr(),
+            output.numel(),
+            ncclDataType,
+            ncclReduceOp,
+            comm,
+            stream.stream());
+      },
+      OpType::COALESCED,
+      "nccl:reduce_scatter_tensor_coalesced");
+}
+
 c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
       static_cast<int>(

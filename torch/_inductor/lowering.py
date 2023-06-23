@@ -13,7 +13,9 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
+    canonicalize_dim,
     canonicalize_dims,
+    check,
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -230,6 +232,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
         return out
 
     aten_fns = get_overloads(aten_fn)
+    foreach_ops.update(aten_fns)
     lowerings.update({fn: wrapped for fn in aten_fns})
     return wrapped
 
@@ -433,11 +436,6 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     for t in args
                 )
 
-        def realize_inputs(*args):
-            for arg in args:
-                if isinstance(arg, TensorBox):
-                    arg.data.realize()
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         # Note: we'll fallback on type promotion until
@@ -449,6 +447,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
                 out[(args[0].get_device(), use_foreach)].append((i, args))
             return out
+
+        realize_outputs = False
+        for node in V.graph.current_node.users:
+            for user in node.users:
+                if not (user.op == "call_function" and user.target in foreach_ops):
+                    realize_outputs = True
 
         # replicate scalar input to match lenghth of list input
         if len(inputs) > 1 and not isinstance(inputs[1], (list, tuple)):
@@ -462,9 +466,6 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 output_ind,
                 args,
             ) in group:
-                if device.type == "cuda" and use_foreach:
-                    realize_inputs(*args)
-
                 if allow_alpha:
                     output = pw_fn(*args, alpha=alpha)
                 else:
@@ -472,7 +473,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach:
+                if device.type == "cuda" and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -898,11 +899,17 @@ def as_strided(x, size, stride, storage_offset=None):
     return TensorBox(ir.ReinterpretView(storage, new_layout))
 
 
-@register_lowering(aten.as_strided_)
+@register_lowering(aten.as_strided_, type_promotion_kind=None)
 def as_strided_(x, size, stride, storage_offset=None):
     assert isinstance(x, TensorBox)
     x.data = as_strided(x, size, stride, storage_offset).data
     return x
+
+
+@register_lowering(aten.as_strided_copy, type_promotion_kind=None)
+def as_strided_copy(x, size, stride, storage_offset=None):
+    result = as_strided(x, size, stride, storage_offset)
+    return clone(result)
 
 
 @register_lowering(aten.cat)
@@ -916,6 +923,65 @@ def cat(inputs, dim=0):
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
+
+
+@register_lowering(aten.diagonal, type_promotion_kind=None)
+def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    original_shape = input.get_size()
+    num_dims = len(original_shape)
+    dim1 = canonicalize_dim(idx=dim1, rank=num_dims)
+    dim2 = canonicalize_dim(idx=dim2, rank=num_dims)
+
+    check(
+        dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
+    )
+
+    evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
+    offset_negative = evaluate_expr(sympy.Lt(offset, 0))
+    if offset_negative:
+        diag_size = max(min(original_shape[dim1] + offset, original_shape[dim2]), 0)
+    else:
+        diag_size = max(min(original_shape[dim1], original_shape[dim2] - offset), 0)
+
+    base_idx = (0, 0)
+    if offset_negative:
+        base_idx = (-offset, 0)
+    else:
+        base_idx = (0, offset)
+
+    sizes = [s for i, s in enumerate(original_shape) if i not in (dim1, dim2)]
+    sizes.append(diag_size)
+
+    def reindexer(idx):
+        diag_idx = idx[-1]
+        original_idx = [0] * len(original_shape)
+        cur_dim = 0
+        for d in range(num_dims):
+            if d == dim1:
+                original_idx[d] = diag_idx + base_idx[0]
+            elif d == dim2:
+                original_idx[d] = diag_idx + base_idx[1]
+            else:
+                original_idx[d] = idx[cur_dim]
+                cur_dim += 1
+
+        assert cur_dim == len(original_shape) - 2
+        return original_idx
+
+    return TensorBox(ir.GenericView.create(input, sizes, reindexer))
+
+
+@register_lowering(aten.diagonal_copy, type_promotion_kind=None)
+def diagonal_copy(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    return clone(diagonal(input, offset, dim1, dim2))
+
+
+@register_lowering(aten.diagonal_scatter, type_promotion_kind=None)
+def diagonal_scatter(input, src, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    output = clone(input)
+    target = diagonal(output, offset, dim1, dim2)
+    mutate_to(target, src)
+    return output
 
 
 @register_lowering(aten.select, type_promotion_kind=None)
@@ -1535,8 +1601,6 @@ make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
 make_fallback(aten.cumprod, warn=False)
-make_fallback(aten.diagonal_copy, warn=False)
-make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -1569,7 +1633,6 @@ make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
 make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
-make_fallback(aten.logaddexp2)
 make_fallback(aten.logcumsumexp)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
@@ -1587,7 +1650,6 @@ make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.put)
 make_fallback(aten.reflection_pad1d)
-make_fallback(aten.renorm)
 make_fallback(aten.replication_pad1d)
 make_fallback(aten.resize)
 make_fallback(aten.resize_)
@@ -1627,7 +1689,6 @@ make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
 make_fallback(aten.avg_pool3d_backward)
 make_fallback(aten._cdist_backward)
-make_fallback(aten.diagonal_backward, warn=False)
 make_fallback(aten._embedding_bag_dense_backward)
 make_fallback(aten.fractional_max_pool2d_backward)
 make_fallback(aten.fractional_max_pool3d_backward)
@@ -1653,6 +1714,7 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.index_reduce)
 make_fallback(aten.masked_scatter)
 make_fallback(aten.to_sparse)
+make_fallback(aten._to_sparse)
 make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
@@ -1828,7 +1890,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    if isinstance(data, sympy.Symbol):
+    if isinstance(data, sympy.Expr):
         ranges = []
 
         def inner_fn(index):
@@ -3107,12 +3169,17 @@ def max_pool2d_with_indices_backward(
             x_stride = x.get_stride()
         except AttributeError:
             x_stride = None
-    if (
-        (x_stride is not None and x_stride[1] == 1)
-        or (gO_stride is not None and gO_stride[1] == 1)
-        or any(d != 1 for d in dilation)
-    ):
-        # don't codegen channels-last, it's very slow
+
+    is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
+        gO_stride is not None and gO_stride[1] == 1
+    )
+    autotune = (
+        config.coordinate_descent_tuning
+        or config.max_autotune
+        or config.max_autotune_pointwise
+    )
+    if any(d != 1 for d in dilation) or (is_channels_last and not autotune):
+        # don't codegen channels-last when autotune is not enabled, it's very slow
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
@@ -4270,6 +4337,11 @@ try:
     @register_lowering(c10d_functional.all_reduce_coalesced)
     def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
         return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+
+    @register_lowering(c10d_functional.all_gather_into_tensor_coalesced)
+    def all_gather_into_tensor_coalesced(self, tag, ranks, group_size):
+        result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
+        return list(map(TensorBox.create, result))
 
 except ImportError:
     log.info(
