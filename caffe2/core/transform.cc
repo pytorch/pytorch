@@ -193,7 +193,7 @@ NetDef ApplyTransform(const string& key, const NetDef& netdef) {
   return t->ApplyTo(netdef);
 }
 
-static double average_net_run_duration(
+double average_net_run_duration(
     const NetDef& netdef,
     const NetDef& init_netdef,
     const int warmup_runs,
