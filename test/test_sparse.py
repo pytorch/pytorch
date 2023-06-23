@@ -4817,7 +4817,7 @@ class TestSparseAny(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    @dtypes(torch.int8, torch.half, torch.bfloat16)
+    @dtypes(torch.int8, torch.half)
     def test_structured_sparse_linear(self, device, dtype):
         def make_tensor(shape, dtype):
             if dtype.is_complex:
@@ -4840,7 +4840,7 @@ class TestSparseAny(TestCase):
                 i = random.randint(0, len(choices) - 1)
             return choices[i]
 
-        def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias, activation, rtol, atol):
+        def run_test(batch_shape, m, n, k, device, dtype, dtype_out, add_bias, activation):
             weight = make_tensor((m, k), dtype).to(device)
             input = make_tensor((*batch_shape, n, k), dtype).to(device)
             bias = make_tensor((m,), dtype_out).to(device) if add_bias else None
@@ -4865,21 +4865,18 @@ class TestSparseAny(TestCase):
                 weight_sparse = weight.masked_select(mask).view(m, k // 2)
 
                 output1, meta = torch._structured_sparse_linear(input, weight_sparse, mask, bias=bias, activation=activation)
-                torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
+                torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=1e-3, atol=1e-3)
 
                 output1, _ = torch._structured_sparse_linear(input, weight_sparse, meta, bias=bias, activation=activation)
-                torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
+                torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=1e-3, atol=1e-3)
 
         is_sm8x = torch.cuda.get_device_capability(0)[0] == 8
         if not is_sm8x:
             return
 
         batch_shapes = [[], [3], [3, 1]]
-        dtype_out = {torch.int8: torch.int32, torch.half: torch.half, torch.bfloat16: torch.bfloat16}
+        dtype_out = {torch.int8: torch.int32, torch.half: torch.half}
         activations = [None, "relu", "silu"]
-        rtol, atol = 1e-3, 1e-3
-        if dtype == torch.bfloat16:
-            rtol, atol = 5e-3, 5e-3
         for (batch_shape, m, n, k, add_bias, activation) in \
                 itertools.product(batch_shapes, range(3), range(3), range(3), (False, True), activations):
             if activation == "silu" and dtype == torch.int8:
@@ -4888,7 +4885,7 @@ class TestSparseAny(TestCase):
             m = 2 ** m * 32
             n = 2 ** n * 32
             k = 2 ** k * 128
-            run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias, activation, rtol, atol)
+            run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias, activation)
 
     @onlyCPU
     @all_sparse_layouts('layout', include_strided=True)

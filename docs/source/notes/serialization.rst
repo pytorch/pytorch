@@ -344,6 +344,9 @@ earlier versions do not understand the new behavior.
 
 .. _utility functions:
 
+Utility functions
+-----------------
+
 The following utility functions are related to serialization:
 
 .. currentmodule:: torch.serialization

@@ -98,13 +98,14 @@ def register_package(
     '''
     Registers callables for tagging and deserializing storage objects with an associated priority.
     Tagging associates a device with a storage object at save time while deserializing moves a
-    storage object to an appropriate device at load time. Taggers and deserializers are run in the
-    order given by their priority until a tagger/deserializer returns a value that is not `None`.
+    storage object to an appropriate device at load time. :attr:`tagger` and :attr:`deserializer`
+    are run in the order given by their :attr:`priority` until a tagger/deserializer returns a
+    value that is not `None`.
 
     To override the deserialization behavior for a device in the global registry, one can register a
     tagger with a higher priority than the existing tagger.
 
-    This function can also be used to register taggers and deserializers for new devices.
+    This function can also be used to register a tagger and deserializer for new devices.
 
     Args:
         priority: Indicates the priority associated with the tagger and deserializer, where a lower
