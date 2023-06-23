@@ -1624,7 +1624,7 @@ def main():
 
     prioritized_tests = []
     remaining_tests = selected_tests
-    if IS_CI:
+    if IS_CI and HAVE_TEST_SELECTION_TOOLS:
         (prioritized_tests, remaining_tests) = get_reordered_tests(selected_tests)
         log_time_savings(
             selected_tests,
