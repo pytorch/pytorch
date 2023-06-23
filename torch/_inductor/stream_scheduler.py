@@ -39,12 +39,12 @@ class SSNode:
         cuda_event: mark if this node needs to generate a CUDA event. CUDA events are used to keep the data dependencies between streams.
         is_fused: mark if this node is a fused node.
     """
-    def __init__(self, original_node, node_id) -> None:
-        self.node_id = node_id
+    def __init__(self, original_node) -> None:
         self.successors = {}
         self.predecessors = {}
         self.name = original_node.get_name() if original_node else ""
         self.original_user_names = []
+        self.to_output_node = False
         # -1 means not assigned
         self.stream_id = -1
         self.snode_names = []
@@ -56,13 +56,23 @@ class SSNode:
                 self.snode_names.append(snode.get_name())
             for snode in original_node.snodes:
                 for user in snode.users:
-                    if user.get_name() not in self.snode_names and user.get_name() not in self.original_user_names:
-                        self.original_user_names.append(user.get_name())
+                    if user.get_name() == 'OUTPUT':
+                        self.to_output_node = True
+                # TODO: change to follow rules same with create_fx_from_snodes
+                for user in snode.read_writes.reads:
+                    if user.name not in self.snode_names and user.name not in self.original_user_names:
+                        if user.name != snode.get_name():
+                            self.original_user_names.append(user.name)
+            
         else:
             self.is_fused = False
             if original_node is not None:
                 for user in original_node.users:
-                    self.original_user_names.append(user.get_name())
+                    if user.get_name() == 'OUTPUT':
+                        self.to_output_node = True
+                for user in original_node.read_writes.reads:
+                    if user.name != original_node.get_name():
+                        self.original_user_names.append(user.name)
     def get_name(self):
         return self.name
 class SSGraph:
@@ -84,30 +94,44 @@ class SSGraph:
         self.reverse_level = {}
         self.reverse_level_predecessors = {}
         self.critical_path = []
-        self.stream_pool_size = 3
+        self.stream_pool_size = 7
         self.stream_pool = []
         self.build_graph(nodes)
         self.stream_scheduling()
 
 
     def build_graph(self, nodes):
-        for node_id, node in enumerate(nodes):
-            new_ssnode = SSNode(node, node_id)
+        output_node = SSNode(None)
+        output_node.name = "OUTPUT"
+        self.name_mapping["OUTPUT"] = output_node
+        for node in nodes:
+            new_ssnode = SSNode(node)
             self.ssnodes.append(new_ssnode)
             self.name_mapping[node.get_name()] = new_ssnode
             if new_ssnode.is_fused:
                 for snode in new_ssnode.snode_names:
                     self.name_mapping[snode] = new_ssnode
-        output_node = SSNode(None, len(nodes))
-        output_node.name = "OUTPUT"
-        self.name_mapping["OUTPUT"] = output_node
+
+        # clean the freed buffers
+        for snode in self.ssnodes:
+            for user in snode.original_user_names:
+                if user not in self.name_mapping:
+                    snode.original_user_names = [user for user in snode.original_user_names if user in self.name_mapping]
+                    break
         self.ssnodes.append(output_node)
+        # breakpoint()
         def update_successor_predecessor(ssnode, user_names):
             for user in user_names:
                 user_ssnode = self.name_mapping[user]
-                ssnode.successors[user_ssnode.get_name()] = user_ssnode
-                user_ssnode.predecessors[ssnode.get_name()] = ssnode
+                user_ssnode.successors[ssnode.get_name()] = ssnode
+                ssnode.predecessors[user_ssnode.get_name()] = user_ssnode
+                # ssnode.successors[user_ssnode.get_name()] = user_ssnode
+                # user_ssnode.predecessors[ssnode.get_name()] = ssnode
+        
         for ssnode in self.ssnodes:
+            if ssnode.to_output_node:
+                output_node.predecessors[ssnode.get_name()] = ssnode
+                ssnode.successors[output_node.get_name()] = output_node
             update_successor_predecessor(ssnode, ssnode.original_user_names)
         tmp_queue = []
         self.reverse_level[output_node] = 0
@@ -116,12 +140,16 @@ class SSGraph:
             # only append the node that has only one successor OUTPUT
             if len(predecessor.successors) == 1:
                 tmp_queue.append(predecessor)
+        # TODO: add a count to avoid infinite loop
         while len(tmp_queue) != 0:
             cur_node = tmp_queue.pop(0)
+            
             # if one of the successors is not assigned, then we cannot assign the level to cur_node
             for successor in cur_node.successors.values():
                 if successor not in self.reverse_level:
                     if successor not in tmp_queue:
+                        if len(cur_node.successors) == 1:
+                            tmp_queue.append(successor)
                         # Yueming TODO: This can be delayed.
                         tmp_queue.append(cur_node)
                     break;
@@ -138,11 +166,11 @@ class SSGraph:
                         self.reverse_level_predecessors[cur_node] = successor
                 for predecessor in cur_node.predecessors.values():
                     tmp_queue.append(predecessor)
-        max_key = max(self.reverse_level, key=self.reverse_level.get)
-        max_value = self.reverse_level[max_key]
-        log.info(f"max level is {max_value}, and the node is {max_key.get_name()}")
-        if 'buf0' not in max_key.get_name():
-            log.warning(f"buf0's level is {self.reverse_level[self.name_mapping['buf0']]}")
+        buf0_level = self.reverse_level[self.name_mapping['buf0']]
+        log.info(f"buf0's level is {buf0_level}")
+        for ssnode, level in self.reverse_level.items():
+            if level > buf0_level:
+                log.info(f"node {ssnode.get_name()} is in level {level}")
         cur_node = self.name_mapping["buf0"]
         while(cur_node.get_name() != "OUTPUT"):
             self.critical_path.append(cur_node)

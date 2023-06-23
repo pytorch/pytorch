@@ -455,7 +455,7 @@ class WrapperCodeGen(CodeGen):
             for call_str in call_strs:
                 writer.writeline(call_str)
         
-        for line in kernel_IndentedBuffer.getrawvalue().split("\n"):
+        for line in [ _ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
             self.writeline(line)
 
     def generate_extern_kernel_alloc(self, output_name, kernel, args, origin_node):

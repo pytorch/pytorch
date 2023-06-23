@@ -783,13 +783,11 @@ class Scheduler:
         self.create_foreach_nodes()
         self.fuse_nodes()
         self.compute_last_usage()
-        # import pdb
-        # breakpoint()
-        if config.multiple_streams:
-            stream_scheduler.stream_schedule(self.nodes)
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
+        if config.multiple_streams:
+            stream_scheduler.stream_schedule(self.nodes)
 
         # used during codegen:
         self.current_device = None
@@ -1431,7 +1429,7 @@ class Scheduler:
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
-            print(f"findhao-> node name: {node.get_name()}")
+            # print(f"findhao-> node name: {node.get_name()}")
             if node.is_template():
                 node, *epilogue = node.get_nodes()
                 self.get_backend(device).codegen_template(node, epilogue)

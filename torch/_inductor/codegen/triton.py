@@ -2140,11 +2140,9 @@ class TritonScheduling:
         node_name = node_schedule[0].get_name()
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
-        if len(node_schedule) > 1:
-            print("findhao-> node_schedule: ", node_schedule)
         ssnode = V.graph.stream_graph.name_mapping[node_name]
         stream_id = ssnode.stream_id
-        print(f"findhao-> kernel_name: {kernel_name}, stream_id: {stream_id}")
+        # print(f"findhao-> kernel_name: {kernel_name}, stream_id: {stream_id}")
         kernel_IndentedBuffer = IndentedBuffer()
         wrapper = V.graph.wrapper_code
         wrapper.cuda_event_dependency(node_name, kernel_IndentedBuffer)
@@ -2158,7 +2156,7 @@ class TritonScheduling:
             kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
         if ssnode.cuda_event:
             wrapper.cuda_event_record(node_name, kernel_IndentedBuffer)
-        for line in kernel_IndentedBuffer.getrawvalue().split("\n"):
+        for line in [_ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
             V.graph.wrapper_code.writeline(line)
 
         if config.warn_mix_layout:
