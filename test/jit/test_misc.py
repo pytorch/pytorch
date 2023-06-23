@@ -204,9 +204,6 @@ class TestMisc(JitTestCase):
         actual = script_index_fn(input2.clone(), index2, value2)
         self.assertEqual(expect, actual)
 
-
-
-
     def test_export_opnames_interface(self):
 
         @torch.jit.interface
