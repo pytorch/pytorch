@@ -43,7 +43,7 @@ struct ParamsEqual {
 template <typename T>
 struct ParamsWrapper {
   T pod;
-  static_assert(std::is_standard_layout_v<T>, "ParamsWrapper wraps non-POD data");
+  static_assert(std::is_standard_layout_v<T>, "ParamsWrapper cannot wrap non-POD data");
 
   ParamsWrapper() {
     memset(&(this->pod), 0, sizeof(T));
@@ -64,7 +64,7 @@ template <typename ParamsWrapper>
 struct ParamsWrapperHash {
   // Params must be a POD because we read out its memory
   // contents as char* when hashing
-  static_assert(std::is_standard_layout_v<decltype(ParamsWrapper::pod)>, "ParamsWrapper wraps non-POD data");
+  static_assert(std::is_standard_layout_v<decltype(ParamsWrapper::pod)>, "ParamsWrapper cannot wrap non-POD data");
 
   size_t operator()(const ParamsWrapper& params_wrapper) const {
     auto ptr = reinterpret_cast<const uint8_t*>(&(params_wrapper.pod));
@@ -81,7 +81,7 @@ template <typename ParamsWrapper>
 struct ParamsWrapperEqual {
   // Params must be a POD because we read out its memory
   // contents as char* when comparing
-  static_assert(std::is_standard_layout_v<decltype(ParamsWrapper::pod)>, "ParamsWrapper wraps non-POD data");
+  static_assert(std::is_standard_layout_v<decltype(ParamsWrapper::pod)>, "ParamsWrapper cannot wrap non-POD data");
 
   bool operator()(const ParamsWrapper& a, const ParamsWrapper& b) const {
     auto ptr1 = reinterpret_cast<const uint8_t*>(&(a.pod));
