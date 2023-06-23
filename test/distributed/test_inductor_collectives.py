@@ -17,10 +17,10 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedMultiProcTestCase,
     _dynamo_dist_per_rank_init,
     requires_nccl,
-    skip_if_lt_x_gpu
+    skip_if_lt_x_gpu,
+    skip_if_rocm
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch._inductor.utils import has_triton, run_and_get_triton_code
 import torch._dynamo.logging
 
@@ -156,6 +156,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allgather_into_tensor_inductor(self):
@@ -576,6 +577,4 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-
-    if not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()
