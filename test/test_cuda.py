@@ -35,18 +35,13 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
     get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-# We cannot import TEST_CUDA and TEST_MULTIGPU from torch.testing._internal.common_cuda here,
-# because if we do that, the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed
-# multiple times as well during the execution of this test suite, and it will
-# cause CUDA OOM error on Windows.
-TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
@@ -64,13 +59,9 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (torch.cuda.get_allocator_backend() == "cudaMallocAsync")
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
-TEST_CUDNN = TEST_CUDA
 TEST_BF16 = False
 TEST_PYNVML = not torch.cuda._HAS_PYNVML
 if TEST_CUDA:
-    torch.ones(1).cuda()  # initialize cuda context
-    TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
-                                torch.backends.cudnn.is_acceptable(torch.tensor(1., device=torch.device('cuda:0'))))
     TEST_LARGE_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 12e9
     TEST_MEDIUM_TENSOR = torch.cuda.get_device_properties(0).total_memory >= 6e9
     TEST_BF16 = torch.cuda.is_bf16_supported()
