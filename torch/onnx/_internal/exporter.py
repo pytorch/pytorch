@@ -458,7 +458,6 @@ class Exporter:
             *self.model_args, **self.model_kwargs
         )
 
-        # TODO: Symbolic tracing does not like most of these passes. Why?!
         # TODO: Design the passes API
         graph_module = pre_export_passes(
             self.options, self.model, graph_module, updated_model_args
