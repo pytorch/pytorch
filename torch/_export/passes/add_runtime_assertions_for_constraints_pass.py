@@ -278,7 +278,6 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                 for i, sym in enumerate(val.shape):
                     cbs, msgs = add_assertions(sym)
                     for cb, msg in zip(cbs, msgs):
-
                         def sym_size_cb(proxy, assert_msg, dim):
                             dim_proxy = super(_AddRuntimeAssertionsForConstraintsPass, self).call_operator(
                                 torch.ops.aten.sym_size.int,
@@ -287,11 +286,9 @@ class _AddRuntimeAssertionsForConstraintsPass(ExportPassBase):
                                 self._create_dummy_node_metadata(),
                             )
                             cb(proxy=dim_proxy, assert_msg=assert_msg)
-
                         call_backs.append(partial(sym_size_cb, dim=i))
                         messages.append(f".shape[{i}]" + msg)
             return call_backs, messages
-
         callbacks, messages = add_assertions(val)
         for cb, msg in zip(callbacks, messages):
             cb(proxy=ret, assert_msg=f"{ret.node}" + msg)
