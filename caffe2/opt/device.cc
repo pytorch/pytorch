@@ -5,7 +5,7 @@
 using namespace nom;
 using namespace nom::repr;
 
-static std::vector<NNGraph::EdgeRef> getInputEdges(
+std::vector<NNGraph::EdgeRef> getInputEdges(
     const NNGraph::SubgraphType& sg,
     const NNGraph& g) {
   std::vector<NNGraph::EdgeRef> inputTensorEdges;
@@ -23,7 +23,7 @@ static std::vector<NNGraph::EdgeRef> getInputEdges(
   return inputTensorEdges;
 }
 
-static std::vector<NNGraph::EdgeRef> getOutputEdges(
+std::vector<NNGraph::EdgeRef> getOutputEdges(
     const NNGraph::SubgraphType& sg,
     const NNGraph& g) {
   std::vector<NNGraph::EdgeRef> outputTensorEdges;
