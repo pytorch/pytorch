@@ -96,7 +96,7 @@ class OnnxFunctionDispatcher:
         # If there are no overloaded functions available for the given FX node, raise an
         # unsupported error
         all_functions, custom_functions = self.get_function_overloads(
-            node, aten_name, onnx_args, diagnostic_context
+            node, aten_name, diagnostic_context
         )
         # If there are overloaded functions available, we will find one that perfect or
         # nearest matches the given arguments and keyword arguments
