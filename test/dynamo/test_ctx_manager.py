@@ -291,14 +291,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
         "Can't run fused SDPA on this platform",
     )
-    @expectedFailureDynamic
+
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
                 with torch.autocast("cpu"):
                     with torch.autocast("cuda", dtype=torch.float32):
                         out = F.scaled_dot_product_attention(
-                            query, key, value, None, 0.5, True
+                            query, key, value, None, 0.0, True
                         )
                 return out
 
