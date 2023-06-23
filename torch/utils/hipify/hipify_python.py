@@ -60,7 +60,7 @@ HIPIFY_FINAL_RESULT: HipifyFinalResult = {}
 to their actual types."""
 PYTORCH_TEMPLATE_MAP = {"Dtype": "scalar_t", "T": "scalar_t"}
 
-__all__ = ['InputError', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_extensions', 'matched_files_iter',
+__all__ = ['InputError', 'CurrentState', 'HipifyResult', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_extensions', 'matched_files_iter',
            'preprocess_file_and_save_result', 'compute_stats', 'add_dim3', 'processKernelLaunches', 'find_closure_group',
            'find_bracket_group', 'find_parentheses_group', 'replace_math_functions', 'hip_header_magic', 'replace_extern_shared',
            'get_hip_file_path', 'is_out_of_place', 'is_pytorch_file', 'is_cusparse_file', 'is_special_file', 'is_caffe2_gpu_file',
@@ -879,7 +879,7 @@ def preprocessor(
                         HIPIFY_FINAL_RESULT[header_filepath] = header_result
                         return templ.format(os.path.relpath(header_fout_path if header_fout_path is not None
                                                     else header_filepath, header_dir))
-                hipified_header_filepath = HIPIFY_FINAL_RESULT[header_filepath]["hipified_path"]
+                hipified_header_filepath = HIPIFY_FINAL_RESULT[header_filepath].hipified_path
                 return templ.format(os.path.relpath(hipified_header_filepath if hipified_header_filepath is not None
                                                     else header_filepath, header_dir))
 
