@@ -465,11 +465,14 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 if not (user.op == "call_function" and user.target in foreach_ops):
                     realize_outputs = True
 
-        list_inputs = [l for l in inputs if isinstance(l, (list, tuple))]
+        a_list_input = None
+        for input in inputs:
+            if isinstance(input, (list, tuple)):
+                a_list_input = input
+                break
         assert (
-            len(list_inputs) >= 1
+            a_list_input is not None
         ), "at least one input must be a list to a foreach op"
-        a_list_input = list_inputs[0]
 
         # broadcast scalar inputs to match length of list inputs
         broadcast_inputs = []
