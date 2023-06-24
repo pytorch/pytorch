@@ -850,3 +850,12 @@ def classproperty(func):
 # Whether we are compiling with torch.compile or not
 def is_compiling():
     return False
+
+
+def _get_device_module(device_type: str):
+    device_module = getattr(torch, device_type, None)
+    if device_module is None:
+        raise RuntimeError(
+            f"invalid device type {device_type}, no module named torch.{device_type}."
+        )
+    return device_module

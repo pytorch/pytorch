@@ -39,6 +39,7 @@ from .planner import (
 from .utils import _create_file_view
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch._utils import _get_device_module
 
 __all__ = [
     "FileSystemWriter",
@@ -127,8 +128,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.idx = 0
         self.started = False
         self.device_type = (getattr(stream, "device", torch.device("cuda"))).type
-        assert self.device_type in ["cuda", torch._C._get_privateuse1_backend_name()]
-        self.device_module = getattr(torch, self.device_type)
+        self.device_module = _get_device_module(self.device_type)
         self.stream = stream or self.device_module.current_stream()
         if self.stream != self.device_module.current_stream():
             self.stream.wait_stream(self.device_module.current_stream())
