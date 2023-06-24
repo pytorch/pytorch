@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _FSDPState, _get_param_to_fqns
 from torch.distributed.fsdp.flat_param import FlatParamHandle
 
-_HandlesKey = Tuple[FlatParamHandle, ...]
+_HandlesKey = Tuple[int, ...]
 
 
 class _ExecOrderWarnStatus(Enum):
@@ -62,7 +62,7 @@ class _ExecOrderData:
         self.all_handles: List[FlatParamHandle] = []
         # Maps each handle to its index in `all_handles`, which must be the
         # same across ranks for the execution order validation to work
-        self.handle_to_handle_index: Dict[FlatParamHandle, int] = {}
+        self.handle_to_handle_index: Dict[int, int] = {}
         # Names are prefixed from the root module
         self.param_to_fqn: Dict[nn.Parameter, List[str]] = {}
         # Current index in the pre-forward execution order
@@ -87,7 +87,7 @@ class _ExecOrderData:
         for handle in traversal_utils._get_fsdp_handles(root_module):
             index = len(self.all_handles)
             self.all_handles.append(handle)
-            self.handle_to_handle_index[handle] = index
+            self.handle_to_handle_index[id(handle)] = index
         self.param_to_fqn = _get_param_to_fqns(root_module)
         # TODO (awgu): We can broadcast the metadata of rank 0's `all_handles`
         # to check that all ranks have the same handles in the same order.
@@ -155,7 +155,7 @@ class _ExecOrderData:
         """
         if not handles:
             return
-        handles_key = tuple(handles)
+        handles_key = tuple([id(h) for h in handles])
         # Only record the first usage of a handles key
         if handles_key in self.handles_to_post_forward_order_index:
             return
@@ -176,7 +176,8 @@ class _ExecOrderData:
         """
         if not handles:
             return
-        handles_key = tuple(handles)
+        
+        handles_key = tuple([id(h) for h in handles])
         self._check_order(handles_key, is_training)
         # Fix the order after the first iteration and only record the first
         # usage of a handles key
@@ -203,6 +204,8 @@ class _ExecOrderData:
         This issues a warning on the first deviating iteration and stops
         warning thereafter.
         """
+        import ctypes
+
         # Do not check order in eval mode since the post-backward callback does
         # not run so it cannot be used to mark the end of an iteration
         if not is_training:
@@ -212,7 +215,7 @@ class _ExecOrderData:
             optional_local_indices: Tuple[
                 Optional[int], ...
             ] = self._get_handle_indices(handles_key)
-            device = handles_key[0].device  # guaranteed to be non-CPU
+            device = ctypes.cast(handles_key[0], ctypes.py_object).value.device  # guaranteed to be non-CPU
             num_valid_indices = sum(
                 (index is not None) for index in optional_local_indices
             )

@@ -528,6 +528,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
         ).add_options(key, self)
 
+    def as_python_constant(self):
+        print("Checking constant", self)
+        # This is just temporary, once we give it its own object, we won't need to do this anymore
+        if isinstance(self.value, torch.distributed.fsdp.flat_param.FlatParamHandle):
+            return self.value
+        return super().as_python_constant()
+
 
 class ProcessGroupVariable(UserDefinedObjectVariable):
     """

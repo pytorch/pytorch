@@ -348,11 +348,14 @@ def _unshard(
     Postcondition: Each handle's ``FlatParameter`` 's data is the padded
     unsharded flat parameter on the compute device.
     """
+    import ctypes
     if not handles:
         return
     any_ran_pre_unshard = False
     with state._device_handle.stream(pre_unshard_stream):
         for handle in handles:
+            if isinstance(handle, int):
+                handle = ctypes.cast(handle, ctypes.py_object).value
             ran_pre_unshard = handle.pre_unshard()
             any_ran_pre_unshard = any_ran_pre_unshard or ran_pre_unshard
     if any_ran_pre_unshard:
@@ -363,6 +366,8 @@ def _unshard(
             event.synchronize()
     with state._device_handle.stream(unshard_stream):
         for handle in handles:
+            if isinstance(handle, int):
+                handle = ctypes.cast(handle, ctypes.py_object).value
             handle.unshard()
             handle.post_unshard()
 
@@ -397,7 +402,7 @@ def _reshard(
         handle.post_reshard()
     # Since we prefetch entire handles keys at a time, conservatively mark
     # the entire key as no longer prefetched once we free at least one
-    handles_key = tuple(handles)
+    handles_key = tuple([id(h) for h in handles])
     if any(free_unsharded_flat_params):
         state._handles_prefetched.pop(handles_key, None)
 
@@ -473,7 +478,7 @@ def _pre_forward_unshard(
     """Unshards parameters in the pre-forward."""
     if not handles:
         return
-    handles_key = tuple(handles)
+    handles_key = tuple([id(h) for h in handles])
     # If the handles have been prefetched, then there is no need to call
     # `_unshard()` again
     if not state._handles_prefetched.get(handles_key, False):
@@ -671,7 +676,7 @@ def _pre_backward_hook(
         module (nn.Module): Fully sharded module (see [Note: Fully Sharded
             Module]).
     """
-    _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
+    _handles_key = tuple([id(h) for h in _handles])  # avoid shadowing `handles_key`
     # Only run the pre-backward hook once per group of handles involved in the
     # same module forward computation
     if _handles_key and state._ran_pre_backward_hook.get(_handles_key, False):
@@ -896,7 +901,7 @@ def _post_backward_reshard(
     # TODO: Post-backward prefetching does not support the multiple handles
     # per module case since the post-backward hook runs per handle, not per
     # group of handles.
-    handles_key = (handle,)
+    handles_key = (id(handle),)
     _prefetch_handles(state, handles_key, _PrefetchMode.BACKWARD)
 
 
@@ -1110,7 +1115,9 @@ def _prefetch_handles(
         # Temporarily emulate the training state while calling `_unshard` to
         # ensure the correct `as_params` for `_use_unsharded_views()`
         prev_training_states: List[HandleTrainingState] = []
-        for handle in handles_key:
+        for handle_id in handles_key:
+            import ctypes
+            handle = ctypes.cast(handle_id, ctypes.py_object).value
             prev_training_states.append(handle._training_state)
             if prefetch_mode == _PrefetchMode.BACKWARD:
                 handle._training_state = HandleTrainingState.BACKWARD_PRE
@@ -1124,6 +1131,7 @@ def _prefetch_handles(
         # the sync to happen as late as possible to maximize overlap
         _unshard(state, handles_key, state._streams_unshard, state._streams_pre_unshard)
         for handle, prev_training_state in zip(handles_key, prev_training_states):
+            handle = ctypes.cast(handle, ctypes.py_object).value
             handle._training_state = prev_training_state
         state._handles_prefetched[handles_key] = True
 
@@ -1186,7 +1194,8 @@ def _get_training_state(
 ) -> HandleTrainingState:
     """Returns the training state of the handles in ``handles_key``."""
     _p_assert(len(handles_key) > 0, "Expects a non-empty handles key")
-    training_states = {handle._training_state for handle in handles_key}
+    import ctypes
+    training_states = {ctypes.cast(handle, ctypes.py_object).value._training_state for handle in handles_key}
     _p_assert(
         len(training_states) == 1,
         f"Expects uniform training state but got {training_states}",
@@ -1306,7 +1315,7 @@ def _register_pre_backward_hooks(
     if state._is_root:
         state._post_backward_callback_queued = False  # only defined on the root
 
-    handles_key = tuple(handles)
+    handles_key = tuple([id(h) for h in handles])
     if handles_key:
         state._needs_pre_backward_unshard[handles_key] = False
         # Since these handles' `FlatParameter`s participated in a forward, we

@@ -1227,6 +1227,8 @@ class BuiltinVariable(VariableTracker):
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
             return variables.ConstantVariable(id(mod))
         else:
+            if isinstance(args[0], variables.UserDefinedObjectVariable):
+                return variables.ConstantVariable(id(args[0].value))
             unimplemented(f"call_id with args {args}")
 
     def _comparison(self, tx, left, right):

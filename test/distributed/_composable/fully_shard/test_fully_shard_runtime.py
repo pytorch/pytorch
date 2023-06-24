@@ -161,7 +161,7 @@ class TestRuntime(FSDPTest):
             *args,
             **kwargs,
         ):
-            handles_key = tuple(handles)
+            handles_key = tuple([id(h) for h in handles])
             unshard_reshard_order.append(("unshard", handles_key))
             return orig_unshard(state, handles, *args, **kwargs)
 
@@ -172,7 +172,7 @@ class TestRuntime(FSDPTest):
             *args,
             **kwargs,
         ):
-            handles_key = tuple(handles)
+            handles_key = tuple([id(h) for h in handles])
             unshard_reshard_order.append(("reshard", handles_key))
             return orig_reshard(state, handles, *args, **kwargs)
 
