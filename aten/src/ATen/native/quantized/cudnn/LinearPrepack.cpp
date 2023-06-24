@@ -5,6 +5,7 @@
 
 #include <ATen/ATen.h>
 #include <torch/library.h>
+#include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/quantized/Quantizer.h>
