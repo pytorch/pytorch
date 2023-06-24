@@ -69,6 +69,17 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     #    make_test(torch.optim.RAdam, exp_graph_count=0)
     # )
 
+    def test_compiled_flag(self):
+        opt = torch.optim.SGD(model.parameters(), lr=0.01)
+
+        @torch.compile(backend="eager")
+        def fn():
+            opt.step()
+
+        fn()
+
+        self.assertTrue(opt.compiled)
+
 
 # exclude SparseAdam because other areas of the stack don't support it yet
 # the others are handled specially above

@@ -197,6 +197,12 @@ class Optimizer:
         self.defaults = defaults
         self._optimizer_step_pre_hooks: Dict[int, Callable] = OrderedDict()
         self._optimizer_step_post_hooks: Dict[int, Callable] = OrderedDict()
+        # This flag will be set internally by dynamo to indicate that the optimizer
+        # has been compiled. It is not intended to be set by the user.
+        # This allows initialization to know where the step tensors should be placed
+        # in order to enable cudagraphs. It is also used to determine where the step tensors
+        # should be placed during de/serialization.
+        self.compiled = False
 
         self._patch_step_function()
 

@@ -25,6 +25,8 @@ class GuardInstallException(Exception):
 class OptimizerVariable(UserDefinedObjectVariable):
     def __init__(self, value, grad_to_source=None, **kwargs):
         super().__init__(value, **kwargs)
+        # Set flag to ensure any optimizer methods will take this flag into account
+        value.compiled = True
         if grad_to_source is None:
             self.grad_to_source = {}
 

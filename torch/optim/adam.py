@@ -83,7 +83,6 @@ class Adam(Optimizer):
         exp_avg_sqs,
         max_exp_avg_sqs,
         state_steps,
-        is_compiling=False,
     ):
         for p in group['params']:
             if p.grad is not None:
@@ -100,7 +99,7 @@ class Adam(Optimizer):
                     # This is because kernel launches are costly on CUDA and XLA.
                     state['step'] = (
                         torch.zeros((), dtype=torch.float, device=p.device)
-                        if group['capturable'] or group['fused'] or is_compiling
+                        if group['capturable'] or group['fused'] or self.compiled
                         else torch.tensor(0.)
                     )
                     # Exponential moving average of gradient values
@@ -151,8 +150,7 @@ class Adam(Optimizer):
                 exp_avgs,
                 exp_avg_sqs,
                 max_exp_avg_sqs,
-                state_steps,
-                torch._utils.is_compiling())
+                state_steps)
 
             adam(
                 params_with_grad,
