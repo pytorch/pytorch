@@ -70,7 +70,7 @@ def make_test(optim_cls, closure=None, **kwargs):
         if self.check_kernel_count:
             # currently, we compile the step and the rest of the computation
             # separately because the step is a single element tensor
-            self.assertEqual(torch._inductor.metrics.get_kernel_count(), 2)
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     return test_fn
 
