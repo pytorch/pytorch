@@ -114,7 +114,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def __init__(
         self,
         resolve_fun: Callable,
-        stream: Union[None, io.RawIOBase, torch._C._CudaStreamBase] = None,
+        stream: Union[None, io.RawIOBase, torch.Stream] = None,
         inflight_threshhold: int = 1_000_000,
     ):
         self.resolve_fun = resolve_fun
@@ -124,9 +124,12 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.stream = stream or torch.cuda.current_stream()
-        if self.stream != torch.cuda.current_stream():
-            self.stream.wait_stream(torch.cuda.current_stream())
+        self.device_type = (getattr(stream, "device", torch.device("cuda"))).type
+        assert self.device_type in ["cuda", torch._C._get_privateuse1_backend_name()]
+        self.device_module = getattr(torch, self.device_type)
+        self.stream = stream or self.device_module.current_stream()
+        if self.stream != self.device_module.current_stream():
+            self.stream.wait_stream(self.device_module.current_stream())
 
     @property
     def _done(self):
@@ -143,7 +146,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         return drained
 
     def _refill(self):
-        with torch.cuda.stream(self.stream):
+        with self.device_module.stream(self.stream):
             while (
                 not self._done
                 and self.in_flight_data < self.inflight_threshhold
@@ -151,9 +154,9 @@ class _OverlappingCpuLoader(_TensorLoader):
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
-                if tensor.is_cuda:
+                if tensor.device.type == self.device_type:
                     tensor = tensor.to(device="cpu", non_blocking=True)
-                elif tensor.device == torch.device("cpu"):
+                elif tensor.device.type == "cpu":
                     if tensor.storage().size() != tensor.numel():
                         # this forces the tensor to be both contiguous and with minimal storage
                         tensor = tensor.clone()
@@ -232,7 +235,7 @@ def _split_by_size_and_type(
 
 
 def _write_item(
-    stream: Optional[Union[io.RawIOBase, torch._C._CudaStreamBase]],
+    stream: Optional[Union[io.RawIOBase, torch.Stream]],
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
@@ -294,7 +297,7 @@ def _write_files_from_queue(
                     )
 
                 for tensor, write_item in loader.values():
-                    assert not tensor.is_cuda
+                    assert tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]
                     write_results.append(
                         _write_item(stream, tensor, write_item, storage_key)
                     )

@@ -66,7 +66,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
                 "Cannot handle inner tensor with more than 1 shard"
             )
         inner_shard = inner_st.local_shards()[0]
-
+        device_type = inner_shard.tensor.device.type
         local_shards = [
             Shard(
                 tensor=inner_shard.tensor,
@@ -92,7 +92,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
 
         # Attribute other rank for the other shards
         for shard_md in st_meta.shards_metadata:
-            shard_md.placement = _remote_device(f"rank:{other_rank}/cuda:0")
+            shard_md.placement = _remote_device(f"rank:{other_rank}/{device_type}:0")
 
         # Add other inner shards from the inner tensor
         for inner_md in inner_st.metadata().shards_metadata:
@@ -104,7 +104,7 @@ def _flatten_sharded_tensors(state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
                             inner_md.shard_offsets,
                         ),
                         shard_sizes=inner_md.shard_sizes,
-                        placement=f"rank:{other_rank}/cuda:0",
+                        placement=f"rank:{other_rank}/{device_type}:0",
                     )
                 )
 

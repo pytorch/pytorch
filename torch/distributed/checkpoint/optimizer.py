@@ -49,23 +49,26 @@ __all__ = [
 ]
 
 
-def _gen_rank_device(global_rank: int) -> str:
-    if torch.cuda.is_available():
-        return f"cuda:{global_rank % torch.cuda.device_count()}"
+def _gen_rank_device(global_rank: int, device_type: str ="cuda") -> str:
+    assert device_type in ["cuda", torch._C._get_privateuse1_backend_name()]
+    device_module = getattr(torch, device_type)
+    if device_module.is_available():
+        return f"{device_type}:{global_rank % device_module.device_count()}"
     return "cpu"
 
 
 def _create_colwise_spec(
     pg: Optional[dist.ProcessGroup] = None,
 ) -> ChunkShardingSpec:
+    pd_device_type = dist.distributed_c10d._get_pg_default_device(pg).type
     if pg is None:
         placements = [
-            f"rank:{idx}/{_gen_rank_device(idx)}"
+            f"rank:{idx}/{_gen_rank_device(idx, pd_device_type)}"
             for idx in range(dist.get_world_size())
         ]
     else:
         placements = [
-            f"rank:{idx}/{_gen_rank_device(dist.get_global_rank(pg, idx))}"
+            f"rank:{idx}/{_gen_rank_device(dist.get_global_rank(pg, idx), pd_device_type)}"
             for idx in range(pg.size())
         ]
     return ChunkShardingSpec(
@@ -92,14 +95,15 @@ def _is_nested_tensor(val: torch.Tensor) -> bool:
     return False
 
 
-def _alloc_tensor(props: TensorProperties, size: Sequence[int]) -> torch.Tensor:
+def _alloc_tensor(props: TensorProperties, size: Sequence[int], device_type: str) -> torch.Tensor:
+    device_module = getattr(torch, device_type)
     return torch.empty(
         size=size,
         dtype=props.dtype,
         layout=props.layout,
         requires_grad=props.requires_grad,
         pin_memory=props.pin_memory,
-        device=cast(torch.device, torch.cuda.current_device()),
+        device=cast(torch.device, device_module.current_device()),
     )
 
 
@@ -255,12 +259,14 @@ def load_sharded_optimizer_state_dict(
     metadata = storage_reader.read_metadata()
 
     layout_specs, dp_pg = _get_state_dict_2d_layout(model_state_dict)
-
+    dp_pg_device_type = dist.distributed_c10d._get_pg_default_device(dp_pg).type
+    assert dp_pg_device_type in ["cuda", torch._C._get_privateuse1_backend_name()]
+    device_module = getattr(torch, dp_pg_device_type)
     if dp_pg is None:
         sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:{i}/cuda:{i % torch.cuda.device_count()}"
+                f"rank:{i}/{dp_pg_device_type}:{i % device_module.device_count()}"
                 for i in range(dist.get_world_size())
             ],
         )
@@ -282,10 +288,10 @@ def load_sharded_optimizer_state_dict(
 
         # value: TensorStorageMetadata
         if value.size.numel() == 1:
-            state_dict[key] = _alloc_tensor(value.properties, value.size)
+            state_dict[key] = _alloc_tensor(value.properties, value.size, dp_pg_device_type)
         elif dp_pg is None:
             state_dict[key] = _shard_tensor(
-                _alloc_tensor(value.properties, value.size), sharding_spec
+                _alloc_tensor(value.properties, value.size, dp_pg_device_type), sharding_spec
             )
         else:
             spec_key = key_path[2]
@@ -305,7 +311,7 @@ def load_sharded_optimizer_state_dict(
                 local_shards.append(
                     Shard(
                         tensor=_alloc_tensor(
-                            value.properties, shard_md.shard_sizes
+                            value.properties, shard_md.shard_sizes, dp_pg_device_type
                         ),
                         metadata=shard_md,
                     )
