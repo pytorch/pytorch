@@ -283,6 +283,8 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         Helper method to verify that the QAT numerics for PT2E quantization match those of
         FX graph mode quantization for symmetric qnnpack.
         """
+        MANUAL_SEED = 100
+
         # PT2 export
 
         model_pt2e = copy.deepcopy(model)
@@ -298,6 +300,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             aten_graph=True,
         )
         model_pt2e = prepare_qat_pt2e_quantizer(model_pt2e, quantizer)
+        torch.manual_seed(MANUAL_SEED)
         after_prepare_result_pt2e = model_pt2e(*example_inputs)
 
         # FX
@@ -317,6 +320,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         model_fx = prepare_qat_fx(
             model_fx, qconfig_mapping, example_inputs, backend_config=backend_config
         )
+        torch.manual_seed(MANUAL_SEED)
         after_prepare_result_fx = model_fx(*example_inputs)
 
         # Verify that numerics match
@@ -1882,4 +1886,18 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
             )
             self._verify_symmetric_qnnpack_qat_numerics(
                 m, example_inputs, is_per_channel=True, verify_convert=True,
+            )
+
+    @skip_if_no_torchvision
+    @skipIfNoQNNPACK
+    def test_qat_mobilenet_v2(self):
+        import torchvision
+        with override_quantized_engine("qnnpack"):
+            example_inputs = (torch.randn(1, 3, 224, 224),)
+            m = torchvision.models.mobilenet_v2()
+            self._verify_symmetric_qnnpack_qat_numerics(
+                m, example_inputs, is_per_channel=False, verify_convert=False,
+            )
+            self._verify_symmetric_qnnpack_qat_numerics(
+                m, example_inputs, is_per_channel=True, verify_convert=False,
             )

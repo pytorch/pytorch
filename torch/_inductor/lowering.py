@@ -4343,6 +4343,13 @@ try:
         result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
         return list(map(TensorBox.create, result))
 
+    @register_lowering(c10d_functional.reduce_scatter_tensor_coalesced)
+    def reduce_scatter_tensor_coalesced(self, reduceOp, tag, ranks, group_size):
+        result = ir.ReduceScatterTensorCoalesced.create(
+            self, reduceOp, tag, ranks, group_size
+        )
+        return list(map(TensorBox.create, result))
+
 except ImportError:
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
