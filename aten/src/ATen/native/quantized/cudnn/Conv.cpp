@@ -22,6 +22,12 @@
 #include <unordered_map>
 #include <vector>
 
+template <int kSpatialDim = 2>
+int register_conv_params();
+
+extern template int register_conv_params<2>();
+extern template int register_conv_params<3>();
+
 // TODO: there is a table from input dtype and weight dtype to operator qdtype,
 // we can derive the operator dtype based on input dtype
 cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, c10::IntArrayRef padding, c10::IntArrayRef stride, c10::IntArrayRef dilation) {
@@ -388,6 +394,8 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
   // this is inconsistent with what has been done for conv2d where new variants use packed weights, and
   // old variant does not. we adopt this inconsistency for now to be consistent with QuantizedCPU's conv1d
   // and will eventually deprecate the old variants
+  register_conv_params<2>();
+  register_conv_params<3>();
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d"), QConv1dInt8<false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_relu"), QConv1dInt8<true>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d.new"), QConvInt8<2, false>::run);
