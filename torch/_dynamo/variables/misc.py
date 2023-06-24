@@ -15,7 +15,6 @@ from ..utils import (
     check_constant_args,
     HAS_NUMPY_TORCH_INTEROP,
     identity,
-    numpy_dtype_to_torch_dtype,
     proxy_args_kwargs,
 )
 from .base import MutableLocal, VariableTracker
@@ -839,13 +838,9 @@ class NumpyVariable(VariableTracker):
         return self.value
 
     def as_proxy(self):
-        # return self.value
         if isinstance(self.value, type) and config.numpy_ndarray_as_tensor:
-            # convert numpy dtype to torch types
-            if self.value in numpy_dtype_to_torch_dtype:
-                return numpy_dtype_to_torch_dtype[self.value]
-            unimplemented(f"Unsupported type {self.value} in numpy")
-
+            # retrieve attribute str. E.g., "float32" if given np.float32
+            return self.value.__name__
         return self.value
 
 
