@@ -162,7 +162,7 @@ test_failures = {
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_index3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_linspace2_dynamic_shapes": TestFailure(("cpu",)),
+    "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -273,13 +273,22 @@ test_failures = {
     #
     "test_cudnn_rnn_dynamic_shapes": TestFailure(("cuda",)),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(("cpu", "cuda")),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
 }
 
+if TEST_WITH_ROCM:
+    # aten.miopen_batch_norm is not registered for lowering
+    test_failures["test_batch_norm_2d_dynamic_shapes"] = TestFailure(("cuda"))
+    # Failed to find triton kernel after ROCm aten.prod fallback
+    test_failures["test_prod_dynamic_shapes"] = TestFailure(("cpu", "cuda"))
 
-DynamicShapesCodegenCommonTemplate = make_dynamic_cls(CommonTemplate)
+DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
+    CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"
+)
 
 
 if HAS_CPU:
@@ -331,5 +340,5 @@ if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
+    if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
