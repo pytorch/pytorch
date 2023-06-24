@@ -16,6 +16,12 @@
 #include <array>
 #include <vector>
 
+template <int kSpatialDim = 2>
+int register_conv_params();
+
+extern template int register_conv_params<2>();
+extern template int register_conv_params<3>();
+
 template <int kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
     kSpatialDim>::
@@ -199,6 +205,8 @@ class QConv1dPackWeightInt8Cudnn final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
+  register_conv_params<2>();
+  register_conv_params<3>();
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_prepack"), TORCH_FN(QConv1dPackWeightInt8Cudnn::run_conv));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_prepack"), TORCH_FN(QConvPackWeightInt8Cudnn<2>::run_conv));
 }
