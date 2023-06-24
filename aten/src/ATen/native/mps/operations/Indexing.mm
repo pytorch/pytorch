@@ -86,8 +86,6 @@ static bool dispatchIndexKernel(TensorIteratorBase& iter,
           MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets =
           (id<MTLBuffer>)getIMPSAllocator()->allocate(numThreads * sizeof(simd_uint3)).get();
-      TORCH_CHECK(
-          kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
 
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];

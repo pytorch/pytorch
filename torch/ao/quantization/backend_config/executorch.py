@@ -312,13 +312,20 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
     }
     binary_op_configs: List[BackendPatternConfig] = []
     for op in [operator.add, torch.add]:
-        binary_op_configs.append(
-            BackendPatternConfig(op)
-            .set_dtype_configs(dtype_configs)  # noqa: E131
-            ._set_num_tensor_args_to_observation_type(
-                num_tensor_args_to_observation_type_mapping
+        bop_patterns = [
+            (op, torch.nn.ReLU),
+            (op, torch.nn.functional.relu),
+            (op, torch.relu),
+            op
+        ]
+        for bop_pattern in bop_patterns:
+            binary_op_configs.append(
+                BackendPatternConfig(bop_pattern)
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                ._set_num_tensor_args_to_observation_type(
+                    num_tensor_args_to_observation_type_mapping
+                )
             )
-        )
     return binary_op_configs
 
 
@@ -347,6 +354,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         torch.nn.MaxPool2d,
         torch.nn.ReLU6,
         torch.nn.Hardtanh,
+        torch.flatten,
         torch.mean,
         torch.squeeze,
         "mean",

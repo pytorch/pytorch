@@ -207,6 +207,16 @@ class TestMetaConverter(TestCase):
 
         self.assertMetadataMatches(m, x)
 
+    def test_view_mutate(self):
+        x = torch.zeros(4)
+        y = x.view(2, 2)
+
+        to_meta = MetaConverter()
+        m = to_meta(y)
+
+        y.add_(torch.randn(2, 2, requires_grad=True))
+        m.add_(torch.randn(2, 2, device='meta', requires_grad=True))
+
     def test_non_leaf_torture(self):
         x = torch.empty(20, requires_grad=True)
         with torch.no_grad():
@@ -605,7 +615,6 @@ meta_function_expected_failures = {
     torch.functional.istft : {f64, c64, c128, f32},
     torch.geqrf : {f64, c64, c128, f32},
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
-    torch.matrix_exp : {f64, c128, c64, bf16, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.ormqr : {f64, c64, c128, f32},
@@ -630,7 +639,6 @@ meta_function_expected_failures = {
     torch.nn.functional.multi_margin_loss : {f64, f32},
     torch.nn.functional.multilabel_margin_loss : {f64, f32},
     torch.nn.functional.one_hot : {i64},
-    torch.nn.functional.pdist : {f64, f32},
     torch._segment_reduce : {f64, f16, bf16, f32},
     torch.cholesky : {f64, f32, c128, c64},
     torch.cholesky_inverse : {f64, f32, c128, c64},
@@ -716,7 +724,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
-    torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -821,7 +828,6 @@ meta_dispatch_expected_failures = {
     aten.geqrf.default : {c64, c128, f64, f32},
     aten.linalg_eig.default : {c64, c128, f64, f32},
     aten.linalg_lstsq.default : {c64, c128, f64, f32},
-    aten.linalg_matrix_exp.default : {c64, bf16, f32, f64, c128},
     aten.masked_select.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.masked_select.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.nonzero.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
@@ -829,15 +835,14 @@ meta_dispatch_expected_failures = {
     aten.ormqr.default : {c64, c128, f64, f32},
     aten.ormqr.out : {c64, c128, f64, f32},
     aten.tensordot.out : {c64, i8, f64, c128, i64, bf16, f32, i32, i16, u8},
-    aten.to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
+    aten._to_sparse.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
+    aten._to_sparse.sparse_dim : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten._ctc_loss.default : {f32, f64},  # Shape of second output depends on data.
     aten._ctc_loss.Tensor : {f32, f64},  # Shape of second output depends on data.
     aten._histogramdd_bin_edges.default : {f32, f64},
     aten._histogramdd_from_bin_cts.default : {f32, f64},
     aten._histogramdd_from_bin_tensors.default : {f32, f64},
     aten._local_scalar_dense.default : {c32, c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten._pdist_forward.default : {f32, f64},
     aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -908,7 +913,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
-    aten.linalg_matrix_exp.default: {f16},  # aten::linalg_matrix_exp
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
     aten.max_pool3d_with_indices.default: {bf16, f16},  # aten::max_pool3d_with_indices

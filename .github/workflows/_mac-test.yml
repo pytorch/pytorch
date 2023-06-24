@@ -99,10 +99,10 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Check for keep-going label
+      - name: Check for keep-going label and re-enabled test issues
         # This uses the filter-test-configs action because it conviniently
-        # checks for labels.  It does not actually do any filtering.  All
-        # filtering is done in the build step.
+        # checks for labels and re-enabled test issues.  It does not actually do
+        # any filtering.  All filtering is done in the build step.
         id: keep-going
         uses: ./.github/actions/filter-test-configs
         with:
@@ -131,23 +131,17 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
         run: |
           # shellcheck disable=SC1090
           set -ex
 
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
-
-          # sanitize the input commit message and PR body here:
-          #
-          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
-          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          PR_BODY="${PR_BODY//[$'\n\r']}"
-
-          # then trim all special characters like single and double quotes to avoid unescaped inputs to
-          # wreak havoc internally
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
-          export PR_BODY="${PR_BODY//[\'\"]}"
           arch
 
           if [[ -n "$CONDA_ENV" ]]; then
