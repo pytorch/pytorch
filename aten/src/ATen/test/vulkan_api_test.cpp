@@ -3622,9 +3622,10 @@ void test_unsqueeze(const at::IntArrayRef input_shape, int64_t dim) {
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
     showRtol(out_cpu, out_vulkan.cpu());
+    std::cout << "unsqueeze test failed with input shape: "
+              << input_shape << std::endl;
   }
   ASSERT_TRUE(check);
-
 }
 
 TEST_F(VulkanAPITest, unsqueeze_1dto2d_dim0) {
@@ -5059,27 +5060,6 @@ TEST_F(VulkanAPITest, stack_3d) {
   test_stack({221, 193, 11}, -4, 5);
 }
 
-void test_zero_(const at::IntArrayRef input_shape) {
-  auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
-  auto vulkan = cpu.vulkan();
-
-  cpu.zero_();
-  vulkan.zero_();
-
-  const auto check = almostEqual(cpu, vulkan.cpu());
-  if (!check) {
-    showRtol(cpu, vulkan.cpu());
-  }
-  ASSERT_TRUE(check);
-}
-
-TEST_F(VulkanAPITest, zero_) {
-  test_zero_({5});
-  test_zero_({5, 7});
-  test_zero_({9, 7, 5});
-  test_zero_({22, 11, 19, 17});
-}
-
 TEST_F(VulkanAPITest, tile_invalid_inputs_exceptions) {
   // Arrange: Vulkan tile only supports input of dims <= 4
   {
@@ -5144,6 +5124,49 @@ void test_tile(
 
 TEST_F(VulkanAPITest, tile) {
   test_tile({13, 5, 13, 7}, {7, 2, 3, 5});
+}
+
+void test_zero_(const at::IntArrayRef input_shape) {
+  auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  auto vulkan = cpu.vulkan();
+
+  cpu.zero_();
+  vulkan.zero_();
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "zero_ test failed with input shape: "
+              << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, zero_) {
+  test_zero_({5});
+  test_zero_({5, 7});
+  test_zero_({9, 7, 5});
+  test_zero_({22, 11, 19, 17});
+}
+
+void test_zeros(const at::IntArrayRef input_shape) {
+  auto cpu = at::zeros(input_shape);
+  auto vulkan = at::zeros(input_shape, at::device(at::kVulkan));
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+    std::cout << "zeros test failed with input shape: "
+              << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, zeros) {
+  test_zeros({5});
+  test_zeros({5, 7});
+  test_zeros({9, 7, 5});
+  test_zeros({22, 11, 19, 17});
 }
 
 TEST_F(VulkanAPITest, clone_success) {
