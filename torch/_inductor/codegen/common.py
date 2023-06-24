@@ -229,6 +229,9 @@ class ExprPrinter(Printer):
         else:  # exp == 0
             return "1"
 
+    def _print_Unequality(self, expr):
+        return " != ".join(map(self.paren, map(self._print, expr.args)))
+
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
 

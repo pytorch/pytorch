@@ -1086,14 +1086,6 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "-pt",
-        "--pytest",
-        action="store_true",
-        help="If true, use `pytest` to execute the tests. E.g., this runs "
-        "TestTorch with pytest in verbose and coverage mode: "
-        "python run_test.py -vci torch -pt",
-    )
-    parser.add_argument(
         "-k",
         "--pytest-k-expr",
         default="",

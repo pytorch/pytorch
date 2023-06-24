@@ -10,8 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
-    skipIfCrossRef
+    parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from typing import Dict, Any
@@ -2009,37 +2008,6 @@ class TestSparse(TestSparseBase):
         expected = self.safeToDense(x1) + self.safeToDense(x2)
         self.assertEqual(self.safeToDense(y1), expected)
         self.assertEqual(self.safeToDense(y2), expected)
-
-    @dtypes(torch.double, torch.cdouble)
-    @skipIfCrossRef
-    def test_sparse_mask_backward(self, device, dtype):
-        from itertools import product, repeat
-
-        shape = (5, 5)
-        sparse_dims = len(shape)
-        nnzs = (0, 5, 15, 25)
-
-        lhs_data = torch.arange(1, 26, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
-        rhs_data = lhs_data.clone()
-
-        for nnz in nnzs:
-            for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
-                lhs = torch.sparse_coo_tensor(
-                    lhs_data._indices()[:, :nnz],
-                    lhs_data._values()[:nnz],
-                    lhs_data.shape
-                )._coalesced_(lhs_is_coalesced).requires_grad_(True)
-
-                rhs = torch.sparse_coo_tensor(
-                    lhs_data._indices()[:, -nnz:],
-                    lhs_data._values()[-nnz:],
-                    lhs_data.shape
-                )._coalesced_(rhs_is_coalesced).requires_grad_(True)
-
-                # setting masked = True is required because of the broken backward of to_dense().
-                # See https://github.com/pytorch/pytorch/issues/95550.
-                gradcheck(lambda x, y: x.sparse_mask(y).to_dense(), (lhs, rhs), masked=True, check_sparse_nnz=True)
-                gradcheck(lambda x, y: x.sparse_mask(y).to_dense(), (lhs, lhs.detach()), masked=True, check_sparse_nnz=True)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
