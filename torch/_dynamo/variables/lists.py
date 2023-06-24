@@ -598,7 +598,13 @@ class NamedTupleVariable(TupleVariable):
 
 class SliceVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
-        items_to_map = items
+        def _to_constant(arg):
+            if isinstance(arg, variables.SymNodeVariable):
+                return ConstantVariable(arg.evaluate_expr())
+            else:
+                return arg
+
+        items_to_map = list(map(_to_constant, items))
         start, stop, step = [variables.ConstantVariable(None)] * 3
 
         if len(items_to_map) == 1:
