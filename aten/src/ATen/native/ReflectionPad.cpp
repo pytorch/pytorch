@@ -243,15 +243,15 @@ void reflection_pad2d_out_template(
   TORCH_CHECK(pad_l < input_w && pad_r < input_w,
     "Argument #4: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_l, ", ", pad_r,
-    ") at dimension ", dim_w, " of input ", ndim);
+    ") at dimension ", dim_w, " of input ", input.sizes());
 
   TORCH_CHECK(pad_t < input_h && pad_b < input_h,
     "Argument #6: Padding size should be less than the corresponding "
     "input dimension, but got: padding (", pad_t, ", ", pad_b,
-    ") at dimension ", dim_h, " of input ", ndim);
+    ") at dimension ", dim_h, " of input ", input.sizes());
 
   TORCH_CHECK(output_w >= 1 || output_h >= 1,
-    "input (H: ", input_h, ", W: ", input_w, ")is too small. Calculated "
+    "input (H: ", input_h, ", W: ", input_w, ") is too small. Calculated "
     "output H: ", output_h, " W: ", output_w);
 
   /* resize output */
