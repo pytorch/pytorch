@@ -1,4 +1,3 @@
-import warnings
 import torch
 from torch._C import _rename_privateuse1_backend, _get_privateuse1_backend_name
 from typing import List, Optional, Union
@@ -7,8 +6,8 @@ __all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backe
 
 # TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
 # renamed-backend name for `privateuse1`, but the func will cause an
-# error with torch._jit_script_compile, so we use the global variable
-# named `_privateuse1_backend_name`.
+# error with torch.jit.script, so we use the global variable named
+# `_privateuse1_backend_name`.
 _privateuse1_backend_name = "privateuseone"
 
 def rename_privateuse1_backend(backend_name: str) -> None:
@@ -325,14 +324,17 @@ def _get_custom_mod_func(func_name: str):
         func_ = torch.utils.backend_registration._get_custom_mod_func("func_name")
         if func_:
             result = func_(*args, **kwargs)
-    Attention: This func is only used for custom device.
+    Attention: This function is not meant to be used directly by users, which is why
+    it is marked as private. It is a convenience function for backend implementers to
+    more easily call the hooks into their backend extensions.
     """
     assert isinstance(func_name, str), f"func_name must be `str`, but got `{type(func_name)}`."
     backend_name = _get_privateuse1_backend_name()
     custom_device_mod = getattr(torch, backend_name, None)  # type: ignore[arg-type]
-    if custom_device_mod is None:
-        message = f'Try to use torch.{backend_name}.{func_name}. The backend must register a custom backend '
+    function = getattr(custom_device_mod, func_name, None)  # type: ignore[arg-type]
+    if custom_device_mod is None or function is None:
+        message = f'Try to call torch.{backend_name}.{func_name}. The backend must register a custom backend '
         message += f"module with `torch._register_device_module('{backend_name}', BackendModule)`. And "
         message += f"BackendModule needs to have the following API's:\n `{func_name}(*args, **kwargs)`. \n"
-        warnings.warn(message)
-    return getattr(custom_device_mod, func_name, None)
+        raise RuntimeError(message)
+    return function

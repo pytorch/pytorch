@@ -153,7 +153,8 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             # register foo module, torch.foo
             torch._register_device_module('foo', DummyModule)
             self.assertTrue(torch.utils.backend_registration._get_custom_mod_func("device_count")() == 1)
-            self.assertTrue(torch.utils.backend_registration._get_custom_mod_func("func_name") is None)
+            with self.assertRaisesRegex(RuntimeError, "Try to call torch.foo"):
+                torch.utils.backend_registration._get_custom_mod_func("func_name_")
             # default set for_tensor and for_module are True, so only set for_storage is True
             torch.utils.generate_methods_for_privateuse1_backend(for_storage=True)
             # generator tensor and module can be registered only once
