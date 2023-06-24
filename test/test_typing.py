@@ -5,6 +5,7 @@ import itertools
 import os
 import re
 import shutil
+import sys
 from collections import defaultdict
 from typing import IO, Dict, List, Optional
 
@@ -19,6 +20,9 @@ except ImportError:
 else:
     NO_MYPY = False
 
+# NB Tests can be skipped because mypy==0.960 cannnot work with python>=3.10
+# due to positional-only args. Ref https://github.com/python/mypy/issues/13627
+INCOMPATIBLE_PY = sys.version_info >= (3, 10)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "typing")
 REVEAL_DIR = os.path.join(DATA_DIR, "reveal")
@@ -47,6 +51,7 @@ def _strip_filename(msg: str) -> str:
     return tail.split(":", 1)[-1]
 
 
+@pytest.mark.skipif(INCOMPATIBLE_PY, reason="Python 3.10+ is not yet supported")
 @pytest.mark.skipif(NO_MYPY, reason="Mypy is not installed")
 @pytest.fixture(scope="module", autouse=True)
 def run_mypy() -> None:
@@ -99,6 +104,7 @@ def get_test_cases(directory):
                 )
 
 
+@pytest.mark.skipif(INCOMPATIBLE_PY, reason="Python 3.10+ is not yet supported")
 @pytest.mark.skipif(NO_MYPY, reason="Mypy is not installed")
 @pytest.mark.parametrize("path", get_test_cases(PASS_DIR))
 def test_success(path):
@@ -110,6 +116,7 @@ def test_success(path):
         raise AssertionError(msg)
 
 
+@pytest.mark.skipif(INCOMPATIBLE_PY, reason="Python 3.10+ is not yet supported")
 @pytest.mark.skipif(NO_MYPY, reason="Mypy is not installed")
 @pytest.mark.parametrize("path", get_test_cases(FAIL_DIR))
 def test_fail(path):
@@ -204,6 +211,7 @@ def _parse_reveals(file: IO[str]) -> List[str]:
     return fmt_str.split("/n")
 
 
+@pytest.mark.skipif(INCOMPATIBLE_PY, reason="Python 3.10+ is not yet supported")
 @pytest.mark.skipif(NO_MYPY, reason="Mypy is not installed")
 @pytest.mark.parametrize("path", get_test_cases(REVEAL_DIR))
 def test_reveal(path):
