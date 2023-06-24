@@ -3651,18 +3651,15 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-  switch (self.layout()) {
-  case kSparseCsr:
-  case kSparseCsc:
-  case kSparseBsr:
-  case kSparseBsc:
-    return at::sparse_csr::alias_with_values(self, self.values());
-  case kSparse:
-    return at::sparse::alias_with_values(self, self._values());
-  default:
-    break;
-  }
   return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+}
+
+Tensor alias_sparse_coo(const Tensor& self) {
+  return at::sparse::alias_with_values(self, self._values());
+}
+
+Tensor alias_sparse_compressed(const Tensor& self) {
+  return at::sparse_csr::alias_with_values(self, self.values());
 }
 
 Tensor detach(const Tensor& self) {

@@ -50,6 +50,11 @@ skipIfNoBFloat16Cuda = _skipper(
     lambda: not torch.cuda.is_bf16_supported(), "BFloat16 CUDA is not available"
 )
 
+skipIfQuantizationBackendQNNPack = _skipper(
+    lambda: torch.backends.quantized.engine == "qnnpack",
+    "Not compatible with QNNPack quantization backend",
+)
+
 
 # skips tests for all versions below min_opset_version.
 # if exporting the op is only supported after a specific version,
