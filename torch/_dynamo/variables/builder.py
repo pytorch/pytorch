@@ -239,7 +239,7 @@ class VariableBuilder:
         return None
 
     def _can_lift_attrs_to_inputs(self, vt):
-        if type(vt) in [TensorVariable, UserDefinedObjectVariable]:
+        if type(vt) in [TensorVariable, UserDefinedObjectVariable, FSDPManagedNNModuleVariable]:
             return True
         return False
 

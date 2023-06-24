@@ -1038,6 +1038,9 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
+        if isinstance(obj, variables.UserDefinedClassVariable) and obj.value is torch.distributed.distributed_c10d.GroupMember and name is "WORLD":
+            unimplemented("Fixing this breaks everything lol")
+            # return variables.user_defined.ProcessGroupVariable(obj.value.WORLD)
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":
@@ -1100,6 +1103,7 @@ class BuiltinVariable(VariableTracker):
                     obj.var_getattr(tx, name).clone(source=source).add_options(options)
                 )
             except NotImplementedError:
+                print("Fall through 2", obj, name)
                 return GetAttrVariable(obj, name, **options)
 
     def call_setattr(
@@ -1118,7 +1122,7 @@ class BuiltinVariable(VariableTracker):
             return val.add_options(self, obj, name_var)
         elif isinstance(obj, variables.UserDefinedObjectVariable):
             unimplemented(
-                f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
+                f"setattr(UserDefinedObjectVariable) {obj.source} {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
             if not tx.output.is_root_tracer():
