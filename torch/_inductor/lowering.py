@@ -4343,6 +4343,13 @@ try:
         result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
         return list(map(TensorBox.create, result))
 
+    @register_lowering(c10d_functional.reduce_scatter_tensor_coalesced)
+    def reduce_scatter_tensor_coalesced(self, reduceOp, tag, ranks, group_size):
+        result = ir.ReduceScatterTensorCoalesced.create(
+            self, reduceOp, tag, ranks, group_size
+        )
+        return list(map(TensorBox.create, result))
+
 except ImportError:
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
@@ -4388,7 +4395,7 @@ try:
 
         inner_dim = jagged_values.get_size()[1]
         batches = jagged_offsets.get_size()[0] - 1
-        limit = jagged_values.get_size()[0] + 1
+        limit = jagged_values.get_size()[0]
 
         output_dims = [batches, max_lengths[0], inner_dim]
 
@@ -4398,11 +4405,11 @@ try:
         def inner_fn(index):
             b, x, y = index
             begin = ops.indirect_indexing(offsets_loader([b]), limit)
-            end = ops.indirect_indexing(offsets_loader([b + 1]), limit)
+            end_idx = offsets_loader([b + 1])
             val = ops.masked(
                 ops.lt(
                     ops.index_expr(begin + x, torch.int64),
-                    ops.index_expr(end, torch.int64),
+                    end_idx,
                 ),
                 lambda: values_loader([begin + x, y]),
                 padding_value,
