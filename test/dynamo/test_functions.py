@@ -984,6 +984,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         else:
             return x - 1
 
+    # Turning TV off due to high latency.
+    @torch._dynamo.config.patch(translation_validation=False)
     @make_test
     def test_torch_distributions_functions(x):
         normal = torch.distributions.Normal(x, torch.tensor(1))

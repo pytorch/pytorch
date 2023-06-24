@@ -250,6 +250,10 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     "vision_maskrcnn",  # accuracy failure on boxes, after https://github.com/pytorch/pytorch/issues/101093
+
+    # accuracy failure due to timeout with translation validation on.
+    "hf_T5_generate",
+    "yolov3",
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
