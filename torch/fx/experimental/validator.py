@@ -365,6 +365,11 @@ try:
         def validate(self) -> "TranslationValidator.Result":
             from torch._dynamo.utils import dynamo_timed
 
+            if len(self._source_exprs) == 0 or len(self._target_exprs) == 0:
+                # If there are no source/target expressions, there's nothing we really
+                # wish to prove. So, we just return.
+                return self.Result(success=True)
+
             # Here, we use "QF_NRA" logic for the solver, since guards have no quantifiers
             # and are potentially non-linear.
             solver = z3.SolverFor("QF_NRA")
