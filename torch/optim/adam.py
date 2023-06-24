@@ -472,8 +472,8 @@ def _multi_tensor_adam(params: List[Tensor],
         torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
 
         if capturable or torch._utils.is_compiling():
-            bias_correction1 = torch._foreach_pow(device_state_steps, beta1)
-            bias_correction2 = torch._foreach_pow(device_state_steps, beta2)
+            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
+            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
             # foreach_sub doesn't allow a scalar as the first arg
             torch._foreach_sub_(bias_correction1, 1)
             torch._foreach_sub_(bias_correction2, 1)
