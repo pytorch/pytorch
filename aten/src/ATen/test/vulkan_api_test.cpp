@@ -1816,6 +1816,91 @@ TEST_F(VulkanAPITest, empty) {
   ASSERT_NO_THROW(at::empty({1, 17, 41, 53}, at::device(at::kVulkan).dtype(at::kFloat)));
 }
 
+void test_expand(const at::IntArrayRef input_shape, const at::IntArrayRef output_shape) {
+  c10::InferenceMode mode;
+  const auto cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
+  const auto vulkan = cpu.vulkan();
+
+  cpu.expand(output_shape);
+  vulkan.expand(output_shape);
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, expand_exceptions) {
+  // Vulkan expand supports input dims <= 4
+  auto in_cpu = at::rand({1, 2, 3, 4, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({1, 2, 3, 4}), ::c10::Error);
+
+  // Vulkan expand supports output_size <= 4
+  in_cpu = at::rand({1, 2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat));
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({1, 1, 2, 3, 4}), ::c10::Error);
+
+  // Vulkan expand expects output size >= input
+  in_cpu = at::rand({1, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({2, 3}), ::c10::Error);
+
+  // Non-singleton dimensions must match
+  in_cpu = at::rand({3, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({1, 1}), ::c10::Error);
+
+  // -1 not allowed in leading, non-existing dimension
+  in_cpu = at::rand({3, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({-1, 3, 1}), ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, expand_1d) {
+  test_expand({1}, {3});
+
+  test_expand({1}, {9, 3});       // 1d->2d
+  test_expand({1}, {8, 9, 3});    // 1d->3d
+  test_expand({1}, {7, 8, 9, 3}); // 1d->4d
+}
+
+TEST_F(VulkanAPITest, expand_2d) {
+  test_expand({5, 1}, {-1, 5}); // W
+  test_expand({1, 5}, {5, 5});  // H
+
+  test_expand({5, 1}, {2, -1, 5});    // 2d->3d
+  test_expand({1, 5}, {2, 5, 3, -1}); // 2d->4d
+}
+
+TEST_F(VulkanAPITest, expand_3d) {
+  test_expand({3, 4, 1}, {3, 4, -1}); // W
+  test_expand({3, 1, 5}, {-1, 4, 5}); // H
+  test_expand({1, 4, 5}, {3, -1, 5}); // C
+
+  test_expand({5, 4, 3}, {2, -1, -1, -1}); // 3d->4d
+}
+
+TEST_F(VulkanAPITest, expand_4d) {
+  test_expand({5, 4, 3, 1}, {5, 4, 3, 9}); // W
+  test_expand({5, 4, 1, 2}, {5, 4, 9, 2}); // H
+  test_expand({5, 1, 3, 2}, {5, 9, 3, 2}); // C
+  test_expand({1, 4, 3, 2}, {9, 4, 3, 2}); // N
+}
+
+TEST_F(VulkanAPITest, expand_as) {
+  // expand_as calls into expand, without negative sizes, those tests should be sufficient.
+  c10::InferenceMode mode;
+  const auto cpu = at::rand({1, 1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto vulkan = cpu.vulkan();
+  const auto other = at::rand({9, 11, 33, 22}, at::device(at::kCPU).dtype(at::kFloat));
+
+  cpu.expand_as(other);
+  vulkan.expand_as(other);
+
+  const auto check = almostEqual(cpu, vulkan.cpu());
+  if (!check) {
+    showRtol(cpu, vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
 void test_glu(const at::IntArrayRef input_shape) {
   const auto in_cpu = at::rand(input_shape, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
