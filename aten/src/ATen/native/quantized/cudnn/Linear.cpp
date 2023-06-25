@@ -9,7 +9,6 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Types.h>
-#include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/ParamsHash.h>
@@ -22,11 +21,6 @@
 
 #include <iostream>
 #include <unordered_map>
-
-namespace ao {
-namespace sparse {
-  int register_linear_params();
-}}  // namespace ao::sparse
 
 // TODO: there is a table from input dtype and weight dtype to operator dtype,
 // we can derive the operator dtype based on input dtype
@@ -361,7 +355,6 @@ class QLinearInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
-  ao::sparse::register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), QLinearInt8<false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), QLinearInt8<true>::run);
 }
