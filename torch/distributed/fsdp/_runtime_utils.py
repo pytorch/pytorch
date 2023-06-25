@@ -337,8 +337,8 @@ def _init_streams(
 def _unshard(
     state: _FSDPState,
     handles: List[FlatParamHandle],
-    unshard_stream: torch.cuda.Stream,
-    pre_unshard_stream: torch.cuda.Stream,
+    unshard_stream: torch.Stream,
+    pre_unshard_stream: torch.Stream,
 ) -> None:
     """
     Unshards the handles in ``handles``. If the handles are in
@@ -1426,9 +1426,9 @@ def _register_post_backward_final_callback(
 
 
 def _wait_for_computation_stream(
-    computation_stream: torch.cuda.Stream,
-    unshard_stream: torch.cuda.Stream,
-    pre_unshard_stream: torch.cuda.Stream,
+    computation_stream: torch.Stream,
+    unshard_stream: torch.Stream,
+    pre_unshard_stream: torch.Stream,
 ):
     """
     Has the unshard and pre-unshard streams wait for the computation stream.
