@@ -18,7 +18,6 @@ CONSTEXPR_EXCEPT_WIN_CUDA char acos_name[] = "acos_impl";
 void acos_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
-    // Disabled due to accuracy issues
 #if AT_USE_JITERATOR()
     static const auto acos_string = jiterator_stringify(
         template <typename T> T acos_impl(T a) { return std::acos(a); });
