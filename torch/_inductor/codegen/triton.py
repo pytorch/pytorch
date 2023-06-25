@@ -1847,9 +1847,7 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
-        if isinstance(node1, scheduler.ForeachKernelSchedulerNode) and isinstance(
-            node2, scheduler.ForeachKernelSchedulerNode
-        ):
+        if isinstance(node1, scheduler.ForeachKernelSchedulerNode):
             return node1.can_fuse(node2)
 
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(

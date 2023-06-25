@@ -916,39 +916,47 @@ void cuComputeGradGammaBeta(
     alignas(sizeof(double)) extern __shared__ char shared[];
     T_ACC * buf = reinterpret_cast<T_ACC*>(&shared);
     int i2 = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // each warp does sequential reductions until reduced part_size is num_warps
+    int num_warp_reductions = part_size / blockDim.y;
+    T_ACC sum_gamma = T_ACC(0);
+    T_ACC sum_beta = T_ACC(0);
+    const T_ACC* part_grad_gamma_ptr = part_grad_gamma + threadIdx.y * num_warp_reductions * N + i2;
+    const T_ACC* part_grad_beta_ptr = part_grad_beta + threadIdx.y * num_warp_reductions * N + i2;
+
     if (i2 < N) {
-      // each warp does sequential reductions until reduced part_size is num_warps
-      int num_warp_reductions = part_size / blockDim.y;
-      T_ACC sum_gamma = T_ACC(0);
-      T_ACC sum_beta = T_ACC(0);
-      const T_ACC* part_grad_gamma_ptr = part_grad_gamma + threadIdx.y * num_warp_reductions * N + i2;
-      const T_ACC* part_grad_beta_ptr = part_grad_beta + threadIdx.y * num_warp_reductions * N + i2;
-      for (int warp_offset = 0;  warp_offset < num_warp_reductions;  ++warp_offset) {
-        sum_gamma += part_grad_gamma_ptr[warp_offset*N];
-        sum_beta += part_grad_beta_ptr[warp_offset*N];
-      }
-      // inter-warp reductions
-      const int nbsize3 = blockDim.x * blockDim.y / 2;
-      for (int offset = blockDim.y/2;  offset >= 1;  offset /= 2) {
-        // top half write to shared memory
-        if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
-          const int write_idx = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
-          buf[write_idx] = sum_gamma;
-          buf[write_idx+nbsize3] = sum_beta;
+        for (int warp_offset = 0;  warp_offset < num_warp_reductions;  ++warp_offset) {
+          sum_gamma += part_grad_gamma_ptr[warp_offset*N];
+          sum_beta += part_grad_beta_ptr[warp_offset*N];
         }
-        __syncthreads();
-        // bottom half sums
-        if (threadIdx.y < offset) {
-          const int read_idx = threadIdx.y * blockDim.x + threadIdx.x;
-          sum_gamma += buf[read_idx];
-          sum_beta += buf[read_idx+nbsize3];
-        }
-        __syncthreads();
+    }
+
+    // inter-warp reductions
+    const int nbsize3 = blockDim.x * blockDim.y / 2;
+    for (int offset = blockDim.y/2;  offset >= 1;  offset /= 2) {
+      // top half write to shared memory
+      if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
+        const int write_idx = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
+        buf[write_idx] = sum_gamma;
+        buf[write_idx+nbsize3] = sum_beta;
       }
-      // write out fully summed gradients
-      if (threadIdx.y == 0) {
-        grad_gamma[i2] = sum_gamma;
-        grad_beta[i2] = sum_beta;
+      __syncthreads();
+      // bottom half sums
+      if (threadIdx.y < offset) {
+        const int read_idx = threadIdx.y * blockDim.x + threadIdx.x;
+        sum_gamma += buf[read_idx];
+        sum_beta += buf[read_idx+nbsize3];
+      }
+      __syncthreads();
+    }
+
+    // write out fully summed gradients
+    if (threadIdx.y == 0 && i2 < N) {
+      if (grad_gamma) {
+          grad_gamma[i2] = sum_gamma;
+      }
+      if (grad_beta) {
+          grad_beta[i2] = sum_beta;
       }
     }
 }
@@ -1154,6 +1162,7 @@ void LayerNormBackwardKernelImplInternal(
       const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
       Tensor part_grad_gamma = at::empty({part_size,N}, gamma.options().dtype(part_grad_dtype));
       Tensor part_grad_beta = at::native::empty_like(part_grad_gamma);
+
       cuComputePartGradGammaBeta<<<blocks2, threads2, nshared2, cuda_stream>>>(
                       dY_data,
                       X_data,
@@ -1165,8 +1174,9 @@ void LayerNormBackwardKernelImplInternal(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
 
       const dim3 threads3(warp_size, 8, 1); // Optimization for ROCm
-      const dim3 blocks3((N + threads2.x - 1) / threads2.x, 1, 1);
-      const int nshared3 = threads3.x * threads3.y * sizeof(T);
+      const dim3 blocks3((N + threads3.x - 1) / threads3.x, 1, 1);
+      const int nshared3 = threads3.x * threads3.y * sizeof(T_ACC);
+
       cuComputeGradGammaBeta<<<blocks3, threads3, nshared3, cuda_stream>>>(
                       part_grad_gamma.template data_ptr<T_ACC>(),
                       part_grad_beta.template data_ptr<T_ACC>(),
