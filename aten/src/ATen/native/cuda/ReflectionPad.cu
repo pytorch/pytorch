@@ -311,7 +311,7 @@ void reflection_pad2d_out_template(
   int output_w  = input_w + pad_l + pad_r;
 
   TORCH_CHECK(output_w >= 1 || output_h >= 1,
-    "input (H: ", input_h, ", W: ", input_w, ")is too small.  Calculated "
+    "input (H: ", input_h, ", W: ", input_w, ") is too small.  Calculated "
     "output H: ", output_h, " W: ", output_w);
 
   if (input_.ndimension() == 3) {
