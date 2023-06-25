@@ -1,5 +1,3 @@
-#pragma once
-
 #include <ATen/ATen.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
