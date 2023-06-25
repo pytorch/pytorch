@@ -9,6 +9,7 @@
 #include <ATen/TensorIndexing.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/cpu/utils.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/DispatchStub.h>
 #include <c10/core/DeviceType.h>
@@ -21,13 +22,6 @@
 #include <utility>
 #if AT_MKL_ENABLED()
 #include <mkl.h>
-
-#ifdef _OPENMP
-#include <omp.h>
-#else
-#define omp_get_max_threads() 1
-#define omp_get_thread_num() 0
-#endif
 
 namespace at {
 namespace native {
@@ -118,7 +112,7 @@ at::Tensor sd_mha_base_kernel(
   int64_t kvSlice = (kvSize - 1) / kvSplitSize + 1;
   int64_t kvTail = (kvSize - 1) % kvSplitSize + 1;
 
-  int64_t num_thread = omp_get_max_threads();
+  int64_t num_thread = at::get_num_threads();
 
   at::Tensor qk = at::empty({num_thread, qSplitSize, kvSplitSize}, at::kFloat);
   at::Tensor qk_norm = at::empty(
@@ -127,75 +121,147 @@ at::Tensor sd_mha_base_kernel(
   at::Tensor qk_sum = at::empty({num_thread, qSplitSize}, at::kFloat);
   at::Tensor dst_fp32 =
       at::empty({num_thread, qSplitSize, headSize}, at::kFloat);
+  
+  at::parallel_for(0, batchSize * num_head * qSlice, 0, [&](int64_t begin, int64_t end) {
+    int64_t i = 0;
+    int64_t j = 0;
+    int64_t k = 0;
+    data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
 
-#pragma omp parallel for collapse(3)
-  for (int i = 0; i < batchSize; ++i) {
-    for (int j = 0; j < num_head; ++j) {
-      for (int k = 0; k < qSlice; ++k) {
-        int qBlockSize = (k == qSlice - 1) ? qTail : qSplitSize;
-        int ompIdx = omp_get_thread_num();
-        _init_mha_buffer_kernel(
+    for (const auto g : c10::irange(begin, end)) {
+      int qBlockSize = (k == qSlice - 1) ? qTail : qSplitSize;
+      int ompIdx = at::get_thread_num();
+      _init_mha_buffer_kernel(
+          qk_max.data_ptr<float>() + ompIdx * qSplitSize,
+          qk_sum.data_ptr<float>() + ompIdx * qSplitSize,
+          qBlockSize);
+      for (int l = 0; l < kvSlice; ++l) {
+        int kvBlockSize = (l == kvSlice - 1) ? kvTail : kvSplitSize;
+        _mkl_gemm(
+            CblasRowMajor,
+            CblasNoTrans,
+            CblasTrans,
+            qBlockSize,
+            kvBlockSize,
+            headSize,
+            1.f,
+            query + i * qSize * qStride + headSize * j +
+                k * qSplitSize * qStride,
+            qStride,
+            key + i * kvSize * kStride + headSize * j +
+                l * kvSplitSize * kStride,
+            kStride,
+            0.f,
+            qk.data_ptr<float>() + ompIdx * qSplitSize * kvSplitSize,
+            kvBlockSize);
+
+        _mha_mul_softmax_kernel<scalar_t>(
+            qk.data_ptr<float>() + ompIdx * qSplitSize * kvSplitSize,
+            qk_norm.data_ptr<scalar_t>() + ompIdx * qSplitSize * kvSplitSize,
+            dst_fp32.data_ptr<float>() + ompIdx * qSplitSize * headSize,
             qk_max.data_ptr<float>() + ompIdx * qSplitSize,
             qk_sum.data_ptr<float>() + ompIdx * qSplitSize,
-            qBlockSize);
-        for (int l = 0; l < kvSlice; ++l) {
-          int kvBlockSize = (l == kvSlice - 1) ? kvTail : kvSplitSize;
-          _mkl_gemm(
-              CblasRowMajor,
-              CblasNoTrans,
-              CblasTrans,
-              qBlockSize,
-              kvBlockSize,
-              headSize,
-              1.f,
-              query + i * qSize * qStride + headSize * j +
-                  k * qSplitSize * qStride,
-              qStride,
-              key + i * kvSize * kStride + headSize * j +
-                  l * kvSplitSize * kStride,
-              kStride,
-              0.f,
-              qk.data_ptr<float>() + ompIdx * qSplitSize * kvSplitSize,
-              kvBlockSize);
+            scale,
+            qBlockSize,
+            kvBlockSize,
+            headSize);
 
-          _mha_mul_softmax_kernel<scalar_t>(
-              qk.data_ptr<float>() + ompIdx * qSplitSize * kvSplitSize,
-              qk_norm.data_ptr<scalar_t>() + ompIdx * qSplitSize * kvSplitSize,
-              dst_fp32.data_ptr<float>() + ompIdx * qSplitSize * headSize,
-              qk_max.data_ptr<float>() + ompIdx * qSplitSize,
-              qk_sum.data_ptr<float>() + ompIdx * qSplitSize,
-              scale,
-              qBlockSize,
-              kvBlockSize,
-              headSize);
-
-          _mkl_gemm(
-              CblasRowMajor,
-              CblasNoTrans,
-              CblasNoTrans,
-              qBlockSize,
-              headSize,
-              kvBlockSize,
-              1.f,
-              qk_norm.data_ptr<scalar_t>() + ompIdx * qSplitSize * kvSplitSize,
-              kvBlockSize,
-              value + i * kvSize * vStride + headSize * j +
-                  l * kvSplitSize * vStride,
-              vStride,
-              l == 0 ? 0.f : 1.f,
-              dst_fp32.data_ptr<float>() + ompIdx * qSplitSize * headSize,
-              headSize);
-        }
-        _reorder_mha_output_kernel<scalar_t>(
-            dst_fp32.data_ptr<float>() + ompIdx * qSplitSize * headSize,
-            output.data_ptr<scalar_t>() + i * qSize * hiddenSize +
-                headSize * j + k * qSplitSize * hiddenSize,
+        _mkl_gemm(
+            CblasRowMajor,
+            CblasNoTrans,
+            CblasNoTrans,
             qBlockSize,
             headSize,
-            hiddenSize);
+            kvBlockSize,
+            1.f,
+            qk_norm.data_ptr<scalar_t>() + ompIdx * qSplitSize * kvSplitSize,
+            kvBlockSize,
+            value + i * kvSize * vStride + headSize * j +
+                l * kvSplitSize * vStride,
+            vStride,
+            l == 0 ? 0.f : 1.f,
+            dst_fp32.data_ptr<float>() + ompIdx * qSplitSize * headSize,
+            headSize);
       }
+      _reorder_mha_output_kernel<scalar_t>(
+          dst_fp32.data_ptr<float>() + ompIdx * qSplitSize * headSize,
+          output.data_ptr<scalar_t>() + i * qSize * hiddenSize +
+              headSize * j + k * qSplitSize * hiddenSize,
+          qBlockSize,
+          headSize,
+          hiddenSize);
+      data_index_step(i, batchSize, j, num_head, k, qSlice);
     }
-  }
+  });
+
+// #pragma omp parallel for collapse(3)
+//   for (int i = 0; i < batchSize; ++i) {
+//     for (int j = 0; j < num_head; ++j) {
+//       for (int k = 0; k < qSlice; ++k) {
+//         int qBlockSize = (k == qSlice - 1) ? qTail : qSplitSize;
+//         int ompIdx = omp_get_thread_num();
+//         _init_mha_buffer_kernel(
+//             qk_max.data_ptr<float>() + ompIdx * qSplitSize,
+//             qk_sum.data_ptr<float>() + ompIdx * qSplitSize,
+//             qBlockSize);
+//         for (int l = 0; l < kvSlice; ++l) {
+//           int kvBlockSize = (l == kvSlice - 1) ? kvTail : kvSplitSize;
+//           _mkl_gemm(
+//               CblasRowMajor,
+//               CblasNoTrans,
+//               CblasTrans,
+//               qBlockSize,
+//               kvBlockSize,
+//               headSize,
+//               1.f,
+//               query + i * qSize * qStride + headSize * j +
+//                   k * qSplitSize * qStride,
+//               qStride,
+//               key + i * kvSize * kStride + headSize * j +
+//                   l * kvSplitSize * kStride,
+//               kStride,
+//               0.f,
+//               qk.data_ptr<float>() + ompIdx * qSplitSize * kvSplitSize,
+//               kvBlockSize);
+
+//           _mha_mul_softmax_kernel<scalar_t>(
+//               qk.data_ptr<float>() + ompIdx * qSplitSize * kvSplitSize,
+//               qk_norm.data_ptr<scalar_t>() + ompIdx * qSplitSize * kvSplitSize,
+//               dst_fp32.data_ptr<float>() + ompIdx * qSplitSize * headSize,
+//               qk_max.data_ptr<float>() + ompIdx * qSplitSize,
+//               qk_sum.data_ptr<float>() + ompIdx * qSplitSize,
+//               scale,
+//               qBlockSize,
+//               kvBlockSize,
+//               headSize);
+
+//           _mkl_gemm(
+//               CblasRowMajor,
+//               CblasNoTrans,
+//               CblasNoTrans,
+//               qBlockSize,
+//               headSize,
+//               kvBlockSize,
+//               1.f,
+//               qk_norm.data_ptr<scalar_t>() + ompIdx * qSplitSize * kvSplitSize,
+//               kvBlockSize,
+//               value + i * kvSize * vStride + headSize * j +
+//                   l * kvSplitSize * vStride,
+//               vStride,
+//               l == 0 ? 0.f : 1.f,
+//               dst_fp32.data_ptr<float>() + ompIdx * qSplitSize * headSize,
+//               headSize);
+//         }
+//         _reorder_mha_output_kernel<scalar_t>(
+//             dst_fp32.data_ptr<float>() + ompIdx * qSplitSize * headSize,
+//             output.data_ptr<scalar_t>() + i * qSize * hiddenSize +
+//                 headSize * j + k * qSplitSize * hiddenSize,
+//             qBlockSize,
+//             headSize,
+//             hiddenSize);
+//       }
+//     }
+//   }
   return output;
 }
 
@@ -233,11 +299,11 @@ _scaled_dot_product_flash_attention_cpu(
   // Query -> Query(Batch x Q_seq_len x hiddenSize)
   // Key   -> Key(Batch x KV_seq_len x hiddenSize)
   // Value -> Value(Batch x KV_seq_len x hiddenSize)
-  Tensor query_reshaped = query.transpose(1, 2).contiguous().reshape(
+  Tensor query_reshaped = query.transpose(1, 2).reshape(
       {batchSize, qSize, hiddenSize});
-  Tensor key_reshaped =
-      key.transpose(1, 2).contiguous().reshape({batchSize, kvSize, hiddenSize});
-  Tensor value_reshaped = value.transpose(1, 2).contiguous().reshape(
+  Tensor key_reshaped = key.transpose(1, 2).reshape(
+      {batchSize, kvSize, hiddenSize});
+  Tensor value_reshaped = value.transpose(1, 2).reshape(
       {batchSize, kvSize, hiddenSize});
 
   int64_t qStride = query_reshaped.size(-1);

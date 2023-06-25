@@ -495,8 +495,11 @@ int64_t _fused_sdp_choice_cpp(
   if (at::hasMKL() &&
       (query_.scalar_type() == at::kFloat ||
        query_.scalar_type() == at::kBFloat16) &&
+      query_.stride(1) == query_.size(-1) &&
       query_.dim() == 4 &&
-      dropout_p == 0.0 && !attn_mask_.has_value() && !is_causal) {
+      dropout_p == 0.0 &&
+      !attn_mask_.has_value() &&
+      !is_causal) {
     return static_cast<int64_t>(sdp::SDPBackend::flash_attention);
   }
   return static_cast<int64_t>(sdp::SDPBackend::math);

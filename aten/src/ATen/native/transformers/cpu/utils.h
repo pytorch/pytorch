@@ -62,9 +62,9 @@ inline void _mkl_gemm(
       n,
       k,
       alpha,
-      (const MKL_BF16*)(a),
+      (MKL_BF16*)(a),
       lda,
-      (const MKL_BF16*)(b),
+      (MKL_BF16*)(b),
       ldb,
       beta,
       c,
@@ -73,11 +73,17 @@ inline void _mkl_gemm(
 
 #endif // AT_MKL_ENABLED
 
-inline void _store(float* dst, at::vec::Vectorized<float> src) {
-  src.store(dst);
+inline void _store(
+    float* dst,
+    at::vec::Vectorized<float> src,
+    int64_t l=at::vec::Vectorized<float>::size()) {
+  src.store(dst, l);
 }
 
-inline void _store(at::BFloat16* dst, at::vec::Vectorized<float> src) {
+inline void _store(
+    at::BFloat16* dst,
+    at::vec::Vectorized<float> src,
+    int64_t l=at::vec::Vectorized<float>::size()) {
   auto res = at::vec::convert_float_bfloat16(src, src);
-  res.store(dst, at::vec::Vectorized<float>::size());
+  res.store(dst, l);
 }
