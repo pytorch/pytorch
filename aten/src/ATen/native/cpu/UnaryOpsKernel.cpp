@@ -689,7 +689,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
             }                                                                      \
           }
 
-#define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
+#define IMPLEMENT_FLOAT_KERNEL(op, compile_kernel)                                  \
   inline namespace CPU_CAPABILITY {                                                 \
   static void op##_kernel(TensorIteratorBase& iter) {                               \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
@@ -700,9 +700,14 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     iter.cast_outputs();                                                            \
   }                                                                                 \
   }                                                                                 \
-  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+  if (compile_kernel == true) {                                                     \
+    REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)                      \
+  } else {                                                                          \
+    REGISTER_DISPATCH(op##_stub, nullptr)                                           \
+  }                                                                                 
+                                                                             
 
-#define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
+#define IMPLEMENT_COMPLEX_KERNEL(op, compile_kernel)                                             \
   inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
@@ -713,9 +718,13 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     iter.cast_outputs();                                                                         \
   }                                                                                              \
   }                                                                                              \
-  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+  if (compile_kernel == true) {                                                                  \
+    REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)                                   \
+  } else {                                                                                       \
+    REGISTER_DISPATCH(op##_stub, nullptr)                                                        \
+  }
 
-#define STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                                      \
+#define STATIC_IMPLEMENT_COMPLEX_KERNEL(op, compile_kernel)                                      \
   inline namespace CPU_CAPABILITY {                                                              \
   static void op##_kernel(TensorIteratorBase& iter) {                                            \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
@@ -726,26 +735,60 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     iter.cast_outputs();                                                                         \
   }                                                                                              \
   }                                                                                              \
-  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+  if (compile_kernel == true) {                                                                  \
+    REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)                                   \
+  } else {                                                                                       \
+    REGISTER_DISPATCH(op##_stub, nullptr)                                                        \
+  }                                                                                  
 
 } // CPU_CAPABILITY namespace
 
-REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
-REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
-REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
+
+#ifdef CPU_CAPABILITY_AVX512
+// The following kernels are slower with AVX512 & faster with AVX2
+REGISTER_DISPATCH(round_decimals_stub, nullptr);
+REGISTER_DISPATCH(abs_stub, nullptr);
+REGISTER_DISPATCH(angle_stub, nullptr);
+REGISTER_DISPATCH(nan_to_num_stub, nullptr);
+REGISTER_DISPATCH(neg_stub, nullptr);
+REGISTER_DISPATCH(sign_stub, nullptr);
+REGISTER_DISPATCH(signbit_stub, nullptr);
+REGISTER_DISPATCH(sgn_stub, nullptr);
+REGISTER_DISPATCH(bitwise_not_stub, nullptr);
+REGISTER_DISPATCH(logical_not_stub, nullptr);
+REGISTER_DISPATCH(conj_physical_stub, nullptr);
+IMPLEMENT_FLOAT_KERNEL(ceil, false)
+IMPLEMENT_FLOAT_KERNEL(floor, false)
+IMPLEMENT_FLOAT_KERNEL(round, false)
+IMPLEMENT_COMPLEX_KERNEL(sqrt, false)
+IMPLEMENT_FLOAT_KERNEL(trunc, false)
+#else
+REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
 REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
-REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
-REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
-REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
-REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel);
-REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
-REGISTER_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
 REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel);
 REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel);
 REGISTER_DISPATCH(sign_stub, &CPU_CAPABILITY::sign_kernel);
 REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel);
 REGISTER_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
+REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
+REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel);
+REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
+IMPLEMENT_FLOAT_KERNEL(ceil, true)
+IMPLEMENT_FLOAT_KERNEL(floor, true)
+IMPLEMENT_FLOAT_KERNEL(round, true)
+IMPLEMENT_COMPLEX_KERNEL(sqrt, true)
+IMPLEMENT_FLOAT_KERNEL(trunc, true)
+#endif
+
+// The following kernels are compute-intensive & are compiled with both AVX512
+// & AVX2
+REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
+REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
+REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
+REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
+REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
+REGISTER_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
 REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel);
 REGISTER_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
@@ -764,7 +807,6 @@ REGISTER_DISPATCH(special_log_ndtr_stub, &CPU_CAPABILITY::log_ndtr_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
-REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 REGISTER_DISPATCH(special_bessel_j0_stub, &CPU_CAPABILITY::bessel_j0_kernel);
 REGISTER_DISPATCH(special_bessel_j1_stub, &CPU_CAPABILITY::bessel_j1_kernel);
 REGISTER_DISPATCH(special_bessel_y0_stub, &CPU_CAPABILITY::bessel_y0_kernel);
@@ -774,28 +816,24 @@ REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bes
 REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
 
-STATIC_IMPLEMENT_COMPLEX_KERNEL(acos)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(asin)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(atan)
-IMPLEMENT_FLOAT_KERNEL(ceil)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(cos)
-IMPLEMENT_FLOAT_KERNEL(erf)
-IMPLEMENT_FLOAT_KERNEL(erfc)
-IMPLEMENT_FLOAT_KERNEL(erfinv)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(exp)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(expm1)
-IMPLEMENT_FLOAT_KERNEL(floor)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log10)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log1p)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log2)
-IMPLEMENT_FLOAT_KERNEL(i0)
-IMPLEMENT_FLOAT_KERNEL(round)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(sin)
-IMPLEMENT_COMPLEX_KERNEL(sqrt)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(tan)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(tanh)
-IMPLEMENT_FLOAT_KERNEL(trunc)
-IMPLEMENT_FLOAT_KERNEL(lgamma)
+// The second argument determines whether or not kernels would be compiled
+STATIC_IMPLEMENT_COMPLEX_KERNEL(acos, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(asin, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(atan, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(cos, true)
+IMPLEMENT_FLOAT_KERNEL(erf, true)
+IMPLEMENT_FLOAT_KERNEL(erfc, true)
+IMPLEMENT_FLOAT_KERNEL(erfinv, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(exp, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(expm1, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log10, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log1p, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log2, true)
+IMPLEMENT_FLOAT_KERNEL(i0, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(sin, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(tan, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(tanh, true)
+IMPLEMENT_FLOAT_KERNEL(lgamma, true)
 
 } // namespace at::native
