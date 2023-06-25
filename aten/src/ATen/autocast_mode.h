@@ -34,6 +34,10 @@ TORCH_API bool is_hpu_enabled();
 TORCH_API void set_hpu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_hpu_dtype();
 TORCH_API void set_autocast_hpu_dtype(at::ScalarType dtype);
+TORCH_API bool is_xla_enabled();
+TORCH_API void set_xla_enabled(bool enabled);
+TORCH_API at::ScalarType get_autocast_xla_dtype();
+TORCH_API void set_autocast_xla_dtype(at::ScalarType dtype);
 TORCH_API bool is_privateuseone_enabled();
 TORCH_API void set_privateuseone_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_privateuseone_dtype();
@@ -56,6 +60,8 @@ bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
       return tensor.is_ipu() && tensor.is_floating_point();
     case DeviceType::HPU:
       return tensor.is_hpu() && tensor.is_floating_point();
+    case DeviceType::XLA:
+      return tensor.is_xla() && tensor.is_floating_point();
     case DeviceType::PrivateUse1:
       return tensor.device().type() == DeviceType::PrivateUse1 &&
           tensor.is_floating_point();
@@ -78,6 +84,8 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
       return DispatchKey::AutocastIPU;
     case DeviceType::HPU:
       return DispatchKey::AutocastHPU;
+    case DeviceType::XLA:
+      return DispatchKey::AutocastXLA;
     case DeviceType::PrivateUse1:
       return DispatchKey::AutocastPrivateUse1;
     default:
@@ -99,6 +107,8 @@ inline at::ScalarType get_lower_precision_fp_from_device_type(
       return get_autocast_ipu_dtype();
     case DeviceType::HPU:
       return get_autocast_hpu_dtype();
+    case DeviceType::XLA:
+      return get_autocast_xla_dtype();
     case DeviceType::PrivateUse1:
       return get_autocast_privateuseone_dtype();
     default:
