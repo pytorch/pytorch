@@ -6,7 +6,6 @@ import torch
 from torch import Tensor
 from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
-from ..._dynamo.utils import counters
 
 from ..pattern_matcher import inference_graph, register_replacement, training_graph
 
@@ -389,6 +388,10 @@ def pad_bmm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
 
 @functools.lru_cache(None)
 def _pad_mm_init():
+    from ..._dynamo.utils import counters
+
+    counters_ref = counters["inductor"].copy()
+
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -411,6 +414,8 @@ def _pad_mm_init():
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     rep = {"beta": 0.213377, "alpha": 0.113377}
+
+    counters_ref = counters["inductor"].copy()
 
     for pattern, replacement, args, workaround, extra_check in [
         (
@@ -455,5 +460,6 @@ def _pad_mm_init():
             scalar_workaround=workaround,
         )
 
-    # copy pasta - needed ?
-    counters["inductor"].clear()  # clear view matches encountered during mm tracing
+    counters[
+        "inductor"
+    ] = counters_ref  # clear view matches encountered during mm tracing
