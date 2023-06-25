@@ -800,8 +800,23 @@ def forward(self, primals_1, primals_2, primals_3, primals_4):
 def forward(self, primals_1):
     mul = torch.ops.aten.mul.Tensor(primals_1, 3);  primals_1 = None
     view = torch.ops.aten.view.default(mul, [-1]);  mul = None
-    _unsafe_view = torch.ops.aten._unsafe_view.default(view, [9]);  view = None
-    return [_unsafe_view]""")
+    return [view]""")
+
+    def test_output_aliases_intermediate_mutation_linear(self):
+        def f(x):
+            return (x + 1).view(-1)
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        # use inductor's decomps (which will e.g. turn _unsafe_view() into view())
+        from torch._inductor.decomposition import decompositions
+        f_compiled = aot_function(f, nop, decompositions=decompositions)
+
+        out_ref = f(*inp)
+        out_test = f_compiled(*inp)
+
+        out_ref.mul_(2)
+        out_test.mul_(2)
+        self.assertEqual(out_ref, out_test)
 
     def test_output_aliases_intermediate_no_grad(self):
         def f(a, b):
@@ -959,8 +974,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     transpose = torch.ops.aten.transpose.int(mul_1, 1, 0);  mul_1 = None
     transpose_1 = torch.ops.aten.transpose.int(mul, 1, 0)
-    _unsafe_view = torch.ops.aten._unsafe_view.default(transpose, [3, 3]);  transpose = None
-    return [view, _unsafe_view, transpose_1, mul]""")
+    return [view, transpose, transpose_1, mul]""")
 
     def test_output_all_alias_types(self):
         # There are 3 types of aliasing that require us to return metadata in the compiled fw:
@@ -2799,7 +2813,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.lstsq', 'grad_oriented'),  # aten.linalg_lstsq.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...
     xfail('linalg.multi_dot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
@@ -2835,7 +2848,6 @@ symbolic_aot_autograd_failures = {
     xfail('polygamma', 'polygamma_n_3'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('polygamma', 'polygamma_n_4'),  # aten.polygamma.default - couldn't find symbolic meta function/de...
     xfail('prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
-    xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('roll', ''),  # narrow() received an invalid combination of arguments - got (FakeTensor, int, torch._C...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
