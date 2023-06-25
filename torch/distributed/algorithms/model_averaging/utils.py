@@ -31,8 +31,12 @@ def average_parameters(
     flat_params = torch.cat([p.data.reshape(-1) for p in params_it1])
     flat_params /= dist.get_world_size(group_to_use)
     # Make sure the allreduce will not conflict with any other ongoing process group.
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    device_type = dist.distributed_c10d._get_pg_default_device(group_to_use).type
+    device_module = getattr(torch, device_type, None)
+    if device_module is None:
+        raise RuntimeError(f"invalid device type {device_type}, no module named torch.{device_type}.")
+    if device_module.is_available():
+        device_module.synchronize()
     dist.all_reduce(flat_params, group=group_to_use)
 
     offset = 0

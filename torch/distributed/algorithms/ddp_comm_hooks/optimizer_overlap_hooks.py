@@ -37,20 +37,24 @@ class _OptimizerHookState:
 
 @dataclass
 class _OptimInBackwardHookState:
-    optim_stream: torch.cuda.Stream
+    optim_stream: torch.Stream
     wait_for_optim_stream_enqueued: bool
 
 @no_type_check
 def _apply_optim_in_backward_hook(
-    gradient_is_bucket_view: bool
+    gradient_is_bucket_view: bool,
+    device_type: str
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     If torch.distributed.optim._apply_optimizer_in_backward is used to overlap
     optimizer with backward pass, DDP will run the below hook to run optimizer
     step for parameters after gradient communication has taken place.
     """
+    device_module = getattr(torch, device_type, None)
+    if device_module is None:
+        raise RuntimeError(f"invalid device type {device_type}, no module named torch.{device_type}.")
     optim_in_bwd_state = _OptimInBackwardHookState(
-        optim_stream=torch.cuda.Stream(),
+        optim_stream=device_module.Stream(),
         wait_for_optim_stream_enqueued=False,
     )
 
@@ -63,7 +67,7 @@ def _apply_optim_in_backward_hook(
         reducer, process_group = ddp_inst.reducer, ddp_inst.process_group
         fut = reducer._run_allreduce_hook(bucket)
         optimizer_stream = optim_stream_state.optim_stream
-        with torch.cuda.stream(optimizer_stream):
+        with device_module.stream(optimizer_stream):
             fut.wait()
             # Apply gradient division since C++ side only allreduces and does
             # not average. TODO: (rohan-varma) the div factor may be different
@@ -90,7 +94,7 @@ def _apply_optim_in_backward_hook(
         # enqueue a callback to wait for this optimizer stream at the end of
         # backward and set all DDP managed grads to None.
         def wait_for_optim_stream_callback():
-            torch.cuda.current_stream().wait_stream(
+            device_module.current_stream().wait_stream(
                 optim_stream_state.optim_stream
             )
             # Set DDP managed grads to None
