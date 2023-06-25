@@ -34,7 +34,7 @@ def _create_onnx_supports_op_overload_table(
     # This is a workaround to make sure we register ONNX symbolic functions for these.
     onnx_supported_aten_lookup_table = [
         k.split("::")[1].split(".")[0]
-        for k in registry.all_registered_op()
+        for k in registry.all_registered_ops()
         if k.startswith("aten::")
     ]
 
