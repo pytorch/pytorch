@@ -616,8 +616,7 @@ struct UnCopyableDataset : public datasets::Dataset<UnCopyableDataset> {
   UnCopyableDataset(UnCopyableDataset&&) = default;
   UnCopyableDataset& operator=(UnCopyableDataset&&) = default;
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~UnCopyableDataset() = default;
+  ~UnCopyableDataset() override = default;
 
   Example<> get(size_t index) override {
     return {
