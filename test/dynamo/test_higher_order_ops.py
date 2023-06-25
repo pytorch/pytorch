@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import functools
+import re
 import unittest
 
 import functorch.experimental.control_flow as control_flow
@@ -17,6 +19,21 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
+
+def strip_comment(code):
+    code = str(code)
+    return re.sub(r"(?m)^ *#.*\n?", "", code)
+
+
+def remove_trailing_space(code):
+    return "\n".join([line.rstrip() for line in code.split("\n")])
+
+
+def normalize_gm(gm_str):
+    # strip comments as comments have path to files which may differ from
+    # system to system.
+    return remove_trailing_space(strip_comment(gm_str))
 
 
 # Equivalent to backend="eager", but also records graphs that
@@ -90,6 +107,30 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3)
 
+    def test_capture_constants(self):
+        x = torch.randn(3, 3)
+        y = 4.0
+
+        def fn(x, y, z):
+            if z:
+                return x + y
+            return x * y
+
+        def f(x, y, z):
+            return wrap(fn, x, y, z)
+
+        args = (x, 4.0, None)
+        opt_f = torch.compile(f, fullgraph=True, backend=CompileCounter())
+        expected = f(*args)
+        result = opt_f(*args)
+        self.assertEqual(result, expected)
+
+        # Ensure that we recompile here
+        args = (x, 5.0, None)
+        expected = f(*args)
+        result = opt_f(*args)
+        self.assertEqual(result, expected)
+
     def test_capture_untracked_global_nested(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -133,6 +174,15 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         def f(x, y):
             return wrap(lambda x: x + y, x)
+
+        self._test_wrap_simple(f, (x, y), 3)
+
+    def test_capture_tracked_nested(self):
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        def f(x, y):
+            return wrap(lambda x: wrap(lambda x: x + y, x), x)
 
         self._test_wrap_simple(f, (x, y), 3)
 
@@ -211,7 +261,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         name_set = set()
         for name, _ in map_gm.named_modules():
             name_set.add(name)
-        self.assertEqual(name_set, {"", "map_body_0.map_body_0", "map_body_0"})
+        self.assertEqual(name_set, {"", "map_body_1.map_body_0", "map_body_1"})
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -249,12 +299,202 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             name_set,
             {
                 "",
-                "cond_true_0",
-                "cond_false_0",
-                "cond_false_0.cond_false_0",
-                "cond_false_0.cond_true_0",
+                "cond_true_1",
+                "cond_false_1",
+                "cond_false_1.cond_false_0",
+                "cond_false_1.cond_true_0",
             },
         )
+
+    @torch._dynamo.config.patch(
+        assume_static_by_default=True,
+        dynamic_shapes=True,
+    )
+    def test_cond_graph_break_in_one_branch(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x):
+                def true_fn(x):
+                    self.buffer += 1
+                    return self.buffer.sum() + x.sum()
+
+                def false_fn(x):
+                    return (x - 1).sum()
+
+                return control_flow.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+
+        mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
+        mod_for_eager = Foo()
+
+        actual = mod_for_compile(torch.ones(6, 4))
+        ref = mod_for_eager(torch.ones(6, 4))
+        self.assertEqual(actual, ref)
+
+        actual = mod_for_compile(torch.ones(3, 4))
+        ref = mod_for_eager(torch.ones(3, 4))
+        self.assertEqual(actual, ref)
+
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    size = l_x_.size();  l_x_ = None
+    getitem = size[0];  size = None
+    gt = getitem > 4;  getitem = None
+    return (gt,)""",
+        )
+
+    def test_cond_free_variable_in_both_branches(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        z = torch.ones(4, 4)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.ones(6, 4))
+
+            def forward(self, x, y):
+                def true_fn(x):
+                    return x.sum() + self.buffer.sum() + z.sum()
+
+                def false_fn(x):
+                    return x.sum() - z.sum() - self.buffer.sum()
+
+                return control_flow.cond(y, true_fn, false_fn, [x])
+
+        mod_for_compile = torch.compile(
+            Foo(), backend=cnt, dynamic=True, fullgraph=True
+        )
+        mod_for_eager = Foo()
+
+        self.assertEqual(
+            mod_for_compile(torch.tensor(True), torch.tensor(5)),
+            mod_for_eager(torch.tensor(True), torch.tensor(5)),
+        )
+
+        for node in backend.graphs[0].graph.nodes:
+            if node.op == "call_function" and node.target == control_flow.cond:
+                _, _, _, operands = node.args
+                # Each branch takes 5 inputs (x, true_buffer, true_z, false_buffer, false_z)
+                self.assertEqual(len(operands), 5)
+            if node.op == "get_attr":
+                if str(node.target) in ("cond_true_0, cond_false_0"):
+                    num_placeholders = len(
+                        [
+                            node
+                            for node in getattr(
+                                backend.graphs[0], str(node.target)
+                            ).graph.nodes
+                            if node.op == "placeholder"
+                        ]
+                    )
+                    self.assertEqual(num_placeholders, 5)
+
+    def test_cond_side_effect_in_one_branches(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        z = [torch.ones(4, 4)]
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, y, x):
+                def true_fn(x):
+                    z.append(x)
+                    z.append(x)
+                    z.pop()
+                    return x.sum() + z[-1].sum()
+
+                def false_fn(x):
+                    return x.sum() - z[0].sum()
+
+                return control_flow.cond(y, true_fn, false_fn, [x])
+
+        mod_for_compile = torch.compile(
+            Foo(), backend=cnt, dynamic=True, fullgraph=False
+        )
+        mod_for_eager = Foo()
+
+        res = mod_for_compile(torch.tensor(True), torch.tensor(5))
+        res = mod_for_compile(torch.tensor(True), torch.tensor(5))
+
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(res, mod_for_eager(torch.tensor(True), torch.tensor(5)))
+
+    def test_map_graph_break(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("w", torch.ones(6, 4))
+
+            def forward(self, xs):
+                def body(x):
+                    self.w += 1
+                    return x
+
+                return control_flow.map(body, xs)
+
+        mod = Module()
+
+        mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
+        mod_for_eager = Module()
+
+        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        # There is graph break right when we enter body of map
+        self.assertEqual(len(backend.graphs), 0)
+        self.assertEqual(
+            res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        )
+
+    def test_map_side_effect(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        z = [torch.ones(6, 4)]
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("w", torch.ones(6, 4))
+
+            def forward(self, xs):
+                def body(x):
+                    z.append(x)
+                    z.append(x)
+                    z.pop()
+                    return x + z[-1].sum()
+
+                return control_flow.map(body, xs)
+
+        mod = Module()
+
+        mod_for_compile = torch.compile(mod, backend=cnt, dynamic=True, fullgraph=False)
+        mod_for_eager = Module()
+
+        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        res = mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+
+        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+        eager = mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
+
+        # FIXME (tmanlaibaatar) there should really be 4 graph breaks
+        # for now, we just ignore side effects in body.
+        self.assertEqual(len(backend.graphs), 2)
+        self.assertEqual(res, eager)
 
     def test_wrap_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -621,6 +861,521 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
+    def _grad_compile_check(self, fn, inputs, fullgraph=True):
+        backend = EagerAndRecordGraphs()
+        actual = fn(*inputs)
+        expected = torch.compile(fn, backend=backend, fullgraph=fullgraph)(*inputs)
+
+        self.assertEqual(actual, expected)
+
+        wrapped_gm = backend.graphs[0]
+        return wrapped_gm
+
+    def test_grad(self):
+        counters.clear()
+
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            sin = l_x_.sin();  l_x_ = None
+            sum_1 = sin.sum();  sin = None
+            return sum_1
+"""
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_grad_freevar_tensor(self):
+        # NOTE: Captured variable is treated as side-effect since
+        #       PR https://github.com/pytorch/pytorch/pull/103386
+        counters.clear()
+        y = torch.randn(3, 3)
+
+        def fn(x):
+            return (x.sin() + y).sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        expected = wrapper_fn(x)
+        actual = torch.compile(wrapper_fn, backend="aot_eager")(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"NYI - torch.func.grad(f) where there are side effects in f": 2},
+        )
+        self.assertEqual(actual, expected)
+
+    def test_grad_freevar_python_scalar(self):
+        counters.clear()
+        y = 3
+
+        def fn(x):
+            return (x.sin() + y).sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            sin = l_x_.sin();  l_x_ = None
+            add = sin + 3;  sin = None
+            sum_1 = add.sum();  add = None
+            return sum_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_grad_capture_tensor(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            y = torch.randn(3)
+
+            def fn(x):
+                return (x.sin() + y).sum()
+
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+
+        # Graph break because dynamo is unable to get source `fn` and
+        # functools.wraps in `grad` leads to graph-break
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_fn_closure_0_cell_contents : torch.Tensor):
+        l_x_ = L_x_
+        l_fn_closure_0_cell_contents = L_fn_closure_0_cell_contents
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, l_fn_closure_0_cell_contents);  grad_proxy = l_x_ = l_fn_closure_0_cell_contents = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, l_fn_closure_0_cell_contents):
+            sin = l_x_.sin();  l_x_ = None
+            add = sin + l_fn_closure_0_cell_contents;  sin = l_fn_closure_0_cell_contents = None
+            sum_1 = add.sum();  add = None
+            return sum_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_grad_closure_scalar(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            y = 3.14
+
+            def fn(x):
+                return (x.sin() + y).sum()
+
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+
+        # Graph break because dynamo is unable to get source `fn` and
+        # functools.wraps in `grad` leads to graph-break
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            sin = l_x_.sin();  l_x_ = None
+            add = sin + 3.14;  sin = None
+            sum_1 = add.sum();  add = None
+            return sum_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_grad_has_aux(self):
+        counters.clear()
+
+        y = 3.14
+
+        def fn(x):
+            return ((x.sin() + y).sum(), x.cos())
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn, has_aux=True)(x)
+
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, True);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        contiguous = getitem.contiguous();  getitem = None
+        return (contiguous, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            sin = l_x_.sin()
+            add = sin + 3.14;  sin = None
+            sum_1 = add.sum();  add = None
+            cos = l_x_.cos();  l_x_ = None
+            return (sum_1, cos)
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_grad_two_tensor_has_aux(self):
+        counters.clear()
+
+        def fn(x, y):
+            return ((x.sin() + y).sum(), x.cos())
+
+        def wrapper_fn(x, y):
+            return torch.func.grad(fn, has_aux=True)(x, y)
+
+        y = torch.randn(3, 3, 3)
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, True);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        contiguous = getitem.contiguous();  getitem = None
+        return (contiguous, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, l_y_):
+            sin = l_x_.sin()
+            add = sin + l_y_;  sin = l_y_ = None
+            sum_1 = add.sum();  add = None
+            cos = l_x_.cos();  l_x_ = None
+            return (sum_1, cos)
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_grad_two_tensor_all_grad_has_aux(self):
+        counters.clear()
+
+        def fn(x, y):
+            return ((x.sin() + y).sum(), x.cos())
+
+        def wrapper_fn(x, y):
+            return torch.func.grad(fn, argnums=(0, 1), has_aux=True)(x, y)
+
+        y = torch.randn(3, 3, 3)
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, (0, 1), True);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
+        getitem = call[0]
+        getitem_1 = getitem[0]
+        getitem_2 = getitem[1];  getitem = None
+        getitem_3 = call[1];  call = None
+        contiguous = getitem_1.contiguous();  getitem_1 = None
+        contiguous_1 = getitem_2.contiguous();  getitem_2 = None
+        return (contiguous, contiguous_1, getitem_3)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, l_y_):
+            sin = l_x_.sin()
+            add = sin + l_y_;  sin = l_y_ = None
+            sum_1 = add.sum();  add = None
+            cos = l_x_.cos();  l_x_ = None
+            return (sum_1, cos)
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_grad_over_grad(self):
+        counters.clear()
+
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(torch.func.grad(fn))(x)
+
+        x = torch.randn(())
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_1 = self.grad_body_1
+        grad_proxy = torch.func.grad(grad_body_1, 0, False);  grad_body_1 = None
+        call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_):
+            grad_body_0 = self.grad_body_0
+            grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+            call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
+            contiguous = call.contiguous();  call = None
+            return contiguous
+
+        class GraphModule(torch.nn.Module):
+            def forward(self, l_x_):
+                sin = l_x_.sin();  l_x_ = None
+                sum_1 = sin.sum();  sin = None
+                return sum_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_grad_with_graph_break(self):
+        counters.clear()
+
+        def fn(x):
+            torch._dynamo.graph_break()
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(actual, expected)
+
+    def test_grad_with_side_effect(self):
+        counters.clear()
+
+        foo = [1, 2]
+
+        def fn(x):
+            foo.append(3)
+            return x.sin().sum()
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"NYI - torch.func.grad(f) where there are side effects in f": 2},
+        )
+        self.assertEqual(actual, expected)
+
+    def test_grad_pytree(self):
+        counters.clear()
+
+        def fn(x):
+            x1, x2 = x
+            return x1.sin().sum() + x2
+
+        def wrapper_fn(x):
+            return torch.func.grad(fn)(x)
+
+        x1 = torch.randn(3, 3, 3)
+        x2 = torch.randn(())
+        actual = wrapper_fn((x1, x2))
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+            (x1, x2)
+        )
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"HigherOrderOperator with body that accepts non-Tensors as input": 2},
+        )
+        self.assertEqual(actual, expected)
+
+    def test_grad_non_tensor_input(self):
+        counters.clear()
+
+        def fn(x, y):
+            return x.sin().sum() + y
+
+        def wrapper_fn(x, y):
+            return torch.func.grad(fn)(x, y)
+
+        x = torch.randn(3, 3, 3)
+        y = 3.0
+        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+
+        # Dynamic shapes produce a slightly different graph.
+        if torch._dynamo.config.dynamic_shapes:
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        grad_body_0 = self.grad_body_0
+        grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
+        call = grad_proxy.__call__(l_x_, 3.0);  grad_proxy = l_x_ = None
+        contiguous = call.contiguous();  call = None
+        return (contiguous,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, l_x_, const):
+            sin = l_x_.sin();  l_x_ = None
+            sum_1 = sin.sum();  sin = None
+            add = sum_1 + 3.0;  sum_1 = None
+            return add
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_grad_disable_capture(self):
+        counters.clear()
+
+        @contextlib.contextmanager
+        def disable_grad_capture():
+            org_val = torch._dynamo.config.capture_func_transforms
+            torch._dynamo.config.capture_func_transforms = False
+            try:
+                yield
+            finally:
+                torch._dynamo.config.capture_func_transforms = org_val
+
+        with disable_grad_capture():
+            # We have verified above that this
+            # function compiles
+            def fn(x):
+                return x.sin().sum()
+
+            def wrapper_fn(x):
+                return torch.func.grad(fn)(x)
+
+            x = torch.randn(3, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                dict(counters["graph_break"]),
+                {"torch.func.grad capture is disabled": 2},
+            )
+            self.assertEqual(actual, expected)
+
+    def test_grad_fn_with_kwargs(self):
+        def fn(x, y):
+            return (x + y).sum()
+
+        def wrapper_fn(x, y):
+            return torch.func.grad(fn)(x, y=y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"torch.func.grad: kwargs arguments are currently unsupported.": 2},
+        )
+        self.assertEqual(actual, expected)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
@@ -628,10 +1383,13 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         for arg in args:
             cloned_args.append(arg.clone().detach().requires_grad_(arg.requires_grad))
 
+        torch.manual_seed(0)
         expected = fn(*args)
         expected.sum().backward()
 
-        result = torch.compile(fn, fullgraph=fullgraph, backend=backend)(*cloned_args)
+        opt_fn = torch.compile(fn, fullgraph=fullgraph, backend=backend)
+        torch.manual_seed(0)
+        result = opt_fn(*cloned_args)
         result.sum().backward()
 
         if not skip_check:
@@ -745,25 +1503,6 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 2)
-
-    def test_without_functionalization_turned_on(self):
-        def gn(x, y):
-            return torch.sigmoid(torch.matmul(x, y))
-
-        def fn(x, y):
-            return torch.cos(torch.utils.checkpoint.checkpoint(gn, torch.sin(x), y))
-
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-        args = (x, y)
-
-        backend = EagerAndRecordGraphs()
-        cnt = CompileCounterWithBackend(backend)
-
-        expected = fn(*args)
-        result = torch.compile(fn, backend=cnt)(*args)
-
-        self.assertEqual(result, expected)
 
     @requires_cuda()
     @torch._functorch.config.patch(functionalize_rng_ops=True)

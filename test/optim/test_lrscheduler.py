@@ -1,9 +1,8 @@
 # Owner(s): ["module: optimizer", "module: LrScheduler" ]
-
+import types
 import warnings
 import math
 import pickle
-import weakref
 
 import torch
 import torch.optim as optim
@@ -32,7 +31,6 @@ from torch.optim.lr_scheduler import (
 from torch.optim.swa_utils import SWALR
 from torch.testing._internal.common_utils import (
     TestCase,
-    run_tests,
     load_tests,
     parametrize,
     instantiate_parametrized_tests,
@@ -1533,7 +1531,7 @@ class TestLRScheduler(TestCase):
     def test_cycle_lr_state_dict_picklable(self):
         adam_opt = optim.Adam(self.net.parameters())
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
-        self.assertIsInstance(scheduler._scale_fn_ref, weakref.WeakMethod)
+        self.assertIsInstance(scheduler._scale_fn_ref, types.FunctionType)
         state = scheduler.state_dict()
         self.assertNotIn("_scale_fn_ref", state)
         pickle.dumps(state)
@@ -2221,4 +2219,4 @@ instantiate_parametrized_tests(TestLRScheduler)
 
 
 if __name__ == "__main__":
-    run_tests()
+    print("These tests should be run through test/test_optim.py instead")

@@ -11,10 +11,13 @@ from onnxscript import evaluator  # type: ignore[import]
 
 import torch
 import torch.fx
-from torch.onnx import _constants, _type_utils
+from torch.onnx import _constants
 from torch.onnx._internal import _beartype, onnx_proto_utils
-from torch.onnx._internal.fx import diagnostics
-from torch.onnx._internal.fx.passes import fx_to_onnxscript
+from torch.onnx._internal.fx import (
+    diagnostics,
+    fx_onnx_interpreter,
+    type_utils as fx_type_utils,
+)
 from torch.utils import _pytree
 
 
@@ -30,7 +33,7 @@ def validate_op_between_ort_torch(
 
     The function will run the op in ONNX Runtime and PyTorch and compare the
     results. It doesn't break the exporting process, but saves each op validated
-    result into SARIF, under the section of `fx_to_onnxscript` pass.
+    result into SARIF, under the section of `fx_onnx_interpreter`.
 
     There are three signs can be found:
     1. Blue: Pass
@@ -95,7 +98,7 @@ def validate_op_between_ort_torch(
             else x
             for x in torch_args
         ]
-        kwargs_onnx = fx_to_onnxscript.filter_incompatible_and_dtype_convert_kwargs(
+        kwargs_onnx = fx_onnx_interpreter.filter_incompatible_and_dtype_convert_kwargs(
             torch_kwargs
         )
         try:
@@ -199,10 +202,10 @@ def generate_random_tensors(shape: torch.Size, dtype: torch.dtype):
 
 @_beartype.beartype
 def _fx_args_to_torch_args(
-    complete_args: List[_type_utils.Argument],
-) -> List[_type_utils.Argument]:
+    complete_args: List[fx_type_utils.Argument],
+) -> List[fx_type_utils.Argument]:
     """Recursively convert fx args to torch args"""
-    wrapped_args: List[_type_utils.Argument] = []
+    wrapped_args: List[fx_type_utils.Argument] = []
     for arg in complete_args:
         if isinstance(arg, torch.fx.Node):
             # NOTE(titaiwang): The arg type here should align to the type handled in
@@ -231,7 +234,7 @@ def _fx_args_to_torch_args(
                 )
         elif isinstance(arg, Sequence):
             wrapped_args.append(_fx_args_to_torch_args(arg))
-        elif isinstance(arg, (int, float, torch.dtype)):
+        elif isinstance(arg, (int, float, torch.dtype)) or arg is None:
             wrapped_args.append(arg)
         else:
             raise ValueError(
@@ -243,12 +246,12 @@ def _fx_args_to_torch_args(
 
 @_beartype.beartype
 def wrap_fx_args_as_torch_args(
-    complete_args: List[_type_utils.Argument],
-    complete_kwargs: Dict[str, _type_utils.Argument],
+    complete_args: List[fx_type_utils.Argument],
+    complete_kwargs: Dict[str, fx_type_utils.Argument],
 ) -> Tuple[tuple, dict]:
     """Prepare torch format args and kwargs for op-level validation by using fake tensor to create real tensor to feed in ops"""
 
     # NOTE: This function only supports FakeTensor with concrete shapes
-    torch_args: List[_type_utils.Argument] = _fx_args_to_torch_args(complete_args)
+    torch_args: List[fx_type_utils.Argument] = _fx_args_to_torch_args(complete_args)
     torch_kwargs = complete_kwargs
     return tuple(torch_args), torch_kwargs

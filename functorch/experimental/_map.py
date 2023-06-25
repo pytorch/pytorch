@@ -29,8 +29,8 @@ class MapWrapper(HigherOrderOperator):
     def __call__(self, xs, *args):
         return map_wrapper(xs, *args)
 
-map = MapWrapper("map")
-map_impl = HigherOrderOperator("map_impl")
+map = MapWrapper("map", _deprecated_global_ns=True)
+map_impl = HigherOrderOperator("map_impl", _deprecated_global_ns=True)
 
 dummy_aot_config = AOTConfig(fw_compiler=None,
                              bw_compiler=None,
@@ -142,11 +142,8 @@ class MapAutogradOp(torch.autograd.Function):
         ctx.save_for_backward(*flat_args)
         ctx._joint_graph = joint_graph
         ctx._num_mapped_args = num_mapped_args
-        try:
-            guard = torch._C._AutoDispatchBelowAutograd()
+        with torch._C._AutoDispatchBelowAutograd():
             return (*map_impl(fw_graph, num_mapped_args, *flat_args), )
-        finally:
-            del guard
 
     @staticmethod
     def backward(ctx, *flat_grads):

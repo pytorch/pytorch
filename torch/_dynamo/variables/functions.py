@@ -534,3 +534,55 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_call_function(1, True))
 
         return []
+
+
+def _traceable_collective_remaps():
+    # We can't rely on importing from distributed, since its not always built
+    if torch.distributed.is_available():
+        from torch.distributed._functional_collectives import (
+            traceable_collective_remaps,
+        )
+
+        return traceable_collective_remaps
+    return {}
+
+
+class CollectiveFunctionRewriteVariable(UserFunctionVariable):
+    """
+    Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
+
+    This class provides both a way to check if a function is remappable, and perform the remapping.
+
+    In the case that a function is 'remappable' but only for some combinations of call-time arguments,
+    we check the args at `call_function` time and fall back to graph-breaking if needed.  This is no worse
+    than status-quo as we currently graph-break on all distributed.* collectives.
+    """
+
+    def __init__(self, fn, *, orig_fn, **kwargs):
+        # orig_fn lets us implement any fn-specific args/kwargs restrictions inside call_function
+        self.orig_fn = orig_fn
+
+        # remapped_fn gets stuffed in self.fn and used in super().call_function
+        super().__init__(fn, **kwargs)
+
+    @staticmethod
+    def can_rewrite(variable):
+        return (
+            inspect.isfunction(variable) and variable in _traceable_collective_remaps()
+        )
+
+    @staticmethod
+    def rewrite(fn):
+        return _traceable_collective_remaps()[fn]
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        # call_function must check any unsupported arguments and graph-break.
+        # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
+        # since that's the contract for putting a mapping in `traceable_collective_remaps`
+        if kwargs.get("async_op", False):
+            unimplemented(
+                f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
+            )
+        return super().call_function(tx, args, kwargs)

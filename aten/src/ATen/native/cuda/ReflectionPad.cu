@@ -7,6 +7,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
+#include <ATen/native/Padding.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -278,11 +279,7 @@ void reflection_pad2d_out_template(
   int dim_w = 2;
   int nbatch = 1;
 
-  bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
-  TORCH_CHECK(
-      (input_.ndimension() == 3 && valid_dims) ||
-      (input_.ndimension() == 4 && valid_dims && input_.size(3) != 0),
-      "3D or 4D (batch mode) tensor expected for input, but got: ", input_);
+  at::native::padding::check_valid_input<2>(input_, padding);
 
   if (input_.ndimension() == 4) {
     nbatch = input_.size(0);
@@ -314,7 +311,7 @@ void reflection_pad2d_out_template(
   int output_w  = input_w + pad_l + pad_r;
 
   TORCH_CHECK(output_w >= 1 || output_h >= 1,
-    "input (H: ", input_h, ", W: ", input_w, ")is too small.  Calculated "
+    "input (H: ", input_h, ", W: ", input_w, ") is too small.  Calculated "
     "output H: ", output_h, " W: ", output_w);
 
   if (input_.ndimension() == 3) {

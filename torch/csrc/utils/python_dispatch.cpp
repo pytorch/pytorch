@@ -561,10 +561,12 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(FuncTorchVmapMode)
       DEF_ONE(FuncTorchGradWrapper)
       DEF_ONE(PythonDispatcher)
+      DEF_ONE(PreDispatch)
       DEF_ONE(Functionalize)
       DEF_ONE(AutocastCPU)
       DEF_ONE(AutocastXPU)
       DEF_ONE(AutocastHPU)
+      DEF_ONE(AutocastIPU)
       DEF_ONE(AutocastCUDA)
       DEF_ONE(AutocastPrivateUse1)
   // clang-format on
@@ -649,14 +651,15 @@ void initDispatchBindings(PyObject* module) {
 
   // DEPRECATED, please don't use this. Instead use
   // torch._C._ExcludeDispatchKeyGuard
-  py::class_<c10::impl::ExcludeDispatchKeyGuard>(m, "ExcludeDispatchKeyGuard")
-      .def(py::init<c10::DispatchKeySet>());
+  py_context_manager_DEPRECATED<
+      c10::impl::ExcludeDispatchKeyGuard,
+      c10::DispatchKeySet>(m, "ExcludeDispatchKeyGuard");
 
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
       m, "_ExcludeDispatchKeyGuard");
 
-  py::class_<at::AutoDispatchBelowAutograd>(m, "_AutoDispatchBelowAutograd")
-      .def(py::init<>());
+  py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
+      m, "_AutoDispatchBelowAutograd");
 
   // Prints out the name of every operator that has a kernel registered to the
   // Dispatcher under [dispatch_key]. If no arguments are specified, it'll print
@@ -706,6 +709,16 @@ void initDispatchBindings(PyObject* module) {
 
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
+
+  m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
+    return at::functionalization::impl::replace_(a, b);
+  });
+  m.def("_propagate_xla_data", [](const at::Tensor& a, const at::Tensor& b) {
+    at::functionalization::impl::propagate_xla_data(a, b);
+  });
+  m.def("_commit_update", [](const at::Tensor& a) {
+    return at::functionalization::impl::commit_update(a);
+  });
 
   m.def("_are_functorch_transforms_active", []() {
     auto include_set = c10::impl::tls_local_dispatch_key_set().included_;

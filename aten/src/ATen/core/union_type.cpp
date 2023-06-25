@@ -17,7 +17,7 @@ OptionalTypePtr OptionalType::create(TypePtr contained) {
 }
 
 TypePtr OptionalType::ofTensor() {
-  static auto value = TypeFactory::create<OptionalType>(TensorType::get());
+  static auto value = OptionalType::create(TensorType::get());
   return value;
 }
 

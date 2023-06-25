@@ -13,7 +13,9 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
+    canonicalize_dim,
     canonicalize_dims,
+    check,
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -32,6 +34,7 @@ from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
     IndexingConstant,
+    ops_wrapper,
     PermuteView,
     Pointwise,
     Reduction,
@@ -223,12 +226,13 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
     @functools.wraps(decomp_fn)
     def wrapped(*args, **kwargs):
-        assert len(args) == 2
+        assert len(args) <= 2
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
         return out
 
     aten_fns = get_overloads(aten_fn)
+    foreach_ops.update(aten_fns)
     lowerings.update({fn: wrapped for fn in aten_fns})
     return wrapped
 
@@ -413,41 +417,88 @@ def make_pointwise(
     return inner
 
 
-def make_foreach_pointwise(aten_fn, pw_fn):
+def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
-        def is_dynamic(t):
-            return any(x.free_symbols for x in t.data.get_size())
+        def is_dynamic(*args):
+            return any(
+                isinstance(t, TensorBox)
+                and any(x.free_symbols for x in t.data.get_size())
+                for t in args
+            )
+
+        def has_type_promotion(*args):
+            if len(args) < 2:
+                return False
+            else:
+                dtype = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        if dtype is None:
+                            dtype = t.data.get_dtype()
+                        elif dtype != t.data.get_dtype():
+                            return True
+                return False
 
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         # Note: we'll fallback on type promotion until
         # https://github.com/openai/triton/commit/9820899b3845e461d9031dba66062efade65d420
         # is in the pytorch triton version
-        def group_args(tensor_pairs):
+        def group_args(arg_pairs):
             out = defaultdict(list)
-            for i, (l, r) in enumerate(tensor_pairs):
-                assert l.get_device() == r.get_device()
-                use_foreach = not (
-                    is_dynamic(l)
-                    or is_dynamic(r)
-                    or l.data.get_dtype() != r.data.get_dtype()
-                )
-                out[(l.get_device(), use_foreach)].append((i, l, r))
+            for i, args in enumerate(arg_pairs):
+                use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
+                device = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        device = t.data.get_device()
+                        break
+                assert (
+                    device is not None
+                ), "foreach op should have at least one tensor arg"
+                out[(device, use_foreach)].append((i, args))
             return out
 
-        groups = group_args(zip(*inputs))
-        outputs = [None] * len(inputs[0])
+        realize_outputs = False
+        for node in V.graph.current_node.users:
+            for user in node.users:
+                if not (user.op == "call_function" and user.target in foreach_ops):
+                    realize_outputs = True
+
+        a_list_input = None
+        for input in inputs:
+            if isinstance(input, (list, tuple)):
+                a_list_input = input
+                break
+        assert (
+            a_list_input is not None
+        ), "at least one input must be a list to a foreach op"
+
+        # broadcast scalar inputs to match length of list inputs
+        broadcast_inputs = []
+        for input in inputs:
+            if not isinstance(input, (list, tuple)):
+                broadcast_inputs.append([input] * len(a_list_input))
+            else:
+                broadcast_inputs.append(input)
+
+        groups = group_args(zip(*broadcast_inputs))
+
+        outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
             buffer_list = []
-            for output_ind, left, right in group:
-                if device.type == "cuda" and use_foreach:
-                    left.realize()
-                    right.realize()
+            for (
+                output_ind,
+                args,
+            ) in group:
+                if allow_alpha:
+                    output = pw_fn(*args, alpha=alpha)
+                else:
+                    output = pw_fn(*args)
 
-                output = pw_fn(left, right, alpha=alpha)
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach:
+                if device.type == "cuda" and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -470,21 +521,36 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+    if x.get_dtype() == dtype:
+        return x
+
+    def _get_primitive_bitwidth(dtype):
+        if dtype.is_floating_point:
+            return torch.finfo(dtype).bits
+        else:
+            return torch.iinfo(dtype).bits
+
+    src_bits = _get_primitive_bitwidth(x.get_dtype())
+    dst_bits = _get_primitive_bitwidth(dtype)
+    if src_bits != dst_bits:
+        raise NotImplementedError(
+            f"bitcast {x.get_dtype()} to different bitwidth type {dtype} is not supported yet."
+        )
+
+    def _to_dtype_bitcast(x):
+        return ops.to_dtype_bitcast(x, dtype)
+
+    return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
+
+
 @register_lowering(prims.device_put, type_promotion_kind=None)
 def to_device(x: TensorBox, device: torch.device):
     device = decode_device(device)
     if x.get_device() == device:
         return x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
-
-
-def ops_wrapper(name):
-    assert isinstance(name, str)
-
-    def fn(*args, **kwargs):
-        return getattr(ops, name)(*args, **kwargs)
-
-    return fn
 
 
 def register_pointwise(
@@ -532,8 +598,9 @@ def register_pointwise(
 def register_foreach_pointwise(
     aten_fn,
     pointwise_lowering_fn,
+    allow_alpha=False,
 ):
-    fn = make_foreach_pointwise(aten_fn, pointwise_lowering_fn)
+    fn = make_foreach_pointwise(pointwise_lowering_fn, allow_alpha=allow_alpha)
     fn = _register_foreach_lowering(aten_fn, fn)
     return fn
 
@@ -857,11 +924,17 @@ def as_strided(x, size, stride, storage_offset=None):
     return TensorBox(ir.ReinterpretView(storage, new_layout))
 
 
-@register_lowering(aten.as_strided_)
+@register_lowering(aten.as_strided_, type_promotion_kind=None)
 def as_strided_(x, size, stride, storage_offset=None):
     assert isinstance(x, TensorBox)
     x.data = as_strided(x, size, stride, storage_offset).data
     return x
+
+
+@register_lowering(aten.as_strided_copy, type_promotion_kind=None)
+def as_strided_copy(x, size, stride, storage_offset=None):
+    result = as_strided(x, size, stride, storage_offset)
+    return clone(result)
 
 
 @register_lowering(aten.cat)
@@ -875,6 +948,65 @@ def cat(inputs, dim=0):
     )
     inputs = [to_dtype(inp, dtype) for inp in inputs]
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
+
+
+@register_lowering(aten.diagonal, type_promotion_kind=None)
+def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    original_shape = input.get_size()
+    num_dims = len(original_shape)
+    dim1 = canonicalize_dim(idx=dim1, rank=num_dims)
+    dim2 = canonicalize_dim(idx=dim2, rank=num_dims)
+
+    check(
+        dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
+    )
+
+    evaluate_expr = V.graph.sizevars.shape_env.evaluate_expr
+    offset_negative = evaluate_expr(sympy.Lt(offset, 0))
+    if offset_negative:
+        diag_size = max(min(original_shape[dim1] + offset, original_shape[dim2]), 0)
+    else:
+        diag_size = max(min(original_shape[dim1], original_shape[dim2] - offset), 0)
+
+    base_idx = (0, 0)
+    if offset_negative:
+        base_idx = (-offset, 0)
+    else:
+        base_idx = (0, offset)
+
+    sizes = [s for i, s in enumerate(original_shape) if i not in (dim1, dim2)]
+    sizes.append(diag_size)
+
+    def reindexer(idx):
+        diag_idx = idx[-1]
+        original_idx = [0] * len(original_shape)
+        cur_dim = 0
+        for d in range(num_dims):
+            if d == dim1:
+                original_idx[d] = diag_idx + base_idx[0]
+            elif d == dim2:
+                original_idx[d] = diag_idx + base_idx[1]
+            else:
+                original_idx[d] = idx[cur_dim]
+                cur_dim += 1
+
+        assert cur_dim == len(original_shape) - 2
+        return original_idx
+
+    return TensorBox(ir.GenericView.create(input, sizes, reindexer))
+
+
+@register_lowering(aten.diagonal_copy, type_promotion_kind=None)
+def diagonal_copy(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    return clone(diagonal(input, offset, dim1, dim2))
+
+
+@register_lowering(aten.diagonal_scatter, type_promotion_kind=None)
+def diagonal_scatter(input, src, offset: int = 0, dim1: int = 0, dim2: int = 1):
+    output = clone(input)
+    target = diagonal(output, offset, dim1, dim2)
+    mutate_to(target, src)
+    return output
 
 
 @register_lowering(aten.select, type_promotion_kind=None)
@@ -954,7 +1086,7 @@ def glu(x, dim=-1):
 
 
 def register_onednn_fusion_ops():
-    if torch._C.has_mkldnn:
+    if torch._C._has_mkldnn:
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
@@ -1464,8 +1596,8 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
-make_fallback(aten._scaled_dot_product_efficient_attention.default)
-make_fallback(aten._scaled_dot_product_efficient_attention_backward.default)
+make_fallback(aten._scaled_dot_product_efficient_attention)
+make_fallback(aten._scaled_dot_product_efficient_attention_backward)
 make_fallback(aten._scaled_dot_product_flash_attention)
 make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
@@ -1475,7 +1607,7 @@ make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 
-make_fallback(aten.view_as_complex.default, require_contiguous)
+make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
 # It's not necessarily a priority to implement these
@@ -1494,8 +1626,6 @@ make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
 make_fallback(aten.cumprod, warn=False)
-make_fallback(aten.diagonal_copy, warn=False)
-make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -1528,7 +1658,6 @@ make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
 make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
-make_fallback(aten.logaddexp2)
 make_fallback(aten.logcumsumexp)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
@@ -1546,7 +1675,6 @@ make_fallback(aten.pixel_unshuffle)
 make_fallback(aten.polygamma)
 make_fallback(aten.put)
 make_fallback(aten.reflection_pad1d)
-make_fallback(aten.renorm)
 make_fallback(aten.replication_pad1d)
 make_fallback(aten.resize)
 make_fallback(aten.resize_)
@@ -1581,14 +1709,11 @@ make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten.vdot)
-make_fallback(aten.view_as_complex)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
 make_fallback(aten.avg_pool3d_backward)
-make_fallback(aten.bitwise_or_, warn=False)
 make_fallback(aten._cdist_backward)
-make_fallback(aten.diagonal_backward, warn=False)
 make_fallback(aten._embedding_bag_dense_backward)
 make_fallback(aten.fractional_max_pool2d_backward)
 make_fallback(aten.fractional_max_pool3d_backward)
@@ -1614,10 +1739,15 @@ make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.index_reduce)
 make_fallback(aten.masked_scatter)
 make_fallback(aten.to_sparse)
+make_fallback(aten._to_sparse)
 make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
+
+
+make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
+make_fallback(torch._prims.rng_prims.run_with_rng_state)
 
 # fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
 make_fallback(aten.exponential.default, warn=False)
@@ -1721,7 +1851,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             # selecting every element is the same as just src.clone()
             return src_loader(idx)
 
-        idx_dim = ops.index_expr(idx[dim], torch.int32)
+        idx_dim = ops.index_expr(idx[dim], torch.int64)
         src_idx = list(idx)
         src_idx[dim] = ir.FloorDiv(idx[dim] - start, step)
 
@@ -1730,23 +1860,23 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
             mask.append(
                 ops.ge(
                     idx_dim,
-                    ops.index_expr(sympy.expand(start), torch.int32),
+                    ops.index_expr(sympy.expand(start), torch.int64),
                 )
             )
         if end != dim_size:
             mask.append(
                 ops.lt(
                     idx_dim,
-                    ops.index_expr(sympy.expand(end), torch.int32),
+                    ops.index_expr(sympy.expand(end), torch.int64),
                 )
             )
         if step != 1:
             mask.append(
                 ops.eq(
                     ops.index_expr(
-                        ir.ModularIndexing(idx[dim] - start, 1, step), torch.int32
+                        ir.ModularIndexing(idx[dim] - start, 1, step), torch.int64
                     ),
-                    ops.constant(0, torch.int32),
+                    ops.constant(0, torch.torch.int64),
                 )
             )
         assert mask
@@ -1785,7 +1915,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
     else:
         dtype = dtype or torch.get_default_dtype()
 
-    if isinstance(data, sympy.Symbol):
+    if isinstance(data, sympy.Expr):
         ranges = []
 
         def inner_fn(index):
@@ -3064,12 +3194,17 @@ def max_pool2d_with_indices_backward(
             x_stride = x.get_stride()
         except AttributeError:
             x_stride = None
-    if (
-        (x_stride is not None and x_stride[1] == 1)
-        or (gO_stride is not None and gO_stride[1] == 1)
-        or any(d != 1 for d in dilation)
-    ):
-        # don't codegen channels-last, it's very slow
+
+    is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
+        gO_stride is not None and gO_stride[1] == 1
+    )
+    autotune = (
+        config.coordinate_descent_tuning
+        or config.max_autotune
+        or config.max_autotune_pointwise
+    )
+    if any(d != 1 for d in dilation) or (is_channels_last and not autotune):
+        # don't codegen channels-last when autotune is not enabled, it's very slow
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
@@ -3621,6 +3756,9 @@ def _validate_reduction_axis(x, axis):
         axis = [axis]
     elif not axis:
         axis = range(len(size))
+    if len(size) == 0:
+        assert tuple(axis) in [(), (0,), (-1,)], f"invalid axis: {axis}"
+        return []
     axis = list(axis)
     for i in range(len(axis)):
         if axis[i] < 0:
@@ -4032,12 +4170,14 @@ sub = register_pointwise(aten.sub, allow_alpha=True)
 register_pointwise_numeric_ldf64(aten.cos)
 register_pointwise_numeric_ldf64(aten.sin)
 register_pointwise(aten.abs)
-register_pointwise(aten.bitwise_and)
-register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
-register_pointwise(aten.bitwise_or)
-register_pointwise(aten.bitwise_xor)
-register_pointwise(aten.bitwise_left_shift)
-register_pointwise(aten.bitwise_right_shift)
+bitwise_and = register_pointwise(aten.bitwise_and)
+bitwise_left_shift = register_pointwise(aten.bitwise_left_shift)
+bitwise_not = register_pointwise(
+    aten.bitwise_not, override_fn_when_input_bool="logical_not"
+)
+bitwise_or = register_pointwise(aten.bitwise_or)
+bitwise_right_shift = register_pointwise(aten.bitwise_right_shift)
+bitwise_xor = register_pointwise(aten.bitwise_xor)
 register_pointwise_numeric(aten.lgamma)
 erf = register_pointwise_numeric(aten.erf)
 register_lowering(
@@ -4048,13 +4188,36 @@ register_pointwise_numeric(aten.log1p)
 register_pointwise_numeric(aten.tan)
 register_pointwise_numeric(aten.tanh)
 register_pointwise_numeric_ldf64(aten.log)
-register_pointwise(aten.logical_not, convert_input_to_bool=True)
+logical_and = register_pointwise(
+    aten.logical_and,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+logical_not = register_pointwise(
+    aten.logical_not,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+logical_or = register_pointwise(
+    aten.logical_or,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
+logical_xor = register_pointwise(
+    aten.logical_xor,
+    type_promotion_kind=None,
+    convert_input_to_bool=True,
+    override_return_dtype=torch.bool,
+)
 maximum = register_pointwise(aten.maximum)
 minimum = register_pointwise(aten.minimum)
 register_lowering(aten.clamp_min)(maximum)
 register_lowering(aten.clamp_max)(minimum)
-register_pointwise(aten.neg)
-register_pointwise_numeric(aten.reciprocal)
+neg = register_pointwise(aten.neg)
+reciprocal = register_pointwise_numeric(aten.reciprocal)
 register_pointwise(aten.remainder)
 register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
@@ -4066,29 +4229,6 @@ register_pointwise(aten.ge, override_return_dtype=torch.bool)
 gt = register_pointwise(aten.gt, override_return_dtype=torch.bool)
 register_pointwise(aten.eq, override_return_dtype=torch.bool)
 register_pointwise(aten.ne, override_return_dtype=torch.bool)
-logical_and = register_pointwise(
-    aten.logical_and,
-    type_promotion_kind=None,
-    convert_input_to_bool=True,
-    override_return_dtype=torch.bool,
-)
-register_lowering(aten.__and__, type_promotion_kind=None)(logical_and)
-register_lowering(aten.__or__, type_promotion_kind=None)(
-    register_pointwise(
-        aten.logical_or,
-        type_promotion_kind=None,
-        convert_input_to_bool=True,
-        override_return_dtype=torch.bool,
-    )
-)
-logical_xor = register_pointwise(
-    aten.logical_xor,
-    name="bitwise_xor",
-    type_promotion_kind=None,
-    convert_input_to_bool=True,
-    override_return_dtype=torch.bool,
-)
-register_lowering(aten.__xor__, type_promotion_kind=None)(logical_xor)
 
 register_pointwise_numeric(aten.cosh)
 register_pointwise_numeric(aten.sinh)
@@ -4106,7 +4246,21 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_foreach_pointwise(aten._foreach_add.List, add)
+register_foreach_pointwise(aten._foreach_add.List, add, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_add.Scalar, add, allow_alpha=True)
+register_foreach_pointwise(aten._foreach_mul.List, mul)
+register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
+register_foreach_pointwise(aten._foreach_sub.List, sub)
+register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
+register_foreach_pointwise(aten._foreach_neg.default, neg)
+register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
+register_foreach_pointwise(aten._foreach_div.List, div)
+register_foreach_pointwise(aten._foreach_div.Scalar, div)
+register_foreach_pointwise(aten._foreach_sqrt, sqrt)
+register_foreach_pointwise(aten._foreach_maximum.List, maximum)
+register_foreach_pointwise(aten._foreach_maximum.Scalar, maximum)
+register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 
 
 def register_inplace(aten_op, outplace_op):
@@ -4120,12 +4274,35 @@ def register_inplace(aten_op, outplace_op):
 
 
 register_inplace(aten.add_, add)
+register_inplace(aten.bitwise_and_, bitwise_and)
+register_inplace(aten.bitwise_left_shift_, bitwise_left_shift)
+register_inplace(aten.bitwise_not_, bitwise_not)
+register_inplace(aten.bitwise_or_, bitwise_or)
+register_inplace(aten.bitwise_right_shift_, bitwise_right_shift)
+register_inplace(aten.bitwise_xor_, bitwise_xor)
 register_inplace(aten.mul_, mul)
 register_inplace(aten.div_.Tensor, div)
 register_inplace(aten.div_.Tensor_mode, div_mode)
+register_inplace(aten.logical_and_, logical_and)
+register_inplace(aten.logical_not_, logical_not)
+register_inplace(aten.logical_or_, logical_or)
+register_inplace(aten.logical_xor_, logical_xor)
 register_inplace(aten.sub_, sub)
 register_inplace(aten.relu_, relu)
 register_inplace(aten.sigmoid_, sigmoid)
+
+
+register_lowering(aten.__and__)(bitwise_and)
+register_lowering(aten.__lshift__)(bitwise_left_shift)
+register_lowering(aten.__or__)(bitwise_or)
+register_lowering(aten.__rshift__)(bitwise_right_shift)
+register_lowering(aten.__xor__)(bitwise_xor)
+
+register_inplace(aten.__iand__, aten.__and__)
+register_inplace(aten.__ilshift__, aten.__lshift__)
+register_inplace(aten.__ior__, aten.__or__)
+register_inplace(aten.__irshift__, aten.__rshift__)
+register_inplace(aten.__ixor__, aten.__xor__)
 
 
 @register_lowering(aten.sym_size)
@@ -4169,9 +4346,7 @@ try:
 
     @register_lowering(c10d_functional.all_reduce)
     def allreduce(input, reduce_op, tag, ranks, group_size):
-        return TensorBox.create(
-            ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
-        )
+        return ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
 
     @register_lowering(c10d_functional.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
@@ -4187,7 +4362,18 @@ try:
 
     @register_lowering(c10d_functional.all_reduce_coalesced)
     def all_reduce_coalesced(input, reduce_op, tag, ranks, group_size):
-        result = ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+        return ir.AllReduceCoalesced.create(input, reduce_op, tag, ranks, group_size)
+
+    @register_lowering(c10d_functional.all_gather_into_tensor_coalesced)
+    def all_gather_into_tensor_coalesced(self, tag, ranks, group_size):
+        result = ir.AllGatherIntoTensorCoalesced.create(self, tag, ranks, group_size)
+        return list(map(TensorBox.create, result))
+
+    @register_lowering(c10d_functional.reduce_scatter_tensor_coalesced)
+    def reduce_scatter_tensor_coalesced(self, reduceOp, tag, ranks, group_size):
+        result = ir.ReduceScatterTensorCoalesced.create(
+            self, reduceOp, tag, ranks, group_size
+        )
         return list(map(TensorBox.create, result))
 
 except ImportError:

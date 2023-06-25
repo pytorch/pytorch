@@ -19,13 +19,16 @@ from ..utils import (
     all_hook_names,
     check_constant_args,
     get_custom_getattr,
+    get_higher_order_op,
     is_namedtuple_cls,
     istype,
     namedtuple_fields,
     object_has_getattribute,
+    requires_higher_order_op,
 )
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
+from .dicts import ConstDictVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -344,6 +347,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
+            if requires_higher_order_op(self.value.func):
+                return variables.TorchHigherOrderOperatorVariable(
+                    get_higher_order_op(self.value.func), source=self.source, **options
+                ).call_function(tx, partial_args, partial_kwargs)
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
@@ -396,6 +403,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
+        elif isinstance(subobj, torch.distributions.utils.lazy_property):
+            subobj_var = UserDefinedObjectVariable(subobj, source=source, **options)
+            return variables.UserMethodVariable(
+                subobj.__get__.__func__, subobj_var, source=source, **options
+            ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             return variables.UserFunctionVariable(
                 subobj.__get__(self.value), source=source, **options
@@ -404,19 +416,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.__func__, self, source=source, **options
             )
-        elif isinstance(subobj, types.FunctionType):
-            # Check `__dict__` to bypass the function descriptor protocol to
-            # accurately check for static method
-            is_staticmethod = name in type(self.value).__dict__ and isinstance(
-                type(self.value).__dict__[name], staticmethod
-            )
-            if is_staticmethod:
-                # Use `UserFunctionVariable` to avoid doubly passing in `self`
-                # as an argument, which happens if using `UserMethodVariable`
-                return variables.UserFunctionVariable(
-                    subobj, name, source=source, **options
+        elif isinstance(subobj, types.FunctionType) or (
+            isinstance(subobj, types.MethodType)
+            and isinstance(self.value, torch.nn.Module)
+        ):
+            if isinstance(subobj, types.MethodType):
+                func = subobj.__func__
+                source = AttrSource(source, "__func__") if source else None
+            else:
+                assert isinstance(subobj, types.FunctionType)
+                func = subobj
+            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
+            # Static lookup can't tell us it's a method or function correctly,
+            # so we trigger dynamic lookup here to get the correct type.
+            dynamic_subobj = getattr(self.value, name)
+            if inspect.ismethod(dynamic_subobj):
+                return variables.UserMethodVariable(
+                    func, self, source=source, **options
                 )
-            return variables.UserMethodVariable(subobj, self, source=source, **options)
+            elif inspect.isfunction(dynamic_subobj):
+                if requires_higher_order_op(func):
+                    return variables.TorchHigherOrderOperatorVariable(
+                        get_higher_order_op(func), **options
+                    )
+                return variables.UserFunctionVariable(func, source=source, **options)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -502,14 +525,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
 
+        index = (
+            key.source
+            if ConstDictVariable.is_valid_key(key) and key.source is not None
+            else key.as_python_constant()
+        )
+
         return VariableBuilder(
             tx,
-            ODictGetItemSource(self.source, key.as_python_constant()),
+            ODictGetItemSource(self.source, index),
         )(
             collections.OrderedDict.__getitem__(self.value, key.as_python_constant())
-        ).add_options(
-            key, self
-        )
+        ).add_options(key, self)
 
 
 class ProcessGroupVariable(UserDefinedObjectVariable):
