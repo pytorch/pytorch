@@ -1157,7 +1157,7 @@ class Operator : public OperatorBase {
   template <class... Args>                                \
   explicit name(Args&&... args)                           \
       : Operator<Context>(std::forward<Args>(args)...) {} \
-  virtual ~name() noexcept {}
+  virtual ~name() noexcept override {}
 
 // Helpers to implement runtime op polymorphism. Often it's convenient to make
 // an op work on different input types (e.g. i32 vs i64 indices) or special-case
