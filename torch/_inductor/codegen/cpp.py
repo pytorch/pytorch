@@ -1360,7 +1360,7 @@ class CppVecKernel(CppKernel):
             line = f"at::vec::Vectorized<float>(static_cast<float>({loadbuf}))"
         elif dtype in [torch.uint8] and opt_ctx.is_load_uint8_as_float:
             line = (
-                f"at::vec::Vectorized<uint8_t>::loadu({loadbuf}, {self.tiling_factor})"
+                f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
             )
         elif is_mask:
             line = f"flag_to_float_vec({loadbuf})"
@@ -1625,7 +1625,7 @@ class CppTile2DKernel(CppVecKernel):
                 V.graph.get_dtype(name) in [torch.uint8]
                 and opt_ctx.is_load_uint8_as_float
             ):
-                line = f"at::vec::Vectorized<uint8_t>::loadu({loadbuf}, {self.tiling_factor})"
+                line = f"at::vec::Vectorized<uint8_t>::loadu_one_fourth({loadbuf})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
