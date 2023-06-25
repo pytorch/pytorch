@@ -5,18 +5,12 @@
 
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
-
-namespace ao {
-namespace sparse {
-  int register_linear_params();
-}}  // namespace ao::sparse
 
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightCudnn::prepack(
         at::Tensor weight,
@@ -52,7 +46,6 @@ class QLinearPackWeightInt8Cudnn final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
-  ao::sparse::register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8Cudnn::run));
 }
 
