@@ -8,6 +8,7 @@ import torch.distributed as dist
 # USE_DISTRIBUTED compile flag. Make sure they raise import error
 # if we're trying to use them.
 from torch.distributed import ProcessGroup, group
+from torch._utils import _get_device_module
 
 __all__ = ["average_parameters", "get_params_to_average", "average_parameters_or_parameter_groups"]
 
@@ -32,9 +33,7 @@ def average_parameters(
     flat_params /= dist.get_world_size(group_to_use)
     # Make sure the allreduce will not conflict with any other ongoing process group.
     device_type = dist.distributed_c10d._get_pg_default_device(group_to_use).type
-    device_module = getattr(torch, device_type, None)
-    if device_module is None:
-        raise RuntimeError(f"invalid device type {device_type}, no module named torch.{device_type}.")
+    device_module = _get_device_module(device_type)
     if device_module.is_available():
         device_module.synchronize()
     dist.all_reduce(flat_params, group=group_to_use)

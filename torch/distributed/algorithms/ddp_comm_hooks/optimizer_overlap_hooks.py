@@ -3,6 +3,7 @@ from typing import Any, Callable, List, no_type_check
 import torch
 import torch.distributed as dist
 from torch.autograd import Variable
+from torch._utils import _get_device_module
 from functools import partial
 from dataclasses import dataclass
 
@@ -50,9 +51,7 @@ def _apply_optim_in_backward_hook(
     optimizer with backward pass, DDP will run the below hook to run optimizer
     step for parameters after gradient communication has taken place.
     """
-    device_module = getattr(torch, device_type, None)
-    if device_module is None:
-        raise RuntimeError(f"invalid device type {device_type}, no module named torch.{device_type}.")
+    device_module = _get_device_module(device_type)
     optim_in_bwd_state = _OptimInBackwardHookState(
         optim_stream=device_module.Stream(),
         wait_for_optim_stream_enqueued=False,

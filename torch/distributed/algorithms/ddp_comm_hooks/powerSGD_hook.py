@@ -5,9 +5,10 @@ from typing import Dict
 
 import torch
 import torch.distributed as dist
+from torch.distributed import distributed_c10d
+from torch._utils import _get_device_module
 
 from . import default_hooks as default
-from torch.distributed import distributed_c10d
 
 __all__ = [
     "PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"
@@ -397,9 +398,7 @@ def powerSGD_hook(
 
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
-    device_module = getattr(torch, device.type, None)
-    if device_module is None:
-        raise RuntimeError(f"invalid device type {device.type}, no module named torch.{device.type}.")
+    device_module = _get_device_module(device.type)
     dtype = input_tensor.dtype
 
     # Incorporate the error from the previous state into the gradients.
@@ -706,9 +705,7 @@ def batched_powerSGD_hook(
 
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
-    device_module = getattr(torch, device.type, None)
-    if device_module is None:
-        raise RuntimeError(f"invalid device type {device.type}, no module named torch.{device.type}.")
+    device_module = _get_device_module(device.type)
     total_length = input_tensor.shape[0]
     state.total_numel_before_compression += total_length
 

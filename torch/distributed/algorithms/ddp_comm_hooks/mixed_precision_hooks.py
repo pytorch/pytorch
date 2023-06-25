@@ -5,6 +5,7 @@ from torch.autograd import Variable
 from dataclasses import dataclass
 from typing import Any, no_type_check
 from torch.distributed.utils import _free_storage
+from torch._utils import _get_device_module
 
 @dataclass
 class _AllreduceUpcastHookState:
@@ -38,9 +39,7 @@ def _reducer_allreduce_and_upcast_hook(
     fut = reducer._run_allreduce_hook(bucket)
     ret_fut = torch.futures.Future()
     stream = hook_state.upcast_stream
-    device_type = stream.device.type
-    assert device_type in ["cuda", torch._C._get_privateuse1_backend_name()]
-    device_module = getattr(torch, device_type)
+    device_module = _get_device_module(stream.device.type)
     with device_module.stream(stream):
         fut.wait()
         bucket.buffer().div_(process_group.size())

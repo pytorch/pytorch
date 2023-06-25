@@ -35,7 +35,7 @@ if torch.distributed.rpc.is_available():
     RPC_AVAILABLE = True
     from torch.distributed.rpc import RRef
 
-from torch._utils import _get_device_index
+from torch._utils import _get_device_index, _get_device_module
 
 from ..modules import Module
 from .scatter_gather import gather, scatter_kwargs  # noqa: F401
@@ -703,9 +703,11 @@ class DistributedDataParallel(Module, Joinable):
             )
 
         self.device_type = list(distinct_device_types)[0]
-        self.device_module = getattr(torch, self.device_type, None)
-        if self.device_module is None:
-            raise RuntimeError(f"invalid device type {self.device_type}, no module named torch.{self.device_type}.")
+        # use `torch.cuda` module to solve `xla` device
+        self._device_module_type = (
+            self.device_type if self.device_type != "xla" else "cuda"
+        )
+        _get_device_module(self._device_module_type)
 
         if (
             device_ids is None
@@ -821,7 +823,7 @@ class DistributedDataParallel(Module, Joinable):
             _setup_mixed_precision_params(self.mixed_precision, self.module)
             _cast_buffers(self.mixed_precision, self.module)
             # Stream used for async low precision copies.
-            self._mp_stream = self.device_module.Stream()
+            self._mp_stream = _get_device_module(self._device_module_type).Stream()
             self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
             # Add forward pre-hook to root module to kick off copies to lower
             # precision.
@@ -847,7 +849,7 @@ class DistributedDataParallel(Module, Joinable):
 
             upcast_hook_state = _AllreduceUpcastHookState(
                 ddp_weakref=weakref.ref(self),
-                upcast_stream=self.device_module.Stream(),
+                upcast_stream=_get_device_module(self._device_module_type).Stream(),
             )
             self.register_comm_hook(
                 upcast_hook_state,
@@ -952,7 +954,7 @@ class DistributedDataParallel(Module, Joinable):
                 ddp_weakref,
                 _apply_optim_in_backward_hook(
                     gradient_is_bucket_view=self.gradient_as_bucket_view,
-                    device_type=self.device_type,
+                    device_type=self._device_module_type,
                 ),
             )
 
@@ -977,7 +979,7 @@ class DistributedDataParallel(Module, Joinable):
         # may have populated some events for modules that didn't end up being
         # used.
         self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
-        with self.device_module.stream(self._mp_stream):
+        with _get_device_module(self._device_module_type).stream(self._mp_stream):
             for submodule in self.module.modules():
                 for param in submodule.parameters(recurse=False):
                     # Do not cast DDP ignored parameters.
@@ -1001,7 +1003,7 @@ class DistributedDataParallel(Module, Joinable):
                                 self.mixed_precision.param_dtype  # type: ignore[union-attr]
                             )
                     param.data = param._mp_param
-                copy_event = self.device_module.Event()
+                copy_event = _get_device_module(self._device_module_type).Event()
                 copy_event.record()
                 self._submodule_to_event[submodule].append(copy_event)
 
@@ -1021,7 +1023,7 @@ class DistributedDataParallel(Module, Joinable):
             # copy event has already been waited on
             return
 
-        event.wait(stream=self.device_module.current_stream())
+        event.wait(stream=_get_device_module(self._device_module_type).current_stream())
         for p in module.parameters(recurse=False):
             # Don't register hooks if param does not require grad
             if not p.requires_grad or (hasattr(p, "_ddp_ignored") and p._ddp_ignored):
