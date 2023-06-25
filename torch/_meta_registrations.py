@@ -3494,6 +3494,7 @@ def meta_max_unpool2d(self_, indices, output_size):
         torch._check(
             self_.size(i) > 0,
             lambda: (
+                f"max_unpooling2d(): "
                 f"Expected input to have non-zero size for non-batch dimensions, "
                 f"but got {self_.shape} with dimension {i} being empty."
             ),
@@ -3512,7 +3513,7 @@ def meta_max_unpool2d(self_, indices, output_size):
     return result
 
 
-def _max_unpooling3d_shape_check(input, indices, output_size, stride, padding):
+def _max_unpooling3d_shape_check(input, indices, output_size, stride, padding, fn_name):
     torch._check(
         indices.dtype == torch.int64, lambda: "elements in indices should be type int64"
     )
@@ -3547,6 +3548,7 @@ def _max_unpooling3d_shape_check(input, indices, output_size, stride, padding):
         torch._check(
             input.size(i) > 0,
             lambda: (
+                f"{fn_name}: "
                 f"Expected input to have non-zero size for non-batch dimensions, "
                 f"but got {input.shape} with dimension {i} being empty."
             ),
@@ -3560,10 +3562,12 @@ def _max_unpooling3d_shape_check(input, indices, output_size, stride, padding):
 
 @register_meta(aten.max_unpool3d)
 @out_wrapper()
-def meta_max_unpool3d(self_, indices_, output_size, stride, padding):
+def meta_max_unpool3d(self_, indices, output_size, stride, padding):
     utils.alert_not_deterministic("max_unpooling3d_forward_out")
 
-    _max_unpooling3d_shape_check(self_, indices_, output_size, stride, padding)
+    _max_unpooling3d_shape_check(
+        self_, indices, output_size, stride, padding, "max_unpooling3d()"
+    )
 
     self = self_.contiguous()
 
