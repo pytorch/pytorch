@@ -31,7 +31,6 @@ C10_DIAGNOSTIC_POP()
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <mutex>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -159,30 +158,29 @@ struct CacheKeyFused {
 
 template <typename T, typename KeyType>
 struct BenchmarkCache {
-std::mutex mutex;
 std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsHash<KeyType>, ParamsEqual<KeyType>> engine_cache;
 
-// TODO: is this thread safe if cache is updated? is pointer stale?
+// no mutexes here as caches are now thread local for v8, can also return a pointer
+// to the Execution Plan if we know it will not be invalidated by another thread
 cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
-  std::lock_guard<std::mutex> guard(mutex);
   auto it = engine_cache.find(key);
   if (it == engine_cache.end()) {
     return nullptr;
   }
-  // TODO: probably want ExecutionPlan copy constructor or better way to return
   return &(it->second);
 }
 
 void update(const KeyType& key, T& results) {
-  std::lock_guard<std::mutex> guard(mutex);
   engine_cache.erase(key);
   engine_cache.emplace(key, std::move(results));
 }
 
 };
 
-BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKey> benchmark_cache;
-BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fused;
+// @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to be thread safe across all engines
+// see Limitations in https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
+thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKey> benchmark_cache;
+thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fused;
 
 } // namespace
 

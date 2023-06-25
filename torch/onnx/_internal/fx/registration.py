@@ -47,7 +47,7 @@ class OnnxRegistry:
         register_custom_op: Registers a custom operator.
         get_functions: Returns the set of SymbolicFunctions for the given op.
         is_registered_op: Returns whether the given op is registered.
-        all_registered_op: Returns the set of all registered op names.
+        all_registered_ops: Returns the set of all registered op names.
 
     Private Methods:
         _register: Registers a SymbolicFunction to an operator.
@@ -95,25 +95,25 @@ class OnnxRegistry:
     @_beartype.beartype
     def register_custom_op(
         self,
-        name: str,
-        func: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"],
+        op_name: str,
+        function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"],
     ) -> None:
         """Registers a custom operator.
 
         Args:
-            name: The qualified name of the operator to register. In the form of 'domain::op'.
+            op_name: The qualified name of the operator to register. In the form of 'domain::op'.
                 E.g. 'aten::add' or 'aten::pow.int'.
-            func: The onnx-sctip function to register.
+            function: The onnx-sctip function to register.
 
         Raises:
             ValueError: If the name is not in the form of 'domain::op'.
         """
-        if "::" not in name:
+        if "::" not in op_name:
             raise ValueError(
-                f"The name must be in the form of 'domain::op', not '{name}'"
+                f"The name must be in the form of 'domain::op', not '{op_name}'"
             )
         symbolic_function = SymbolicFunction(
-            onnx_function=func, op_name=name, is_custom=True
+            onnx_function=function, op_name=op_name, is_custom=True
         )
         self._register(symbolic_function)
 
@@ -128,45 +128,41 @@ class OnnxRegistry:
             Thethe set of SymbolicFunctions corresponding to the given name, or None if
             the name is not in the registry.
         """
-        functions = self._registry.get(name)
-        if functions is None:
-            return None
-        return functions
+        if (functions := self._registry.get(name)) is not None:
+            return functions
+        return None
 
     @_beartype.beartype
-    def _get_custom_functions(self, name: str) -> Optional[Set[SymbolicFunction]]:
+    def _get_custom_functions(self, op_name: str) -> Optional[Set[SymbolicFunction]]:
         """Returns the set of custom functions for the given name.
 
         Args:
-            name: The qualified op name of the functions to retrieve.
+            op_name: The qualified op name of the functions to retrieve.
 
         Returns:
             The set of custom SymbolicFunctions corresponding to the given name, or None
             if the name is not in the registry.
         """
-        functions = self.get_functions(name)
-        if functions is None:
-            return None
-
-        custom_functions = {func for func in functions if func.is_custom}
-        if not custom_functions:
-            return None
-        return custom_functions
+        if (functions := self.get_functions(op_name)) is not None:
+            custom_functions = {func for func in functions if func.is_custom}
+            if custom_functions:
+                return custom_functions
+        return None
 
     @_beartype.beartype
-    def is_registered_op(self, name: str) -> bool:
+    def is_registered_op(self, op_name: str) -> bool:
         """Returns whether the given op is registered.
 
         Args:
-            name: The qualified op name of the function to check.
+            op_name: The qualified op name of the function to check.
 
         Returns:
             True if the given op is registered, otherwise False.
         """
-        functions = self.get_functions(name)
+        functions = self.get_functions(op_name)
         return functions is not None
 
     @_beartype.beartype
-    def all_registered_op(self) -> Set[str]:
+    def all_registered_ops(self) -> Set[str]:
         """Returns the set of all registered function names."""
         return set(self._registry)
