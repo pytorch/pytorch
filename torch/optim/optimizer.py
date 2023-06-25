@@ -234,6 +234,7 @@ class Optimizer:
             'defaults': self.defaults,
             'state': self.state,
             'param_groups': self.param_groups,
+            'compiled': self.compiled
         }
 
     def __setstate__(self, state):
