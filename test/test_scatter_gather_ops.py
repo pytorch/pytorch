@@ -286,6 +286,7 @@ class TestScatterGather(TestCase):
                 rtol = 1e-2
             input = torch.randn(input_size, device=device).to(dtype=dtype)
             input2 = input.clone().to(torch.float32) if is_reduced_type else input.clone()
+            input3 = input.clone()
 
             shape = [1] * len(input_size)
             shape[0] = idx_size
@@ -309,14 +310,22 @@ class TestScatterGather(TestCase):
             out = input.scatter_add(0, idx, src)
             out2 = input2.scatter_add(0, idx2, src2)
 
-            self.assertEqual(out, out2.to(dtype) if is_reduced_type else out2, atol=atol, rtol=rtol)
+            if torch.has_openmp:
+                self.assertEqual(out, out2.to(dtype) if is_reduced_type else out2, atol=atol, rtol=rtol)
+            else:
+                out3 = input3.scatter_add(0, idx2, src)
+                self.assertEqual(out, out3)
 
             for reduce in ["sum", "prod", "mean", "amax", "amin"]:
                 for include_self in [True, False]:
                     out = input.scatter_reduce(0, idx, src, reduce=reduce, include_self=include_self)
                     out2 = input2.scatter_reduce(0, idx2, src2, reduce=reduce, include_self=include_self)
-                    self.assertEqual(out, out2.to(dtype) if is_reduced_type else out2,
-                                     atol=atol, rtol=rtol)
+                    if torch.has_openmp:
+                        self.assertEqual(out, out2.to(dtype) if is_reduced_type else out2,
+                                         atol=atol, rtol=rtol)
+                    else:
+                        out3 = input3.scatter_reduce(0, idx2, src, reduce=reduce, include_self=include_self)
+                        self.assertEqual(out, out3)
 
         helper([50, 17], 100)
         helper([50, 1], 100)
