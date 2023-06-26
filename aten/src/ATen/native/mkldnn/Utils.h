@@ -85,13 +85,17 @@ inline bool mkldnn_fp16_device_check() {
 }
 #endif
 
-inline void mkldnn_check_low_precision(ScalarType input_t, std::string name){
+inline void mkldnn_check_low_precision(ScalarType input_t, std::string name) {
   if (input_t == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(), name,
+    TORCH_CHECK(
+        mkldnn_bf16_device_check(),
+        name,
         ": bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  } else if (input_t  == ScalarType::Half) {
-    TORCH_CHECK(mkldnn_fp16_device_check(), name,
-        ": fp16 path needs the cpu support avx512_fp16");
+  } else if (input_t == ScalarType::Half) {
+    TORCH_CHECK(
+        mkldnn_fp16_device_check(),
+        name,
+        ": fp16 path needs the cpu support avx_vnni, avx512bw, avx512vl, avx512dq, avx512_vnni, avx512_bf16 and avx512_fp16");
   }
 }
 
