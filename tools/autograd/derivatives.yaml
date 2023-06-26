@@ -123,7 +123,7 @@
 #     Another interpretation of this expression would read as `var_0` is needed
 #     in the backward computation of the second or the third argument.
 #     NOTE: the usage of `var_i.requires_grad()` in the conditional expression
-#     is UB, use `grad_input_mask[i]` instead.
+#     is not supported, use `grad_input_mask[i]` instead.
 #     NOTE: `wrap_opt_if` could be used to prevent saving redundant variables
 #     with multi-output backward formulas.
 #     See https://github.com/pytorch/pytorch/issues/97575 for more details
@@ -1860,7 +1860,7 @@
   result: auto_linear
 
 - name: sparse_mask(Tensor self, Tensor mask) -> Tensor
-  self: sparse_mask_backward(grad, mask, self.layout())
+  self: grad.to_dense().sparse_mask(mask).to_dense()
   mask: non_differentiable
 
 - name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
