@@ -396,12 +396,12 @@ def sym_constrain_range(size, min, max):
 @register_meta(aten._functional_sym_constrain_range.default)
 def functional_sym_constrain_range(size, min, max, dep_token):
     aten.sym_constrain_range(size, min=min, max=max)
-    return dep_token
+    return dep_token.clone()
 
 
 @register_meta(aten._functional_assert_async.msg)
 def functional_assert_async_meta(val, assert_msg, dep_token):
-    return dep_token
+    return dep_token.clone()
 
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
