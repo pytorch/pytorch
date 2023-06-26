@@ -45,29 +45,29 @@ struct ParamsWrapper {
   T pod;
   static_assert(std::is_standard_layout_v<T>, "ParamsWrapper cannot wrap non-POD data");
 
-  ParamsWrapper<T>() {
-    memset(&(this->pod), 0, sizeof(T));
+  ParamsWrapper() {
+    memset(&(this->pod), 0, sizeof(this->pod));
   }
 
-  ParamsWrapper<T>(const ParamsWrapper<T> &other) {
-    memcpy(&(this->pod), &(other.pod), sizeof(T));
+  ParamsWrapper(const ParamsWrapper &other) {
+    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
   }
 
-  ParamsWrapper<T>(ParamsWrapper<T> &&other) {
-    memcpy(&(this->pod), &(other.pod), sizeof(T));
+  ParamsWrapper(ParamsWrapper &&other) {
+    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
   }
 
-  ParamsWrapper<T>& operator=(const ParamsWrapper<T> &other) {
-    memcpy(&(this->pod), &(other.pod), sizeof(T));
+  ParamsWrapper& operator=(const ParamsWrapper &other) {
+    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
     return *this;
   }
 
-  ParamsWrapper<T>& operator=(ParamsWrapper<T> &&other) {
-    memcpy(&(this->pod), &(other.pod), sizeof(T));
+  ParamsWrapper& operator=(ParamsWrapper &&other) {
+    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
     return *this;
   }
 
-  inline friend bool operator==(const ParamsWrapper<T> &lhs, const ParamsWrapper<T> &rhs) {
+  inline friend bool operator==(const ParamsWrapper &lhs, const ParamsWrapper &rhs) {
     auto ptr1 = reinterpret_cast<const uint8_t*>(&(lhs.pod));
     auto ptr2 = reinterpret_cast<const uint8_t*>(&(rhs.pod));
     return memcmp(ptr1, ptr2, sizeof(lhs.pod)) == 0;
