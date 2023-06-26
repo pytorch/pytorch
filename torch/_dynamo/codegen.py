@@ -29,6 +29,7 @@ from .variables.tensor import (
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
+from .variables.torch import TorchHigherOrderOperatorVariable
 
 
 @dataclasses.dataclass
@@ -101,6 +102,10 @@ class PyCodegen:
             and not isinstance(value.source, GeneratorStateSource)
             and not isinstance(
                 value, (DisabledFunctionVariable, DisabledMethodVariable)
+            )
+            and not (
+                isinstance(value, TorchHigherOrderOperatorVariable)
+                and value.disable_on_reconstruction
             )
         ):
             output.extend(value.source.reconstruct(self))

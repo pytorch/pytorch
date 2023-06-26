@@ -19,7 +19,6 @@ from ..utils import (
     all_hook_names,
     check_constant_args,
     get_custom_getattr,
-    get_higher_order_op,
     is_namedtuple_cls,
     istype,
     namedtuple_fields,
@@ -347,9 +346,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
-            if requires_higher_order_op(self.value.func):
-                return variables.TorchHigherOrderOperatorVariable(
-                    get_higher_order_op(self.value.func), source=self.source, **options
+            if higher_order_op := requires_higher_order_op(self.value.func):
+                return variables.HigherOrderCheckpointVariable(
+                    higher_order_op,
+                    source=self.source,
+                    source_fn=self.value.func,
+                    disable_on_reconstruction=True,
+                    **options,
                 ).call_function(tx, partial_args, partial_kwargs)
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
@@ -443,9 +446,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if func in disabled_torch_fns:
                     return variables.functions.DisabledFunctionVariable(func, **options)
-                if requires_higher_order_op(func):
-                    return variables.TorchHigherOrderOperatorVariable(
-                        get_higher_order_op(func), **options
+                if higher_order_op := requires_higher_order_op(func):
+                    return variables.HigherOrderCheckpointVariable(
+                        higher_order_op,
+                        source_fn=func,
+                        disable_on_reconstruction=True,
+                        **options,
                     )
                 return variables.UserFunctionVariable(func, source=source, **options)
 
