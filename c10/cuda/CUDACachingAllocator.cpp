@@ -3141,7 +3141,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   bool initialized() override {
-    return !device_allocator.empty();
+    return !allocated_blocks.empty();
   }
 
   /** allocates a block which is safe to use from the provided stream */
