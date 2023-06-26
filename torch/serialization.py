@@ -120,16 +120,16 @@ def register_package(
         `None`
 
     Example:
-        >>> # xdoctest: +SKIP("omitted definition of _validate_ipu_device")
-        >>> def _ipu_tag(obj):
+        >>> def ipu_tag(obj):
         >>>     if obj.device.type == 'ipu':
         >>>         return 'ipu'
-        >>> def _ipu_deserialize(obj, location):
+        >>> def ipu_deserialize(obj, location):
         >>>     if location.startswith('ipu'):
-        >>>         # fn to validate ipu is available and location is valid
-        >>>         device = _validate_ipu_device(location)
-        >>>         return obj.ipu(device)
-        >>> register_package(11, _ipu_tag, _ipu_deserialize)
+        >>>         ipu = getattr(torch, "ipu", None)
+        >>>         assert ipu is not None, "IPU device module is not loaded"
+        >>>         assert torch.ipu.is_available(), "ipu is not available"
+        >>>         return obj.ipu(location)
+        >>> torch.serialization.register_package(11, ipu_tag, ipu_deserialize)
     '''
     queue_elem = (priority, tagger, deserializer)
     _package_registry.append(queue_elem)
