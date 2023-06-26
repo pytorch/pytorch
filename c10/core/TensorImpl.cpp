@@ -73,7 +73,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-TensorImpl::~TensorImpl() = default;
+TensorImpl::~TensorImpl() {
+  pyobj_slot_.destroy_pyobj_if_needed();
+}
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -580,7 +582,7 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  pyobj_slot_.maybe_destroy_pyobj();
+  pyobj_slot_.destroy_pyobj_if_needed();
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY

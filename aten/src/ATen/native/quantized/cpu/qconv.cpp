@@ -607,7 +607,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
    * quantization means XNNPACK will ignore kernel zero point(s).
    */
 
-  if ((std::is_same<underlying_t, c10::quint8>::value )) {
+  if constexpr (std::is_same_v<underlying_t, c10::quint8>) {
     TORCH_CHECK(!per_channel(),
       func_name, ": xnnpack does not currently have per_channel support with activation dtype of c10::quint8."
     );
@@ -931,7 +931,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     output_shape = MakeDeConvOutputShape<kSpatialDim>(
         N,
         M,
-        {H, W},
+        kSpatialDim == 2 ? std::vector<int64_t>{H, W} : std::vector<int64_t>{D, H, W},
         kernel_,
         stride(),
         padding(),
@@ -1010,7 +1010,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 }
 
 #ifdef USE_XNNPACK
-bool can_use_xnnp(
+static bool can_use_xnnp(
     c10::ScalarType dtype,
     int kSpatialDim,
     bool per_channel,

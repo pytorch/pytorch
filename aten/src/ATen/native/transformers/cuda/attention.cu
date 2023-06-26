@@ -775,7 +775,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
   at::Tensor output = at::empty_like(query);
 
   Tensor logsumexp, debug_attn_mask, philox_seed, philox_offset;
-  std::tie(logsumexp, philox_seed, philox_offset, debug_attn_mask) = fmha::mha_fwd(
+  std::tie(logsumexp, philox_seed, philox_offset, debug_attn_mask) = pytorch_fmha::mha_fwd(
       query,
       key,
       value,

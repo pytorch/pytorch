@@ -5,42 +5,83 @@
 
 #define THPStorageStr "torch.UntypedStorage"
 
+namespace c10 {
+
+template <>
+struct MaybeOwnedTraits<c10::Storage> {
+  using owned_type = c10::Storage;
+  using borrow_type = c10::Storage;
+
+  static borrow_type createBorrow(const owned_type& from) {
+    return borrow_type(from);
+  }
+
+  static void assignBorrow(borrow_type& lhs, const borrow_type& rhs) {
+    lhs.unsafeReleaseStorageImpl();
+    lhs = borrow_type(rhs);
+  }
+
+  static void destroyBorrow(borrow_type& toDestroy) {
+    toDestroy.unsafeReleaseStorageImpl(); // "leak" it, but it was already +0.
+  }
+
+  static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
+    return borrow;
+  }
+
+  static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
+    return &borrow;
+  }
+
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
+    return true;
+  }
+};
+
+template <>
+struct ExclusivelyOwnedTraits<c10::Storage> {
+  using repr_type = c10::Storage;
+  using pointer_type = c10::Storage*;
+  using const_pointer_type = const c10::Storage*;
+
+  static repr_type nullRepr() {
+    return c10::Storage();
+  }
+
+  template <class... Args>
+  static repr_type createInPlace(Args&&... args) {
+    return c10::Storage(std::forward<Args>(args)...);
+  }
+
+  static repr_type moveToRepr(c10::Storage&& x) {
+    return std::move(x);
+  }
+
+  static c10::Storage take(c10::Storage& x) {
+    return std::move(x);
+  }
+
+  static pointer_type getImpl(repr_type& x) {
+    return &x;
+  }
+
+  static const_pointer_type getImpl(const repr_type& x) {
+    return &x;
+  }
+};
+
+} // namespace c10
+
 struct THPStorage {
   PyObject_HEAD;
   c10::MaybeOwned<c10::Storage> cdata;
 };
 
-TORCH_PYTHON_API PyObject* THPStorage_Wrap(c10::Storage storage);
-TORCH_PYTHON_API PyObject* THPStorage_NewWithStorage(
-    PyTypeObject* type,
-    c10::Storage _storage,
-    c10::impl::PyInterpreterStatus status,
-    bool allow_preexisting_pyobj = false);
-extern PyTypeObject* THPStorageClass;
-
-static inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
-  return tp == THPStorageClass;
-}
-
-static inline bool THPStorage_CheckExact(PyObject* obj) {
-  return THPStorage_CheckTypeExact(Py_TYPE(obj));
-}
-
-inline bool THPStorage_Check(PyObject* obj) {
-  if (!THPStorageClass)
-    return false;
-
-  const auto result = PyObject_IsInstance(obj, (PyObject*)THPStorageClass);
-  if (result == -1)
-    throw python_error();
-  return result;
-}
+TORCH_PYTHON_API PyObject* THPStorage_New(c10::Storage storage);
+extern PyObject* THPStorageClass;
 
 bool THPStorage_init(PyObject* module);
 void THPStorage_postInit(PyObject* module);
-
-void THPStorage_assertNotNull(THPStorage* storage);
-void THPStorage_assertNotNull(PyObject* obj);
 
 extern PyTypeObject THPStorageType;
 

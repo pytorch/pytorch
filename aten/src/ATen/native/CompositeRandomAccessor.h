@@ -2,7 +2,7 @@
 
 #include <ATen/native/CompositeRandomAccessorCommon.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 struct TupleInfoCPU {
   template <typename ...Types>
@@ -31,4 +31,4 @@ auto get(references_holder<Values, References> rh) -> decltype(std::get<N>(rh.da
   return std::get<N>(rh.data());
 }
 
-}} // namespace at::native
+} // namespace at::native

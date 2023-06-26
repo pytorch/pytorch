@@ -338,6 +338,15 @@ void index_func_meta_impl(
               func, "_(): Number of indices (", numel, ") should be equal to source.size(dim): (",
               source.size(dim), "), for dim: ", dim);
 
+  if (source.dim() != 0) {
+    auto self_sizes = self.sizes().vec();
+    auto source_sizes = source.sizes().vec();
+    self_sizes.erase(self_sizes.begin() + dim);
+    source_sizes.erase(source_sizes.begin() + dim);
+    TORCH_CHECK(self_sizes == source_sizes,
+    "source tensor shape must match self tensor shape, excluding the specified dimension. Got self.shape = ", self.sizes(), " source.shape = ", source.sizes());
+  }
+
   auto& result = meta.maybe_get_output(0);
   bool is_defined = result.defined();
   meta.set_output_raw_strided(0, self.sizes(), {}, self.options());
@@ -400,7 +409,7 @@ static void build_index_op(
   iter.build(config);
 }
 
-void check_indices_on_cpu_or_selfdevice(
+static void check_indices_on_cpu_or_selfdevice(
     const Tensor& self,
     const at::MaterializedIOptTensorListRef& indices) {
   auto dev = self.device();
@@ -965,7 +974,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
   }
 }
 
-void index_reduce_func_impl(
+static void index_reduce_func_impl(
   const Tensor& self,
   int64_t dim,
   const Tensor& index,
@@ -1149,7 +1158,7 @@ static void check_indexarray_range(
   }
 }
 
-Tensor & index_select_out_cpu_dim1_(
+static Tensor & index_select_out_cpu_dim1_(
     Tensor & result_contig, const Tensor & self, const Tensor & index_contig) {
 
   auto self_contig = self.contiguous();
@@ -1379,10 +1388,6 @@ Tensor index_select_quantized_cpu_(const Tensor & self, int64_t dim, const Tenso
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
-Tensor index_select_backward(const Tensor& grad, at::IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
-    return at::native::index_select_backward_symint(grad, c10::fromIntArrayRefSlow(self_sizes), dim, index);
-}
-
 Tensor index_select_backward_symint(const Tensor& grad, c10::SymIntArrayRef self_sizes, int64_t dim, const Tensor& index) {
   // for composite compliance, use out-of-place variant of
   // `index_add` if index tensor is a Tensor Subclass.
@@ -1537,7 +1542,7 @@ static void scatter_reduce_exclude_self_helper(
   });
 }
 
-void _scatter_via_index_put(
+static void _scatter_via_index_put(
   const Tensor& self,
   int64_t dim,
   const Tensor& index,

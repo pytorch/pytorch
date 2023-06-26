@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, skipIfTorchInductor)
+    gradgradcheck)
 from unittest.mock import patch, call
 
 
@@ -324,7 +324,6 @@ class TestModule(TestCase):
         self._traverse_obj(obj, inner_zero_grad)
 
     @modules(module_db)
-    @skipIfTorchInductor("to be fixed")
     def test_non_contiguous_tensors(self, device, dtype, module_info, training):
         # Check modules work with non-contiguous tensors
 
@@ -457,10 +456,6 @@ class TestModule(TestCase):
                 else:
                     other_kwargs[name] = obj
 
-            grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
-
-            flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
-
             def fn_to_gradcheck(*flat_input_and_params):
                 input_and_params = torch.utils._pytree.tree_unflatten(flat_input_and_params, flat_spec)
                 new_input_args = input_and_params[:len(input_args)]
@@ -472,7 +467,34 @@ class TestModule(TestCase):
                     output_flattened, _ = torch.utils._pytree.tree_flatten(output)
                     return output_flattened
 
+            # check total derivative
+            grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+            flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+
             self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+
+            # check partial derivatives
+            old_params_requires_grad = [p.requires_grad for p in params]
+            for p in params:
+                p.requires_grad = False
+
+            old_kwargs_requires_grad = [obj.requires_grad for (_, obj) in kwarg_tensors]
+            for (_, obj) in kwarg_tensors:
+                obj.requires_grad = False
+
+            for p, old in zip(params, old_params_requires_grad):
+                p.requires_grad = old
+                grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+                flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                p.requires_grad = False
+
+            for (_, obj), old in zip(kwarg_tensors, old_kwargs_requires_grad):
+                obj.requires_grad = old
+                grad_input = input_args + params + tuple(obj for (_, obj) in kwarg_tensors)
+                flat_input, flat_spec = torch.utils._pytree.tree_flatten(grad_input)
+                self.assertTrue(check(fn_to_gradcheck, flat_input, nondet_tol=gradcheck_nondet_tol))
+                obj.requires_grad = False
 
     @modules(module_db, allowed_dtypes=[torch.double])
     def test_grad(self, device, dtype, module_info, training):
@@ -488,7 +510,6 @@ class TestModule(TestCase):
     @toleranceOverride({torch.float32: tol(5e-2, 0),
                         torch.float64: tol(4e-4, 0)})
     @modules(module_db)
-    @skipIfTorchInductor("to be fixed")
     def test_cpu_gpu_parity(self, device, dtype, module_info, training):
         # TODO: RNN / GRU / LSTM don't support backwards on eval mode for cuDNN; skip this in a
         # nicer way for eval mode only.
@@ -580,7 +601,6 @@ class TestModule(TestCase):
 
     @with_tf32_off
     @modules(module_db)
-    @skipIfTorchInductor("to be fixed")
     def test_memory_format(self, device, dtype, module_info, training):
         is_sm86or80 = device.startswith("cuda") and (torch.cuda.get_device_capability(0) == (8, 6)
                                                      or torch.cuda.get_device_capability(0) == (8, 0))

@@ -21,6 +21,7 @@
 #include <ATen/ops/quantized_max_pool1d_native.h>
 #include <ATen/ops/quantized_max_pool2d.h>
 #include <ATen/ops/quantized_max_pool2d_native.h>
+#include <ATen/ops/quantized_max_pool3d_native.h>
 #endif
 
 #include <algorithm>

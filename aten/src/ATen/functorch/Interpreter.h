@@ -7,7 +7,7 @@
 #include <c10/util/variant.h>
 #include <bitset>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // NOTE: [functorch interpreter stack]
 //
@@ -40,7 +40,7 @@ namespace at { namespace functorch {
 // The VmapInterpreter just does this via a call to ophandle.callBoxed(stack)
 // and most Interpreters will implement it this way.
 
-enum RandomnessType {
+enum class RandomnessType {
     Error,      // always errors when calling a random function
     Same,       // randomness appears the same across batches
     Different,  // randomness appears different across batches
@@ -205,4 +205,4 @@ void setup_dispatch_key_tls(TransformType key, DispatchKeySet include);
 
 void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack);
 
-}} // namespace at::functorch
+} // namespace at::functorch

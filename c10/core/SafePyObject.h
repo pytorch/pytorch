@@ -29,7 +29,7 @@ struct C10_API SafePyObject {
   SafePyObject& operator=(SafePyObject const&) = delete;
 
   ~SafePyObject() {
-    (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
+    (*pyinterpreter_)->decref(data_, /*is_tensor*/ false);
   }
 
   c10::impl::PyInterpreter& pyinterpreter() const {

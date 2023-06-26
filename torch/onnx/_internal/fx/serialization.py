@@ -4,6 +4,7 @@ import os
 from typing import Tuple, TYPE_CHECKING
 
 import torch
+from torch.onnx import _type_utils as jit_type_utils
 from torch.onnx._internal import _beartype
 
 if TYPE_CHECKING:
@@ -38,9 +39,9 @@ def _create_tensor_proto_with_external_data(
 
     tensor_proto = onnx.TensorProto()
     tensor_proto.name = name
-    tensor_proto.data_type = torch.onnx._type_utils._SCALAR_TYPE_TO_ONNX[  # type: ignore[assignment]
-        torch.onnx._type_utils._DTYPE_TO_SCALAR_TYPE[tensor.dtype]
-    ]
+    tensor_proto.data_type = jit_type_utils.JitScalarType.from_dtype(
+        tensor.dtype
+    ).onnx_type()
     tensor_proto.dims.extend(tensor.shape)
     tensor_proto.data_location = onnx.TensorProto.EXTERNAL
 
