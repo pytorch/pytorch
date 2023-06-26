@@ -295,6 +295,36 @@ def _reduce_scatter_tensor(
 
     return out_tensor
 
+def _reduce_scatter_tensor_coalesced(
+    inputs: List[torch.Tensor],
+    reduce_op: str,
+    tag: str,
+    ranks: List[int],
+    group_size: int,
+):
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+    op = _str_to_reduce_op(reduce_op)
+
+
+    def mk_out_tensor(shard):
+        out_size = list(shard.size())
+        out_size[0] //= group_size
+        out_tensor = shard.new_empty(out_size)
+        assert out_tensor.is_contiguous()
+        return out_tensor
+
+    out_tensors = [mk_out_tensor(t) for t in inputs]
+
+    work_list = _reduce_scatter_tensor_coalesced_fallback(
+        output_tensors=out_tensors,
+        input_tensors=inputs,
+        op=op,
+        group=group,
+        async_op=False)
+
+    _register_tensor_work(out_tensors, work_list)
+    return out_tensors
 
 RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dist._tensor.DeviceMesh", Tuple["dist._tensor.DeviceMesh", int]]
 
@@ -515,6 +545,44 @@ def all_gather_into_tensor_coalesced(self: List[torch.Tensor], group: RANK_TYPES
     tensor_list = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(self, tag, rankset, group_size)  # type: ignore[attr-defined]
     return list(map(_maybe_wrap_tensor, tensor_list))
 
+
+def reduce_scatter_tensor_coalesced(
+    inputs: List[torch.Tensor],
+    reduceOp: str,
+    scatter_dim: List[int],
+    group: RANK_TYPES,
+    tag: str = "",
+) -> List[torch.Tensor]:
+    """
+    Reduces a list of tensors across all machines in such a way that all get
+    the final result, then scatter the results to corresponding ranks.
+
+    The input tensors are left unmodified.
+    Group can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
+        DeviceMesh: Do a SPMD collective over all ranks of the mesh
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+
+    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
+    that information and perform collective algebraic optimization. Use other forms of input for that.
+    """
+    tag, rankset, group_size = _expand_group(group, tag)
+    assert len(scatter_dim) == len(inputs)
+    for idx, (dim, tensor) in enumerate(zip(scatter_dim, inputs)):
+        assert (
+            tensor.size(dim) % group_size == 0
+        ), f"input dimension {dim} ({tensor.size(dim)} must be a multiple of group_size {group_size} for tensor at index {idx}"
+        if dim != 0:
+            tensor_list = torch.chunk(tensor, group_size, dim=dim)
+            inputs[idx] = torch.cat(tensor_list)
+
+    tensor_list = torch.ops.c10d_functional.reduce_scatter_tensor_coalesced(inputs, reduceOp, tag, rankset, group_size)  # type: ignore[attr-defined]
+
+    return list(map(_maybe_wrap_tensor, tensor_list))
+
+
 def _all_gather_into_tensor_coalesced_meta(self, tag, rankset, group_size):
     def mk_out_tensor(shard):
         out_size = list(shard.size())
@@ -544,6 +612,17 @@ def _reduce_scatter_tensor_meta(input, reduce_op, tag, rankset, group_size):
 def _all_reduce_coalesced_meta(self, reduceOp, tag, rankset, group_size):
     return [torch.empty_like(t) for t in self]
 
+
+def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_size):
+    def mk_out_tensor(input):
+        out_size = list(input.size())
+        out_size[0] //= group_size
+        out_tensor = input.new_empty(out_size)
+        return out_tensor
+
+    return [mk_out_tensor(t) for t in inputs]
+
+
 def _register_ops():
     ops_defs = [
         "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
@@ -552,6 +631,7 @@ def _register_ops():
         "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
         "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+        "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
     ]
 
     my_module = sys.modules[__name__]
@@ -637,4 +717,12 @@ def _all_gather_into_tensor_coalesced_fallback(output_tensors, input_tensors, gr
         for shard, out_tensor in zip(input_tensors, output_tensors):
             work = c10d.all_gather_into_tensor(out_tensor, shard, group=group, async_op=async_op)
             work_list.append(work)
+    return work_list
+
+def _reduce_scatter_tensor_coalesced_fallback(output_tensors, input_tensors, op, group, async_op=False):
+    # All the same reasons as the all_gather fallback
+    work_list = []
+    for shard, out_tensor in zip(input_tensors, output_tensors):
+        work = c10d.reduce_scatter_tensor(out_tensor, shard, op=op, group=group, async_op=async_op)
+        work_list.append(work)
     return work_list
