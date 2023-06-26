@@ -44,6 +44,13 @@ class FakeProcessGroup(dist.ProcessGroup):
         return ret_work(output_tensor)
 
     def _allgather_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+        # assume each rank have the same input tensor so we just copy to the results
+        # since it's not a real allgather, we simply make this copying logic to let
+        # some simple validation works (i.e. calling allgather to see if each rank have
+        # the same tensor or not)
+        chunks = output_tensor.chunk(self._world_size)
+        for chunk in chunks:
+            chunk.copy_(input_tensor)
         return ret_work(output_tensor)
 
     def _reduce_scatter_base(self, output_tensor, input_tensor, opts=ReduceScatterOptions()):
