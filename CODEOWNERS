@@ -42,6 +42,12 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw
 /torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw
 
+# Profiler
+torch/csrc/autograd/profiler* @aaronenyeshi
+torch/autograd/profiler* @aaronenyeshi
+torch/csrc/profiler/ @aaronenyeshi
+torch/profiler/ @aaronenyeshi
+
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
