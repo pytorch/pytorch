@@ -34,7 +34,7 @@ from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch._dynamo.utils import ifdyn, ifdynstaticdefault, ifunspec
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
-    disable_translation_validation_if_dynamic_shapes
+    disable_translation_validation_if_dynamic_shapes,
 )
 
 
