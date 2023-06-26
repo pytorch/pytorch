@@ -22,6 +22,8 @@
 #include <iostream>
 #include <unordered_map>
 
+int register_linear_params();
+
 // TODO: there is a table from input dtype and weight dtype to operator dtype,
 // we can derive the operator dtype based on input dtype
 cudnn_frontend::MatMulDesc_v8 getLinearDescriptor(cudnnDataType_t dataType) {
@@ -355,6 +357,7 @@ class QLinearInt8 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
+  register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear"), QLinearInt8<false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu"), QLinearInt8<true>::run);
 }
