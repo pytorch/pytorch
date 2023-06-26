@@ -548,7 +548,7 @@ class TestInductorOpInfo(TestCase):
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
 
-        # Skip dtype=torch.uint8 for all ops expect upsample and interpolate:
+        # Skip dtype=torch.uint8 for all ops except upsample and interpolate:
         allowed_dtypes = [f16, f32, f64, i32, i64, b8]
         if op_name not in (
             "nn.functional.interpolate.bilinear",
