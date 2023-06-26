@@ -411,7 +411,7 @@ Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& 
     return argsortTensor;
   };
 
-  return mps::random_mps_impl<int64_t>(result,
+  return mps::random_mps_impl<float32_t>(result,
                                        0.0,
                                        1.0,
                                        c10::nullopt,
