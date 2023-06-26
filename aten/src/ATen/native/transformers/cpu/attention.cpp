@@ -121,14 +121,14 @@ at::Tensor sd_mha_base_kernel(
   at::Tensor qk_sum = at::empty({num_thread, qSplitSize}, at::kFloat);
   at::Tensor dst_fp32 =
       at::empty({num_thread, qSplitSize, headSize}, at::kFloat);
-  
+
   at::parallel_for(0, batchSize * num_head * qSlice, 0, [&](int64_t begin, int64_t end) {
     int64_t i = 0;
     int64_t j = 0;
     int64_t k = 0;
     data_index_init(begin, i, batchSize, j, num_head, k, qSlice);
 
-    for (const auto g : c10::irange(begin, end)) {
+    for (int64_t l = begin; l < end; l++) {
       int qBlockSize = (k == qSlice - 1) ? qTail : qSplitSize;
       int ompIdx = at::get_thread_num();
       _init_mha_buffer_kernel(
