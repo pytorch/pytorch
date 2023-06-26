@@ -33,4 +33,5 @@ static_assert(
 #endif
 
 #define MKL_TENSOR_DATA_PTR(INPUT) reinterpret_cast<MKL_INT*>((INPUT).data_ptr<TORCH_COMPATIPLE_MKL_INT>())
+#define MKL_TENSOR_PTR_DATA_PTR(INPUT) reinterpret_cast<MKL_INT*>((INPUT)->data_ptr<TORCH_COMPATIPLE_MKL_INT>())
 #define MKL_TENSOR_MUTABLE_DATA_PTR(INPUT) reinterpret_cast<MKL_INT*>((INPUT).mutable_data_ptr<TORCH_COMPATIPLE_MKL_INT>())

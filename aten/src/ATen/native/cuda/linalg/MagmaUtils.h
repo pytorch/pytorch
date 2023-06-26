@@ -11,7 +11,6 @@
 #else
 #define TORCH_COMPATIPLE_MAGMA_INT int32_t
 #endif
-#define MAGMA_TENSOR_DATA_PTR(INPUT) reinterpret_cast<magma_int_t*>((INPUT).data_ptr<TORCH_COMPATIPLE_MAGMA_INT>())
 #define MAGMA_TENSOR_MUTABLE_DATA_PTR(INPUT) reinterpret_cast<magma_int_t*>((INPUT).mutable_data_ptr<TORCH_COMPATIPLE_MAGMA_INT>())
 
 namespace at {
