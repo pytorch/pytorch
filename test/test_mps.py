@@ -10426,10 +10426,6 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'round', 'xlogy', 'addcmul',
-<<<<<<< Updated upstream
-=======
-        '__rmatmul__', 'addbmm', 'addmv', 'baddbmm',
->>>>>>> Stashed changes
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
