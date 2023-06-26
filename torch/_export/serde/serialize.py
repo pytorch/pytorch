@@ -450,7 +450,7 @@ class GraphModuleSerializer:
         node_args = node.args[0]
         if isinstance(node_args, torch.fx.Node):
             node_args = (node_args,)
-        assert isinstance(node_args, tuple)
+        assert isinstance(node_args, (tuple, list))
         self.graph_state.outputs = [self.serialize_input(arg) for arg in node_args]
 
     def handle_call_function(self, node: torch.fx.Node):
