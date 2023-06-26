@@ -430,11 +430,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
             dynamic_subobj = getattr(self.value, name)
+            from ..eval_frame import disabled_torch_fns
+
             if inspect.ismethod(dynamic_subobj):
+                if func in disabled_torch_fns:
+                    return variables.functions.DisabledMethodVariable(
+                        func, self, **options
+                    )
                 return variables.UserMethodVariable(
                     func, self, source=source, **options
                 )
             elif inspect.isfunction(dynamic_subobj):
+                if func in disabled_torch_fns:
+                    return variables.functions.DisabledFunctionVariable(func, **options)
                 if requires_higher_order_op(func):
                     return variables.TorchHigherOrderOperatorVariable(
                         get_higher_order_op(func), **options

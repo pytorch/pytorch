@@ -12,6 +12,7 @@ from torch import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
+from ..eval_frame import disabled_torch_fns
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -997,6 +998,7 @@ class BuiltinVariable(VariableTracker):
     ):
         from . import (
             ConstantVariable,
+            DisabledFunctionVariable,
             GetAttrVariable,
             PythonModuleVariable,
             TorchHigherOrderOperatorVariable,
@@ -1071,6 +1073,8 @@ class BuiltinVariable(VariableTracker):
                 return TorchHigherOrderOperatorVariable(
                     get_higher_order_op(member), **options
                 )
+            elif member in disabled_torch_fns:
+                return DisabledFunctionVariable(member, **options)
             elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):

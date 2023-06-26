@@ -20,6 +20,7 @@ from .exc import unimplemented
 from .source import AttrSource, GeneratorStateSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import VariableTracker
+from .variables.functions import DisabledFunctionVariable, DisabledMethodVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -98,6 +99,9 @@ class PyCodegen:
             value.source is not None
             and allow_cache
             and not isinstance(value.source, GeneratorStateSource)
+            and not isinstance(
+                value, (DisabledFunctionVariable, DisabledMethodVariable)
+            )
         ):
             output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(

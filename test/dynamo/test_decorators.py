@@ -8,6 +8,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import IncorrectUsage
+from torch.jit import trace as jit_trace
 
 
 def my_custom_function(x):
@@ -263,6 +264,34 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             seen_frames[0].line,
             "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
         )
+
+    def test_disable_jit_trace(self):
+        def gn(x):
+            return torch.cos(x)
+
+        def fn(x):
+            return torch.jit.trace(gn, x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.op_count, 0)
+
+    def test_disable_jit_trace_global(self):
+        def gn(x):
+            return torch.cos(x)
+
+        def fn(x):
+            return jit_trace(gn, x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        x = torch.randn(4)
+        opt_fn(x)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(cnts.op_count, 0)
 
 
 if __name__ == "__main__":

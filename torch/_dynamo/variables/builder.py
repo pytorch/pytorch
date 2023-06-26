@@ -73,6 +73,7 @@ from .dicts import (
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    DisabledFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -363,6 +364,8 @@ class VariableBuilder:
         return result
 
     def _wrap(self, value):
+        from ..eval_frame import disabled_torch_fns
+
         make_guards = self.make_guards
 
         # Handle exact type() match
@@ -382,6 +385,8 @@ class VariableBuilder:
         # Everything else (NB: order matters!)
         if istype(value, config.traceable_tensor_subclasses):
             return self.wrap_tensor(value)
+        elif value in disabled_torch_fns:
+            return DisabledFunctionVariable(value)
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
         elif istype(

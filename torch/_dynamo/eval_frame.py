@@ -1207,24 +1207,30 @@ def skip(fn=None):
     return fn
 
 
+disabled_torch_fns = set()
+
+
+def disable_torch_fn(fn):
+    assert callable(fn)
+    disabled_torch_fns.add(fn)
+
+
 class TorchPatcher:
     @staticmethod
     @functools.lru_cache(None)
     def patch():
         # Disable TorchDynamo on some torch.* compilers generated frames
-        torch.jit.trace = disable(torch.jit.trace)
-        torch.jit.trace_module = disable(torch.jit.trace_module)
-        torch.jit._get_trace_graph = disable(torch.jit._get_trace_graph)
+        disable_torch_fn(torch.jit.trace)
+        disable_torch_fn(torch.jit.trace_module)
+        disable_torch_fn(torch.jit._get_trace_graph)
 
         # symbolic_trace creates new frames. We disable Dynamo on such frames
-        torch.fx._symbolic_trace.Tracer.trace = disable(
-            torch.fx._symbolic_trace.Tracer.trace
-        )
+        disable_torch_fn(torch.fx._symbolic_trace.Tracer.trace)
 
-        torch.onnx.export_to_pretty_string = disable(torch.onnx.export_to_pretty_string)
+        disable_torch_fn(torch.onnx.export_to_pretty_string)
         torch.distributions.Distribution.set_default_validate_args(False)
 
-        proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
+        disable_torch_fn(proxy_tensor.dispatch_trace)
 
         optimizers = [
             opt
@@ -1283,15 +1289,15 @@ class TorchPatcher:
         excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
             if opt in excluded_opts:
-                opt.step = disable(opt.step)
+                disable_torch_fn(opt.step)
 
-            opt.zero_grad = disable(opt.zero_grad)
-            opt.state_dict = disable(opt.state_dict)
-            opt.load_state_dict = disable(opt.load_state_dict)
-            opt.add_param_group = disable(opt.add_param_group)
+            disable_torch_fn(opt.zero_grad)
+            disable_torch_fn(opt.state_dict)
+            disable_torch_fn(opt.load_state_dict)
+            disable_torch_fn(opt.add_param_group)
 
             if hasattr(opt, "_init_group"):
-                opt._init_group = disable(opt._init_group)
+                disable_torch_fn(opt._init_group)
 
             # disable any currently set hooks
             # Note: we only want to disable the profiling hook

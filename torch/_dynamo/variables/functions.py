@@ -586,3 +586,59 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
             )
         return super().call_function(tx, args, kwargs)
+
+
+class DisabledFunctionVariable(VariableTracker):
+    """
+    This causes a graph break for torch functions that are marked as disabled
+    (not decorated). Dynamo waits for CALL_FUNCTION* bytecode to cause a graph
+    break and then while reconstructing the bytecode, it disables the function.
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def __repr__(self):
+        return f"DisabledFunctionVariable({self.value})"
+
+    def reconstruct(self, codegen):
+        from ..bytecode_transformation import unique_id
+        from ..eval_frame import disable
+
+        disabled_fn = disable(self.value)
+        name = unique_id("__disabled_fn")
+        codegen.tx.output.install_global(name, disabled_fn)
+        return codegen.load_function_name(name, True)
+
+
+class DisabledMethodVariable(VariableTracker):
+    """
+    This causes a graph break for torch functions that are marked as disabled
+    (not decorated). Dynamo waits for CALL_FUNCTION* bytecode to cause a graph
+    break and then while reconstructing the bytecode, it disables the function.
+    """
+
+    def __init__(self, value, obj, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+        self.obj = obj
+
+    def __repr__(self):
+        return f"DisabledMethodVariable({self.value})"
+
+    def reconstruct(self, codegen):
+        from ..bytecode_transformation import unique_id
+        from ..eval_frame import disable
+
+        disabled_fn = disable(self.value)
+
+        # Method descriptor automatically prepends self to the args, kwargs. So,
+        # here we have to create a wrapper that prepends self (i.e. self.obj in
+        # this case) to the call.
+        def method_wrapper(*args, **kwargs):
+            return disabled_fn(self.obj, *args, **kwargs)
+
+        name = unique_id("__disabled_fn")
+        codegen.tx.output.install_global(name, method_wrapper)
+        return codegen.load_function_name(name, True)
