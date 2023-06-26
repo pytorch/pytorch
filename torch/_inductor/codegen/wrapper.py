@@ -480,10 +480,8 @@ class WrapperCodeGen(CodeGen):
         else:
             for call_str in call_strs:
                 writer.writeline(call_str)
-        
         if ssnode.cuda_event:
             self.cuda_event_record(node_name, kernel_IndentedBuffer)
-        
         for line in [ _ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
             self.writeline(line)
 
@@ -498,7 +496,11 @@ class WrapperCodeGen(CodeGen):
             call_strs.append(
                 f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
             )
-        self.generate_extern_kernel_w_stream(output_name, call_strs)
+        if config.multiple_streams:
+            self.generate_extern_kernel_w_stream(output_name, call_strs)
+        else:
+            for call_str in call_strs:
+                self.writeline(call_str)
 
 
     def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel, node_name=None):
@@ -507,7 +509,11 @@ class WrapperCodeGen(CodeGen):
         else:
             args.append(f"out={codegen_reference}")
         call_strs = [f"{kernel}({', '.join(args)})"]
-        self.generate_extern_kernel_w_stream(node_name, call_strs)
+        if config.multiple_streams:
+            self.generate_extern_kernel_w_stream(node_name, call_strs)
+        else:
+            for call_str in call_strs:
+                self.writeline(call_str)
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
@@ -523,18 +529,18 @@ class WrapperCodeGen(CodeGen):
     def generate_stream_creation(self):
         self.write_triton_header_once()
         self.header.writeline(f"")
-        for i in range(1, V.graph.stream_graph.stream_pool_size + 1):
-            self.header.writeline(f"stream{i}_raw = torch.cuda.Stream()")
-            self.header.writeline(f"stream{i} = stream{i}_raw.cuda_stream")
-        self.header.writeline(f"stream0_raw = torch.cuda.default_stream()")
+        if config.multiple_streams:
+            for i in range(1, V.graph.stream_graph.stream_pool_size + 1):
+                self.header.writeline(f"stream{i}_raw = torch.cuda.Stream()")
+                self.header.writeline(f"stream{i} = stream{i}_raw.cuda_stream")
+            self.header.writeline(f"stream0_raw = torch.cuda.default_stream()")
         # TODO(Yueming): what about mutliple GPUs? is it always 0? is it better to change it to stream0_raw.cuda_stream?
         self.header.writeline(f"stream0 = get_cuda_stream(0)")
 
     @dynamo_timed
     def generate(self):
         result = IndentedBuffer()
-        if config.multiple_streams:
-            self.generate_stream_creation()
+        self.generate_stream_creation()
         result.splice(self.header)
         out_names = V.graph.get_output_names()
         with contextlib.ExitStack() as stack:
@@ -753,7 +759,7 @@ class WrapperCodeGen(CodeGen):
 
     def generate_numel_expr(self, kernel_name: str, tree, kernel_IndentedBuffer=None):
         expr = f"{kernel_name}_{tree.prefix}numel"
-        if kernel_IndentedBuffer is not None:
+        if kernel_IndentedBuffer:
             writer = kernel_IndentedBuffer
         else:
             writer = self
@@ -786,7 +792,7 @@ class WrapperCodeGen(CodeGen):
     def generate_kernel_call(
         self, name, call_args, grid=None, device_index=None, cuda=True, stream_id=0, kernel_IndentedBuffer=None
     ):
-        if kernel_IndentedBuffer is not None:
+        if kernel_IndentedBuffer:
             writer = kernel_IndentedBuffer
         else:
             writer = self

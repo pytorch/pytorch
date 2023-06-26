@@ -2137,28 +2137,30 @@ class TritonScheduling:
         )
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        node_name = node_schedule[0].get_name()
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
-        ssnode = V.graph.stream_graph.name_mapping[node_name]
-        stream_id = ssnode.stream_id
-        # print(f"findhao-> kernel_name: {kernel_name}, stream_id: {stream_id}")
-        kernel_IndentedBuffer = IndentedBuffer()
-        wrapper = V.graph.wrapper_code
-        wrapper.cuda_event_dependency(node_name, kernel_IndentedBuffer)
-        if ssnode.cuda_event:
-            wrapper.cuda_event_create(node_name, kernel_IndentedBuffer)
-        if stream_id != 0:
-            kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
-            with kernel_IndentedBuffer.indent():
+        if config.multiple_streams:
+            node_name = node_schedule[0].get_name()
+            ssnode = V.graph.stream_graph.name_mapping[node_name]
+            stream_id = ssnode.stream_id
+            # print(f"findhao-> kernel_name: {kernel_name}, stream_id: {stream_id}")
+            kernel_IndentedBuffer = IndentedBuffer()
+            wrapper = V.graph.wrapper_code
+            wrapper.cuda_event_dependency(node_name, kernel_IndentedBuffer)
+            if ssnode.cuda_event:
+                wrapper.cuda_event_create(node_name, kernel_IndentedBuffer)
+            if stream_id != 0:
+                kernel_IndentedBuffer.writeline(f"with torch.cuda.stream(stream{stream_id}_raw):")
+                with kernel_IndentedBuffer.indent():
+                    kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
+            else:
                 kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
+            if ssnode.cuda_event:
+                wrapper.cuda_event_record(node_name, kernel_IndentedBuffer)
+            for line in [_ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
+                V.graph.wrapper_code.writeline(line)
         else:
-            kernel.call_kernel(kernel_name, stream_id, kernel_IndentedBuffer)
-        if ssnode.cuda_event:
-            wrapper.cuda_event_record(node_name, kernel_IndentedBuffer)
-        for line in [_ for _ in kernel_IndentedBuffer.getrawvalue().split("\n") if _]:
-            V.graph.wrapper_code.writeline(line)
-
+            kernel.call_kernel(kernel_name)
         if config.warn_mix_layout:
             kernel.warn_mix_layout(kernel_name)
 

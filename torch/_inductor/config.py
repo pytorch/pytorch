@@ -139,7 +139,7 @@ joint_graph_constant_folding = True
 debug_index_asserts = False
 
 # Enable mutiple streams for codegen
-multiple_streams = True
+multiple_streams = os.environ.get("TORCHINDUCTOR_MULTIPLE_STREAMS", "1") == "1"
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")

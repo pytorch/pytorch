@@ -142,9 +142,12 @@ class SSGraph:
             if len(predecessor.successors) == 1:
                 tmp_queue.append(predecessor)
         # TODO: add a count to avoid infinite loop
+        count = 0
         while len(tmp_queue) != 0:
             cur_node = tmp_queue.pop(0)
-            
+            count += 1
+            if count > len(self.ssnodes) * len(self.ssnodes) * len(self.ssnodes) * len(self.ssnodes) * len(self.ssnodes):
+                raise RuntimeError("Infinite loop in building graph")
             # if one of the successors is not assigned, then we cannot assign the level to cur_node
             for successor in cur_node.successors.values():
                 if successor not in self.reverse_level:
