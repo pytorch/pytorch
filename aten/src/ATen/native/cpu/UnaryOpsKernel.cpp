@@ -760,7 +760,6 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
 REGISTER_NO_AVX512_DISPATCH(round_decimals_stub);
 REGISTER_NO_AVX512_DISPATCH(abs_stub);
 REGISTER_NO_AVX512_DISPATCH(angle_stub);
-REGISTER_NO_AVX512_DISPATCH(nan_to_num_stub);
 REGISTER_NO_AVX512_DISPATCH(neg_stub);
 REGISTER_NO_AVX512_DISPATCH(sign_stub);
 REGISTER_NO_AVX512_DISPATCH(signbit_stub);
@@ -768,6 +767,8 @@ REGISTER_NO_AVX512_DISPATCH(sgn_stub);
 REGISTER_NO_AVX512_DISPATCH(bitwise_not_stub);
 REGISTER_NO_AVX512_DISPATCH(logical_not_stub);
 REGISTER_NO_AVX512_DISPATCH(conj_physical_stub);
+REGISTER_NO_AVX512_DISPATCH(rsqrt_stub);
+REGISTER_NO_AVX512_DISPATCH(frac_stub);
 IMPLEMENT_NULLPTR_FLOAT_KERNEL(ceil)
 IMPLEMENT_NULLPTR_FLOAT_KERNEL(floor)
 IMPLEMENT_NULLPTR_FLOAT_KERNEL(round)
@@ -778,7 +779,6 @@ IMPLEMENT_NULLPTR_FLOAT_KERNEL(trunc)
 REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
 REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
-REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel);
 REGISTER_DISPATCH(neg_stub, &CPU_CAPABILITY::neg_kernel);
 REGISTER_DISPATCH(sign_stub, &CPU_CAPABILITY::sign_kernel);
 REGISTER_DISPATCH(signbit_stub, &CPU_CAPABILITY::signbit_kernel);
@@ -786,6 +786,8 @@ REGISTER_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel);
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
+REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
+REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
 IMPLEMENT_FLOAT_KERNEL(ceil)
 IMPLEMENT_FLOAT_KERNEL(floor)
 IMPLEMENT_FLOAT_KERNEL(round)
@@ -795,12 +797,10 @@ IMPLEMENT_FLOAT_KERNEL(trunc)
 
 // The following kernels are compute-intensive & are compiled with both AVX512
 // & AVX2
+REGISTER_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
 REGISTER_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
-REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
 REGISTER_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
-REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel);
-REGISTER_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kernel);
 REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel);
 REGISTER_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
@@ -827,6 +827,7 @@ REGISTER_DISPATCH(special_modified_bessel_i0_stub, &CPU_CAPABILITY::modified_bes
 REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
+REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel);
 
 STATIC_IMPLEMENT_COMPLEX_KERNEL(acos)
 STATIC_IMPLEMENT_COMPLEX_KERNEL(asin)

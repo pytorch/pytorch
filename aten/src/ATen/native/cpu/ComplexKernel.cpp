@@ -25,7 +25,13 @@ void polar_kernel(TensorIterator& iter) {
 
 } // anonymous namespace
 
+// These kernels are slower with AVX512 than with AVX2.
+#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(complex_stub, &complex_kernel);
 REGISTER_DISPATCH(polar_stub, &polar_kernel);
+#else
+REGISTER_NO_AVX512_DISPATCH(complex_stub);
+REGISTER_NO_AVX512_DISPATCH(polar_stub);
+#endif
 
 } // namespace at::native

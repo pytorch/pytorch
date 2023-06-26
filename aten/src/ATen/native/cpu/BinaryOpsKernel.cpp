@@ -1263,13 +1263,13 @@ void shifted_chebyshev_polynomial_w_kernel(TensorIteratorBase& iterator) {
 
 } // namespace
 
+// These kernels are slower with AVX512 than with AVX2.
+#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_true_stub, &div_true_kernel);
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_kernel);
 REGISTER_DISPATCH(div_floor_stub, &div_floor_kernel);
-REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
-REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel);
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
@@ -1288,6 +1288,36 @@ REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
 REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
 REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
+REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
+#else
+REGISTER_NO_AVX512_DISPATCH(add_clamp_stub);
+REGISTER_NO_AVX512_DISPATCH(mul_stub);
+REGISTER_NO_AVX512_DISPATCH(div_true_stub);
+REGISTER_NO_AVX512_DISPATCH(div_trunc_stub);
+REGISTER_NO_AVX512_DISPATCH(div_floor_stub);
+REGISTER_NO_AVX512_DISPATCH(bitwise_and_stub);
+REGISTER_NO_AVX512_DISPATCH(bitwise_or_stub);
+REGISTER_NO_AVX512_DISPATCH(bitwise_xor_stub);
+REGISTER_NO_AVX512_DISPATCH(lshift_stub);
+REGISTER_NO_AVX512_DISPATCH(rshift_stub);
+REGISTER_NO_AVX512_DISPATCH(logical_xor_stub);
+REGISTER_NO_AVX512_DISPATCH(logical_and_stub);
+REGISTER_NO_AVX512_DISPATCH(logical_or_stub);
+REGISTER_NO_AVX512_DISPATCH(lt_stub);
+REGISTER_NO_AVX512_DISPATCH(le_stub);
+REGISTER_NO_AVX512_DISPATCH(gt_stub);
+REGISTER_NO_AVX512_DISPATCH(ge_stub);
+REGISTER_NO_AVX512_DISPATCH(eq_stub);
+REGISTER_NO_AVX512_DISPATCH(ne_stub);
+REGISTER_NO_AVX512_DISPATCH(maximum_stub);
+REGISTER_NO_AVX512_DISPATCH(minimum_stub);
+REGISTER_NO_AVX512_DISPATCH(fmax_stub);
+REGISTER_NO_AVX512_DISPATCH(fmin_stub);
+REGISTER_NO_AVX512_DISPATCH(copysign_stub);
+#endif
+
+REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
+REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(huber_stub, &huber_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
@@ -1304,7 +1334,6 @@ REGISTER_DISPATCH(igamma_stub, &igamma_kernel);
 REGISTER_DISPATCH(igammac_stub, &igammac_kernel);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
-REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel);
 REGISTER_DISPATCH(zeta_stub, &zeta_kernel);

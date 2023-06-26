@@ -1315,8 +1315,13 @@ void grid_sampler_2d_backward_cpu_kernel_impl(
 
 }
 
+// These kernels are slower with AVX512 than with AVX2.
+#ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(grid_sampler_2d_cpu_kernel, &grid_sampler_2d_cpu_kernel_impl);
 REGISTER_DISPATCH(grid_sampler_2d_backward_cpu_kernel, &grid_sampler_2d_backward_cpu_kernel_impl);
-
+#else
+REGISTER_NO_AVX512_DISPATCH(grid_sampler_2d_cpu_kernel);
+REGISTER_NO_AVX512_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
+#endif
 
 }  // namespace at::native
