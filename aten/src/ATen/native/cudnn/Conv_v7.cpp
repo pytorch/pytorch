@@ -724,11 +724,11 @@ void raw_cudnn_convolution_backward_input_out_32bit(
           &one, args.wdesc.desc(), weight.data_ptr(),
           args.odesc.desc(), grad_output.data_ptr(),
           args.cdesc.desc(), bwdDataAlgPerf.algo, workspace.data_ptr(), bwdDataAlgPerf.memory,
-          &zero, args.idesc.desc(), grad_input.data_ptr()),
+          &zero, args.idesc.desc(), grad_input.mutable_data_ptr()),
         args,
         "Additional pointer addresses: \n",
         "    grad_output: ", grad_output.data_ptr(), "\n",
-        "    grad_input: ", grad_input.data_ptr(), "\n",
+        "    grad_input: ", grad_input.mutable_data_ptr(), "\n",
         "Backward data algorithm: ", static_cast<int>(bwdDataAlgPerf.algo), "\n");
     }
   );

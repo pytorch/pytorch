@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <unordered_set>
 
 namespace torch {
 namespace autograd {

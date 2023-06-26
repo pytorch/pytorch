@@ -40,7 +40,7 @@ class SpatialBNOp : public Operator<Context> {
     CAFFE_ENFORCE_LE(momentum_, 1);
   }
 
-  virtual ~SpatialBNOp() = default;
+  ~SpatialBNOp() override = default;
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
@@ -305,7 +305,7 @@ class SpatialBNGradientOp : public Operator<Context> {
     CAFFE_ENFORCE_EQ(OutputSize(), 3);
   }
 
-  virtual ~SpatialBNGradientOp() = default;
+  ~SpatialBNGradientOp() override = default;
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<float>>::call(this, Input(0));

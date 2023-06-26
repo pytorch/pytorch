@@ -80,6 +80,8 @@ def parallelize_module(  # type: ignore[return]
         granularity, you need to pass in a dict of module FQN and parallel style instead.
     """
 
+    torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
+
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
 
