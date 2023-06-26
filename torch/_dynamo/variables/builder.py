@@ -109,6 +109,7 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import (
+    HigherOrderCheckpointVariable,
     tensor_dunder_fns,
     torch_special_class_types,
     TorchHigherOrderOperatorVariable,
@@ -463,6 +464,15 @@ class VariableBuilder:
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.BUILTIN_MATCH),
+            )
+        elif callable(value) and (higher_order_op := requires_higher_order_op(value)):
+            return HigherOrderCheckpointVariable(
+                higher_order_op,
+                source_fn=value,
+                disable_on_reconstruction=True,
+                guards=self.make_guards(
+                    GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
+                ),
             )
         elif callable(value) and value in disabled_torch_fns:
             return DisabledFunctionVariable(value)
