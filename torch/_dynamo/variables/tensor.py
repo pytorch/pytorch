@@ -991,9 +991,5 @@ class TypedStorageVariable(VariableTracker):
             return SizeVariable(sizes)
         if name == "device":
             return ConstantVariable(self.value.device)
-        if name == "_resize_":
-            assert len(args) == 1
-            self.value._resize_(args[0].value)
-            return ConstantVariable(None)
         print("TypedStorageVariable Call method", name, self.value, args)
         unimplemented(f"typed_storage method calls WIP {name}")
