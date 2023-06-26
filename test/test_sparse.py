@@ -27,6 +27,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
+from torch._inductor.utils import has_triton
 
 
 def _op_supports_any_sparse(op):
@@ -4890,7 +4891,7 @@ class TestSparseAny(TestCase):
             k = 2 ** k * 128
             run_test(batch_shape, m, n, k, device, dtype, dtype_out[dtype], add_bias, activation, rtol, atol)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(not has_triton(), "Test needs triton and recent GPU arch")
     @dtypes(torch.int8, torch.half, torch.bfloat16)
     def test_semi_structured_sparse_conversions(self, device, dtype):
         from torch.sparse.semi_structured_sparse_conversions import (
