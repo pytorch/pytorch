@@ -298,6 +298,7 @@ ALLOW_LIST = [
      datetime.date(9999, 1, 1)),
     ("mkldnn::_convolution_pointwise_.binary", datetime.date(2023, 7, 1)),
     # These ops were moved to python under the c10d_functional namespace
+    ("c10d::allreduce_", datetime.date(2023, 7, 30)),
     ("aten::wait_tensor", datetime.date(9999, 1, 30)),
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
