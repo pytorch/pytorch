@@ -181,7 +181,7 @@ class OnnxifiOp final : public Operator<Context> {
     buildBackendAndGraph(ws, property_pointers, onnx_model_str);
   }
 
-  ~OnnxifiOp() {
+  ~OnnxifiOp() override {
     backend_graph_shared_ptr_.reset();
     backend_graph_map_ptr_->remove(op_id_string_);
 #ifdef ONNXIFI_ENABLE_EXT
