@@ -77,8 +77,8 @@ def pad_dim(x, padded_length, dim):
     return torch.cat([x, pad], dim=dim)
 
 
-def addmm_pattern(input, mat1, mat2, beta, alpha):
-    return aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
+def addmm_pattern(input, mat1, mat2):
+    return aten.addmm(input, mat1, mat2, beta=1.0, alpha=1.0)
 
 
 def should_pad_addmm(match):
