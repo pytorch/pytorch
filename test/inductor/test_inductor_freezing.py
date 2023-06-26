@@ -177,7 +177,11 @@ class OptimizeForInferenceTemplate(TestCase):
             def forward(self, x):
                 return [
                     aten.addmm(b, x, p)
-                    for b, p in [(self.b1, self.t1), (self.b2, self.t2), (self.b3, self.t3)]
+                    for b, p in [
+                        (self.b1, self.t1),
+                        (self.b2, self.t2),
+                        (self.b3, self.t3),
+                    ]
                 ]
 
         for mod in [MM().to(self.device), AddMM().to(self.device)][1:]:
