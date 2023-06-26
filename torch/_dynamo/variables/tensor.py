@@ -86,7 +86,6 @@ class TensorVariable(VariableTracker):
         stride=None,
         is_contiguous=None,
         specialized_value=None,
-        _typed_storage=None,
         storage_offset=None,
         **kwargs,
     ):
@@ -104,7 +103,6 @@ class TensorVariable(VariableTracker):
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.specialized_value = specialized_value
-        self._typed_storage = _typed_storage
         self.storage_offset = storage_offset
 
     def as_proxy(self):
@@ -137,7 +135,6 @@ class TensorVariable(VariableTracker):
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
-            "_typed_storage": value._typed_storage,
         }
         if not free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
@@ -246,10 +243,6 @@ class TensorVariable(VariableTracker):
             result = self.call_method(tx, "detach", [], {})
         if name == "__class__":
             return TorchVariable(self.python_type(), **options)
-        if name == "_typed_storage":
-            return variables.LambdaVariable(
-                lambda *args, **kwargs: TypedStorageVariable(self._typed_storage())
-            ).add_options(self)
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
@@ -483,10 +476,20 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
-        elif name == "_typed_storage":
-            return TypedStorageVariable(self._typed_storage)
         elif name == "storage_offset":
-            return ConstantVariable(self.storage_offset)
+            # Constant path
+            if self.storage_offset is not None:
+                return ConstantVariable(self.storage_offset, **options)
+            # dyn shapes path
+            return wrap_fx_proxy(
+                tx,
+                tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
+                ),
+                **options,
+            )
         else:
             constant_result = None
 
@@ -965,31 +968,3 @@ class FakeItemVariable(TensorVariable):
     @classmethod
     def from_tensor_variable(cls, tensor_variable):
         return FakeItemVariable(**dict(tensor_variable.__dict__))
-
-
-class TypedStorageVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
-        self.value = value
-        super().__init__(**kwargs)
-
-    def reconstruct(self, codegen):
-        return super().reconstruct(codegen)
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if name == "_data_ptr":
-            return ConstantVariable(self.value._data_ptr())
-        if name == "_size":
-            if isinstance(self.value._size(), int):
-                return ConstantVariable(self.value._size())
-            sizes = [ConstantVariable(x) for x in self.value._size()]
-            return SizeVariable(sizes)
-        if name == "device":
-            return ConstantVariable(self.value.device)
-        print("TypedStorageVariable Call method", name, self.value, args)
-        unimplemented(f"typed_storage method calls WIP {name}")
