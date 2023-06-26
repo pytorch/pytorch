@@ -390,7 +390,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
         def test_unaligned_static_input_non_trees(self):
-            self.test_unaligned_static_input()
+            self._test_unaligned_static_input_impl()
 
         def test_accumulate_multiple_recordings(self):
             def foo(x):
