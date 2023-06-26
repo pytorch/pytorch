@@ -1686,27 +1686,20 @@ def defake(x):
 # We also need the original untouched/ not disabled torch utils checkpoint
 # becuase distributed checkpointed wrappers import these utils before
 # TorchDynamo TorchPatcher runs.
-untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
+# untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
 
 
-def higher_order_op_converter():
+def requires_higher_order_op(obj):
     import torch._higher_order_ops.wrap as higher_order_ops
 
-    # TODO - This is a temporary sitaution where we have two versions of
-    # checkpointing implemetation. We will converge on one and remove the other.
     activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
     if torch._functorch.config.functionalize_rng_ops:
         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
 
-    return {
+    d = {
         torch.utils.checkpoint.checkpoint: activation_checkpoint_op,
-        untouched_torch_utils_checkpoint: activation_checkpoint_op,
+        # untouched_torch_utils_checkpoint: activation_checkpoint_op,
     }
-
-
-def requires_higher_order_op(obj):
-    return obj in higher_order_op_converter()
-
-
-def get_higher_order_op(obj):
-    return higher_order_op_converter().get(obj)
+    if obj not in d:
+        return None
+    return d[obj]

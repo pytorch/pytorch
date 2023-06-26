@@ -27,7 +27,6 @@ from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
-    get_higher_order_op,
     istype,
     proxy_args_kwargs,
     requires_higher_order_op,
@@ -1000,8 +999,8 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             DisabledFunctionVariable,
             GetAttrVariable,
+            HigherOrderCheckpointVariable,
             PythonModuleVariable,
-            TorchHigherOrderOperatorVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1069,9 +1068,12 @@ class BuiltinVariable(VariableTracker):
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
-            if requires_higher_order_op(member):
-                return TorchHigherOrderOperatorVariable(
-                    get_higher_order_op(member), **options
+            if higher_order_op := requires_higher_order_op(member):
+                return HigherOrderCheckpointVariable(
+                    higher_order_op,
+                    source_fn=member,
+                    disable_on_reconstruction=True,
+                    **options,
                 )
             elif member in disabled_torch_fns:
                 return DisabledFunctionVariable(member, **options)
