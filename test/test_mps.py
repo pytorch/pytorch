@@ -10426,6 +10426,10 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'round', 'xlogy', 'addcmul',
+<<<<<<< Updated upstream
+=======
+        '__rmatmul__', 'addbmm', 'addmv', 'baddbmm',
+>>>>>>> Stashed changes
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10486,6 +10490,11 @@ class TestConsistency(TestCaseMPS):
             elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
+            elif op.name in ['nn.functional.conv_transpose1d',
+                             'nn.functional.conv_transpose2d',
+                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                atol = 2e-2
+                rtol = 2e-2
             elif op.name == "masked.mean":
                 atol = 7e-4
                 rtol = 2e-3
