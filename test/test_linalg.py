@@ -5415,35 +5415,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         else:
             f(t, m, v, alpha=alpha, beta=beta, out=res2)
         res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
-        res1_fused_epilogue = (t.is_cuda and t.dim() == 1 and beta == 1)
-        if TEST_WITH_ROCM or IS_WINDOWS or _get_torch_cuda_version() < (11, 8):
-            # epilogue fusion enabled only on CUDA >= 11.8
-            res1_fused_epilogue = False
-        res2_fused_epilogue = res1_fused_epilogue and res2.is_contiguous()
         if beta != 0:
             res3 += (beta * t).to(numpy_dtype).cpu().numpy()
         if activation == "relu":
             res3 = res3 * (res3 > 0)
         elif activation == "gelu":
             res3_t = torch.from_numpy(res3).to(dtype)
-            approximate = "none"
-            if res1_fused_epilogue:
-                # fused GELU epilogue used in CUDA utilizes
-                # the tanh approximation to compute GELU
-                approximate = "tanh"
+            approximate = "tanh" if t.is_cuda else "none"
             res3_t = torch.nn.functional.gelu(res3_t, approximate=approximate)
             res3 = res3_t.to(numpy_dtype).cpu().numpy()
         else:
             assert activation is None, f"unsupported activation {activation}"
         res3 = torch.from_numpy(res3).to(dtype)
-        if activation == "gelu" and res1_fused_epilogue and not res2_fused_epilogue:
-            # when out=res2 is transposed (not contiguous), the epilogue is unfused;
-            # in this case, when the activation is GELU and res1's epilogue is fused,
-            # the difference between res1 and res2 will be larger due to the tanh
-            # approximation of GELU in res1 computation, but not in res2
-            self.assertEqual(res1, res2, atol=1e-3, rtol=0)
-        else:
-            self.assertEqual(res1, res2)
+        self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 5e-4, torch.float: 1e-4, torch.double: 1e-8,
@@ -5563,19 +5547,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_addmm(self, device, dtype):
         self._test_addmm_impl(torch.addmm, None, device, dtype)
 
-    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
-                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
+                        torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(
-                  *[torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
+                  *[torch.bfloat16, torch.half] if TEST_WITH_ROCM or SM53OrLater else []))
     @dtypes(*floating_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_addmm_relu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
-    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
-                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 5e-2,
+                        torch.half: 5e-2, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(
-                  *[torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
+                  *[torch.bfloat16, torch.half] if TEST_WITH_ROCM or SM53OrLater else []))
     @dtypes(*floating_types_and(torch.bfloat16))
     @tf32_on_and_off(0.05)
     def test_addmm_gelu(self, device, dtype):
