@@ -41,6 +41,8 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+# patterns applied only in inference
+inference_patterns = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
@@ -62,6 +64,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
 
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
+        if locality_reorder:
+            inference_patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
     gm.recompile()
@@ -410,7 +414,7 @@ def register_addmm_activation_replacement():
             replacement,
             args,
             inference_graph,
-            pass_patterns[2],
+            inference_patterns,
             extra_check=should_replace_addmm_activation,
         )
 
