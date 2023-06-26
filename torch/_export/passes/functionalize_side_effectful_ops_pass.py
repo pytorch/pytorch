@@ -34,12 +34,12 @@ class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
     Will be transformed to:
     ```
     def f(x):
-        dep_token = _make_dep_token()
-        dep_token_2 = _functional_sym_constrain_range(
-            x.shape[0], min=1, max=3, dep_token=dep_token
+        dep_token0 = _make_dep_token()
+        dep_token1 = _functional_sym_constrain_range(
+            x.shape[0], min=1, max=3, dep_token=dep_token0
         )
 
-        return x.add(3), dep_token_2
+        return x.add(3), dep_token1
     ```
     """
 
@@ -104,8 +104,8 @@ class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
                 kwargs={},
                 meta=self._create_dummy_node_metadata(),
             )
-            self._dep_token.node.name = "dep_token"
-            self._next_dep_token_index = 2
+            self._dep_token.node.name = "dep_token0"
+            self._next_dep_token_index = 1
 
         self._dep_token = super().call_operator(
             _NON_FUNCTIONAL_TO_FUNCTIONAL_SIDE_EFFECTFUL_FUNCS[op],
@@ -114,7 +114,7 @@ class _FunctionalizeSideEffectfulOpsPass(ExportPassBase):
             meta=meta,
         )
         assert self._next_dep_token_index is not None
-        self._dep_token.node.name = f"dep_token_{self._next_dep_token_index}"
+        self._dep_token.node.name = f"dep_token{self._next_dep_token_index}"
         self._next_dep_token_index += 1
 
         return self._dep_token
