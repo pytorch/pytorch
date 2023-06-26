@@ -1793,49 +1793,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         )
 
     @staticmethod
-    def optim_state_dict_post_hook(
-        model: torch.nn.Module,
-        optim: torch.optim.Optimizer,
-        optim_state_dict: Dict[str, Any],
-        group: Optional[dist.ProcessGroup] = None,
-    ) -> Dict[str, Any]:
-        """
-        This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to :meth:`optim_state_dict` except
-        for the different arguments.
-
-        Args:
-            model (torch.nn.Module): Root module (which may or may not be a
-                :class:`FullyShardedDataParallel` instance) whose parameters
-                were passed into the optimizer ``optim``.
-            optim (torch.optim.Optimizer): Optimizer for ``model`` 's
-                parameters.
-            optim (Dict[str, Any]: the optim_state_dict to be converted. The value
-               is typically returned by ``NamedOptimizer.state_dict()``.
-            group (dist.ProcessGroup): Model's process group across which parameters
-                are sharded or ``None`` if using the default process group. (
-                Default: ``None``)
-
-        Returns:
-            Dict[str, Any]: A :class:`dict` containing the optimizer state for
-            ``model``. The sharding of the optimizer state is based on
-            ``state_dict_type``.
-        """
-        state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
-        return FullyShardedDataParallel._optim_state_dict_impl(
-            model=model,
-            optim=optim,
-            optim_state_dict=optim_state_dict,
-            optim_input=None,
-            rank0_only=getattr(
-                state_dict_settings.optim_state_dict_config, "rank0_only", False
-            ),
-            full_state_dict=state_dict_settings.state_dict_type
-            == StateDictType.FULL_STATE_DICT,
-            group=None,
-        )
-
-    @staticmethod
     def optim_state_dict_to_load(
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
@@ -1922,41 +1879,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         if load_directly:
             optim.load_state_dict(result)
         return result
-
-    @staticmethod
-    def load_optim_state_dict_pre_hook(
-        model: torch.nn.Module,
-        optim: torch.optim.Optimizer,
-        optim_state_dict: Dict[str, Any],
-        group: Optional[dist.ProcessGroup] = None,
-    ) -> Dict[str, Any]:
-        """
-        This hook is intended be used by ``torch.distributed.NamedOptimizer``.
-        The functionality is identical to :meth:`optim_state_dict_to_load`
-        except for the different arguments.
-
-        Args:
-            model (torch.nn.Module): Root module (which may or may not be a
-                :class:`FullyShardedDataParallel` instance) whose parameters
-                were passed into the optimizer ``optim``.
-            optim (torch.optim.Optimizer): Optimizer for ``model`` 's
-                parameters.
-            optim_state_dict (Dict[str, Any]): The optimizer states to be loaded.
-            group (dist.ProcessGroup): Model's process group across which parameters
-                are sharded or ``None`` if using the default process group. (
-                Default: ``None``)
-        """
-        state_dict_settings = FullyShardedDataParallel.get_state_dict_type(model)
-        return FullyShardedDataParallel._optim_state_dict_to_load_impl(
-            optim_state_dict=optim_state_dict,
-            model=model,
-            optim_input=None,
-            optim=optim,
-            full_state_dict=state_dict_settings.state_dict_type
-            == StateDictType.FULL_STATE_DICT,
-            is_named_optimizer=True,
-            group=group,
-        )
 
     def register_comm_hook(self, state: object, hook: callable):
         """

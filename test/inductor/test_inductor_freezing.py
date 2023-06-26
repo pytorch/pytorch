@@ -167,13 +167,20 @@ class OptimizeForInferenceTemplate(TestCase):
                 return x @ self.t1, x @ self.t2, x @ self.t3
 
         class AddMM(MM):
+            def __init__(self):
+                super().__init__()
+
+                self.b1 = torch.nn.Parameter(torch.rand([10]))
+                self.b2 = torch.nn.Parameter(torch.rand([10]))
+                self.b3 = torch.nn.Parameter(torch.rand([10]))
+
             def forward(self, x):
                 return [
-                    aten.addmm(torch.ones([10], device=x.device), x, p)
-                    for p in [self.t1, self.t2, self.t3]
+                    aten.addmm(b, x, p)
+                    for b, p in [(self.b1, self.t1), (self.b2, self.t2), (self.b3, self.t3)]
                 ]
 
-        for mod in [MM().to(self.device), AddMM().to(self.device)]:
+        for mod in [MM().to(self.device), AddMM().to(self.device)][1:]:
             inp = torch.rand([10, 10]).to(self.device)
 
             @torch.compile()
@@ -183,10 +190,12 @@ class OptimizeForInferenceTemplate(TestCase):
             kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
 
             with torch.no_grad():
-                _, code = run_and_get_code(foo, mod, inp)
+                out_eager = mod(inp)
+                out, code = run_and_get_code(foo, mod, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
                     "mm(", count=1, exactly=True
                 ).run(code[0])
+                self.assertEqual(out_eager, out)
 
     def test_error_on_eager(self):
         mod = ConvBN(3, 32, kernel_size=3, stride=2).eval().to(self.device)

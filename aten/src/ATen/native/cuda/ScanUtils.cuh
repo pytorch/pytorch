@@ -57,14 +57,18 @@ __device__ void binary_op_update(const scalar_t lhs, scalar_t& rhs, const idx_t 
  * Each thread block processes one or more sets of contiguous rows (processing multiple rows
  * per thread block is quicker than processing a single row, especially for short rows).
  */
-template<typename scalar_t, int num_threads_x, int num_threads_y, class BinaryFunction>
+template<typename scalar_t, class BinaryFunction>
 __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *self_, scalar_t *values_, int64_t *indices_,
                                                 int num_rows, int row_size,
+                                                const uint32_t num_threads, const uint32_t log_num_threads_x,
                                                 scalar_t init, BinaryFunction binary_op) {
-  __shared__ scalar_t vbuf[num_threads_y][2 * num_threads_x];
-  __shared__ int64_t ibuf[num_threads_y][2 * num_threads_x];
-  scalar_t* row_buf = vbuf[threadIdx.y];
-  int64_t* row_idx_buf = ibuf[threadIdx.y];
+  // dynamic memory allocation for vbuf and ibuf
+  alignas(sizeof(double)) extern __shared__ char buf[];
+  scalar_t* vbuf = reinterpret_cast<scalar_t*>(buf); // the size is num_threads * 2
+  int64_t* ibuf = reinterpret_cast<int64_t*>(vbuf + num_threads * 2);
+  const uint32_t num_threads_x = 1 << log_num_threads_x;
+  scalar_t* row_buf = vbuf + 2 * num_threads_x * threadIdx.y;
+  int64_t* row_idx_buf = ibuf + 2 * num_threads_x * threadIdx.y;
 
   for (int block_row = blockIdx.x * blockDim.y;
        block_row < num_rows;
@@ -218,12 +222,19 @@ __host__ void scan_innermost_dim_with_indices(
   int row_size = self.size(ndim - 1);
   int num_rows = self.numel() / row_size;
 
-  dim3 threads(16, 32);
+  // assuming max_num_threads per block is 512
+  const uint32_t num_threads = 512;
+  const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan<uint32_t>(num_rows, row_size);
+  const uint32_t num_threads_x = (1 << log_num_threads_x);
+  const uint32_t num_threads_y = num_threads / num_threads_x;
+  dim3 threads(num_threads_x, num_threads_y);
   dim3 grid(std::min(at::cuda::getCurrentDeviceProperties()->maxGridSize[0], ceil_div(num_rows, int(threads.y))));
 
-  tensor_kernel_scan_innermost_dim_with_indices<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  const uint32_t mem_size = 2 * num_threads * (sizeof(scalar_t) + sizeof(int64_t));
+  tensor_kernel_scan_innermost_dim_with_indices<scalar_t><<<grid, threads, mem_size,
+                                                            at::cuda::getCurrentCUDAStream()>>>(
     self.const_data_ptr<scalar_t>(), values.mutable_data_ptr<scalar_t>(), indices.mutable_data_ptr<int64_t>(),
-    num_rows, row_size, init, binary_op);
+    num_rows, row_size, num_threads, log_num_threads_x, init, binary_op);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -357,10 +368,8 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
 
 template <
     typename T,
-    int num_threads,
     class BinaryFunction>
-__global__ typename std::enable_if<!c10::is_complex<T>::value, void>::type
-tensor_kernel_scan_innermost_dim(
+__global__ void tensor_kernel_scan_innermost_dim(
     T* tgt_,
     const T* src_,
     const uint32_t num_rows,
@@ -368,37 +377,10 @@ tensor_kernel_scan_innermost_dim(
     const uint32_t log_num_threads_x,
     T init,
     BinaryFunction binary_op) {
-  __shared__ T sbuf[num_threads * 2];
+  alignas(sizeof(double)) extern __shared__ char sbuf[];
+  T* sbuf2 = reinterpret_cast<T*>(sbuf);
   const uint32_t num_threads_x = 1 << log_num_threads_x;
-  T* row_buf = sbuf + num_threads_x * 2 * threadIdx.y;
-
-  tensor_kernel_scan_innermost_dim_impl<T>(
-      row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
-}
-
-template <
-    typename T,
-    int num_threads,
-    class BinaryFunction>
-__global__ typename std::enable_if<c10::is_complex<T>::value, void>::type
-tensor_kernel_scan_innermost_dim(
-    T* tgt_,
-    const T* src_,
-    const uint32_t num_rows,
-    const uint32_t row_size,
-    const uint32_t log_num_threads_x,
-    T init,
-    BinaryFunction binary_op) {
-  // As we cannot directly initialize shared array for complex types
-  // Reference:
-  //  `error: initializer not allowed for __shared__ variable`
-  // We instead get the base scalar type and allocate twice number of
-  // elements required of base type and reinterpret them as complex.
-  using base_t = typename scalar_value_type<T>::type;
-  const uint32_t num_threads_x = 1 << log_num_threads_x;
-  __shared__ base_t sbuf[4 * num_threads];
-
-  T* row_buf = reinterpret_cast<T*>(sbuf + num_threads_x * 4 * threadIdx.y);
+  T* row_buf = reinterpret_cast<T*>(sbuf2 + num_threads_x * 2 * threadIdx.y);
 
   tensor_kernel_scan_innermost_dim_impl<T>(
       row_buf, tgt_, src_, num_rows, row_size, log_num_threads_x, init, binary_op);
@@ -440,9 +422,10 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
   int64_t num_rows = self.numel() / row_size;
 
   // assuming max_num_threads per block is 512
+  const uint32_t num_threads = 512;
   const uint32_t log_num_threads_x = get_log_num_threads_x_inner_scan<uint32_t>(num_rows, row_size);
   const uint32_t num_threads_x = (1 << log_num_threads_x);
-  const uint32_t num_threads_y = 512 / num_threads_x;
+  const uint32_t num_threads_y = num_threads / num_threads_x;
   dim3 threads(num_threads_x, num_threads_y);
   int64_t maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
   dim3 grid(std::min(maxGridDim, ceil_div(num_rows, int64_t{threads.y})));
@@ -450,7 +433,8 @@ void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
   check_fits_in_unsigned(num_rows, "Number of rows (self.numel()/self.size(self.dim()-1))");
   check_fits_in_unsigned(row_size, "row_size");
 
-  tensor_kernel_scan_innermost_dim<scalar_t, 512><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  tensor_kernel_scan_innermost_dim<scalar_t><<<grid, threads, num_threads * 2 * sizeof(scalar_t),
+                                               at::cuda::getCurrentCUDAStream()>>>(
     result.mutable_data_ptr<scalar_t>(), self.const_data_ptr<scalar_t>(),
     num_rows, row_size, log_num_threads_x, init, binary_op);
   C10_CUDA_KERNEL_LAUNCH_CHECK();

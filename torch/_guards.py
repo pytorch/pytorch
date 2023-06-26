@@ -2,6 +2,7 @@ import contextlib
 
 import dataclasses
 import enum
+import functools
 import logging
 import traceback
 import unittest.mock
@@ -150,11 +151,17 @@ class Guard:
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
-            self.create_fn.__code__.co_firstlineno,
+            self.inner_create_fn().__code__.co_firstlineno,
         )
 
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
+
+    def inner_create_fn(self):
+        if isinstance(self.create_fn, functools.partial):
+            return self.create_fn.func
+        else:
+            return self.create_fn
 
     @staticmethod
     def weakref_to_str(obj_weakref):
@@ -183,7 +190,7 @@ class Guard:
 
     def __repr__(self):
         s = f"""
-        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
+        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.inner_create_fn().__name__}
         {{
             'guard_types': {self.guard_types},
             'code': {self.code_list},
@@ -197,7 +204,7 @@ class Guard:
         output = f"Name: {repr(self.name)}\n"
         source = self.source.name.lower() if self.source else ""
         output += f"    Source: {source}\n"
-        output += f"    Create Function: {self.create_fn.__name__}\n"
+        output += f"    Create Function: {self.inner_create_fn().__name__}\n"
         output += f"    Guard Types: {self.guard_types}\n"
         output += f"    Code List: {self.code_list}\n"
         output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"
@@ -449,7 +456,7 @@ having to plumb complex subsystems across multiple verticals.
 Ex: A common example is guard accumulation between dynamo, shape_env, aot_autograd, and inductor.
 Accessing the current tracing context via
 TracingContext.get() allows users to accumulate their own guards for processing, without needing to know how
-to plumb objects back up to where frame interpretation happend.
+to plumb objects back up to where frame interpretation happened.
 """
 
 
@@ -541,6 +548,7 @@ def tracing(context: TracingContext):
 
 
 # Subclasses can be found in torch/_dynamo/source.py
+# TODO(voz): Consider a toplevel torch/_source.py
 @dataclasses.dataclass(frozen=True)
 class Source:
     def reconstruct(self, codegen):
@@ -559,6 +567,14 @@ class Source:
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+
+# Subclasses can be found in torch/_dynamo/source.py
+# Note - there is an odd exception to this invariant of a single base,
+# see class SuperSource
+@dataclasses.dataclass(frozen=True)
+class ChainedSource(Source):
+    base: Source
 
 
 def detect_fake_mode(inputs: Any = None):
@@ -603,3 +619,17 @@ def detect_fake_mode(inputs: Any = None):
         return fake_mode
     else:
         return None
+
+
+EXPORT_FAKE_MODE = None
+
+
+@contextlib.contextmanager
+def export_fake_mode(fake_mode):
+    global EXPORT_FAKE_MODE
+    assert EXPORT_FAKE_MODE is None
+    EXPORT_FAKE_MODE = fake_mode
+    try:
+        yield
+    finally:
+        EXPORT_FAKE_MODE = None
