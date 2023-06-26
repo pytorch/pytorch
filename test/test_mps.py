@@ -772,15 +772,13 @@ def mps_ops_error_inputs_modifier(ops):
         'clamp_min',
         'masked_scatter',
 
-        # unsupported float32 dtype
-        'nn.functional.conv3d',
-
         # unsupported float64 dtype
         'cat',
         'complex',
         'multinomial',
         'nn.functional.conv1d',
         'nn.functional.conv2d',
+        'nn.functional.conv3d',
         'gather',
         'scatter',
         'scatter_add',
