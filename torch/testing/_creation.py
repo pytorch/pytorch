@@ -203,6 +203,11 @@ def make_tensor(
                 default_high=10,
             ),
         )
+        if low + 1 == high:
+            raise ValueError(
+                f"Computed low ({low}) and high ({high}) values are almost equal. "
+                "This will generate a constant tensor which may lead to potential silent bugs"
+            )
         result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _FLOATING_OR_COMPLEX_TYPES:
         low, high = modify_low_high(
