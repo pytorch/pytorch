@@ -95,8 +95,8 @@ class MklSparseCsrDescriptor
     values_ = values.expect_contiguous();
 
     auto values_ptr = values_->data_ptr<scalar_t>();
-    auto crow_indices_ptr = crow_indices_->data_ptr<MKL_INT>();
-    auto col_indices_ptr = col_indices_->data_ptr<MKL_INT>();
+    auto crow_indices_ptr = MKL_TENSOR_PTR_DATA_PTR(crow_indices_);
+    auto col_indices_ptr = MKL_TENSOR_PTR_DATA_PTR(col_indices_);
 
     sparse_matrix_t raw_descriptor;
 

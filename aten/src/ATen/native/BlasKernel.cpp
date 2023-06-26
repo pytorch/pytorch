@@ -10,6 +10,20 @@
 #include <iostream>
 #include <limits>
 
+#if AT_MKL_ENABLED()
+#if MKL_ILP64
+#define INT_T int64_t
+#else
+#define INT_T int32_t
+#endif
+#else
+#ifdef OPENBLAS_USE64BITINT
+#define INT_T int64_t
+#else
+#define INT_T int
+#endif
+#endif
+
 namespace {
 
 /// Wrapper for const_cast<T*> with type-inference.
@@ -23,11 +37,11 @@ T* remove_const(const T* x) {
 } // namespace
 
 #if AT_BUILD_WITH_BLAS()
-extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
-extern "C" void dscal_(int *n, double *a, double *x, int *incx);
-extern "C" void sscal_(int *n, float *a, float *x, int *incx);
-extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
-extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int *lda, float *x, int *incx, float *beta, float *y, int *incy);
+extern "C" double ddot_(INT_T *n, double *x, INT_T *incx, double *y, INT_T *incy);
+extern "C" void dscal_(INT_T *n, double *a, double *x, INT_T *incx);
+extern "C" void sscal_(INT_T *n, float *a, float *x, INT_T *incx);
+extern "C" void dgemv_(char *trans, INT_T *m, INT_T *n, double *alpha, double *a, INT_T *lda, double *x, INT_T *incx, double *beta, double *y, INT_T *incy);
+extern "C" void sgemv_(char *trans, INT_T *m, INT_T *n, float *alpha, float *a, INT_T *lda, float *x, INT_T *incx, float *beta, float *y, INT_T *incy);
 
 #if AT_BLAS_F2C()
 # define ffloat double
@@ -36,39 +50,39 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 #endif
 
 #if AT_BLAS_USE_CBLAS_DOT()
-  extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
-  extern "C" void cblas_cdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
-  extern "C" void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
-  extern "C" void cblas_cdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
-  extern "C" void cblas_zdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
+  extern "C" float cblas_sdot(const INT_T n, const float *x, const INT_T incx, const float *y, const INT_T incy);
+  extern "C" void cblas_cdotu_sub(const INT_T n, const void *x, const INT_T incx, const void *y, const INT_T incy, void *dotu);
+  extern "C" void cblas_zdotu_sub(const INT_T n, const void *x, const INT_T incx, const void *y, const INT_T incy, void *dotu);
+  extern "C" void cblas_cdotc_sub(const INT_T n, const void *x, const INT_T incx, const void *y, const INT_T incy, void *dotc);
+  extern "C" void cblas_zdotc_sub(const INT_T n, const void *x, const INT_T incx, const void *y, const INT_T incy, void *dotc);
 
-  static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
+  static inline ffloat sdot_(const INT_T *n, const float *x, const INT_T *incx, const float *y, const INT_T *incy)
   {
     return cblas_sdot(*n, x, *incx, y, *incy);
   }
-  static inline void cdotu_(std::complex<float> *res, const int *n, const std::complex<float> *x, const int *incx,
-  const std::complex<float> *y, const int *incy) {
+  static inline void cdotu_(std::complex<float> *res, const INT_T *n, const std::complex<float> *x, const INT_T *incx,
+  const std::complex<float> *y, const INT_T *incy) {
     cblas_cdotu_sub(*n, x, *incx, y, *incy, res);
   }
-  static inline void zdotu_(std::complex<double> *res, const int *n, const std::complex<double> *x, const int *incx,
-  const std::complex<double> *y, const int *incy) {
+  static inline void zdotu_(std::complex<double> *res, const INT_T *n, const std::complex<double> *x, const INT_T *incx,
+  const std::complex<double> *y, const INT_T *incy) {
     cblas_zdotu_sub(*n, x, *incx, y, *incy, res);
   }
-  static inline void cdotc_(std::complex<float> *res, const int *n, const std::complex<float> *x, const int *incx,
-  const std::complex<float> *y, const int *incy) {
+  static inline void cdotc_(std::complex<float> *res, const INT_T *n, const std::complex<float> *x, const INT_T *incx,
+  const std::complex<float> *y, const INT_T *incy) {
     cblas_cdotc_sub(*n, x, *incx, y, *incy, res);
   }
-  static inline void zdotc_(std::complex<double> *res, const int *n, const std::complex<double> *x, const int *incx,
-  const std::complex<double> *y, const int *incy) {
+  static inline void zdotc_(std::complex<double> *res, const INT_T *n, const std::complex<double> *x, const INT_T *incx,
+  const std::complex<double> *y, const INT_T *incy) {
     cblas_zdotc_sub(*n, x, *incx, y, *incy, res);
   }
 
 #else
-  extern "C" ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
-  extern "C" void cdotu_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
-  extern "C" void zdotu_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
-  extern "C" void cdotc_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
-  extern "C" void zdotc_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
+  extern "C" ffloat sdot_(INT_T *n, float *x, INT_T *incx, float *y, INT_T *incy);
+  extern "C" void cdotu_(std::complex<float> *res, INT_T *n, std::complex<float> *x, INT_T *incx, std::complex<float> *y, INT_T *incy);
+  extern "C" void zdotu_(std::complex<double> *res, INT_T *n, std::complex<double> *x, INT_T *incx, std::complex<double> *y, INT_T *incy);
+  extern "C" void cdotc_(std::complex<float> *res, INT_T *n, std::complex<float> *x, INT_T *incx, std::complex<float> *y, INT_T *incy);
+  extern "C" void zdotc_(std::complex<double> *res, INT_T *n, std::complex<double> *x, INT_T *incx, std::complex<double> *y, INT_T *incy);
 #endif // AT_BLAS_USE_CBLAS_DOT
 #endif // AT_BUILD_WITH_BLAS
 
@@ -87,20 +101,20 @@ bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t
 }
 
 template <typename scalar_t>
-void scal_fast_path(int *n, scalar_t *a, scalar_t *x, int *incx) {
+void scal_fast_path(INT_T *n, scalar_t *a, scalar_t *x, INT_T *incx) {
   TORCH_INTERNAL_ASSERT(false, "scal_fast_path shouldn't be called for this configuration");
 }
 
 template <typename scalar_t>
-void gemv_fast_path(const char *trans, const int *m, const int *n, const scalar_t *alpha, const scalar_t *a, const int *lda, const scalar_t *x, const int *incx, const scalar_t *beta, scalar_t *y, const int *incy) {
+void gemv_fast_path(const char *trans, const INT_T *m, const INT_T *n, const scalar_t *alpha, const scalar_t *a, const INT_T *lda, const scalar_t *x, const INT_T *incx, const scalar_t *beta, scalar_t *y, const INT_T *incy) {
   TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
 #define INSTANTIATE(scalar_t)                                                                                                                                                     \
 template bool scal_use_fast_path<scalar_t>(int64_t n, int64_t incx);                                                                                                              \
 template bool gemv_use_fast_path<scalar_t>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy);                                                                        \
-template void gemv_fast_path<scalar_t>(const char *trans, const int *m, const int *n, const scalar_t *alpha, const scalar_t *a, const int *lda, const scalar_t *x, const int *incx, const scalar_t *beta, scalar_t *y, const int *incy);      \
-template void scal_fast_path<scalar_t>(int *n, scalar_t *a, scalar_t *x, int *incx);
+template void gemv_fast_path<scalar_t>(const char *trans, const INT_T *m, const INT_T *n, const scalar_t *alpha, const scalar_t *a, const INT_T *lda, const scalar_t *x, const INT_T *incx, const scalar_t *beta, scalar_t *y, const INT_T *incy);      \
+template void scal_fast_path<scalar_t>(INT_T *n, scalar_t *a, scalar_t *x, INT_T *incx);
 
 #if AT_BUILD_WITH_BLAS()
 template <>
@@ -115,12 +129,12 @@ bool scal_use_fast_path<float>(int64_t n, int64_t incx) {
 }
 
 template <>
-void scal_fast_path<double>(int *n, double *a, double *x, int *incx) {
+void scal_fast_path<double>(INT_T *n, double *a, double *x, INT_T *incx) {
   dscal_(n, a, x, incx);
 }
 
 template <>
-void scal_fast_path<float>(int *n, float *a, float *x, int *incx) {
+void scal_fast_path<float>(INT_T *n, float *a, float *x, INT_T *incx) {
   sscal_(n, a, x, incx);
 }
 
@@ -137,12 +151,12 @@ bool gemv_use_fast_path<double>(int64_t m, int64_t n, int64_t lda, int64_t incx,
 }
 
 template <>
-void gemv_fast_path<double>(const char *trans, const int *m, const int *n, const double *alpha, const double *a, const int *lda, const double *x, const int *incx, const double *beta, double *y, const int *incy) {
+void gemv_fast_path<double>(const char *trans, const INT_T *m, const INT_T *n, const double *alpha, const double *a, const INT_T *lda, const double *x, const INT_T *incx, const double *beta, double *y, const INT_T *incy) {
   dgemv_(remove_const(trans), remove_const(m), remove_const(n), remove_const(alpha), remove_const(a), remove_const(lda), remove_const(x), remove_const(incx), remove_const(beta), y, remove_const(incy));
 }
 
 template <>
-void gemv_fast_path<float>(const char *trans, const int *m, const int *n, const float *alpha, const float *a, const int *lda, const float *x, const int *incx, const float *beta, float *y, const int *incy) {
+void gemv_fast_path<float>(const char *trans, const INT_T *m, const INT_T *n, const float *alpha, const float *a, const INT_T *lda, const float *x, const INT_T *incx, const float *beta, float *y, const INT_T *incy) {
   sgemv_(remove_const(trans), remove_const(m), remove_const(n), remove_const(alpha), remove_const(a), remove_const(lda), remove_const(x), remove_const(incx), remove_const(beta), y, remove_const(incy));
 }
 #else
@@ -165,8 +179,8 @@ inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 {
   if (n == 1) incx = 1;
   if (blas_impl::scal_use_fast_path<scalar_t>(n, incx)) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
+    INT_T i_n = (INT_T)n;
+    INT_T i_incx = (INT_T)incx;
     blas_impl::scal_fast_path<scalar_t>(&i_n, &a, x, &i_incx);
     return;
   }
@@ -185,11 +199,11 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
 
   if (blas_impl::gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
     TORCH_CHECK(lda >= std::max<int64_t>(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
-    int i_m = (int)m;
-    int i_n = (int)n;
-    int i_lda = (int)lda;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    INT_T i_m = (INT_T)m;
+    INT_T i_n = (INT_T)n;
+    INT_T i_lda = (INT_T)lda;
+    INT_T i_incx = (INT_T)incx;
+    INT_T i_incy = (INT_T)incy;
     blas_impl::gemv_fast_path<scalar_t>(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
     return;
   }
@@ -256,34 +270,34 @@ AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 
 namespace blas_impl {
 #if AT_BUILD_WITH_BLAS()
-static float dot_fast_path(int n, float* x, int incx, float* y, int incy) {
+static float dot_fast_path(INT_T n, float* x, INT_T incx, float* y, INT_T incy) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return sdot_(&n, x, &incx, y, &incy);
 }
 
-static double dot_fast_path(int n, double* x, int incx, double* y, int incy) {
+static double dot_fast_path(INT_T n, double* x, INT_T incx, double* y, INT_T incy) {
   return ddot_(&n, x, &incx, y, &incy);
 }
 
-static c10::complex<float> vdot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
+static c10::complex<float> vdot_fast_path(INT_T n, c10::complex<float>* x, INT_T incx, c10::complex<float>* y, INT_T incy) {
   c10::complex<float> result;
   cdotc_(reinterpret_cast<std::complex<float>* >(&result), &n, reinterpret_cast<std::complex<float>*>(x), &incx, reinterpret_cast<std::complex<float>*>(y), &incy);
   return result;
 }
 
-static c10::complex<double> vdot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
+static c10::complex<double> vdot_fast_path(INT_T n, c10::complex<double>* x, INT_T incx, c10::complex<double>* y, INT_T incy) {
   c10::complex<double> result;
   zdotc_(reinterpret_cast<std::complex<double>* >(&result), &n, reinterpret_cast<std::complex<double>*>(x), &incx, reinterpret_cast<std::complex<double>*>(y), &incy);
   return result;
 }
 
-static c10::complex<double> dot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
+static c10::complex<double> dot_fast_path(INT_T n, c10::complex<double>* x, INT_T incx, c10::complex<double>* y, INT_T incy) {
   c10::complex<double> result;
   zdotu_(reinterpret_cast<std::complex<double>* >(&result), &n, reinterpret_cast<std::complex<double>*>(x), &incx, reinterpret_cast<std::complex<double>*>(y), &incy);
   return result;
 }
 
-static c10::complex<float> dot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
+static c10::complex<float> dot_fast_path(INT_T n, c10::complex<float>* x, INT_T incx, c10::complex<float>* y, INT_T incy) {
   c10::complex<float> result;
   cdotu_(reinterpret_cast<std::complex<float>* >(&result), &n, reinterpret_cast<std::complex<float>*>(x), &incx, reinterpret_cast<std::complex<float>*>(y), &incy);
   return result;

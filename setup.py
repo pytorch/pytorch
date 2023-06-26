@@ -140,6 +140,9 @@
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
 #
+#   MKL_MODEL
+#     MKL model: ILP64 or LP64 (default)
+#
 #   USE_REDIS
 #     Whether to use Redis for distributed workflows (Linux only)
 #
