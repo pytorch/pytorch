@@ -17,7 +17,9 @@ from torch import sub
 from torch._dynamo.testing import requires_numpy_pytorch_interop, requires_static_shapes
 from torch._dynamo.utils import same
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import disable_translation_validation_if_dynamic_shapes
+from torch.testing._internal.common_utils import (
+    disable_translation_validation_if_dynamic_shapes
+)
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)

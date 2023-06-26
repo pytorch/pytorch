@@ -33,7 +33,9 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch._dynamo.utils import ifdyn, ifdynstaticdefault, ifunspec
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import disable_translation_validation_if_dynamic_shapes
+from torch.testing._internal.common_utils import (
+    disable_translation_validation_if_dynamic_shapes
+)
 
 
 _orig_module_call = torch.nn.Module.__call__
