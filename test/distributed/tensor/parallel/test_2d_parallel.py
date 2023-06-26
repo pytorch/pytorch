@@ -9,11 +9,18 @@ import torch.distributed.distributed_c10d as distributed_c10d
 import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._tensor import DeviceMesh, DTensor as DT, Replicate
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_WRAPPED_MODULE,
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import FSDP_WRAPPED_MODULE
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
+from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 from torch.testing._internal.common_utils import run_tests
@@ -44,7 +51,13 @@ class SimpleModel(torch.nn.Module):
 
 
 def _distribute_and_fsdp_wrap_module(
-    module, module_shard, mesh_2d, fsdp_pg, use_orig_params, fsdp_nested
+    module,
+    module_shard,
+    mesh_2d,
+    fsdp_pg,
+    use_orig_params,
+    fsdp_nested,
+    recompute_activation,
 ):
     if module_shard:
         module = parallelize_module(module, mesh_2d, PairwiseParallel(), tp_mesh_dim=1)
@@ -57,10 +70,17 @@ def _distribute_and_fsdp_wrap_module(
         module.net2 = FSDP(
             module.net2, process_group=pg, use_orig_params=use_orig_params
         )
+    if recompute_activation:
+        module = checkpoint_wrapper(module, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
     return FSDP(module, process_group=pg, use_orig_params=use_orig_params)
 
 
-def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False, fsdp_nested=False):
+def init_model(
+    model_parallel_size=TP_DEGREE,
+    use_orig_params=False,
+    fsdp_nested=False,
+    recompute_activation=False,
+):
     rank = dist.get_rank()
     torch.cuda.set_device(rank)
     world_size = dist.get_world_size()
@@ -77,9 +97,16 @@ def init_model(model_parallel_size=TP_DEGREE, use_orig_params=False, fsdp_nested
 
     # Create Input
     model = _distribute_and_fsdp_wrap_module(
-        model, True, twod_mesh, fsdp_pg, use_orig_params, fsdp_nested
+        model,
+        True,
+        twod_mesh,
+        fsdp_pg,
+        use_orig_params,
+        fsdp_nested,
+        recompute_activation,
     )
-    return model, fsdp_pg
+    tp_mesh = _create_1d_device_mesh(twod_mesh, 1)
+    return model, fsdp_pg, tp_mesh
 
 
 def is_nested_tensor(val: Any) -> bool:
@@ -134,7 +161,8 @@ class Test2dParallelIntegration(DTensorTestBase):
                 for n_p1, n_p2 in zip(m1.named_parameters(), m2.named_parameters()):
                     p1 = n_p1[1]
                     p2 = n_p2[1]
-                    self.assertEqual(n_p1[0], n_p2[0])
+                    if n_p1[0] != n_p2[0]:
+                        self.assertTrue(n_p1[0] in n_p2[0])
                     name = n_p1[0]
                     if name == "net2.bias" and self.rank != 0:
                         continue
@@ -144,11 +172,19 @@ class Test2dParallelIntegration(DTensorTestBase):
 
     def _clean_up_fsdp_param_name(self, name):
         return ".".join(
-            filter(lambda name: name != FSDP_WRAPPED_MODULE, name.split("."))
+            filter(
+                lambda name: name
+                not in [FSDP_WRAPPED_MODULE, _CHECKPOINT_WRAPPED_MODULE],
+                name.split("."),
+            )
         )
 
     def _test_2d_e2e_flow(
-        self, use_orig_params=False, fsdp_nested=False, multi_param_group=False
+        self,
+        use_orig_params=False,
+        fsdp_nested=False,
+        multi_param_group=False,
+        recompute_activation=False,
     ) -> None:
         if not enable_2d_with_fsdp():
             self.skipTest("FSDP 2d parallel integration not available")
@@ -156,9 +192,13 @@ class Test2dParallelIntegration(DTensorTestBase):
         model = SimpleModel().cuda(self.rank)
         model = FSDP(model, use_orig_params=use_orig_params)
         torch.manual_seed(0)
-        model_2d, dp_pg = init_model(
-            use_orig_params=use_orig_params, fsdp_nested=fsdp_nested
+        model_2d, dp_pg, tp_mesh = init_model(
+            use_orig_params=use_orig_params,
+            fsdp_nested=fsdp_nested,
+            recompute_activation=recompute_activation,
         )
+        if recompute_activation:
+            model_2d = input_reshard(model_2d, tp_mesh, 0)
         # Check named parameters are returning the same name at least.
         param_names_2d = [
             self._clean_up_fsdp_param_name(name)
@@ -206,6 +246,11 @@ class Test2dParallelIntegration(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_integration_correctness(self) -> None:
         self._test_2d_e2e_flow()
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_fsdp_integration_correctness_w_recompute_activation(self) -> None:
+        self._test_2d_e2e_flow(recompute_activation=True)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
