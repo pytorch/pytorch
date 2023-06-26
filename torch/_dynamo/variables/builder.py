@@ -80,6 +80,7 @@ from .lists import (
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    SetVariable,
     SizeVariable,
     SliceVariable,
     TupleIteratorVariable,
@@ -239,7 +240,11 @@ class VariableBuilder:
         return None
 
     def _can_lift_attrs_to_inputs(self, vt):
-        if type(vt) in [TensorVariable, UserDefinedObjectVariable]:
+        if type(vt) in [
+            TensorVariable,
+            UserDefinedObjectVariable,
+            FSDPManagedNNModuleVariable,
+        ]:
             return True
         return False
 
@@ -261,6 +266,7 @@ class VariableBuilder:
     def list_type(value):
         if is_namedtuple(value):
             return functools.partial(NamedTupleVariable, tuple_cls=type(value))
+        # TODO(voz): Why do we have both this and `BaseListVariable`'s `cls_for`?
         return {
             tuple: TupleVariable,
             list: ListVariable,
@@ -384,6 +390,7 @@ class VariableBuilder:
             return self.wrap_tensor(value)
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
+
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -574,13 +581,13 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.cuda.streams.Stream):
-            unimplemented("CUDAStreamVariable does not currently work soundly.")
-            # return CUDAStreamVariable(
-            #     None,
-            #     value,
-            #     source=self.source,
-            #     guards=self.make_guards(GuardBuilder.ID_MATCH),
-            # )
+            # unimplemented("CUDAStreamVariable does not currently work soundly.")
+            return CUDAStreamVariable(
+                None,
+                value,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.ID_MATCH),
+            )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
@@ -692,7 +699,9 @@ class VariableBuilder:
             ).add_guards(guards)
             for i, item in enumerate(value)
         ]
-        result = self.list_type(value)(output, guards=guards)
+        result = self.list_type(value)(
+            output, mutable_local=MutableLocal(), guards=guards
+        )
         if istype(value, list):
             return self.tx.output.side_effects.track_list(self.source, value, result)
         return result
@@ -1233,7 +1242,7 @@ def wrap_fx_proxy_cls(
     ):
         sizes = [ConstantVariable(x) for x in example_value]
         return SizeVariable(sizes, **options)
-    elif isinstance(example_value, (tuple, list)):
+    elif isinstance(example_value, (tuple, list, set)):
         proxy.node.meta["example_value"] = example_value
         unpacked = []
         for i, val in enumerate(example_value):
@@ -1262,6 +1271,8 @@ def wrap_fx_proxy_cls(
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
             return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
+        elif istype(example_value, set):
+            return SetVariable(tx, unpacked, mutable_local=MutableLocal(), **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
@@ -1465,9 +1476,10 @@ def wrap_to_fake_tensor_and_record(
         if is_tensor and not (static_shapes and source.is_nn_module()):
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source, constraint_dims))
             tx.output.tracked_fakes_id_to_source[id(e)].append(source)
-        tx.output.tensor_weakref_to_sizes_strides[WeakIdRef(e)] = {
+        tx.output.tensor_weakref_to_sizes_strides_offset[WeakIdRef(e)] = {
             "size": fake_e.size(),
             "stride": fake_e.stride(),
+            "storage_offset": fake_e.storage_offset(),
         }
         return fake_e
     else:
