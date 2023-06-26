@@ -28,7 +28,6 @@
 #include <utility>
 #endif
 
-int register_linear_params();
 int register_embedding_params();
 
 #ifdef USE_FBGEMM
