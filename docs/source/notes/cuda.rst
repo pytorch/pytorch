@@ -512,6 +512,60 @@ of the alloc/free functions that match the signatures specified above.
    # This will error since the current allocator was already instantiated
    torch.cuda.memory.change_current_allocator(new_alloc)
 
+An alternative approach is to use the :mod:`torch.utils.cpp_extension` to easily define
+allocators directly in the same python source and let PyTorch to take care of the
+compilation process.
+
+.. code:: python
+
+    import torch
+    from torch.utils import cpp_extension
+    
+    custom_allocator_code = """
+    #include <sys/types.h>
+    #include <cuda_runtime_api.h>
+    #include <torch/extension.h>
+    
+    extern "C" {
+    int my_malloc(void** ptr, ssize_t size, int device, cudaStream_t stream) {
+       int err = cudaMalloc(ptr, size);
+       std::cout<<"alloc "<<ptr<<" "<<size<<" "<<err<<std::endl;
+       return err;
+    }
+    
+    int my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
+       int err = cudaFree(ptr);
+       std::cout<<"free "<<ptr<< " "<<err<<std::endl;
+       return err;
+    }
+    }
+    
+    // Needed for torch extension to work
+    PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
+    """
+    
+    module = cpp_extension.load_inline(
+        name='allocator',
+        cpp_sources=custom_allocator_code,
+        build_directory='.',
+        with_cuda=True,
+    )
+    
+    # Load the allocator
+    new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+        'allocator.so', 'my_malloc', 'my_free')
+    
+    # Swap the current allocator
+    torch.cuda.memory.change_current_allocator(new_alloc)
+
+Error Handling
+^^^^^^^^^^^^^^
+
+To deal with errors, the custom allocator user defined functions need to return an
+error code when invoked. If the code is other than zero, the current execution will
+fail with the actual error code reported to the user. It is the responsibility of  the
+allocator developer to stablish meaningful error codes and document them.
+ 
 .. cublas-workspaces:
 
 cuBLAS workspaces
