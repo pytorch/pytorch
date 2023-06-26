@@ -572,8 +572,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "masked.cumsum",
-        dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
