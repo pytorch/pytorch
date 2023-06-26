@@ -650,6 +650,10 @@ void UnpackQuantizedWeights(
   graph(%input, %packed_weight, %w_scale, %w_zero_point):
         %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
         return (%r) )";
+  std::string qconv1d = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv1d(%input, %packed_params, %scale, %zero_point)
+        return (%r) )";
   std::string qconv1d_relu = R"(
   graph(%input, %packed_params, %scale, %zero_point):
         %r = quantized::conv1d_relu(%input, %packed_params, %scale, %zero_point)
@@ -670,12 +674,31 @@ void UnpackQuantizedWeights(
   graph(%input, %packed_params, %scale, %zero_point):
         %r = quantized::conv3d_relu(%input, %packed_params, %scale, %zero_point)
         return (%r) )";
+  std::string qconv_transpose1d = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv_transpose1d(%input, %packed_params, %scale, %zero_point)
+        return (%r) )";
+  std::string qconv_transpose2d = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv_transpose2d(%input, %packed_params, %scale, %zero_point)
+        return (%r) )";
+  std::string qconv_transpose3d = R"(
+  graph(%input, %packed_params, %scale, %zero_point):
+        %r = quantized::conv_transpose3d(%input, %packed_params, %scale, %zero_point)
+        return (%r) )";
   unpackQuantizedWeightsHelper(
       graph,
       paramsDict,
       qlinear,
       "quantized::linear_unpack",
       QuantizedParamsType::LINEAR,
+      caffe2);
+  unpackQuantizedWeightsHelper(
+      graph,
+      paramsDict,
+      qconv1d,
+      "quantized::conv1d_unpack",
+      QuantizedParamsType::CONV1D,
       caffe2);
   unpackQuantizedWeightsHelper(
       graph,
@@ -710,6 +733,27 @@ void UnpackQuantizedWeights(
       paramsDict,
       qconv3d_relu,
       "quantized::conv3d_unpack",
+      QuantizedParamsType::CONV,
+      caffe2);
+  unpackQuantizedWeightsHelper(
+      graph,
+      paramsDict,
+      qconv_transpose1d,
+      "quantized::conv_transpose1d_unpack",
+      QuantizedParamsType::CONV1D,
+      caffe2);
+  unpackQuantizedWeightsHelper(
+      graph,
+      paramsDict,
+      qconv_transpose2d,
+      "quantized::conv_transpose2d_unpack",
+      QuantizedParamsType::CONV,
+      caffe2);
+  unpackQuantizedWeightsHelper(
+      graph,
+      paramsDict,
+      qconv_transpose3d,
+      "quantized::conv_transpose3d_unpack",
       QuantizedParamsType::CONV,
       caffe2);
   if (!caffe2) {

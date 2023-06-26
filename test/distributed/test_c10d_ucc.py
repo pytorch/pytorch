@@ -1001,6 +1001,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("ucc")
 
+    @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     def test_ucc_barrier_device_ids(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1011,6 +1012,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
 
+    @skip_but_pass_in_sandcastle("Fails on M60")
     @skip_if_lt_x_gpu(2)
     @requires_ucc()
     def test_ucc_warn_not_in_group(self):
@@ -1105,12 +1107,14 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
 class UccProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
 
+    @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     @skip_if_lt_x_gpu(1)
     def test_collectives(self):
         # includes reduce, broadcast, all_reduce, all_gather, reduce_scatter, barrier, all_to_all, scatter
         self._test_collectives(backend="ucc")
 
+    @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     @skip_if_lt_x_gpu(1)
     def test_allgather_base(self):

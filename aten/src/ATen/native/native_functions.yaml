@@ -175,7 +175,24 @@
     CPU: _assert_async_msg_cpu
     CUDA: _assert_async_msg_cuda
 
+- func: _functional_assert_async.msg(Tensor self, str assert_msg, Tensor dep_token) -> Tensor
+  dispatch:
+    CPU: _functional_assert_async_msg_cpu
+
 - func: _assert_tensor_metadata(Tensor a, SymInt[]? size=None, SymInt[]? stride=None, ScalarType? dtype=None) -> ()
+
+- func: sym_constrain_range(Scalar size, int? min=None, int? max=None) -> ()
+  dispatch:
+    CPU: sym_constrain_range_cpu
+    CUDA: sym_constrain_range_cuda
+
+- func: _functional_sym_constrain_range(Scalar size, int? min, int? max, Tensor dep_token) -> Tensor
+  dispatch:
+    CPU: _functional_sym_constrain_range_cpu
+
+- func: _make_dep_token(*, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
+  dispatch:
+    CPU: _make_dep_token_cpu
 
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
@@ -2521,21 +2538,21 @@
   device_guard: False
 
 # decomposes to eye.m
-- func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: eye(SymInt n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: eye
 
-- func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: eye.m(SymInt n, SymInt m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: eye
 
-- func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
+- func: eye.out(SymInt n, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
     MPS: eye_out_mps
 
-- func: eye.m_out(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+- func: eye.m_out(SymInt n, SymInt m, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: eye_out_cpu
     CUDA: eye_out_cuda
@@ -2942,6 +2959,13 @@
   dispatch:
     CPU, CUDA, MPS: index_out
 
+# Used by inductor to signal indexing without bounds checks
+# Note that we don't support boolean indexing, to avoid dynamic output shapes
+- func: _unsafe_index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
+  variants: function
+  dispatch:
+    CPU, CUDA: _unsafe_index
+
 - func: index_copy.out(Tensor self, int dim, Tensor index, Tensor source, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
@@ -2981,6 +3005,12 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: index_put
+
+- func: _unsafe_index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
+  device_check: NoCheck   # delegate to _index_put_impl_ after clone, which leverages TensorIterator
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _unsafe_index_put
 
 - func: _index_put_impl_(Tensor(a!) self, Tensor?[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3203,7 +3233,7 @@
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
 
-- func: _structured_sparse_linear(Tensor input, Tensor weight, Tensor mask_or_meta, *, Tensor? bias=None) -> (Tensor, Tensor)
+- func: _structured_sparse_linear(Tensor input, Tensor weight, Tensor mask_or_meta, *, Tensor? bias=None, str? activation=None) -> (Tensor, Tensor)
   dispatch:
     CUDA: _structured_sparse_linear
 
@@ -3655,6 +3685,11 @@
     QuantizedCPU: quantized_max_pool2d
     QuantizedCUDA: quantized_max_pool2d_cudnn
   autogen: quantized_max_pool2d.out
+
+- func: quantized_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
+  dispatch:
+    QuantizedCPU: quantized_max_pool3d
+  autogen: quantized_max_pool3d.out
 
 - func: max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
 
@@ -5116,6 +5151,27 @@
   device_check: NoCheck
   device_guard: False
 
+- func: sym_size.int(Tensor self, int dim) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
+
+- func: sym_numel(Tensor self) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
+
+- func: sym_storage_offset(Tensor self) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
+
 - func: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
@@ -5390,6 +5446,13 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
+
+- func: sym_stride.int(Tensor self, int dim) -> SymInt
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+  tags: core
+  manual_cpp_binding: True
 
 - func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6755,6 +6818,12 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_mask_sparse_csr
   autogen: sparse_mask.out
 
+- func: _sparse_mask_projection(Tensor self, Tensor mask) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU, SparseCUDA: sparse_mask_projection
+  autogen: _sparse_mask_projection.out
+
 - func: _to_cpu(Tensor[] tensors) -> Tensor[]
   variants: function
 
@@ -6940,51 +7009,75 @@
 
 - func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   variants: method
-  dispatch:
-    CPU, CUDA: dense_to_sparse
-    SparseCPU, SparseCUDA: sparse_coo_to_sparse
-    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
-  autogen: to_sparse.sparse_dim_out
 
-- func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+# Special case of to_sparse.sparse_dim with custom derivative
+- func: _to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse
     SparseCPU, SparseCUDA: sparse_coo_to_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
-  autogen: to_sparse.out
+  autogen: _to_sparse.sparse_dim_out
+
+- func: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+  variants: method
+
+# Special case of to_sparse with custom derivative
+- func: _to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+  variants: method
+  dispatch:
+    CPU, CUDA: dense_to_sparse
+    SparseCPU, SparseCUDA: sparse_coo_to_sparse
+    SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse
+  autogen: _to_sparse.out
 
 - func: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+  variants: method
+
+# Special case of to_sparse_csr with custom derivative
+- func: _to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_csr
     SparseCPU, SparseCUDA: coo_to_sparse_csr
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csr
-  autogen: to_sparse_csr.out
+  autogen: _to_sparse_csr.out
 
 - func: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+  variants: method
+
+# Special case of to_sparse_csc with custom derivative
+- func: _to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_csc
     SparseCPU, SparseCUDA: coo_to_sparse_csc
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_csc
-  autogen: to_sparse_csc.out
+  autogen: _to_sparse_csc.out
 
 - func: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+  variants: method
+
+# Special case of to_sparse_bsr with custom derivative
+- func: _to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_bsr
     SparseCPU, SparseCUDA: coo_to_sparse_bsr
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsr
-  autogen: to_sparse_bsr.out
+  autogen: _to_sparse_bsr.out
 
 - func: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+  variants: method
+
+# Special case of to_sparse_bsc with custom derivative
+- func: _to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   variants: method
   dispatch:
     CPU, CUDA: dense_to_sparse_bsc
     SparseCPU, SparseCUDA: coo_to_sparse_bsc
     SparseCsrCPU, SparseCsrCUDA: sparse_compressed_to_sparse_bsc
-  autogen: to_sparse_bsc.out
+  autogen: _to_sparse_bsc.out
 
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
@@ -8817,8 +8910,10 @@
     CPU, CUDA: linalg_solve_triangular
     MPS: linalg_solve_triangular_mps
 
-- func: linalg_vander(Tensor x, *, int? N=None) -> Tensor
+- func: linalg_vander(Tensor x, *, SymInt? N=None) -> Tensor
   python_module: linalg
+  dispatch:
+    CompositeImplicitAutograd: linalg_vander_symint
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
@@ -14081,7 +14176,7 @@
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_backward_cuda
 
-- func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False, *, float? scale=None) -> (Tensor, Tensor)
+- func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp)
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
@@ -14108,12 +14203,14 @@
     CUDA: _flash_attention_backward
 
 # Returns ouput, logsumexp if compute_logsumexp
-- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False, *, float? scale=None) -> (Tensor, Tensor)
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None) -> (Tensor output, Tensor logsumexp)
   variants: function
   dispatch:
     CUDA: _efficient_attention_forward
+  tags: nondeterministic_seeded
 
-- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False, *, float? scale=None) -> (Tensor, Tensor, Tensor)
+- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor out, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int max_seqlen_k, int max_seqlen_q, Tensor logsumexp, float dropout_p, Tensor rng_seed, Tensor rng_offset, int custom_mask_type, *, float? scale=None, int? num_splits_key=None) -> (Tensor, Tensor, Tensor, Tensor)
+  device_check: NoCheck
   variants: function
   dispatch:
     CUDA: _efficient_attention_backward

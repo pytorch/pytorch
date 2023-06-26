@@ -10,9 +10,7 @@
 #include <ATen/ops/pow.h>
 #endif
 
-namespace at {
-namespace native {
-namespace sobol_utils {
+namespace at::native::sobol_utils {
 
 /// Function to return the minimum of number of bits to represent the integer `n`
 inline int64_t bit_length(const int64_t n) {
@@ -54,6 +52,4 @@ constexpr float RECIPD = 1.0 / LARGEST_NUMBER;
 extern const int64_t poly[MAXDIM];
 extern const int64_t initsobolstate[MAXDIM][MAXDEG];
 
-} // namespace sobol_utils
-} // namespace native
-} // namespace at
+} // namespace at::native::sobol_utils

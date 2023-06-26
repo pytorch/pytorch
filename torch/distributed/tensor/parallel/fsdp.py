@@ -43,6 +43,9 @@ def enable_2d_with_fsdp() -> bool:
     Return:
         A `bool` indicated whether extension registration succeeds or not.
     """
+
+    torch._C._log_api_usage_once("torch.distributed.tensor.parallel.enable_2d_with_fsdp")
+
     try:
         from torch.distributed.fsdp._fsdp_extensions import (
             _set_fsdp_extensions,
@@ -181,7 +184,9 @@ def _create_sharded_tensor_md_from_dt(
 def _get_dt_pg(dt: DistributedTensor) -> c10d.ProcessGroup:
     mesh = dt.device_mesh
     assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
-    return mesh.get_dim_groups()[0]
+    dim_groups = mesh.get_dim_groups()
+    assert isinstance(dim_groups, list)
+    return dim_groups[0]
 
 
 def _rewrite_spec_if_needed(

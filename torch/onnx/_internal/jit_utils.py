@@ -140,7 +140,7 @@ class GraphContext:
         """
         # NOTE(titaiwang): This is using class attributes, and it needs to be updated
         # if onnx-script makes any change on these.
-        symbolic_name = f"{onnx_fn.opset.domain}::{onnx_fn.opname}"
+        symbolic_name = f"{onnx_fn.opset.domain}::{onnx_fn.name}"
         opset_version = onnx_fn.opset.version
 
         registration.custom_onnx_symbolic(symbolic_name, opset_version)(onnx_fn)

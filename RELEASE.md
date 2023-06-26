@@ -4,6 +4,7 @@
 
   - [Release Compatibility Matrix](#release-compatibility-matrix)
   - [General Overview](#general-overview)
+    - [Frequently Asked Questions](#frequently-asked-questions)
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
   - [Cutting release branches](#cutting-release-branches)
     - [`pytorch/pytorch`](#pytorchpytorch)
@@ -54,6 +55,14 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 1. Cutting a release branch and making release branch specific changes
 2. Drafting RCs (Release Candidates), and merging cherry picks
 3. Promoting RCs to stable and performing release day tasks
+
+### Frequently Asked Questions
+
+* Q: What is release branch cut  ?
+  * A: When bulk of the tracked features merged into the main branch, the primary release engineer starts the release process of cutting the release branch by creating a new git branch based off of the current `main` development branch of PyTorch. This allows PyTorch development flow on `main` to continue uninterrupted, while the release engineering team focuses on stabilizing the release branch in order to release a series of release candidates (RC). The activities in the release branch include both regression and performance testing as well as polishing new features and fixing release-specific bugs. In general, new features *are not* added to the release branch after it was created.
+
+* Q: What is cherry-pick ?
+  * A: A cherry pick is a process of propagating commits from the main into the release branch, utilizing git's built in [cherry-pick feature](https://git-scm.com/docs/git-cherry-pick). These commits are typically limited to small fixes or documentation updates to ensure that the release engineering team has sufficient time to complete a thorough round of testing on the release branch. To nominate a fix for cherry-picking, a separate pull request must be created against the respective release branch and then mentioned in the Release Tracker issue (example: https://github.com/pytorch/pytorch/issues/94937) following the template from the issue description. The comment nominating a particular cherry-pick for inclusion in the release should include the committed PR against main branch, the newly created cherry-pick PR, as well as the acceptance criteria for why the cherry-pick is needed in the first place.
 
 ## Cutting a release branch preparations
 

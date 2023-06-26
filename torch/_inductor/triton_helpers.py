@@ -5,10 +5,14 @@ TRITON_HAS_REDUCE = hasattr(tl, "reduce")
 
 
 @triton.jit
+def promote_to_tensor(x):
+    # Addition promotes to tensor for us
+    return x + tl.zeros((1,), tl.int1)
+
+
+@triton.jit
 def is_floating(x):
-    # Addition to promote scalars to tensor
-    x += tl.zeros((1,), tl.int1)
-    return x.dtype.is_floating()
+    return promote_to_tensor(x).dtype.is_floating()
 
 
 @triton.jit
@@ -162,3 +166,20 @@ def randint64(seed, offset, low, high):
     result = result % size.to(tl.uint64)
     result = result.to(tl.int64) + low
     return result
+
+
+if TRITON_HAS_REDUCE:
+
+    @triton.jit
+    def _any_combine(a, b):
+        return a | b
+
+    @triton.jit
+    def any(a, dim):
+        return tl.reduce(a, dim, _any_combine)
+
+else:
+
+    @triton.jit
+    def any(a, dim):
+        return tl.max(a, dim)

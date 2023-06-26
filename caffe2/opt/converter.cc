@@ -173,8 +173,8 @@ class ConvTransposeConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~ConvTransposeConverter() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~ConvTransposeConverter() override {}
 };
 
 REGISTER_CONVERTER(Conv, ConvConverter);
