@@ -27,14 +27,16 @@ class TensorCheck {
       PyTypeObject* pt,
       const at::Tensor& v,
       std::vector<std::optional<int64_t>> dynamic_dims_sizes,
-      std::vector<std::optional<int64_t>> dynamic_dims_strides)
+      std::vector<std::optional<int64_t>> dynamic_dims_strides,
+      std::optional<int64_t> storage_offset)
       : pytype(pt),
         dispatch_key_(state.apply(v.key_set()).raw_repr()),
         dtype_(v.dtype().toScalarType()),
         device_index_(v.device().index()),
         requires_grad_(v.requires_grad()),
         sizes_(std::move(dynamic_dims_sizes)),
-        strides_(std::move(dynamic_dims_strides)) {
+        strides_(std::move(dynamic_dims_strides)),
+        offset_(storage_offset) {
     // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
     // we just treat this as optional?
     dim_ = sizes_.size();
@@ -68,6 +70,9 @@ class TensorCheck {
           return false;
         }
       }
+    }
+    if (offset_.has_value() && offset_.value() != v.storage_offset()) {
+      return false;
     }
     return true;
   }
@@ -128,6 +133,11 @@ class TensorCheck {
         return fail_reason.str();
       }
     }
+    if (offset_.has_value() && offset_.value() != v.storage_offset()) {
+      fail_reason << "storage_offset mismatch, expected " << v.storage_offset()
+                  << ", actual " << offset_.value();
+      return fail_reason.str();
+    }
     return "";
   }
 
@@ -141,9 +151,11 @@ class TensorCheck {
   // necessarily capture device indices correctly.
   at::DeviceIndex device_index_;
   bool requires_grad_;
-  // NB: These are unset if dynamic shapes is enabled.
+  // NB: These are always set, but will contains empty optionals if dynamic
+  // shapes is enabled.
   std::vector<std::optional<int64_t>> sizes_;
   std::vector<std::optional<int64_t>> strides_;
+  std::optional<int64_t> offset_;
   // Not strictly required for dense tensors, but nested tensors need it.
   int64_t dim_;
 };
@@ -240,6 +252,12 @@ static int TensorGuards_init(
     PyErr_SetString(PyExc_TypeError, "missing dynamic_dims_strides=...");
     return -1;
   }
+  PyObject* dynamic_storage_offset_py =
+      PyDict_GetItemString(kwds, "dynamic_storage_offset");
+  if (dynamic_storage_offset_py == NULL) {
+    PyErr_SetString(PyExc_TypeError, "missing dynamic_storage_offset=...");
+    return -1;
+  }
 
   // dynamic_dims_strides/sizes_py is None when dynamic_shapes=False - this is
   // an optimization to avoid invoking .size()/.stride() in python needlessly
@@ -248,6 +266,8 @@ static int TensorGuards_init(
   std::vector<std::vector<std::optional<int64_t>>>
       per_tensor_dynamic_dims_strides =
           get_dynamic_dims(dynamic_dims_strides_py);
+  std::vector<std::optional<int64_t>> per_tensor_dynamic_storage_offset =
+      pyListToVecOptInt(dynamic_storage_offset_py);
 
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
@@ -268,12 +288,18 @@ static int TensorGuards_init(
         per_tensor_dynamic_dims_strides.size() == 0
         ? wrapIntegersInOptional(tensor.strides())
         : per_tensor_dynamic_dims_strides[i];
+
+    std::optional<int64_t> tensor_storage_offset =
+        per_tensor_dynamic_storage_offset.size() == 0
+        ? std::make_optional(tensor.storage_offset())
+        : per_tensor_dynamic_storage_offset[i];
     checks.emplace_back(
         state,
         Py_TYPE(item),
         std::move(tensor),
         std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
+        std::move(tensor_dims_stride),
+        tensor_storage_offset);
   }
   return 0;
 }
