@@ -547,6 +547,19 @@ class TorchVariable(VariableTracker):
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
             ).call_function(tx, args, {})
+        elif self.value == torch.utils._pytree.tree_flatten:
+            if len(args) != 1:
+                unimplemented("Unsupported flatten with len(args) != 1")
+
+            flattened, spec = torch.utils._pytree.tree_flatten(args[0])
+            return TupleVariable(
+                [ListVariable(flattened), ConstantVariable(spec)], **options
+            )
+        elif self.value == torch.utils._pytree.tree_unflatten:
+            if len(args) != 2:
+                unimplemented("Unsupported unflatten with len(args) != 2")
+
+            return torch.utils._pytree.tree_unflatten(args[0], args[1].value)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(

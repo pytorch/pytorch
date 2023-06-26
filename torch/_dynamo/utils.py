@@ -1,3 +1,4 @@
+import atexit
 import collections
 import contextlib
 import copy
@@ -62,7 +63,6 @@ counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
-
 log = logging.getLogger(__name__)
 
 # profiling compilation time
@@ -232,6 +232,11 @@ def compile_times(repr="str", aggregate=False):
         ]
         headers = list(compilation_metrics.keys())
         return headers, values
+
+
+@atexit.register
+def dump_compile_times():
+    log.info(compile_times(repr="str", aggregate=True))
 
 
 tensortype_to_dtype = {
