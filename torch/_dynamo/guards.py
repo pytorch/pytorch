@@ -416,6 +416,14 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, code)
 
+    # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
+    def DUPLICATE_INPUT(self, guard, source_b):
+        ref_a = self.arg_ref(guard)
+        ref_b = self.arg_ref(source_b.name())
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._produce_guard_code(guard, code)
+
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
