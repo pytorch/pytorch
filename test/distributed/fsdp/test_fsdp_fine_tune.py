@@ -48,9 +48,8 @@ class TestFSDPFineTune(FSDPTest):
         return seq
 
     def _set_seq_module_requires_grad(self, seq: nn.Module, requires_grad: bool):
-        # Assume that the linears are leaf modules, meaning that we pass
-        # `requires_grad=True` to have this method work for both pre and post
-        # FSDP wrapping
+        # Assume that the linears are leaf modules, meaning that we can pass
+        # `recurse=True` to have this to work for both pre/post FSDP wrapping
         for i in range(self.NUM_LINEARS):
             # Only set for every other linear to test mixing frozen/non-frozen
             if i % 2 == 0:
