@@ -16,9 +16,20 @@ wrap = Wrap()
 
 class WrapActivationCheckpoint(HigherOrderOperator):
     """
-    Wrap activation checkpoint is little different from Wrap. There are two
-    functions to wrap here - utils.checkpoint() itself and the function to be
-    checkpointed (the first arg to the utils.checkpoint() function).
+    This operator is used to wrap torch.utils.checkpoint. This avoids
+    TorchDynamo to look into saved tensor hooks and directly passes the control
+    to AOT Autograd, which is ok with tracing saved tensor hooks. As a result of
+    AOT tracing torch.utils.checkpoint code, we have a backward graph with
+    recomputed forward nodes.
+
+    However, we might deprecate this operator soon. The difficulty arises in the
+    functionalization of rng ops. Today, there are two different
+    functionalization of rng ops - one at AOT autograd and other at Inductor.
+    And they are difficult to map to each other. The rng states also complicate
+    pattern matching in Inductor. Due to the ease of implementation, we are
+    currently inclined towards functionalization at Inductor level, which means
+    that duplication/recomputation is done as a compiler pass in the
+    partitioners. See TagActivationCheckpoint for more information.
     """
     def __init__(self):
         super().__init__("wrap_activation_checkpoint", _deprecated_global_ns=True)
@@ -42,12 +53,17 @@ class TagActivationCheckpoint(HigherOrderOperator):
     This operator is supposed to be used only with torch.compile stack. This
     accepts a Fx graph module which needs to be checkpointed. This operator adds
     "recomputable" tag to the nodes of the Fx graph that should be recomputed.
-    This goal is to pass this information to AOT Autograd's partitioner which
-    will actually perform the cut.
+
+    The goal is to avoid both Dynamo and AOT Autograd to trace through saved
+    tensor hooks, and rather rely on the partitioners to actually duplicate the
+    nodes. This sits well in the torch.compile stack, because by the time graph
+    reaches partitioner, inductor has already run its functionalization of rng
+    ops. Therefore, the duplication of nodes, by design, respects the rng states
+    in the forward and recomputed forward in backward.
     """
 
     def __init__(self):
-        super().__init__("wrap_activation_checkpoint", _deprecated_global_ns=True)
+        super().__init__("tag_activation_checkpoint", _deprecated_global_ns=True)
 
     def tag_nodes(self, gmod):
         # TODO - This needs major investigation. Currently, we are tagging all
