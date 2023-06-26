@@ -16,9 +16,11 @@ from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..utils import (
     fqn,
+    get_custom_getattr,
     get_fake_value,
     get_real_value,
     HAS_NUMPY_TORCH_INTEROP,
+    object_has_getattribute,
     product,
     proxy_args_kwargs,
     tensortype_to_dtype,
@@ -150,6 +152,53 @@ class TensorVariable(VariableTracker):
             )
         return props
 
+    def dynamic_getattr(self, tx, name):
+        if not self.source:
+            raise NotImplementedError()
+
+        # For local source, we associate the real value. We use this real value
+        # for implementing getattr fallthrough on the variable tracker base class.
+
+        # Note - this scope construction is mirrored in guards
+        # A subsequent PR will introduce a util.
+        scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
+        try:
+            # We raise in case we get a typerror bug w/ SuperSource.
+            # SuperSource has bugs in it atm, and can produce code like
+            # eval("super(L['mod'].model.model.encoder.embed_positions.forward__class__,
+            # L['mod'].model.model.encoder.embed_positions)", scope)
+            # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
+            _input_associated_real_value = eval(self.source.name(), scope)
+        except Exception:
+            raise NotImplementedError()
+
+        if _input_associated_real_value is None:
+            raise NotImplementedError()
+
+        if object_has_getattribute(_input_associated_real_value):
+            raise NotImplementedError()
+
+        if get_custom_getattr(_input_associated_real_value):
+            raise NotImplementedError()
+
+        real_value = getattr(_input_associated_real_value, name)
+        if callable(real_value):
+            # Callables have more nuanced handling, and we should let the existing system delegate here.
+            # Raising was past behavior and so should always be sound to fall back.
+            # Note - at a certain point we may want to handle
+            raise NotImplementedError()
+
+        from ..guards import GuardBuilder
+        from .builder import VariableBuilder
+
+        attr_source = AttrSource(self.source, name)
+        has_attr_guard = attr_source.make_guard(GuardBuilder.HASATTR)
+        return (
+            VariableBuilder(tx, attr_source)(real_value)
+            .add_options(self)
+            .add_guard(has_attr_guard)
+        )
+
     def var_getattr(self, tx, name):
         from . import ConstantVariable, TorchVariable
 
@@ -237,8 +286,10 @@ class TensorVariable(VariableTracker):
             result = try_generic_attr_handling()
 
         if result is None:
-            raise NotImplementedError()
+            result = self.dynamic_getattr(tx, name)
 
+        if result is None:
+            raise NotImplementedError()
         return result
 
     def has_unpack_var_sequence(self, tx):

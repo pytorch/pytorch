@@ -68,53 +68,70 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     return preserved_arg_indices
 
 
+class ConstantFolder(torch.fx.Interpreter):
+    def __init__(self, gm, skip_constructors=False):
+        super().__init__(gm)
+        self.node_replacements = {}
+        self.unknown_value = object()
+        self.skip_constructors = skip_constructors
+
+    def run_node(self, node):
+        aten = torch.ops.aten
+        args, kwargs = self.fetch_args_kwargs_from_env(node)
+
+        if node.target == "output":
+            return super().run_node(node)
+
+        flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
+        if self.unknown_value in flattened_inputs:
+            return self.unknown_value
+
+        # TODO - fix errors with this
+        if (
+            node.op == "call_function"
+            and node.target == aten._efficientzerotensor.default
+        ):
+            return self.unknown_value
+
+        # skip constructors, since inductor generates optimal code for them already
+        # and turning into tensor would result in an additional global memory read
+        # TODO - more complicated strategy
+        if (
+            self.skip_constructors
+            and node.op != "get_attr"
+            and not any(isinstance(e, torch.Tensor) for e in flattened_inputs)
+        ):
+            return self.unknown_value
+
+        # All mutations should either be removed or on inputs which we did not make constant
+        if (
+            isinstance(node.target, torch._ops.OpOverload)
+            and torch.Tag.nondeterministic_seeded in node.target.tags
+        ):
+            return self.unknown_value
+
+        out = super().run_node(node)
+
+        # TODO - remove constant from node_replacement when it has no uses
+        if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            self.node_replacements[node] = out
+
+        return out
+
+    def run(self):
+        env = {}
+        for n in self.module.graph.nodes:
+            if n.op == "placeholder":
+                env[n] = self.unknown_value
+        return super().run(initial_env=env)
+
+
 @torch.utils._python_dispatch._disable_current_modes()
 def constant_fold(gm):
-    unknown_value = object()
+    cf = ConstantFolder(gm, skip_constructors=True)
+    cf.run()
 
-    node_replacements = {}
-
-    class ConstantFolder(torch.fx.Interpreter):
-        def run_node(self, node):
-            args, kwargs = self.fetch_args_kwargs_from_env(node)
-
-            flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
-            if unknown_value in flattened_inputs:
-                return unknown_value
-
-            # skip constructors, since inductor generates optimal code for them already
-            # and turning into tensor would result in an additional global memory read
-            # TODO - more complicated strategy
-            if node.op != "get_attr" and not any(
-                isinstance(e, torch.Tensor) for e in flattened_inputs
-            ):
-                return unknown_value
-
-            # All mutations should either be removed or on inputs which we did not make constant
-            if (
-                isinstance(node.target, torch._ops.OpOverload)
-                and torch.Tag.nondeterministic_seeded in node.target.tags
-            ):
-                return unknown_value
-
-            out = super().run_node(node)
-
-            # TODO - remove constant from node_replacement when it has no uses
-            if node.op != "get_attr" and isinstance(out, torch.Tensor):
-                node_replacements[node] = out
-
-            return out
-
-        def run(self):
-            env = {}
-            for n in self.module.graph.nodes:
-                if n.op == "placeholder":
-                    env[n] = unknown_value
-            return super().run(initial_env=env)
-
-    ConstantFolder(gm).run()
-
-    for node, constant in node_replacements.items():
+    for node, constant in cf.node_replacements.items():
         replace_node_with_constant(gm, node, constant)
 
     erased_params = []

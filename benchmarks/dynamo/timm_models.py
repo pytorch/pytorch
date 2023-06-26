@@ -77,6 +77,11 @@ SCALED_COMPUTE_LOSS = {
     "sebotnet33ts_256",
 }
 
+FORCE_AMP_FOR_FP16_BF16_MODELS = {
+    "convit_base",
+    "xcit_large_24_p8_224",
+}
+
 
 def refresh_model_names():
     import glob
@@ -164,10 +169,14 @@ def refresh_model_names():
             fw.write(model_name + "\n")
 
 
-class TimmRunnner(BenchmarkRunner):
+class TimmRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "timm_models"
+
+    @property
+    def force_amp_for_fp16_bf16_models(self):
+        return FORCE_AMP_FOR_FP16_BF16_MODELS
 
     @download_retry_decorator
     def _download_model(self, model_name):
@@ -330,7 +339,7 @@ class TimmRunnner(BenchmarkRunner):
 def timm_main():
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
-    main(TimmRunnner())
+    main(TimmRunner())
 
 
 if __name__ == "__main__":
