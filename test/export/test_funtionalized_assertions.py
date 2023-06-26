@@ -59,8 +59,7 @@ class TestFuntionalAssertions(TestCase):
         with _enable_functionalization():
             compiled = torch.compile(f, backend=my_compiler)
             inp = torch.Tensor([3, 4, 5])
-            compiled(inp)
-            # self.assertTrue(torch._dynamo.utils.same(compiled(inp), f(inp)))
+            self.assertTrue(torch._dynamo.utils.same(compiled(inp), f(inp)))
 
 
 @contextmanager
