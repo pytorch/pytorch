@@ -208,7 +208,7 @@ static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bo
    return memory_format;
 }
 
-static void _mkldnn_convolution_out (
+void _mkldnn_convolution_out (
     const Tensor& input_t,
     const Tensor& weight_t,
     const Tensor& bias,
@@ -256,7 +256,7 @@ static void _mkldnn_convolution_out (
   }
 }
 
-static Tensor _mkldnn_convolution(
+Tensor _mkldnn_convolution(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
@@ -344,7 +344,6 @@ Tensor mkldnn_convolution(
       use_channels_last);
 }
 
-namespace{
 Tensor mkldnn_convolution_pointwise(
     const Tensor& input_t,
     const Tensor& weight_t,
@@ -937,11 +936,9 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
   }
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
-}
 
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
 
-namespace{
 Tensor mkldnn_convolution_transpose(
     const Tensor& input,
     const Tensor& weight,
@@ -1083,7 +1080,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
         weight.sizes(), grad_output, input, padding_expanded , output_padding_expanded , stride_expanded , dilation_expanded , groups, output_mask[2], is_channels_last);
   }
   return std::make_tuple(grad_input, grad_weight, grad_bias);
-}
 }
 
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_stub, &mkldnn_convolution_transpose);

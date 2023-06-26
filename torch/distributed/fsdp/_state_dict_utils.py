@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import math
 import warnings
 from typing import (
@@ -24,6 +25,7 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
+from torch.distributed._tensor import DTensor
 
 from torch.distributed.distributed_c10d import _get_pg_default_device
 from torch.distributed.fsdp._common_utils import (
@@ -55,6 +57,9 @@ from ._fsdp_extensions import (
     _ext_pre_load_state_dict_transform,
 )
 from ._unshard_param_utils import _unshard_fsdp_state_params, FLAT_PARAM
+
+
+logger = logging.getLogger(__name__)
 
 
 def _convert_to_wrapped_module_name(module_name: str) -> str:
@@ -269,6 +274,7 @@ def _common_unshard_post_state_dict_hook(
             )
             for buffer, clean_fqn in zip(buffers, buffer_clean_fqns):
                 fqn = f"{prefix}{clean_fqn}"
+                logger.info("FSDP is casting the dtype of %s to %s", fqn, buffer.dtype)
                 state_dict[fqn] = buffer.clone()
     return state_dict
 
@@ -689,6 +695,29 @@ def _post_state_dict_hook(
         processed_state_dict = _post_state_dict_hook_fn[fsdp_state._state_dict_type](
             module, fsdp_state, state_dict, prefix
         )
+
+    if fsdp_state._is_root:
+        logger.info("FSDP finished processing state_dict(), prefix=%s", prefix)
+        for key, tensor in sorted(processed_state_dict.items()):
+            if key.startswith(prefix) and isinstance(tensor, torch.Tensor):
+                local_shape = tensor.shape
+                if isinstance(tensor, ShardedTensor):
+                    local_shape = None
+                    shards = tensor.local_shards()
+                    if shards:
+                        local_shape = shards[0].tensor.shape
+                elif isinstance(tensor, DTensor):
+                    local_shape = tensor.to_local().shape
+                logger.info(
+                    "FQN=%s: type=%s, shape=%s, local_shape=%s, dtype=%s, device=%s",
+                    key,
+                    type(tensor),
+                    tensor.shape,
+                    local_shape,
+                    tensor.dtype,
+                    tensor.device,
+                )
+
     return processed_state_dict
 
 

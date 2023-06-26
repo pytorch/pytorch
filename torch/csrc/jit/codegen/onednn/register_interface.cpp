@@ -5,7 +5,7 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
-static bool canFuseNode(const Node* node) {
+bool canFuseNode(const Node* node) {
   switch (node->kind()) {
     case aten::conv2d:
     case aten::_convolution:
