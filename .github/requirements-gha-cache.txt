@@ -11,6 +11,6 @@ lintrunner==0.10.7
 ninja==1.10.0.post1
 nvidia-ml-py==11.525.84
 pyyaml==6.0
-requests==2.26
+requests==2.31.0
 rich==10.9.0
 rockset==1.0.3

@@ -456,7 +456,7 @@ html_theme_options = {
     'collapse_navigation': False,
     'display_version': True,
     'logo_only': True,
-    'analytics_id': 'UA-117752657-2',
+    'analytics_id': 'GTM-T8XT4PS',
 }
 
 html_logo = '_static/img/pytorch-logo-dark-unstable.png'

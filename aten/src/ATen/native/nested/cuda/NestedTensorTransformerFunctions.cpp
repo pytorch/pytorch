@@ -759,21 +759,27 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       std::ignore,
       output_shape) = sdpa_nested_preprocessing(query, key, value);
 
-  std::tuple<Tensor, Tensor> attention_and_logsumexp =
-      at::_efficient_attention_forward(
-          query_buffer_reshaped.unsqueeze(0),
-          key_buffer_reshaped.unsqueeze(0),
-          value_buffer_reshaped.unsqueeze(0),
-          cumulative_sequence_length_q,
-          cumulative_sequence_length_kv,
-          max_seqlen_batch_q,
-          compute_log_sumexp,
-          is_causal,
-          scale);
+  sdp::CustomMaskType custom_mask_type = is_causal
+      ? sdp::CustomMaskType::CausalFromTopLeft
+      : sdp::CustomMaskType::NoCustomMask;
+
+  Tensor attention, log_sumexp;
+  std::tie(attention, log_sumexp) = at::_efficient_attention_forward(
+      query_buffer_reshaped.unsqueeze(0),
+      key_buffer_reshaped.unsqueeze(0),
+      value_buffer_reshaped.unsqueeze(0),
+      c10::nullopt,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      0.0 /*dropout_p*/,
+      static_cast<int64_t>(custom_mask_type),
+      compute_log_sumexp,
+      scale);
+
   // Reshape output to convert nnz to batch_size and seq_len
-  Tensor attention = std::get<0>(attention_and_logsumexp);
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
-  return std::tie(attention, std::get<1>(attention_and_logsumexp));
+  return std::make_tuple(std::move(attention), std::move(log_sumexp));
 }
 
 } // namespace native

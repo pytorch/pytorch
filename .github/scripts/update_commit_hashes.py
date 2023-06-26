@@ -6,13 +6,13 @@ from typing import Any, Dict
 
 import requests
 
-MERGEBOT_TOKEN = os.environ["MERGEBOT_TOKEN"]
+UPDATEBOT_TOKEN = os.environ["UPDATEBOT_TOKEN"]
 PYTORCHBOT_TOKEN = os.environ["PYTORCHBOT_TOKEN"]
 OWNER, REPO = "pytorch", "pytorch"
 
 
 def git_api(
-    url: str, params: Dict[str, str], type: str = "get", token: str = MERGEBOT_TOKEN
+    url: str, params: Dict[str, str], type: str = "get", token: str = UPDATEBOT_TOKEN
 ) -> Any:
     headers = {
         "Accept": "application/vnd.github.v3+json",

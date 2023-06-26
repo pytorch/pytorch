@@ -257,7 +257,7 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
 
 } // namespace
 
-std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
+static std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
     TORCH_CHECK(self.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions");
     const int64_t N = self.size(-1);
     std::vector<Tensor> bin_edges_out(N);
@@ -269,7 +269,7 @@ std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
 
 /* Versions of histogramdd in which bins is a Tensor[] defining the sequences of bin edges.
  */
-Tensor& histogramdd_out(const Tensor& self, TensorList bins,
+static Tensor& histogramdd_out(const Tensor& self, TensorList bins,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, TensorList& bin_edges) {
     histogramdd_check_inputs(self, bins, weight);
@@ -296,7 +296,7 @@ Tensor _histogramdd(const Tensor& self, TensorList bins,
 /* Versions of histogramdd in which bins is an int[]
  * defining the number of bins in each dimension.
  */
-std::vector<Tensor>& histogramdd_bin_edges_out(const Tensor& self, IntArrayRef bin_ct,
+static std::vector<Tensor>& histogramdd_bin_edges_out(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density,
         std::vector<Tensor>& bin_edges_out) {
@@ -328,7 +328,7 @@ std::vector<Tensor> histogramdd_bin_edges(const Tensor& self, IntArrayRef bin_ct
     return histogramdd_bin_edges_out(self, bin_ct, range, weight, density, bin_edges_out);
 }
 
-Tensor& histogramdd_out(const Tensor& self, IntArrayRef bin_ct,
+static Tensor& histogramdd_out(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, TensorList& bin_edges) {

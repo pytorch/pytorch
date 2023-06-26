@@ -394,6 +394,10 @@ class CodeGen:
                     qualified_name = _get_qualified_name(type(arg))
                     global_name = add_global(qualified_name, type(arg))
                     return f"{global_name}{repr(tuple(arg))}"
+                elif isinstance(arg, torch._ops.OpOverload):
+                    qualified_name = _get_qualified_name(arg)
+                    global_name = add_global(qualified_name, arg)
+                    return f"{global_name}"
                 return repr(arg)
             args_s = ', '.join(_get_repr(a) for a in args)
             kwargs_s = ', '.join(f'{k} = {_get_repr(v)}' for k, v in kwargs.items())
@@ -700,12 +704,12 @@ class Graph:
     .. code-block:: text
 
         graph(x):
-            %linear_weight : [#users=1] = self.linear.weight
-            %add_1 : [#users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
-            %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
-            %relu_1 : [#users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-            %sum_1 : [#users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
-            %topk_1 : [#users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
+            %linear_weight : [num_users=1] = self.linear.weight
+            %add_1 : [num_users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
+            %linear_1 : [num_users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
+            %relu_1 : [num_users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
+            %sum_1 : [num_users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
+            %topk_1 : [num_users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
             return topk_1
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.

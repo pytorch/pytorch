@@ -42,12 +42,12 @@
     },
     "bazel": {
         "Darwin": {
-            "download_url": "https://ossci-macos.s3.amazonaws.com/bazel-4.2.1-darwin-x86_64",
-            "hash": "74d93848f0c9d592e341e48341c53c87e3cb304a54a2a1ee9cff3df422f0b23c"
+            "download_url": "https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py",
+            "hash": "1f6d76d023ddd5f1625f34d934418e7334a267318d084f31be09df8a8835ed16"
         },
         "Linux": {
-            "download_url": "https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64",
-            "hash": "1a4f3a3ce292307bceeb44f459883859c793436d564b95319aacb8af1f20557c"
+            "download_url": "https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py",
+            "hash": "1f6d76d023ddd5f1625f34d934418e7334a267318d084f31be09df8a8835ed16"
         }
     }
 }
