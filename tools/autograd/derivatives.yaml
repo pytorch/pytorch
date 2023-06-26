@@ -1365,8 +1365,8 @@
 
 # [Note: Sometimes view derivatives]
 # The following situation applies to other operations as well.
-# TODO: This note is only referenced once by to_dense. Make this
-# more generic if it's been referenced more than once.
+# TODO: This note is only referenced by to_dense and to_sparse*. Make
+# this more generic if it's been referenced more than once.
 #
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
@@ -1696,22 +1696,46 @@
 - name: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
   self: to_dense_backward(grad, self, masked_grad)
 
-- name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse.sparse_dim
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+#
+- name: _to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
+# DO NOT define a backward for to_sparse
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_csr
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_csc
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_bsr
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_bsr(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
-- name: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+# DO NOT define a backward for to_sparse_bsc
+# See [Note: Sometimes view derivatives]
+# - name: to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
+#
+- name: _to_sparse_bsc(Tensor self, int[2] blocksize, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
 
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
@@ -2694,9 +2718,14 @@
   nested_strides: non_differentiable
 
 # Transformers
-- name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
-  output_differentiability: [True, False, False, False]
-  query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, output, log_sumexp, philox_seed, philox_offset, dropout_p, is_causal, scale)
+- name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp)
+  output_differentiability: [True, False]
+  query, key, value: _scaled_dot_product_efficient_attention_backward(grad, query, key, value, output, log_sumexp, is_causal, false, scale)
+
+# - name: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None) -> (Tensor, Tensor)
+#   output_differentiability: [True, False]
+#   query, key, value, bias: _efficient_attention_backward(grad, query, key, value, bias, result0, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, key.size(0), result1, custom_mask_type, false, scale)
+# # Returns ouput, softmax_logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, rng_state
 
 - name: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   output_differentiability: [True, False, False, False, False, False, False, False, False]

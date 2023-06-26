@@ -738,13 +738,12 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
       debug_attn_mask);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor>
+std::tuple<Tensor, Tensor>
 _scaled_dot_product_efficient_attention_nestedtensor_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     bool compute_log_sumexp,
-    double dropout_p,
     bool is_causal,
     c10::optional<double> scale) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
@@ -764,8 +763,8 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       ? sdp::CustomMaskType::CausalFromTopLeft
       : sdp::CustomMaskType::NoCustomMask;
 
-  // See Note [Seed and Offset] for description of seed and offset
-  auto [attention, log_sumexp, seed, offset] = at::_efficient_attention_forward(
+  Tensor attention, log_sumexp;
+  std::tie(attention, log_sumexp) = at::_efficient_attention_forward(
       query_buffer_reshaped.unsqueeze(0),
       key_buffer_reshaped.unsqueeze(0),
       value_buffer_reshaped.unsqueeze(0),
@@ -773,14 +772,14 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
       cumulative_sequence_length_q,
       cumulative_sequence_length_kv,
       max_seqlen_batch_q,
-      dropout_p,
+      0.0 /*dropout_p*/,
       static_cast<int64_t>(custom_mask_type),
       compute_log_sumexp,
       scale);
 
   // Reshape output to convert nnz to batch_size and seq_len
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
-  return std::make_tuple(std::move(attention), std::move(log_sumexp), std::move(seed), std::move(offset));
+  return std::make_tuple(std::move(attention), std::move(log_sumexp));
 }
 
 } // namespace native

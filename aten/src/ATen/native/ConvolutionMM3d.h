@@ -1,7 +1,6 @@
 #include <ATen/core/Tensor.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
     const Tensor& grad_output,
@@ -12,4 +11,4 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
     IntArrayRef padding,
     std::array<bool, 3> output_mask);
 
-}} // namespace at::native
+} // namespace at::native

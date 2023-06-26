@@ -477,8 +477,6 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         check_fn = CheckFunctionManager(
             output,
-            locals,
-            globals,
             hooks.guard_fail_fn if hooks else None,
         )
 
@@ -499,6 +497,7 @@ def _compile(
         if hooks.guard_export_fn is not None:
             hooks.guard_export_fn(output.guards)
 
+        output.local_scope.clear()
         return guarded_code
     except (
         Unsupported,
