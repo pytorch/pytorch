@@ -4629,6 +4629,7 @@ class DistributedTest:
                         # case.
                         optim.zero_grad(set_to_none=True)
 
+        @skip_if_rocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward(self):
             for optim_cls in [torch.optim.SGD, torch.optim.Adam]:
@@ -4638,6 +4639,7 @@ class DistributedTest:
                         optim_kwargs={"lr": 0.03}
                     )
 
+        @skip_if_rocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
             self._test_ddp_apply_optim_in_backward(
