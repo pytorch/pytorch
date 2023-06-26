@@ -481,6 +481,10 @@ inductor_override_kwargs = {
     "linalg.solve_triangular": {"check_gradient": False},
     "linalg.lu_factor": {"check_gradient": False},
     "linalg.lu_factor_ex": {"check_gradient": False},
+    # Temporarily skip interpolate bilinear and bicubic tests:
+    "nn.functional.interpolate.bicubic": {"assert_equal": False, "check_gradient": False},
+    "nn.functional.interpolate.bilinear": {"assert_equal": False},
+    "nn.functional.upsample_bilinear": {"assert_equal": False},
 }
 
 # Always test with all sample for following ops

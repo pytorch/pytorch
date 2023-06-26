@@ -4112,8 +4112,26 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
             return tuple([N, C] + ([size] * rank))
         return tuple([size] * rank)
 
-    make_arg = partial(make_tensor, device=device, dtype=dtype,
-                       requires_grad=requires_grad, low=-1, high=1)
+    if mode in ('bilinear', 'bicubic'):
+        make_arg = partial(
+            make_tensor,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            low=0 if dtype == torch.uint8 else None,
+            high=256 if dtype == torch.uint8 else None,
+        )
+        # provide a single sample for more typical image processing usage
+        rank = 2
+        yield SampleInput(
+            make_arg(shape(400, rank)),
+            shape(270, rank, False),
+            None,
+            mode,
+            False,
+        )
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     for align_corners in align_corners_options:
         for rank in ranks_for_mode[mode]:
@@ -4145,8 +4163,20 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
             return torch.Size([N, C] + ([size] * rank))
         return torch.Size([size] * rank)
 
-    make_arg = partial(make_tensor, device=device, dtype=dtype,
-                       requires_grad=requires_grad, low=-1, high=1)
+    if mode in ('bilinear', ):
+        make_arg = partial(
+            make_tensor,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            low=0 if dtype == torch.uint8 else None,
+            high=256 if dtype == torch.uint8 else None,
+        )
+        # provide a single sample for more typical image processing usage
+        rank = 2
+        yield SampleInput(make_arg(shape(400, rank)), size=shape(270, rank, False))
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     for rank in ranks_for_mode[mode]:
         yield SampleInput(make_arg(shape(D, rank)), size=shape(S, rank, False))
@@ -4155,7 +4185,7 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape(D, rank)), scale_factor=0.6)
 
 
-def sample_inputs_upsample_aten(mode, self, device, dtype, requires_grad, **kwargs):
+def sample_inputs_upsample_aa(mode, self, device, dtype, requires_grad, **kwargs):
     N = 6
     C = 3
     H = 10
@@ -4163,8 +4193,7 @@ def sample_inputs_upsample_aten(mode, self, device, dtype, requires_grad, **kwar
     S = 3
     L = 5
 
-    input_tensor = make_tensor(torch.Size([N, C, H, W]), device=device, dtype=dtype,
-                               requires_grad=requires_grad, low=-1, high=1)
+    input_tensor = make_tensor(torch.Size([N, C, H, W]), device=device, dtype=dtype, requires_grad=requires_grad)
 
     yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=False, scale_factors=None)
     yield SampleInput(input_tensor, output_size=torch.Size([L, L]), align_corners=False, scale_factors=None)
@@ -12697,7 +12726,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.uint8),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=partial(sample_inputs_upsample_aten, 'bilinear'),
+           sample_inputs_func=partial(sample_inputs_upsample_aa, 'bilinear'),
            supports_out=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
