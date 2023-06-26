@@ -56,6 +56,22 @@ struct ParamsWrapper {
   ParamsWrapper(ParamsWrapper<T> &&other) {
     memcpy(&(this->pod), &(other.pod), sizeof(T));
   }
+
+  ParamsWrapper& operator=(const ParamsWrapper<T> &other) {
+    memcpy(&(this->pod), &(other.pod), sizeof(T));
+    return *this;
+  }
+
+  ParamsWrapper& operator=(ParamsWrapper<T> &&other) {
+    memcpy(&(this->pod), &(other.pod), sizeof(T));
+    return *this;
+  }
+
+  inline friend bool operator==(const ParamsWrapper<T> &lhs, const ParamsWrapper<T> &rhs) {
+    auto ptr1 = reinterpret_cast<const uint8_t*>(&(lhs.pod));
+    auto ptr2 = reinterpret_cast<const uint8_t*>(&(rhs.pod));
+    return memcmp(ptr1, ptr2, sizeof(lhs.pod)) == 0;
+  }
 };
 
 // Wrapped version: this allows the outer struct to have custom copy and move
@@ -76,19 +92,5 @@ struct ParamsWrapperHash {
     return (size_t)value;
   }
 };
-
-template <typename ParamsWrapper>
-struct ParamsWrapperEqual {
-  // Params must be a POD because we read out its memory
-  // contents as char* when comparing
-  static_assert(std::is_standard_layout_v<decltype(ParamsWrapper::pod)>, "ParamsWrapper cannot wrap non-POD data");
-
-  bool operator()(const ParamsWrapper& a, const ParamsWrapper& b) const {
-    auto ptr1 = reinterpret_cast<const uint8_t*>(&(a.pod));
-    auto ptr2 = reinterpret_cast<const uint8_t*>(&(b.pod));
-    return memcmp(ptr1, ptr2, sizeof(a.pod)) == 0;
-  }
-};
-
 
 }  // at::native

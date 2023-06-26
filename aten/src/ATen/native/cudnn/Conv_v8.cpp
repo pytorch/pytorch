@@ -184,12 +184,13 @@ struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
 
 template <typename T, typename KeyType>
 struct BenchmarkCache {
-std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsWrapperHash<KeyType>, ParamsWrapperEqual<KeyType>> engine_cache;
+std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsWrapperHash<KeyType>> engine_cache;
 
 // no mutexes here as caches are now thread local for v8, can also return a pointer
 // to the Execution Plan if we know it will not be invalidated by another thread
 cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
   auto it = engine_cache.find(key);
+  std::cout << "cache size: " << engine_cache.size() << std::endl;
   if (it == engine_cache.end()) {
     return nullptr;
   }
