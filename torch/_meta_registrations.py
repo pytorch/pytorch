@@ -2258,7 +2258,7 @@ def meta_adaptive_max_pool2d(input, output_size):
         indices = input.new_empty(out_shape, dtype=torch.int64)
         return out, indices
     else:
-        out_shape = (sizeB, sizeD, osizeH, osizeW)
+        out_shape = (sizeB, sizeD, osizeH, osizeW)  # type: ignore[assignment]
         memory_format = utils.suggest_memory_format(input)
         out = input.new_empty(out_shape).to(memory_format=memory_format)
         indices = input.new_empty(out_shape, dtype=torch.int64).to(
