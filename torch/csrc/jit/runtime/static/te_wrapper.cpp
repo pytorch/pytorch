@@ -29,7 +29,7 @@ void TEWrapper::call(const std::vector<void*>& args) {
   cg->call_raw(args);
 }
 
-void optimizePointwise(LoopNest* ln, Tensor target, int width) {
+static void optimizePointwise(LoopNest* ln, Tensor target, int width) {
   std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
   ForPtr inner, tail;
   TORCH_CHECK(loops.size() > 0, "No loops created for pointwise op");
@@ -37,7 +37,7 @@ void optimizePointwise(LoopNest* ln, Tensor target, int width) {
   ln->vectorize(inner);
 }
 
-std::shared_ptr<TEWrapper> wrapTECompute(
+static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     Tensor out,
     std::vector<CodeGen::BufferArg> args,
@@ -54,7 +54,7 @@ std::shared_ptr<TEWrapper> wrapTECompute(
   return wrap;
 }
 
-std::shared_ptr<TEWrapper> wrapTECompute(
+static std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     LoopNest* ln,
     std::vector<CodeGen::BufferArg> args) {
