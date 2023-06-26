@@ -110,6 +110,25 @@
 #     destroy saved buffers if we know variables are not going to be retained,
 #     e.g., it is used by _cudnn_rnn
 #
+# In a gradient expression, the following functions are in scope:
+#
+#   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
+#     variable and a boolean condition that dictates whether to save that
+#     variable in a graph. The result of this function is `c10::optional<Tensor>`,
+#     and it is `c10::nullopt` when the condition evalutes to `false`,
+#     otherwise it is the variable wrapped in `c10::optional<Tensor>`.
+#     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
+#     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
+#     or the third (grad_input_mask[2]) argument requires gradients.
+#     Another interpretation of this expression would read as `var_0` is needed
+#     in the backward computation of the second or the third argument.
+#     NOTE: the usage of `var_i.requires_grad()` in the conditional expression
+#     is UB, use `grad_input_mask[i]` instead.
+#     NOTE: `wrap_opt_if` could be used to prevent saving redundant variables
+#     with multi-output backward formulas.
+#     See https://github.com/pytorch/pytorch/issues/97575 for more details
+#     on the issue.
+#
 # If you need a complex expression, e.g., with local variables,
 # write a _backward function in torch/csrc/autograd/FunctionsManual.cpp
 # and invoke it from here.  By the way, go read
