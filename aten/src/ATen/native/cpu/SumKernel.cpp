@@ -266,8 +266,13 @@ struct OuterNanSumCastLoadPolicy {
 template <typename scalar_t, typename acc_t>
 struct CastStoreAccumulate {
   static void store(char * C10_RESTRICT data, int64_t stride, int64_t index, acc_t value) {
-    auto * ptr = reinterpret_cast<scalar_t*>(data + index * stride);
-    *ptr += value;
+    if (stride == 0 && (std::is_same_v<scalar_t, c10::BFloat16> || std::is_same_v<scalar_t, c10::Half>)) {
+      auto * ptr = reinterpret_cast<acc_t*>(data + index * stride);
+      *ptr += value;
+    } else {
+      auto * ptr = reinterpret_cast<scalar_t*>(data + index * stride);
+      *ptr += value;
+    }
   }
 };
 
@@ -527,9 +532,10 @@ void scalar_outer_sum(
 // Custom floating point sum for better accuracy
 template <bool ignore_nan, typename scalar_t>
 void cascade_sum(TensorIterator &iter) {
+  using acc_t = at::acc_type<scalar_t, true>;
+  constexpr bool lowp = std::is_same_v<scalar_t, c10::BFloat16> || std::is_same_v<scalar_t, c10::Half>;
   iter.output_base().fill_(scalar_t(0));
-  iter.parallel_reduce(
-    [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
+  auto loop = [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       int64_t in_strides[] = { strides[1], strides[3] };
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -569,7 +575,6 @@ void cascade_sum(TensorIterator &iter) {
       TORCH_INTERNAL_ASSERT(out_strides[0] == 0);
 
       using vec_t = Vectorized<scalar_t>;
-      using acc_t = at::acc_type<scalar_t, true>;
       using vacc_t = Vectorized<acc_t>;
       using ScalarLoadPolicy = std::conditional_t<
           ignore_nan,
@@ -600,7 +605,23 @@ void cascade_sum(TensorIterator &iter) {
         scalar_outer_sum<acc_t, ScalarLoadPolicy, StorePolicy>(
             data, in_strides, out_stride, size0, size1);
       }
-    });
+    };
+    if (lowp) {
+      auto sync = [&] (char* buffer, char** data, const int64_t* strides, bool init) {
+        TORCH_INTERNAL_ASSERT(strides[0] == 0 || strides[2] == 0);
+        scalar_t * out_ptr = reinterpret_cast<scalar_t*>(data[0]);
+        acc_t * buffer_ptr = reinterpret_cast<acc_t*>(buffer);
+        if (init) {
+          *buffer_ptr = *out_ptr;
+        } else {
+          *out_ptr = *buffer_ptr;
+        }
+
+      };
+      iter.parallel_reduce_acc(loop, sync);
+    } else {
+      iter.parallel_reduce(loop);
+    }
 }
 
 void sum_kernel_impl(TensorIterator &iter) {

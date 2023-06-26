@@ -1332,6 +1332,50 @@ class TestReductions(TestCase):
         self.assertEqual(tensor.var(0), 0.03125)
 
     @onlyCPU
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_sum_noncontig_lowp(self, device, dtype) -> None:
+        def helper(self, shape, reduce_dims, device, dtype):
+            x = torch.ones(shape, device=device, dtype=dtype)
+            if len(shape) == 3:
+                permute_list = [0, 1, 2]
+            elif len(shape) == 4:
+                permute_list = [0, 1, 2, 3]
+            else:
+                permute_list = [0, 1, 2, 3, 4]
+            random.shuffle(permute_list)
+            x_trans = x.permute(permute_list)
+            x_sum = torch.sum(x_trans, reduce_dims)
+            x_trans_ref = x_trans.float()
+            x_sum_ref = torch.sum(x_trans_ref, reduce_dims)
+            self.assertEqual(x_sum, x_sum_ref.to(dtype=dtype))
+
+        for shape, dims in [
+            ((10, 13, 3, 3), (0, 1, 2)),
+            ((1, 7, 24, 6), (0, 1, 2)),
+            ((10, 211, 77, 77), (0, 1)),
+            ((10, 211, 77, 77), (0, 1, 2)),
+            ((10, 211, 77, 77), (0, 1, 2, 3)),
+            ((10, 128, 300, 300), (0, 1)),
+            ((10, 128, 300, 300), (0, 1, 2)),
+            ((10, 128, 300, 300), (0, 1, 2, 3)),
+            ((10, 55, 600), (0)),
+            ((10, 55, 600), (0, 1)),
+            ((10, 55, 600), (0, 1, 2)),
+            ((10, 55, 600, 66, 7), (0)),
+            ((10, 55, 600, 66, 7), (0, 1)),
+            ((10, 55, 600, 66, 7), (0, 1, 2)),
+            ((10, 55, 600, 66, 7), (0, 1, 2, 3)),
+            ((10, 55, 600, 66, 7), (0, 1, 2, 3, 4)),
+            ((10, 55, 600, 66, 7), (0, 3)),
+            ((10, 55, 600, 66, 7), (0, 2)),
+            ((10, 55, 600, 66, 7), (2, 3)),
+            ((10, 55, 600, 66, 7), (1, 3)),
+            ((10, 55, 600, 66, 7), (1, 4)),
+            ((10, 55, 600, 66, 7), (2, 4)),
+        ]:
+            helper(self, shape, dims, device, dtype)
+
+    @onlyCPU
     @dtypes(torch.bool, torch.double)
     def test_sum_all(self, device, dtype) -> None:
         def check_sum_all(tensor: torch.Tensor) -> None:

@@ -16,10 +16,11 @@
 namespace at {
 
 using loop2d_t = TensorIteratorBase::loop2d_t;
+using sync_acc_t = TensorIteratorBase::sync_acc_t;
 
 static bool use_two_pass_reduction(TensorIteratorBase& iter);
-static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop);
-static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop);
+static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop, sync_acc_t sync={}, bool acc_buffer=false);
+static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop, sync_acc_t sync={}, bool acc_buffer=false);
 
 void TensorIteratorBase::parallel_reduce(loop2d_t loop) {
   TORCH_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
@@ -34,11 +35,24 @@ void TensorIteratorBase::parallel_reduce(loop2d_t loop) {
   }
 }
 
+void TensorIteratorBase::parallel_reduce_acc(loop2d_t loop, sync_acc_t sync) {
+  TORCH_CHECK(ntensors() == 2, "parallel_reduce_acc only supports one input and one output");
+  int64_t numel = this->numel();
+  if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
+      at::in_parallel_region()) {
+    serial_for_each_acc(loop, sync, {0, numel});
+  } else if (use_two_pass_reduction(*this)) {
+    two_pass_reduction(*this, loop, sync, true);
+  } else {
+    parallel_dim_reduction(*this, loop, sync, true);
+  }
+}
+
 static bool use_two_pass_reduction(TensorIteratorBase& iter) {
   return iter.output(0).numel() == 1;
 }
 
-static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
+static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop, sync_acc_t sync, bool acc_buffer) {
   const int max_threads = at::get_num_threads();
 
   const auto& dst = iter.output(0);
@@ -62,13 +76,21 @@ static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
     // Bump output ptr so each thread has its own ouput slice
     auto base_ptrs = first_reduce.get_base_ptrs();
     base_ptrs[0] += buffer_stride * thread_num;
+    if (acc_buffer) {
+      at::internal::serial_for_each_acc(shape, strides, base_ptrs.data(),
+                                base_ptrs.size(), loop, sync, {begin, end});
+    } else {
+      at::internal::serial_for_each(shape, strides, base_ptrs.data(),
+                                base_ptrs.size(), loop, {begin, end});
+    }
 
-    at::internal::serial_for_each(shape, strides, base_ptrs.data(),
-                                  base_ptrs.size(), loop, {begin, end});
   });
-
-  auto final_reduce = TensorIterator::reduce_op(unsqueezed, buffer);
-  final_reduce.for_each(loop);
+    auto final_reduce = TensorIterator::reduce_op(unsqueezed, buffer);
+    if (acc_buffer) {
+      final_reduce.for_each_acc(loop, sync);
+    } else {
+      final_reduce.for_each(loop);
+    }
 }
 
 /// Chooses a dimension over which to parallelize. Prefers the outer-most
@@ -101,7 +123,7 @@ round_columns(TensorIteratorBase& iter, int dim, int multiple, int64_t begin, in
   return std::make_tuple(begin, end);
 }
 
-static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop) {
+static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop, sync_acc_t sync, bool acc_buffer) {
   AT_ASSERT(iter.ndim() >= 1);
   int dim = find_split_dim(iter);
   int64_t cols = iter.shape()[dim];
@@ -120,7 +142,11 @@ static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop) {
     }
     auto sub_iter = TensorIterator(iter);
     sub_iter.narrow(dim, begin, end - begin);
-    sub_iter.for_each(loop);
+    if (acc_buffer) {
+      sub_iter.for_each_acc(loop, sync);
+    } else {
+      sub_iter.for_each(loop);
+    }
   });
 }
 

@@ -56,6 +56,18 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
   }
 }
 
+inline bool should_use_acc_buffer(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
+  bool should_use_acc_buffer = true;
+  for (const auto dim : c10::irange(0, 2)) {
+    for (const auto arg : c10::irange(operands.size())) {
+      if (operands[arg].is_output && strides[operands.size() * dim + arg] != 0) {
+        should_use_acc_buffer = false;
+      }
+    }
+  }
+  return should_use_acc_buffer;
+}
+
 static OptionalTensorRef make_otr(const TensorBase &tensor) {
   if (tensor.defined()) {
     return OptionalTensorRef(tensor);
@@ -754,6 +766,19 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   }
 }
 
+void TensorIteratorBase::for_each_acc(loop2d_t loop, sync_acc_t sync, int64_t grain_size) {
+  int64_t numel = this->numel();
+  if (numel == 0) {
+    return;
+  } else if (numel < grain_size || at::get_num_threads() == 1) {
+    return serial_for_each_acc(loop, sync, {0, numel});
+  } else {
+    at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
+      serial_for_each_acc(loop, sync, {begin, end});
+    });
+  }
+}
+
 StrideVector TensorIteratorBase::get_strides() const {
   const auto dim = ndim();
   StrideVector strides(std::max(dim, 2) * ntensors());
@@ -776,6 +801,29 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
   at::get_strides(strides.data(), operands_, ndim);
   at::internal::serial_for_each(
       shape_, strides, ptrs.data(), ptrs.size(), loop, range);
+}
+
+void TensorIteratorBase::serial_for_each_acc(loop2d_t loop, sync_acc_t sync, Range range) const {
+  if (range.size() == 0) {
+    return;
+  }
+
+  const auto ntensors = this->ntensors();
+  const auto ndim = this->ndim();
+
+  c10::SmallBuffer<char*, 4> ptrs(ntensors);
+  c10::SmallBuffer<int64_t, 8> strides(ntensors * std::max(ndim, 2));
+
+  at::get_base_ptrs(ptrs.data(), operands_);
+  at::get_strides(strides.data(), operands_, ndim);
+  if (this->noutputs() == 1 &&
+      at::should_use_acc_buffer(strides.data(), operands_, ndim)) {
+    at::internal::serial_for_each_acc(
+      shape_, strides, ptrs.data(), ptrs.size(), loop, sync, range);
+  } else {
+    at::internal::serial_for_each(
+      shape_, strides, ptrs.data(), ptrs.size(), loop, range);
+  }
 }
 
 bool TensorIteratorBase::is_trivial_1d() const {

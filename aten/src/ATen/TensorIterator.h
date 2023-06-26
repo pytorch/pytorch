@@ -252,6 +252,9 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   using loop2d_t = c10::function_ref<
       void(char** data, const int64_t* strides, int64_t size0, int64_t size1)>;
 
+  using sync_acc_t = c10::function_ref<
+      void(char* buffer, char** data, const int64_t* strides, bool init)>;
+
   using loop_subiter_t = c10::function_ref<void(TensorIteratorBase& subiter)>;
 
   void foreach_reduced_elt(loop_subiter_t loop, bool parallelize = true);
@@ -423,7 +426,29 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
 
   void for_each(loop2d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE);
 
+ public:
+  template <
+      typename loop1d_t,
+      std::enable_if_t<
+          std::is_convertible<
+              loop1d_t,
+              c10::function_ref<
+                  void(char**, const int64_t* strides, int64_t size)>>::value,
+          int> = 0>
+  void for_each_acc(
+      loop1d_t loop,
+      sync_acc_t sync,
+      int64_t grain_size = at::internal::GRAIN_SIZE) {
+    for_each_acc(loop_2d_from_1d(loop), sync, grain_size);
+  }
+
+  void for_each_acc(
+      loop2d_t loop,
+      sync_acc_t sync,
+      int64_t grain_size = at::internal::GRAIN_SIZE);
+
   void parallel_reduce(loop2d_t loop);
+  void parallel_reduce_acc(loop2d_t loop, sync_acc_t sync);
 
   template <
       typename loop1d_t,
@@ -438,6 +463,18 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   }
 
   void serial_for_each(loop2d_t loop, Range range) const;
+  void serial_for_each_acc(loop2d_t loop, sync_acc_t sync, Range range) const;
+  template <
+      typename loop1d_t,
+      std::enable_if_t<
+          std::is_convertible<
+              loop1d_t,
+              c10::function_ref<
+                  void(char**, const int64_t* strides, int64_t size)>>::value,
+          int> = 0>
+  void serial_for_each_acc(loop1d_t loop, sync_acc_t sync, Range range) {
+    serial_for_each_acc(loop_2d_from_1d(loop), sync, range);
+  }
 
   /// Create a strides array for a Tensor with shape of this iterator. The
   /// parameter `element_size` specifies the size of Tensor's data type in
