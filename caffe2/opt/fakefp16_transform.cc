@@ -68,7 +68,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
   return fake_fp16_op_conversion_map;
 }
 
-static std::vector<OperatorDef*> findMutableOperatorByInput(
+std::vector<OperatorDef*> findMutableOperatorByInput(
     NetDef* net,
     const std::string& input) {
   std::vector<OperatorDef*> ops;
@@ -83,7 +83,7 @@ static std::vector<OperatorDef*> findMutableOperatorByInput(
   return ops;
 }
 
-static void fakeFp16FoldLayerNorm(NetDef* net) {
+void fakeFp16FoldLayerNorm(NetDef* net) {
   for (auto& op : *net->mutable_op()) {
     if (op.type() == "LayerNormFakeFP16NNPI") {
       LOG(INFO) << "Attemping to fuse LayerNormFakeFP16NNPI at "
@@ -126,7 +126,7 @@ static void fakeFp16FoldLayerNorm(NetDef* net) {
   }
 }
 
-static void fakeFp16FoldLayerNormQuant(NetDef* net) {
+void fakeFp16FoldLayerNormQuant(NetDef* net) {
   for (auto& op : *net->mutable_op()) {
     if (op.type() == "LayerNormFakeFP16NNPI") {
       auto layernormNetPos = ArgumentHelper::GetSingleArgument<OperatorDef, int>(
@@ -171,7 +171,7 @@ static void fakeFp16FoldLayerNormQuant(NetDef* net) {
   }
 }
 
-static void fakeFp16FoldSwish(NetDef* net) {
+void fakeFp16FoldSwish(NetDef* net) {
   // find a sequence deq->swish->quant and replace it
   for (auto& op : *net->mutable_op()) {
     if (op.type() == "Int8DequantizeNNPI") {
@@ -229,7 +229,7 @@ static void fakeFp16FoldSwish(NetDef* net) {
   }
 }
 
-static void fakeFp16FoldTanhQuant(NetDef* net) {
+void fakeFp16FoldTanhQuant(NetDef* net) {
   // find a sequence deq->swish->quant and replace it
   for (auto& op : *net->mutable_op()) {
     if (op.type() == "TanhFakeFp16NNPI") {

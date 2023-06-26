@@ -15,7 +15,7 @@ using namespace nom;
 // m)}{\sqrt{\sigma + \epsilon}} + b_{bn}$$ or
 // $$ W' = W\frac{s}{\sqrt{\sigma + \epsilon}}$$
 // $$ b' = (b_{conv} - m)\frac{s}{\sqrt{\sigma + \epsilon}} + b_{bn}$$
-static bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
+bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
   size_t convOrder = 0;
   for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
