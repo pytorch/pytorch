@@ -5770,6 +5770,7 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
 
+@unittest.skipIf(IS_WINDOWS or TEST_WITH_ROCM, "Not compatible with windows or ROCm")
 class TestCUDAPluggableAllocator(TestCase):
     def setUp(self):
         super().setUp()
