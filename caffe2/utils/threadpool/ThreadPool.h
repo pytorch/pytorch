@@ -62,6 +62,7 @@ class TORCH_API /*alignas(kCacheLineSize)*/ ThreadPool {
   size_t minWorkSize_;
 };
 
+size_t getDefaultNumThreads();
 } // namespace caffe2
 
 #endif // CAFFE2_UTILS_THREADPOOL_H_

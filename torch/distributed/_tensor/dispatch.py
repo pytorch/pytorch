@@ -27,13 +27,6 @@ from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
-"""
-If _ENABLE_FALLBACK set to False, dispatch will fail when an op doesn't
-have a sharding rule registered.
-"""
-_ENABLE_FALLBACK = False
-
-
 def wrap(res: object, spec: OutputSpecType) -> object:
     def to_dt(res, spec):
         assert spec is not None and isinstance(

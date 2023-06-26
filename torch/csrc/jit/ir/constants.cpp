@@ -8,13 +8,13 @@
 
 namespace torch::jit {
 
-bool insertableTensor(const at::Tensor& ten) {
+static bool insertableTensor(const at::Tensor& ten) {
   // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
   // or gradients because we have no way of serializing them & are mutable
   return !ten.requires_grad() && ten.has_storage() && !ten.is_nested();
 }
 
-bool insertableIValue(const IValue& ivalue) {
+static bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
       ivalue.isDouble() || ivalue.isComplexDouble() || ivalue.isString() ||
       ivalue.isDevice() || ivalue.isEnum()) {

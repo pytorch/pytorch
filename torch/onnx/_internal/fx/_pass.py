@@ -13,7 +13,7 @@ from typing import Any, Callable
 import torch
 import torch.fx
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import diagnostics
+from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher
 
 
 @contextlib.contextmanager
@@ -216,9 +216,11 @@ class Analysis(abc.ABC):
         self,
         diagnostic_context: diagnostics.DiagnosticContext,
         module: torch.fx.GraphModule,
+        onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
     ):
         self.diagnostic_context = diagnostic_context
         self.module = module
+        self.onnxfunction_dispatcher = onnxfunction_dispatcher
 
     @abc.abstractmethod
     def analyze(self, diagnostic_level: diagnostics.infra.Level) -> AnalysisResult:

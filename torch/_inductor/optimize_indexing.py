@@ -1,4 +1,5 @@
 import functools
+import itertools
 import logging
 import math
 from typing import Dict, Iterable, Union
@@ -6,9 +7,10 @@ from typing import Dict, Iterable, Union
 import sympy
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
-from .utils import sympy_subs
+from .utils import sympy_subs, sympy_symbol
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -63,6 +65,89 @@ def range_expressable_in_32_bits(range):
     )
 
 
+def get_expr_range(expr, vars_ranges: dict):
+    fs = list(expr.free_symbols)
+    if len(fs) == 0:
+        return ValueRanges(expr, expr)
+
+    vars_ranges = vars_ranges.copy()
+
+    def replace_symbols_for_deriv(expr):
+        cnt = itertools.count()
+
+        # for the purposes of finding local, minimum, maximum, assume smoothness
+        def mod_indexing_rep(x, y, z):
+            if z.is_constant():
+                new_var = sympy_symbol("mod_index" + f"{next(cnt)}")
+                # TODO: check if x / y has a range <= z and return x / y.
+                if z > 0:
+                    vars_ranges[new_var] = ValueRanges(0, z - 1)
+                else:
+                    vars_ranges[new_var] = ValueRanges(z + 1, 0)
+                fs.append(new_var)
+                return new_var
+
+            # never really happens, we'll bail on optimizing
+            return (x / y) % z
+
+        def indexing_div_rep(x, y):
+            return x / y
+
+        return expr.replace(ModularIndexing, mod_indexing_rep).replace(
+            FloorDiv, indexing_div_rep
+        )
+
+    monotonic_increasing = []
+    monotonic_decreasing = []
+    other_symbols = []
+
+    expr_for_deriv = replace_symbols_for_deriv(expr)
+    for symbol in fs:
+        diff = sympy.diff(expr_for_deriv, symbol)
+        if diff.is_positive:
+            monotonic_increasing.append(symbol)
+        elif diff.is_positive is False:  # can return None
+            monotonic_decreasing.append(symbol)
+        else:
+            # If diff_free_symbols only one symbol and it is the same as symbol,
+            # If this symbol's lower and upper bounds are the same, then it is constant.
+            # Add it to monotonic_increasing or monotonic_decreasing is ok.
+            diff_free_symbols = list(diff.free_symbols)
+            if (
+                len(diff_free_symbols) == 1
+                and symbol in diff_free_symbols
+                and symbol in vars_ranges
+                and vars_ranges[symbol].lower == vars_ranges[symbol].upper
+            ):
+                monotonic_increasing.append(symbol)
+            else:
+                other_symbols.append(symbol)
+
+    if not other_symbols:
+        max_val = sympy_subs(
+            expr_for_deriv,
+            {
+                k: (v.upper if k in monotonic_increasing else v.lower)
+                for k, v in vars_ranges.items()
+            },
+        )
+        min_val = sympy_subs(
+            expr_for_deriv,
+            {
+                k: (v.lower if k in monotonic_increasing else v.upper)
+                for k, v in vars_ranges.items()
+            },
+        )
+        if free_symbols(min_val):
+            min_val = -math.inf
+        if free_symbols(max_val):
+            max_val = math.inf
+        return ValueRanges(min_val, max_val)
+    else:
+        # bail on optimizing, have not run into this yet
+        return ValueRanges(-math.inf, math.inf)
+
+
 class OptimizeIndexing:
     """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
@@ -93,6 +178,8 @@ class OptimizeIndexing:
         ]
 
         for k, v in indices_ranges.items():
+            if free_symbols(v):
+                v = math.inf
             self.replace_indirect(k, ValueRanges(0, v))
 
         # avoid computing these values, pessimistically assume that they are unbounded
@@ -237,65 +324,9 @@ class OptimizeIndexing:
 
     def _get_index_impl(self, name):
         expr = self.indexing_exprs[name]
-
-        free_symbols = list(expr.free_symbols)
-
-        if len(free_symbols) == 0:
-            return ValueRanges(expr, expr)
-
         if expr in self.replacement_vals:
             return self.replacement_vals[expr]
-
-        def replace_symbols_for_deriv(expr, ignore_mod=False):
-            # for the purposes of finding local, minimum, maximum, assume smoothness
-            def mod_indexing_rep(x, y, z):
-                if z.is_constant():
-                    return x / y
-
-                # never really happens, we'll bail on optimizing
-                return (x / y) % z
-
-            def indexing_div_rep(x, y):
-                return x / y
-
-            return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-                FloorDiv, indexing_div_rep
-            )
-
-        symbols = expr.free_symbols
-        monotonic_increasing = []
-        monotonic_decreasing = []
-        other_symbols = []
-
-        expr_for_deriv = replace_symbols_for_deriv(expr, True)
-        for symbol in symbols:
-            diff = sympy.diff(expr_for_deriv, symbol)
-            if diff.is_positive:
-                monotonic_increasing.append(symbol)
-            elif diff.is_positive is False:  # can return None
-                monotonic_decreasing.append(symbol)
-            else:
-                other_symbols.append(symbol)
-
-        if not other_symbols:
-            max_val = sympy_subs(
-                expr,
-                {
-                    k: (v.upper if k in monotonic_increasing else v.lower)
-                    for k, v in self.replacement_vals.items()
-                },
-            )
-            min_val = sympy_subs(
-                expr,
-                {
-                    k: (v.lower if k in monotonic_increasing else v.upper)
-                    for k, v in self.replacement_vals.items()
-                },
-            )
-            return ValueRanges(min_val, max_val)
-        else:
-            # bail on optimizing, have not run into this yet
-            return ValueRanges(-math.inf, math.inf)
+        return get_expr_range(expr, self.replacement_vals)
 
 
 def indexing_dtype_strength_reduction(loop_body: LoopBody):

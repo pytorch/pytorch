@@ -170,6 +170,8 @@ def is_general_tensor_shape_node(node, modules):
     ]
     module_type_list = [
         torch.nn.Identity,
+        torch.nn.PixelShuffle,
+        torch.nn.PixelUnshuffle,
     ]
     return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
 

@@ -17,32 +17,34 @@ from .. import config
 
 from ..fx_utils import matches_module_function_pattern
 from ..mkldnn import mkldnn_fuse_fx
-from ..pattern_matcher import init_once_fakemode, PatternMatcherPass
+from ..pattern_matcher import (
+    init_once_fakemode,
+    PatternMatcherPass,
+    stable_topological_sort,
+)
 from ..utils import is_cpu_device
 
 log = logging.getLogger(__name__)
 
-normalize_split_pass = PatternMatcherPass()
-merge_splits_pass = PatternMatcherPass()
-merge_split_cat_pass = PatternMatcherPass()
+normalization_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
-    normalize_split_pass,
+    normalization_pass,
     merge_splits_pass,
-    merge_split_cat_pass,
+    split_cat_pass,
+    unbind_stack_pass,
 ]
 
 
 @init_once_fakemode
 def lazy_init():
-    from .split_cat import _split_cat_init
-
-    _split_cat_init()
+    from . import split_cat  # noqa: F401
 
     if config.is_fbcode():
-        from .fb.split_cat import _split_cat_init as _fb_split_cat_init
-
-        _fb_split_cat_init()
+        from .fb import split_cat as split_cat_fb  # noqa: F401
 
 
 def pre_grad_passes(gm, example_inputs):
@@ -64,6 +66,7 @@ def pre_grad_passes(gm, example_inputs):
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
 
+    stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
 

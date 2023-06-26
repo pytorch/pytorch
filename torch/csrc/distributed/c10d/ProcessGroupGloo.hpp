@@ -134,6 +134,37 @@ class TORCH_API ProcessGroupGloo : public Backend {
       store_->wait(keys, timeout);
     }
 
+#ifdef GLOO_STORE_HAS_STORE_V2
+  bool has_v2_support() override {
+    return store_->hasExtendedApi();
+  }
+
+  std::vector<std::vector<char>> multi_get(const std::vector<std::string>& keys) override {
+    std::vector<std::vector<char>> res;
+    for(auto& value : store_->multiGet(keys)) {
+      res.emplace_back(std::vector<char>(value.begin(), value.end()));
+    }
+    return res;
+  }
+
+  void multi_set(const std::vector<std::string>& keys, const std::vector<std::vector<char>>& values) override {
+    std::vector<std::vector<uint8_t>> u_values;
+    for(auto& value : values) {
+      u_values.emplace_back(std::vector<uint8_t>(value.begin(), value.end()));
+    }
+    store_->multiSet(keys, u_values);
+  }
+
+  void append(const std::string& key, const std::vector<char>& value) override {
+    std::vector<uint8_t> tmp(value.begin(), value.end());
+    return store_->append(key, tmp);
+  }
+
+  int64_t add(const std::string& key, int64_t value) override {
+    return store_->add(key, value);
+  }
+#endif
+
    protected:
     c10::intrusive_ptr<::c10d::Store> store_;
   };

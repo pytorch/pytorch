@@ -3,6 +3,7 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/DispatchStub.h>
@@ -35,8 +36,9 @@ bool input_requires_grad(sdp_params params) {
 }
 
 bool has_for_nested_inputs(sdp_params params) {
-  return (params.query.is_nested() || params.key.is_nested() ||
-          params.value.is_nested());
+  return (
+      params.query.is_nested() || params.key.is_nested() ||
+      params.value.is_nested());
 }
 
 std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
@@ -452,16 +454,41 @@ bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) {
   return true;
 }
 
+template <int Major, int Minor>
+struct SMVersion {
+  static constexpr int major = Major;
+  static constexpr int minor = Minor;
+  constexpr SMVersion() = default;
+};
+
+/**
+ * Checks if the current CUDA device architecture is inclusively within the specified range.
+ *
+ * @param lower_bound The lower bound of the CUDA device architecture range.
+ * @param upper_bound The upper bound of the CUDA device architecture range.
+ * @param params The parameters for the current operation.
+ * @return True if the current CUDA device architecture is within the specified range, false otherwise.
+ */
+template <typename lower_bound, typename upper_bound>
+bool check_sm_version(cudaDeviceProp * dprops) {
+  bool is_gte_lower_bound = dprops->major > lower_bound::major ||
+      (dprops->major == lower_bound::major &&
+       dprops->minor >= lower_bound::minor);
+  bool is_lte_upper_bound = dprops->major < upper_bound::major ||
+      (dprops->major == upper_bound::major &&
+       dprops->minor <= upper_bound::minor);
+  return is_gte_lower_bound && is_lte_upper_bound;
+}
+
 bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   // Check that the gpu is capable of running flash attention
+  using sm75 = SMVersion<7, 5>;
+  using sm90 = SMVersion<9, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
-  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-  bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
-  if (!(is_sm90 || is_sm8x || is_sm75)) {
+  if (!check_sm_version<sm75, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention only supports {sm75, sm8x, sm90} gpu architectures. Attempting to run on a sm ",
+          "Flash attention only supports gpu architectures in the range [sm75, sm90]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
@@ -472,33 +499,19 @@ bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   return true;
 }
 
-bool check_gpu_sm50_or_greater(sdp_params params, bool debug) {
-  // Check that the gpu is capable of running flash attention
+bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
+  // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
+  using sm50 = SMVersion<5, 0>;
+  using sm90 = SMVersion<9, 0>;
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm50 = dprops->major >= 5;
-  if (!(is_sm50)) {
+  if (!check_sm_version<sm50, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
-          "Mem Efficient Attention only supports sm5x or greater gpu architectures. Attempting to run on a sm ",
+          "Mem Efficient Attention only supports gpu architectures in the range [sm50, sm90]. Attempting to run on a sm ",
           dprops->major,
           ".",
           dprops->minor,
           " gpu.");
-    }
-    return false;
-  }
-  return true;
-}
-
-bool check_head_dim_gt64_and_sm_ge86_lt90(sdp_params params, bool debug) {
-  // Memory Efficient Attention is throwing a cuda illegal memory error
-  // on sm86 or newer when head_dim is greater than 64.
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm86_or_newer = (dprops->major == 8) && (dprops->minor >= 6);
-  if (is_sm86_or_newer && (params.query.sym_size(-1) > 64)) {
-    if (debug) {
-      TORCH_WARN(
-          "Memory Efficient Attention does not currently support head_dim greater than 64 on sm86 or newer");
     }
     return false;
   }
@@ -509,36 +522,22 @@ bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
     sdp_params params,
     bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
-  // size is greater than 64 And the device is sm86 or newer.
-  if (input_requires_grad(params) &&
-      !check_head_dim_gt64_and_sm_ge86_lt90(params, false)) {
+  // size is greater than 64 And the device is between in the range [sm86, sm89]
+  using sm86 = SMVersion<8, 6>;
+  using sm89 = SMVersion<8, 9>;
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm86_or_sm89 = check_sm_version<sm86, sm89>(dprops);
+  bool is_head_dim_gt64 = params.query.sym_size(-1) > 64;
+  if (input_requires_grad(params) && is_sm86_or_sm89 && is_head_dim_gt64) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention currently doesn't support training with head_dim greater than 64 on sm86 or newer.");
+          "Flash attention currently doesn't support training with head_dim greater than 64 on gpu architectures in the range[sm86, sm89].",
+          "Attempting to run with head_dim: ",
+          params.query.sym_size(-1), " on a sm ", dprops->major, ".",
+          dprops->minor, " gpu.");
     }
     return false;
   }
-  return true;
-}
-
-bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
-  auto& ctx = at::globalContext();
-  if (ctx.deterministicAlgorithms()) {
-    if (ctx.deterministicAlgorithmsWarnOnly()) {
-      TORCH_WARN_ONCE(
-          "Memory Efficient attention is a non-deterministic algorithm. ",
-          "To explicitly disable Memory Efficient attention call torch.use_deterministic_algorithms(True, warn_only=False).");
-      // Warn the user but don't disable the kernel.
-      return true;
-    } else {
-      if (debug) {
-        TORCH_WARN(
-            "Memory Efficient attention is a non-deterministic algorithm and torch.use_deterministic_algorithms(True) has been set.");
-      }
-      return false;
-    }
-  }
-  // Determinism is not set so we can use the kernel.
   return true;
 }
 
@@ -582,31 +581,33 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
   return false;
 #endif
   // Constraints specific to mem efficient attention
-  constexpr auto mem_efficient_dtypes =
+  constexpr auto default_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+  constexpr auto sm50_mem_efficient_dtypes =
+      array_of<at::ScalarType>(at::kHalf, at::kFloat);
 
   //  Define gate functions that determine if a flash kernel can be ran
   constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
-      check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
+      check_mem_efficient_hardware_support,
       check_requires_grad_and_nested,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
-      check_head_dim_gt64_and_sm_ge86_lt90,
       check_for_seq_len_0_nested_tensor,
-      check_for_non_zero_dropout,
-      check_use_deterministic_algorithms);
+      check_for_non_zero_dropout);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
-  if (!check_tensor_dtype(params, mem_efficient_dtypes, debug)) {
-    return false;
+
+  auto dprop = at::cuda::getCurrentDeviceProperties();
+  if (dprop->major == 5) {
+    return check_tensor_dtype(params, sm50_mem_efficient_dtypes, debug);
   }
-  return true;
+  return check_tensor_dtype(params, default_mem_efficient_dtypes, debug);
 }
 } // namespace
 

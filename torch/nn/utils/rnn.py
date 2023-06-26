@@ -248,7 +248,7 @@ def pack_padded_sequence(
                           'values, and it will treat them as constants, likely rendering '
                           'the trace incorrect for any other combination of lengths.',
                           stacklevel=2)
-        lengths = torch.as_tensor(lengths, dtype=torch.int64)
+        lengths = torch.as_tensor(lengths, dtype=torch.int64, device='cpu')
     else:
         lengths = lengths.to(dtype=torch.int64)
 

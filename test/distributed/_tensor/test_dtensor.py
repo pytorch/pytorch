@@ -230,6 +230,20 @@ class DTensorTest(DTensorTestBase):
 
         self.assertEqual(sharded_tensor.grad.to_local(), torch.ones(3, 3) * 3)
 
+        # test the case when grad stride is different from fwd input.
+        res = sharded_tensor.to_local()
+        model = torch.nn.ReLU()
+        res.register_hook(lambda grad: grad.t())
+        target = torch.randn(3, 3, device=self.device_type)
+        mae_loss = torch.nn.L1Loss()
+        output = mae_loss(model(res), target)
+        # The manual change to grad stride leads to the failure of the copy op afterwards.
+        # so that we need a try-catch here.
+        try:
+            output.backward()
+        except RuntimeError:
+            self.assertEqual(sharded_tensor.grad.stride(), [1, 3 * self.world_size])
+
     @with_comms
     def test_from_local_then_to_local(self):
         # this test ensure end to end from torch.Tensor -> dist tensor -> torch.Tensor works
@@ -302,6 +316,20 @@ class DTensorTest(DTensorTestBase):
         local_tensor = torch.randn(3, 3)
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
         self.assertEqual(sharded_tensor.device.type, self.device_type)
+
+    @with_comms
+    def test_dtensor_save_load(self):
+        import io
+
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+        local_tensor = torch.randn(3, 3)
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+        buffer = io.BytesIO()
+        torch.save(sharded_tensor, buffer)
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer)
+        self.assertEqual(sharded_tensor, reloaded_st)
 
 
 class DTensorMeshTest(DTensorTestBase):

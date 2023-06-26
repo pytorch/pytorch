@@ -483,7 +483,7 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 
 }  // namespace
 
-Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
+static Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
   return qadd<false>(std::move(qa), std::move(qb), scale, zero_point);
 }
 
