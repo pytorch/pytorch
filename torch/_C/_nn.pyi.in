@@ -1,11 +1,11 @@
-from typing import Callable, List, Optional, overload, Tuple
+from typing import List, Optional, overload, Sequence, Tuple, Union
 
 from torch import memory_format, Tensor
-from torch.types import _bool, _device, _dtype
+from torch.types import _bool, _device, _dtype, _int, _size
 
 # Defined in tools/autograd/templates/python_nn_functions.cpp
 
-${dispatched_hints}
+${c_nn_function_hints}
 
 # Defined in aten/src/ATen/native/mkldnn/Linear.cpp
 def mkldnn_linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor: ...
