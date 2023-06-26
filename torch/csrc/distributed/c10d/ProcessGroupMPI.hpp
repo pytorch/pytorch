@@ -118,7 +118,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
 
-    virtual ~AsyncWork();
+    ~AsyncWork() override;
 
     bool isCompleted() override;
 
@@ -144,7 +144,7 @@ class TORCH_API ProcessGroupMPI : public Backend {
   // Constructor will spawn up the worker thread loop
   explicit ProcessGroupMPI(int rank, int size, MPI_Comm pgComm);
 
-  virtual ~ProcessGroupMPI();
+  ~ProcessGroupMPI() override;
 
   // Abort the MPI program, needs to be called when exception is detected
   void abort();
