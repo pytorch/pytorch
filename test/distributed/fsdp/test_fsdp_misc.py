@@ -508,7 +508,6 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         """
         Module on multiple GPUs wrapped in FSDP should raise an error.
         """
-        torch.cuda.set_device(self.rank)
 
         class MultiGPUModule(nn.Module):
             def __init__(self, rank):
