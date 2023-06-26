@@ -760,11 +760,11 @@ def _check_single_device_module(
     # by another algorithm and may already be on GPU. We'd like to enforce device_id
     # to not be None, otherwise we'd flatten parameters in a mixed module which is
     # not supported.
-    if len(devices) == 2 and torch.device("cpu") in devices:
-        if device_id is None:
-            raise RuntimeError(
-                f"To support partial CPU / GPU module, please pass in device_id argument."
-            )
+    if len(devices) == 2 and torch.device("cpu") in devices and device_id is None:
+        raise RuntimeError(
+            "To support a module with both CPU and GPU params, "
+            "please pass in device_id argument."
+        )
     elif len(devices) > 1:
         raise RuntimeError(
             f"FSDP only supports single device modules but got params on {devices}"
