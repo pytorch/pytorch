@@ -2776,6 +2776,19 @@ def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
     return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
 
 
+def _compute_scale(in_size, out_size, align_corners, scale=None):
+    if align_corners:
+        return (in_size - 1.0) / (out_size - 1.0) if out_size > 1 else 0
+    else:
+        return 1.0 / scale if scale is not None and scale > 0 else in_size / out_size
+
+def _compute_source_index(scale, dst_index, align_corners):
+    if align_corners:
+        return scale * dst_index
+    else:
+        return scale * (dst_index + 0.5) - 0.5
+
+
 @register_decomposition(aten.upsample_bilinear2d.default)
 @aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
@@ -2793,56 +2806,44 @@ def upsample_bilinear2d(
     out_w = output_size[1]
 
     # Calculate horizontal and vertical scaling factor
-    # TODO: Figure out if scales_h/scales_w matters here
-    if out_h > 1:
-        if align_corners:
-            h_scale_factor = (in_h - 1) / (out_h - 1)
-        else:
-            h_scale_factor = 1.0 / scales_h if scales_h is not None else in_h / out_h
+    h_scale_factor = _compute_scale(in_h, out_h, align_corners, scales_h)
+    w_scale_factor = _compute_scale(in_w, out_w, align_corners, scales_w)
+
+    if input.is_floating_point():
+        i = torch.arange(out_h, dtype=input.dtype, device=input.device)
+        j = torch.arange(out_w, dtype=input.dtype, device=input.device)
     else:
-        h_scale_factor = 0.0
+        i = torch.arange(out_h, dtype=torch.int64, device=input.device)
+        j = torch.arange(out_w, dtype=torch.int64, device=input.device)
 
-    if out_w > 1:
-        if align_corners:
-            w_scale_factor = (in_w - 1) / (out_w - 1)
-        else:
-            w_scale_factor = 1.0 / scales_w if scales_w is not None else in_w / out_w
-    else:
-        w_scale_factor = 0.0
+    y = _compute_source_index(h_scale_factor, i, align_corners).clamp(min=0.0)
+    x = _compute_source_index(w_scale_factor, j, align_corners).clamp(min=0.0)
 
-    i = torch.arange(out_h, dtype=input.dtype, device=input.device)
-    j = torch.arange(out_w, dtype=input.dtype, device=input.device)
+    # Replicate guard_index_and_lambda and compute_source_index_and_lambda
+    # from UpSample.h
+    y_floor = y.to(torch.int64).clamp(max=in_h - 1)
+    y_ceil = (y_floor + 1).clamp(max=in_h - 1)
+    x_floor = x.to(torch.int64).clamp(max=in_w - 1)
+    x_ceil = (x_floor + 1).clamp(max=in_w - 1)
 
-    if align_corners:
-        x = h_scale_factor * i
-        y = w_scale_factor * j
-    else:
-        x = (h_scale_factor * (i + 0.5) - 0.5).clamp(min=0.0)
-        y = (w_scale_factor * (j + 0.5) - 0.5).clamp(min=0.0)
+    y_view = y.unsqueeze(1)
+    y_floor_view = y_floor.unsqueeze(1)
+    y_ceil_view = y_ceil.unsqueeze(1)
 
-    x_floor = x.to(torch.int64)
-    x_ceil = torch.ceil(x).clamp(max=in_h - 1).to(torch.int64)
-    y_floor = y.to(torch.int64)
-    y_ceil = torch.ceil(y).clamp(max=in_w - 1).to(torch.int64)
+    v1 = aten._unsafe_index(input, [None, None, y_floor_view, x_floor])
+    v2 = aten._unsafe_index(input, [None, None, y_floor_view, x_ceil])
+    v3 = aten._unsafe_index(input, [None, None, y_ceil_view, x_floor])
+    v4 = aten._unsafe_index(input, [None, None, y_ceil_view, x_ceil])
 
-    x_view = x.unsqueeze(1)
-    x_floor_view = x_floor.unsqueeze(1)
-    x_ceil_view = x_ceil.unsqueeze(1)
+    yscale2 = (y_view - y_floor_view).clamp(0.0, 1.0)
+    xscale2 = (x - x_floor).clamp(0.0, 1.0)
 
-    v1 = aten._unsafe_index(input, [None, None, x_floor_view, y_floor])
-    v2 = aten._unsafe_index(input, [None, None, x_ceil_view, y_floor])
-    v3 = aten._unsafe_index(input, [None, None, x_floor_view, y_ceil])
-    v4 = aten._unsafe_index(input, [None, None, x_ceil_view, y_ceil])
-
-    xscale2 = x_view - x_floor_view
-    xscale1 = 1.0 - xscale2
-
-    yscale2 = y - y_floor
-    yscale1 = 1.0 - yscale2
-
-    q1 = torch.mul(v1, xscale1) + torch.mul(v2, xscale2)
-    q2 = torch.mul(v3, xscale1) + torch.mul(v4, xscale2)
-    result = torch.mul(q1, yscale1) + torch.mul(q2, yscale2)
+    # q1 = v1 * (1 - xscale2) + v2 * xscale2
+    # q3 = v3 * (1 - xscale2) + v4 * xscale2
+    q1 = v1 + torch.mul(v2 - v1, xscale2)
+    q2 = v3 + torch.mul(v4 - v3, xscale2)
+    # results = q1 * (1 - yscale2) + q2 * yscale2
+    result = q1 + torch.mul(q2 - q1, yscale2)
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
@@ -2852,6 +2853,9 @@ def upsample_bilinear2d(
         memory_format = torch.contiguous_format
 
     result = result.contiguous(memory_format=memory_format)
+
+    if not input.is_floating_point():
+        result = result.round()
 
     return result
 
