@@ -41,58 +41,53 @@ auto eng2string = [](const engine& eng) {
 };
 
 void bind_engine(pybind11::module& m) {
-  pybind11::class_<engine> eng(m, "engine");
+    pybind11::class_<engine> eng(m, "engine");
 
-  eng.def(pybind11::init([](engine::kind akind, int index) {
-    static dnnl::graph::allocator alloc{};
-    auto aengine = engine(akind, index, alloc);
-    return aengine;
-  }));
-  eng.def("get_kind", &engine::get_kind);
-  eng.def("__repr__", eng2string);
+    eng.def(pybind11::init([](engine::kind akind, int index) {
+        static dnnl::graph::allocator alloc {};
+        auto aengine
+                = dnnl::graph::make_engine_with_allocator(akind, index, alloc);
+        return aengine;
+    }));
+    eng.def("get_kind", &engine::get_kind);
+    eng.def("__repr__", eng2string);
 
-  pybind11::enum_<engine::kind>(eng, "kind")
-      .value("any", engine::kind::any)
-      .value("cpu", engine::kind::cpu)
-      .value("gpu", engine::kind::gpu)
-      .export_values();
+    pybind11::enum_<engine::kind>(eng, "kind")
+            .value("any", engine::kind::any)
+            .value("cpu", engine::kind::cpu)
+            .value("gpu", engine::kind::gpu)
+            .export_values();
 }
 
 void bind_graph(pybind11::module& m) {
-  pybind11::class_<graph> g(m, "graph");
+    pybind11::class_<graph> g(m, "graph");
 
-  g.def(pybind11::init<engine::kind>());
-  g.def(pybind11::init<engine::kind, graph::fpmath_mode>());
-  g.def("add_op", &graph::add_op);
-  // g.def("finalize", &graph::finalize);
-  // g.def("is_finalized", &graph::is_finalized);
-  g.def("get_partitions", &graph::get_partitions);
+    g.def(pybind11::init<engine::kind>());
+    g.def(pybind11::init<engine::kind, dnnl::graph::fpmath_mode>());
+    g.def("add_op", &graph::add_op);
+    g.def("finalize", &graph::finalize);
+    g.def("is_finalized", &graph::is_finalized);
+    g.def("get_partitions", &graph::get_partitions);
 
-  pybind11::enum_<graph::fpmath_mode>(g, "fpmath_mode")
-      .value("strict", graph::fpmath_mode::strict)
-      .value("bf16", graph::fpmath_mode::bf16)
-      .value("f16", graph::fpmath_mode::f16)
-      .value("any", graph::fpmath_mode::any)
-      .value("tf32", graph::fpmath_mode::tf32)
-      .export_values();
+    pybind11::enum_<dnnl::graph::fpmath_mode>(g, "fpmath_mode")
+            .value("strict", dnnl::graph::fpmath_mode::strict)
+            .value("bf16", dnnl::graph::fpmath_mode::bf16)
+            .value("f16", dnnl::graph::fpmath_mode::f16)
+            .value("any", dnnl::graph::fpmath_mode::any)
+            .value("tf32", dnnl::graph::fpmath_mode::tf32)
+            .export_values();
 }
 
 const std::string data_type2str(logical_tensor::data_type v) {
-  if (v == logical_tensor::data_type::undef)
-    return "undef";
-  if (v == logical_tensor::data_type::f16)
-    return "f16";
-  if (v == logical_tensor::data_type::bf16)
-    return "bf16";
-  if (v == logical_tensor::data_type::f32)
-    return "f32";
-  if (v == logical_tensor::data_type::s32)
-    return "s32";
-  if (v == logical_tensor::data_type::s8)
-    return "s8";
-  if (v == logical_tensor::data_type::u8)
-    return "u8";
-  return "unknown data_type";
+    if (v == logical_tensor::data_type::undef) return "undef";
+    if (v == logical_tensor::data_type::f16) return "f16";
+    if (v == logical_tensor::data_type::bf16) return "bf16";
+    if (v == logical_tensor::data_type::f32) return "f32";
+    if (v == logical_tensor::data_type::s32) return "s32";
+    if (v == logical_tensor::data_type::s8) return "s8";
+    if (v == logical_tensor::data_type::u8) return "u8";
+    if (v == logical_tensor::data_type::boolean) return "boolean";
+    return "unknown data_type";
 }
 
 const std::string layout_type2str(logical_tensor::layout_type v) {
@@ -228,184 +223,179 @@ void set_op_attribute(op& aop, T x, op::attr attr) {
   }
 }
 
-void bind_op(pybind11::module& m) {
-  pybind11::class_<op> opr(m, "op");
+void bind_op(pybind11::module &m) {
+    pybind11::class_<op> opr(m, "op");
 
-  opr.def(pybind11::init<size_t, op::kind, std::string>());
+    opr.def(pybind11::init<size_t, op::kind, std::string>());
 
-  opr.def(pybind11::init([](size_t id, op::kind kind, std::string name) {
-    auto aop = op(id, kind, name);
-    return aop;
-  }));
+    opr.def(pybind11::init([](size_t id, op::kind kind, std::string name) {
+        auto aop = op(id, kind, name);
+        return aop;
+    }));
 
-  opr.def("set_attributes", [](op& aop, op::attr key, pybind11::object val) {
-    set_op_attribute(aop, val, key);
-  });
-  opr.def("add_input", &op::add_input);
-  opr.def("add_inputs", &op::add_inputs);
-  opr.def("add_output", &op::add_output);
-  opr.def("add_outputs", &op::add_outputs);
+    opr.def("set_attributes", [](op &aop, op::attr key, pybind11::object val) {
+        set_op_attribute(aop, val, key);
+    });
+    opr.def("add_input", &op::add_input);
+    opr.def("add_inputs", &op::add_inputs);
+    opr.def("add_output", &op::add_output);
+    opr.def("add_outputs", &op::add_outputs);
 
-  pybind11::enum_<op::kind>(opr, "kind")
-      .value("Abs", op::kind::Abs)
-      .value("AbsBackprop", op::kind::AbsBackprop)
-      .value("Add", op::kind::Add)
-      .value("AvgPool", op::kind::AvgPool)
-      .value("AvgPoolBackprop", op::kind::AvgPoolBackprop)
-      .value("BatchNormForwardTraining", op::kind::BatchNormForwardTraining)
-      .value("BatchNormInference", op::kind::BatchNormInference)
-      .value("BatchNormTrainingBackprop", op::kind::BatchNormTrainingBackprop)
-      .value("BiasAdd", op::kind::BiasAdd)
-      .value("BiasAddBackprop", op::kind::BiasAddBackprop)
-      .value("Clamp", op::kind::Clamp)
-      .value("ClampBackprop", op::kind::ClampBackprop)
-      .value("Concat", op::kind::Concat)
-      .value("Convolution", op::kind::Convolution)
-      .value("ConvolutionBackpropData", op::kind::ConvolutionBackpropData)
-      .value("ConvolutionBackpropFilters", op::kind::ConvolutionBackpropFilters)
-      .value("ConvTranspose", op::kind::ConvTranspose)
-      .value("ConvTransposeBackpropData", op::kind::ConvTransposeBackpropData)
-      .value(
-          "ConvTransposeBackpropFilters",
-          op::kind::ConvTransposeBackpropFilters)
-      .value("Dequantize", op::kind::Dequantize)
-      .value("Divide", op::kind::Divide)
-      .value("DynamicDequantize", op::kind::DynamicDequantize)
-      .value("DynamicQuantize", op::kind::DynamicQuantize)
-      .value("Elu", op::kind::Elu)
-      .value("EluBackprop", op::kind::EluBackprop)
-      .value("End", op::kind::End)
-      .value("Exp", op::kind::Exp)
-      .value("GELU", op::kind::GELU)
-      .value("GELUBackprop", op::kind::GELUBackprop)
-      .value("HardSigmoid", op::kind::HardSigmoid)
-      //.value("HardSigmoidBackward", op::kind::HardSigmoidBackward)
-      .value("HardSwish", op::kind::HardSwish)
-      .value("HardSwishBackprop", op::kind::HardSwishBackprop)
-      .value("Interpolate", op::kind::Interpolate)
-      .value("InterpolateBackprop", op::kind::InterpolateBackprop)
-      .value("LayerNorm", op::kind::LayerNorm)
-      .value("LayerNormBackprop", op::kind::LayerNormBackprop)
-      .value("LeakyReLU", op::kind::LeakyReLU)
-      .value("Log", op::kind::Log)
-      .value("LogSoftmax", op::kind::LogSoftmax)
-      .value("LogSoftmaxBackprop", op::kind::LogSoftmaxBackprop)
-      .value("MatMul", op::kind::MatMul)
-      .value("Maximum", op::kind::Maximum)
-      .value("MaxPool", op::kind::MaxPool)
-      .value("MaxPoolBackprop", op::kind::MaxPoolBackprop)
-      .value("Minimum", op::kind::Minimum)
-      .value("Mish", op::kind::Mish)
-      .value("MishBackprop", op::kind::MishBackprop)
-      .value("Multiply", op::kind::Multiply)
-      .value("PReLU", op::kind::PReLU)
-      .value("PReLUBackprop", op::kind::PReLUBackprop)
-      .value("Quantize", op::kind::Quantize)
-      .value("Reciprocal", op::kind::Reciprocal)
-      .value("ReduceL1", op::kind::ReduceL1)
-      .value("ReduceL2", op::kind::ReduceL2)
-      .value("ReduceMax", op::kind::ReduceMax)
-      .value("ReduceMean", op::kind::ReduceMean)
-      .value("ReduceMin", op::kind::ReduceMin)
-      .value("ReduceProd", op::kind::ReduceProd)
-      .value("ReduceSum", op::kind::ReduceSum)
-      .value("ReLU", op::kind::ReLU)
-      .value("ReLUBackprop", op::kind::ReLUBackprop)
-      .value("Reorder", op::kind::Reorder)
-      .value("Round", op::kind::Round)
-      .value("Select", op::kind::Select)
-      .value("Sigmoid", op::kind::Sigmoid)
-      .value("SigmoidBackprop", op::kind::SigmoidBackprop)
-      .value("SoftMax", op::kind::SoftMax)
-      .value("SoftMaxBackprop", op::kind::SoftMaxBackprop)
-      .value("SoftPlus", op::kind::SoftPlus)
-      .value("SoftPlusBackprop", op::kind::SoftPlusBackprop)
-      .value("Sqrt", op::kind::Sqrt)
-      .value("SqrtBackprop", op::kind::SqrtBackprop)
-      .value("Square", op::kind::Square)
-      .value("SquaredDifference", op::kind::SquaredDifference)
-      .value("StaticReshape", op::kind::StaticReshape)
-      .value("StaticTranspose", op::kind::StaticTranspose)
-      .value("Subtract", op::kind::Subtract)
-      .value("Tanh", op::kind::Tanh)
-      .value("TanhBackprop", op::kind::TanhBackprop)
-      .value("TypeCast", op::kind::TypeCast)
-      .value("Wildcard", op::kind::Wildcard)
-      .export_values();
+    pybind11::enum_<op::kind>(opr, "kind")
+            .value("Abs", op::kind::Abs)
+            .value("AbsBackward", op::kind::AbsBackward)
+            .value("Add", op::kind::Add)
+            .value("AvgPool", op::kind::AvgPool)
+            .value("AvgPoolBackward", op::kind::AvgPoolBackward)
+            .value("BatchNormForwardTraining",
+                    op::kind::BatchNormForwardTraining)
+            .value("BatchNormInference", op::kind::BatchNormInference)
+            .value("BatchNormTrainingBackward",
+                    op::kind::BatchNormTrainingBackward)
+            .value("BiasAdd", op::kind::BiasAdd)
+            .value("BiasAddBackward", op::kind::BiasAddBackward)
+            .value("Clamp", op::kind::Clamp)
+            .value("ClampBackward", op::kind::ClampBackward)
+            .value("Concat", op::kind::Concat)
+            .value("Convolution", op::kind::Convolution)
+            .value("ConvolutionBackwardData", op::kind::ConvolutionBackwardData)
+            .value("ConvolutionBackwardWeights",
+                    op::kind::ConvolutionBackwardWeights)
+            .value("ConvTranspose", op::kind::ConvTranspose)
+            .value("ConvTransposeBackwardData",
+                    op::kind::ConvTransposeBackwardData)
+            .value("ConvTransposeBackwardWeights",
+                    op::kind::ConvTransposeBackwardWeights)
+            .value("Dequantize", op::kind::Dequantize)
+            .value("Divide", op::kind::Divide)
+            .value("DynamicDequantize", op::kind::DynamicDequantize)
+            .value("DynamicQuantize", op::kind::DynamicQuantize)
+            .value("Elu", op::kind::Elu)
+            .value("EluBackward", op::kind::EluBackward)
+            .value("End", op::kind::End)
+            .value("Exp", op::kind::Exp)
+            .value("GELU", op::kind::GELU)
+            .value("GELUBackward", op::kind::GELUBackward)
+            .value("HardSigmoid", op::kind::HardSigmoid)
+            .value("HardSigmoidBackward", op::kind::HardSigmoidBackward)
+            .value("HardSwish", op::kind::HardSwish)
+            .value("HardSwishBackward", op::kind::HardSwishBackward)
+            .value("Interpolate", op::kind::Interpolate)
+            .value("InterpolateBackward", op::kind::InterpolateBackward)
+            .value("LayerNorm", op::kind::LayerNorm)
+            .value("LayerNormBackward", op::kind::LayerNormBackward)
+            .value("LeakyReLU", op::kind::LeakyReLU)
+            .value("Log", op::kind::Log)
+            .value("LogSoftmax", op::kind::LogSoftmax)
+            .value("LogSoftmaxBackward", op::kind::LogSoftmaxBackward)
+            .value("MatMul", op::kind::MatMul)
+            .value("Maximum", op::kind::Maximum)
+            .value("MaxPool", op::kind::MaxPool)
+            .value("MaxPoolBackward", op::kind::MaxPoolBackward)
+            .value("Minimum", op::kind::Minimum)
+            .value("Mish", op::kind::Mish)
+            .value("MishBackward", op::kind::MishBackward)
+            .value("Multiply", op::kind::Multiply)
+            .value("Pow", op::kind::Pow)
+            .value("PReLU", op::kind::PReLU)
+            .value("PReLUBackward", op::kind::PReLUBackward)
+            .value("Quantize", op::kind::Quantize)
+            .value("Reciprocal", op::kind::Reciprocal)
+            .value("ReduceL1", op::kind::ReduceL1)
+            .value("ReduceL2", op::kind::ReduceL2)
+            .value("ReduceMax", op::kind::ReduceMax)
+            .value("ReduceMean", op::kind::ReduceMean)
+            .value("ReduceMin", op::kind::ReduceMin)
+            .value("ReduceProd", op::kind::ReduceProd)
+            .value("ReduceSum", op::kind::ReduceSum)
+            .value("ReLU", op::kind::ReLU)
+            .value("ReLUBackward", op::kind::ReLUBackward)
+            .value("Reorder", op::kind::Reorder)
+            .value("Round", op::kind::Round)
+            .value("Select", op::kind::Select)
+            .value("Sigmoid", op::kind::Sigmoid)
+            .value("SigmoidBackward", op::kind::SigmoidBackward)
+            .value("SoftMax", op::kind::SoftMax)
+            .value("SoftMaxBackward", op::kind::SoftMaxBackward)
+            .value("SoftPlus", op::kind::SoftPlus)
+            .value("SoftPlusBackward", op::kind::SoftPlusBackward)
+            .value("Sqrt", op::kind::Sqrt)
+            .value("SqrtBackward", op::kind::SqrtBackward)
+            .value("Square", op::kind::Square)
+            .value("SquaredDifference", op::kind::SquaredDifference)
+            .value("StaticReshape", op::kind::StaticReshape)
+            .value("StaticTranspose", op::kind::StaticTranspose)
+            .value("Subtract", op::kind::Subtract)
+            .value("Tanh", op::kind::Tanh)
+            .value("TanhBackward", op::kind::TanhBackward)
+            .value("TypeCast", op::kind::TypeCast)
+            .value("Wildcard", op::kind::Wildcard)
+            .export_values();
 
-  pybind11::enum_<op::attr>(opr, "attr")
-      .value("undef", op::attr::undef)
-      .value("alpha", op::attr::alpha)
-      .value("beta", op::attr::beta)
-      .value("epsilon", op::attr::epsilon)
-      .value("max", op::attr::max)
-      .value("min", op::attr::min)
-      .value("momentum", op::attr::momentum)
-      .value("scales", op::attr::scales)
-      .value("axis", op::attr::axis)
-      .value("begin_norm_axis", op::attr::begin_norm_axis)
-      .value("groups", op::attr::groups)
-      .value("axes", op::attr::axes)
-      .value("dilations", op::attr::dilations)
-      .value("filter_shape", op::attr::filter_shape)
-      .value("input_shape", op::attr::input_shape)
-      .value("kernel", op::attr::kernel)
-      .value("order", op::attr::order)
-      .value("output_padding", op::attr::output_padding)
-      .value("output_shape", op::attr::output_shape)
-      .value("pads_begin", op::attr::pads_begin)
-      .value("pads_end", op::attr::pads_end)
-      .value("shape", op::attr::shape)
-      .value("sizes", op::attr::sizes)
-      .value("strides", op::attr::strides)
-      .value("zps", op::attr::zps)
-      .value("exclude_pad", op::attr::exclude_pad)
-      .value("keep_dims", op::attr::keep_dims)
-      .value("keep_stats", op::attr::keep_stats)
-      .value("per_channel_broadcast", op::attr::per_channel_broadcast)
-      .value("special_zero", op::attr::special_zero)
-      .value("transpose_a", op::attr::transpose_a)
-      .value("transpose_b", op::attr::transpose_b)
-      .value("use_affine", op::attr::use_affine)
-      .value("use_dst", op::attr::use_dst)
-      .value("auto_broadcast", op::attr::auto_broadcast)
-      .value("auto_pad", op::attr::auto_pad)
-      .value(
-          "coordinate_transformation_mode",
-          op::attr::coordinate_transformation_mode)
-      .value("data_format", op::attr::data_format)
-      .value("filter_format", op::attr::filter_format)
-      .value("mode", op::attr::mode)
-      .value("qtype", op::attr::qtype)
-      .value("rounding_type", op::attr::rounding_type)
-      .export_values();
+    pybind11::enum_<op::attr>(opr, "attr")
+            .value("undef", op::attr::undef)
+            .value("alpha", op::attr::alpha)
+            .value("beta", op::attr::beta)
+            .value("epsilon", op::attr::epsilon)
+            .value("max", op::attr::max)
+            .value("min", op::attr::min)
+            .value("momentum", op::attr::momentum)
+            .value("scales", op::attr::scales)
+            .value("axis", op::attr::axis)
+            .value("begin_norm_axis", op::attr::begin_norm_axis)
+            .value("groups", op::attr::groups)
+            .value("axes", op::attr::axes)
+            .value("dilations", op::attr::dilations)
+            .value("dst_shape", op::attr::dst_shape)
+            .value("kernel", op::attr::kernel)
+            .value("order", op::attr::order)
+            .value("output_padding", op::attr::output_padding)
+            .value("pads_begin", op::attr::pads_begin)
+            .value("pads_end", op::attr::pads_end)
+            .value("shape", op::attr::shape)
+            .value("sizes", op::attr::sizes)
+            .value("src_shape", op::attr::src_shape)
+            .value("strides", op::attr::strides)
+            .value("weights_shape", op::attr::weights_shape)
+            .value("zps", op::attr::zps)
+            .value("exclude_pad", op::attr::exclude_pad)
+            .value("keep_dims", op::attr::keep_dims)
+            .value("keep_stats", op::attr::keep_stats)
+            .value("per_channel_broadcast", op::attr::per_channel_broadcast)
+            .value("special_zero", op::attr::special_zero)
+            .value("transpose_a", op::attr::transpose_a)
+            .value("transpose_b", op::attr::transpose_b)
+            .value("use_affine", op::attr::use_affine)
+            .value("use_dst", op::attr::use_dst)
+            .value("auto_broadcast", op::attr::auto_broadcast)
+            .value("auto_pad", op::attr::auto_pad)
+            .value("coordinate_transformation_mode",
+                    op::attr::coordinate_transformation_mode)
+            .value("data_format", op::attr::data_format)
+            .value("mode", op::attr::mode)
+            .value("qtype", op::attr::qtype)
+            .value("rounding_type", op::attr::rounding_type)
+            .value("weights_format", op::attr::weights_format)
+            .export_values();
 }
 
-void bind_partition(pybind11::module& m) {
-  pybind11::class_<partition> p(m, "partition");
+void bind_partition(pybind11::module &m) {
+    pybind11::class_<partition> p(m, "partition");
 
-  p.def(pybind11::init<>())
-      .def("get_ops_num", &partition::get_ops_num)
-      .def("get_ops", &partition::get_ops)
-      .def("get_id", &partition::get_id)
-      .def("is_supported", &partition::is_supported)
-      .def("get_in_ports", &partition::get_in_ports)
-      .def("get_out_ports", &partition::get_out_ports)
-      .def("get_engine_kind", &partition::get_engine_kind)
-      .def(
-          "compile",
-          [](partition& self,
-             std::vector<logical_tensor>& inputs,
-             std::vector<logical_tensor>& outputs,
-             engine& e) { return self.compile(inputs, outputs, e); },
-          pybind11::arg("inputs"),
-          pybind11::arg("outputs"),
-          pybind11::arg("engine"));
+    p.def(pybind11::init<>())
+            .def("get_ops_num", &partition::get_ops_num)
+            .def("get_ops", &partition::get_ops)
+            .def("get_id", &partition::get_id)
+            .def("is_supported", &partition::is_supported)
+            .def("get_input_ports", &partition::get_input_ports)
+            .def("get_output_ports", &partition::get_output_ports)
+            .def("get_engine_kind", &partition::get_engine_kind)
+            .def("compile", &partition::compile);
 
-  pybind11::enum_<partition::policy>(p, "policy")
-      .value("fusion", partition::policy::fusion)
-      .value("debug", partition::policy::debug)
-      .export_values();
+    pybind11::enum_<partition::policy>(p, "policy")
+            .value("fusion", partition::policy::fusion)
+            .value("debug", partition::policy::debug)
+            .export_values();
 }
 
 void bind_stream(pybind11::module& m) {
@@ -416,37 +406,38 @@ void bind_stream(pybind11::module& m) {
 }
 
 static size_t size_of(logical_tensor::data_type dtype) {
-  switch (dtype) {
-    case logical_tensor::data_type::f32:
-    case logical_tensor::data_type::s32:
-      return 4U;
-    case logical_tensor::data_type::s8:
-    case logical_tensor::data_type::u8:
-      return 1U;
-    case logical_tensor::data_type::f16:
-    case logical_tensor::data_type::bf16:
-      return 2U;
-    default:
-      return 0;
-  }
+    switch (dtype) {
+        case logical_tensor::data_type::f32:
+        case logical_tensor::data_type::s32: return 4U;
+        case logical_tensor::data_type::boolean:
+        case logical_tensor::data_type::s8:
+        case logical_tensor::data_type::u8: return 1U;
+        case logical_tensor::data_type::f16:
+        case logical_tensor::data_type::bf16: return 2U;
+        default: return 0;
+    }
 }
 
 static std::string format_string(logical_tensor::data_type dtype) {
-  switch (dtype) {
-    case logical_tensor::data_type::f32:
-    case logical_tensor::data_type::f16:
-    case logical_tensor::data_type::bf16:
-      return pybind11::format_descriptor<float>::format();
-      break;
-    case logical_tensor::data_type::u8:
-      return pybind11::format_descriptor<uint8_t>::format();
-      break;
-    case logical_tensor::data_type::s8:
-      return pybind11::format_descriptor<int8_t>::format();
-      break;
-    default:
-      throw std::runtime_error("Not supported data type in current example.");
-  }
+    switch (dtype) {
+        case logical_tensor::data_type::f32:
+        case logical_tensor::data_type::f16:
+        case logical_tensor::data_type::bf16:
+            return pybind11::format_descriptor<float>::format();
+            break;
+        case logical_tensor::data_type::u8:
+            return pybind11::format_descriptor<uint8_t>::format();
+            break;
+        case logical_tensor::data_type::s8:
+            return pybind11::format_descriptor<int8_t>::format();
+            break;
+        case logical_tensor::data_type::boolean:
+            return pybind11::format_descriptor<bool>::format();
+            break;
+        default:
+            throw std::runtime_error(
+                    "Not supported data type in current example.");
+    }
 }
 
 pybind11::buffer_info to_buffer_info(tensor& t, logical_tensor& lt) {
@@ -503,20 +494,20 @@ void bind_tensor(pybind11::module& m) {
           pybind11::arg("lt"));
 }
 
-void bind_status(pybind11::module& m) {
-  pybind11::enum_<dnnl::graph::status>(m, "status")
-      .value("success", dnnl::graph::status::success)
-      .value("out_of_memory", dnnl::graph::status::out_of_memory)
-      .value("invalid_arguments", dnnl::graph::status::invalid_arguments)
-      .value("unimplemented", dnnl::graph::status::unimplemented)
-      .value("iterator_ends", dnnl::graph::status::interator_ends)
-      .value("runtime_error", dnnl::graph::status::runtime_error)
-      .value("not_required", dnnl::graph::status::not_required)
-      .value("invalid_graph", dnnl::graph::status::invalid_graph)
-      .value("invalid_graph_op", dnnl::graph::status::invalid_graph_op)
-      .value("invalid_shape", dnnl::graph::status::invalid_shape)
-      .value("invalid_data_type", dnnl::graph::status::invalid_data_type)
-      .export_values();
+void bind_status(pybind11::module &m) {
+    pybind11::enum_<dnnl::graph::status>(m, "status")
+            .value("success", dnnl::graph::status::success)
+            .value("out_of_memory", dnnl::graph::status::out_of_memory)
+            .value("invalid_arguments", dnnl::graph::status::invalid_arguments)
+            .value("unimplemented", dnnl::graph::status::unimplemented)
+            .value("last_impl_reached", dnnl::graph::status::last_impl_reached)
+            .value("runtime_error", dnnl::graph::status::runtime_error)
+            .value("not_required", dnnl::graph::status::not_required)
+            .value("invalid_graph", dnnl::graph::status::invalid_graph)
+            .value("invalid_graph_op", dnnl::graph::status::invalid_graph_op)
+            .value("invalid_shape", dnnl::graph::status::invalid_shape)
+            .value("invalid_data_type", dnnl::graph::status::invalid_data_type)
+            .export_values();
 }
 
 void initOnednnPythonBindings(PyObject* module) {

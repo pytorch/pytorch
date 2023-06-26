@@ -582,7 +582,7 @@ def fuse_graph(gm: GraphModule, onednn_graph: OnednnGraph) -> GraphModule:
                 [n.name for n in current_partition_nodes]
             )
 
-            out_descs = current_partition.get_out_ports()
+            out_descs = current_partition.get_output_ports()
             if len(out_descs) == 1:
                 onednn_graph.register_node_by_desc(node, out_descs[0])
             else:
@@ -1097,7 +1097,7 @@ def _onednn_convolution(onednn_graph, node_name, in_descs, out_descs, kwargs):
                 llga.op.output_padding: in_descs[7],
                 llga.op.groups: in_descs[8],
                 llga.op.data_format: "NCX",
-                llga.op.filter_format: "IOX",
+                llga.op.weights_format: "IOX",
             },
         )
     else:
@@ -1113,7 +1113,7 @@ def _onednn_convolution(onednn_graph, node_name, in_descs, out_descs, kwargs):
                 llga.op.dilations: in_descs[5],
                 llga.op.groups: in_descs[8],
                 llga.op.data_format: "NCX",
-                llga.op.filter_format: "OIX",
+                llga.op.weights_format: "OIX",
             },
         )
 
