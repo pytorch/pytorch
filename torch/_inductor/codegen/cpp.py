@@ -1507,7 +1507,7 @@ class CppVecKernel(CppKernel):
                         store_lines = [
                             DeferredLine(
                                 name,
-                                f"auto {_16bit_tmpvar_vec} = cvt_fp32_to_16bit({tmpvar_vec});",
+                                f"auto {_16bit_tmpvar_vec} = cvt_fp32_to_16bit<{DTYPE_TO_CPP[out_dtype]}>({tmpvar_vec});",
                             ),
                             DeferredLine(
                                 name,

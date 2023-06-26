@@ -45,6 +45,10 @@ except unittest.SkipTest:
 
 
 vec_dtypes = test_torchinductor.vec_dtypes
+_16bit_dtypes = (
+    torch.bfloat16,
+    torch.float16,
+)
 run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
@@ -407,27 +411,30 @@ class CPUReproTests(TestCase):
         )
 
     @patch("torch.cuda.is_available", lambda: False)
-    def test_max_reduction_bfloat16(self):
+    def test_max_reduction_16bit(self):
         def fn(x):
             return torch.ops.aten.max(x, 1, keepdim=True)[0].float()
 
-        self.common(
-            fn,
-            (torch.randn(1, 32, 4, 4).bfloat16(),),
-        )
+        for dtype in _16bit_dtypes:
+            self.common(
+                fn,
+                (torch.randn(1, 32, 4, 4).to(dtype),),
+            )
 
     @patch("torch.cuda.is_available", lambda: False)
-    def test_vec_transpose_bf16(self):
-        def fn(x):
-            return x.to(memory_format=torch.channels_last).bfloat16()
+    def test_vec_transpose_16bit(self):
+        for dtype in _16bit_dtypes:
 
-        self.common(
-            fn,
-            (torch.randn(2, 3, 4, 4),),
-        )
+            def fn(x):
+                return x.to(memory_format=torch.channels_last).to(dtype)
+
+            self.common(
+                fn,
+                (torch.randn(2, 3, 4, 4),),
+            )
 
     @patch("torch.cuda.is_available", lambda: False)
-    def test_fp32_load_with_to_bf16(self):
+    def test_fp32_load_with_to_16bit(self):
         # From llama model.
         class Model(torch.nn.Module):
             def __init__(self):
@@ -440,11 +447,12 @@ class CPUReproTests(TestCase):
                 self.cache_k[:bsz, 1 : 1 + seqlen] = xk
                 return self.cache_k
 
-        ref_model = Model().eval()
-        opt_model = torch.compile()(Model().eval())
-        x = torch.randn(4, 2, 2).bfloat16()
-        xk = torch.randn(4, 2, 2, 2).bfloat16()
-        self.assertEqual(opt_model(x, xk), ref_model(x, xk))
+        for dtype in _16bit_dtypes:
+            ref_model = Model().eval()
+            opt_model = torch.compile()(Model().eval())
+            x = torch.randn(4, 2, 2).to(dtype)
+            xk = torch.randn(4, 2, 2, 2).to(dtype)
+            self.assertEqual(opt_model(x, xk), ref_model(x, xk))
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -819,47 +827,48 @@ class CPUReproTests(TestCase):
             set(cpp_op_list).issubset(union), f"unexpected: {set(cpp_op_list) - union}"
         )
 
-    def test_atomic_add_bf16(self):
+    def test_atomic_add_16bit(self):
         def fn(test_args):
             res = torch.gather(**test_args)
             return res
 
-        input_tensor_for_ref = torch.tensor(
-            [[3.0, -5.0]], dtype=torch.bfloat16, requires_grad=True
-        )
-        input_tensor_for_opt = torch.tensor(
-            [[3.0, -5.0]], dtype=torch.bfloat16, requires_grad=True
-        )
+        for dtype in _16bit_dtypes:
+            input_tensor_for_ref = torch.tensor(
+                [[3.0, -5.0]], dtype=dtype, requires_grad=True
+            )
+            input_tensor_for_opt = torch.tensor(
+                [[3.0, -5.0]], dtype=dtype, requires_grad=True
+            )
 
-        test_args_for_ref = {
-            "input": input_tensor_for_ref,
-            "dim": 1,
-            "index": torch.tensor([[1]]),
-        }
-        test_args_for_opt = {
-            "input": input_tensor_for_opt,
-            "dim": 1,
-            "index": torch.tensor([[1]]),
-        }
+            test_args_for_ref = {
+                "input": input_tensor_for_ref,
+                "dim": 1,
+                "index": torch.tensor([[1]]),
+            }
+            test_args_for_opt = {
+                "input": input_tensor_for_opt,
+                "dim": 1,
+                "index": torch.tensor([[1]]),
+            }
 
-        opt_fn = torch.compile(fn)
+            opt_fn = torch.compile(fn)
 
-        ref_fwd = fn(test_args_for_ref)
-        res_fwd = opt_fn(test_args_for_opt)
-        self.assertEqual(res_fwd, ref_fwd)
+            ref_fwd = fn(test_args_for_ref)
+            res_fwd = opt_fn(test_args_for_opt)
+            self.assertEqual(res_fwd, ref_fwd)
 
-        torch.manual_seed(1)
-        bwd_tensor_for_ref = torch.randn(ref_fwd.shape, dtype=torch.bfloat16)
-        torch.manual_seed(1)
-        bwd_tensor_for_opt = torch.randn(res_fwd.shape, dtype=torch.bfloat16)
-        self.assertEqual(bwd_tensor_for_ref, bwd_tensor_for_opt)
+            torch.manual_seed(1)
+            bwd_tensor_for_ref = torch.randn(ref_fwd.shape, dtype=dtype)
+            torch.manual_seed(1)
+            bwd_tensor_for_opt = torch.randn(res_fwd.shape, dtype=dtype)
+            self.assertEqual(bwd_tensor_for_ref, bwd_tensor_for_opt)
 
-        ref_fwd.backward(bwd_tensor_for_ref)
-        res_fwd.backward(bwd_tensor_for_opt)
+            ref_fwd.backward(bwd_tensor_for_ref)
+            res_fwd.backward(bwd_tensor_for_opt)
 
-        ref_grad = test_args_for_ref["input"].grad
-        res_grad = test_args_for_opt["input"].grad
-        self.assertEqual(ref_grad, res_grad)
+            ref_grad = test_args_for_ref["input"].grad
+            res_grad = test_args_for_opt["input"].grad
+            self.assertEqual(ref_grad, res_grad)
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1061,24 +1070,25 @@ class CPUReproTests(TestCase):
 
             self.assertEqual(model(x), model_f(x))
 
-    def test_redundant_to_node_elimination_bf16(self):
+    def test_redundant_to_node_elimination_16bit(self):
         def fn(x, y):
             res = x + y
             res = torch.mean(res)
             return res
 
-        x = torch.randn((2, 9), dtype=torch.bfloat16)
-        y = torch.randn((2, 9), dtype=torch.bfloat16)
+        for dtype in _16bit_dtypes:
+            x = torch.randn((2, 9), dtype=dtype)
+            y = torch.randn((2, 9), dtype=dtype)
 
-        for torch_compile_debug in [True, False]:
-            with config.patch(
-                {"trace.enabled": torch_compile_debug, "cpp.simdlen": None}
-            ):
-                torch._dynamo.reset()
-                metrics.reset()
-                self.common(fn, (x, y))
-                if codecache.valid_vec_isa_list():
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+            for torch_compile_debug in [True, False]:
+                with config.patch(
+                    {"trace.enabled": torch_compile_debug, "cpp.simdlen": None}
+                ):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    self.common(fn, (x, y))
+                    if codecache.valid_vec_isa_list():
+                        assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_do_not_insert_to_dtype_for_memory_copy_only_kernel(self):
         def fn(x):
@@ -1650,16 +1660,17 @@ class CPUReproTests(TestCase):
             self.assertEqual(metrics.generated_kernel_count, 1)
             self.assertTrue(same(fn(a, b, c, idx), opt_fn(a, b, c, idx)))
 
-    def test_bf16_neg_abs(self):
+    def test_16bit_neg_abs(self):
         def fn(x):
             return x.neg().abs()
 
-        metrics.reset()
-        x = torch.randn(100, 100).bfloat16()
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
-        self.assertTrue(same(fn(x), opt_fn(x)))
-        assert metrics.cpp_to_dtype_count == 0
-        assert metrics.generated_cpp_vec_kernel_count == 1
+        for dtype in _16bit_dtypes:
+            metrics.reset()
+            x = torch.randn(100, 100).to(dtype)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            self.assertTrue(same(fn(x), opt_fn(x)))
+            assert metrics.cpp_to_dtype_count == 0
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     def test_transpose_non_contiguous(self):
         def fn(a):
@@ -1805,12 +1816,13 @@ class CPUReproTests(TestCase):
         x = torch.rand(16)
         self.common(f, (x,))
 
-    def test_to_channels_last_bfloat16(self):
+    def test_to_channels_last_16bit(self):
         def f(a):
             return a.to(memory_format=torch.channels_last)
 
-        x = torch.rand(2, 3, 14, 14).bfloat16()
-        self.common(f, (x,))
+        for dtype in _16bit_dtypes:
+            x = torch.rand(2, 3, 14, 14).to(dtype)
+            self.common(f, (x,))
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
