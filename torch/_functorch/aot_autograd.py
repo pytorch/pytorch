@@ -563,7 +563,6 @@ class ViewAndMutationMeta:
                 self.num_intermediate_bases == other.num_intermediate_bases and
                 self.keep_input_mutations == other.keep_input_mutations and
                 self.is_rng_op_functionalized == other.is_rng_op_functionalized and
-                self.is_assertion_op_functionalized == other.is_assertion_op_functionalized and
                 self.num_outputs_rng_offset == other.num_outputs_rng_offset and
                 self.num_outputs_dep_token == other.num_outputs_dep_token and
                 len(self.traced_tangents) == len(other.traced_tangents) and
@@ -1378,7 +1377,7 @@ def create_functionalized_graph(
         # Setup the wrapper for functionalization of assertion ops.
         # NOTE: This needs to run after setting up rng ops functionalization
         # wrapper to satisfy calling convention specified in
-        # _runtime_functionalization_epilogue`.
+        # `_runtime_functionalization_epilogue`.
         helper = FunctionalAssertionsHelper.create_compile_tracing_wrapper(helper)
 
     with enable_python_dispatcher():
