@@ -486,7 +486,7 @@ class TORCH_API ThreadedRecurrentNetworkExecutor : public RecurrentNetworkExecut
       : RecurrentNetworkExecutorBase(step_net_def, recurrent_input_map, timestep_blob),
         failed_(false) {}
 
-  ~ThreadedRecurrentNetworkExecutor() {
+  ~ThreadedRecurrentNetworkExecutor() override {
     task_queue_.NoMoreJobs();
     VLOG(1) << "Joining workers.";
     for (auto& worker : workers_) {
