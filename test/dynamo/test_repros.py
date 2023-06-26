@@ -33,6 +33,7 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
 from torch._dynamo.utils import ifdyn, ifdynstaticdefault, ifunspec
 from torch.nn import functional as F
+from torch.testing._internal.common_utils import disable_translation_validation_if_dynamic_shapes
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -967,6 +968,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, ifunspec(ifdyn(3, 1), 3))
         self.assertEqual(cnt.op_count, ifunspec(ifdyn(10, 11), 10))
 
+    @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):
         input1 = torch.randn([1, 4096, 1])
         input2 = torch.randn([12, 4096, 64])
