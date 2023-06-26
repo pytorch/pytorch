@@ -38,7 +38,6 @@ def normalize_gm(gm_str):
 
 
 def check_dynamic_shape_capture():
-    print(config.assume_static_by_default, config.automatic_dynamic_shapes)
     # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
     if config.assume_static_by_default and config.automatic_dynamic_shapes:
         return True
