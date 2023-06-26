@@ -7,7 +7,7 @@ import unittest
 import warnings
 
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from functorch.compile import min_cut_rematerialization_partition
 
@@ -436,17 +436,16 @@ def clone_preserve_strides(x):
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
-def copy_misaligned_inputs(new_inputs, check_inputs) -> None:
+def copy_misaligned_inputs(new_inputs, check_inputs: Sequence[int]) -> None:
     for i in check_inputs:
         if new_inputs[i].data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(new_inputs[i])
 
 
-def is_aligned(storage_offset, dtype):
-    return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
+def get_input_idxs_to_check(inputs, static_input_idxs) -> Sequence[int]:
+    def is_aligned(storage_offset, dtype):
+        return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
 
-
-def get_check_inputs(inputs, static_input_idxs):
     return [
         i
         for i in range(len(inputs))
@@ -459,7 +458,7 @@ def get_check_inputs(inputs, static_input_idxs):
     ]
 
 
-def align_inputs_from_check_set(model, inputs_to_check):
+def align_inputs_from_check_idxs(model, inputs_to_check: Sequence[int]):
     if len(inputs_to_check) == 0:
         return model
 
@@ -471,8 +470,8 @@ def align_inputs_from_check_set(model, inputs_to_check):
 
 
 def align_inputs(model, inputs, static_input_idxs=()):
-    inputs_to_check = get_check_inputs(inputs, static_input_idxs)
-    return align_inputs_from_check_set(model, inputs_to_check)
+    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
 @dynamo_utils.dynamo_timed
@@ -555,7 +554,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
-    check_input_idxs = get_check_inputs(inputs, static_input_idxs)
+    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
     copy_misaligned_inputs(inputs, check_input_idxs)
 
@@ -634,7 +633,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
             graph.replay()
             return static_outputs
 
-    return align_inputs_from_check_set(run, check_input_idxs)
+    return align_inputs_from_check_idxs(run, check_input_idxs)
 
 
 def count_tangents(fx_g: torch.fx.GraphModule):
