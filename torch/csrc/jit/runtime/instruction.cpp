@@ -5,7 +5,7 @@
 
 namespace torch {
 namespace jit {
-std::ostream& operator<<(std::ostream& out, OpCode op) {
+static std::ostream& operator<<(std::ostream& out, OpCode op) {
   switch (op) {
 #define OP_STRING(x, _) \
   case x:               \
@@ -27,7 +27,7 @@ char const* toString(OpCode op) {
   return nullptr;
 }
 
-const char* OpInfo(OpCode op) {
+static const char* OpInfo(OpCode op) {
   switch (op) {
 #define OP_INFO(x, info) \
   case x:                \

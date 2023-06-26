@@ -60,7 +60,7 @@ class InputAdapter:
     @_beartype.beartype
     def apply(
         self, *model_args, **model_kwargs
-    ) -> Sequence[Union[int, float, bool, "torch.Tensor", None]]:
+    ) -> Sequence[Union[int, float, bool, str, "torch.Tensor", None]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
@@ -113,7 +113,7 @@ class OutputAdapter:
     @_beartype.beartype
     def apply(
         self, model_outputs: Any
-    ) -> Sequence[Union["torch.Tensor", int, float, bool]]:
+    ) -> Sequence[Union["torch.Tensor", int, float, bool, str]]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Args:
@@ -325,7 +325,11 @@ class RemoveNonTensorInputStep:
         """
         assert not model_kwargs
         return (
-            tuple(arg for arg in model_args if not isinstance(arg, (int, float, bool))),
+            tuple(
+                arg
+                for arg in model_args
+                if not isinstance(arg, (int, float, bool, str))
+            ),
             {},
         )
 

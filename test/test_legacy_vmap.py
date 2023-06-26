@@ -575,13 +575,13 @@ class TestVmapAPI(TestCase):
             x = torch.randn(B0, 7, 11, 13)
             dim = 0
             index = torch.tensor([0, 4, 2])
-            values = torch.randn(B0, 3, 13)
+            values = torch.randn(B0, 3, 11, 13)
 
             self._assert_uses_vmap_fallback((torch.index_add, (0, None, None, 0)), (x, dim, index, values))
 
             result = vmap(torch.index_add, (0, None, None, 0))(x, dim, index, values)
             expected = torch.index_add(
-                x, dim + 1, index, values.view(B0, 3, 1, 13))
+                x, dim + 1, index, values.view(B0, 3, 11, 13))
             self.assertEqual(result, expected)
 
         run_test(batch_size=5)

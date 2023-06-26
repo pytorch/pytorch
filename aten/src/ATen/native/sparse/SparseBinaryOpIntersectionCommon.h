@@ -136,6 +136,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     const std::vector<int64_t> broadcasted_shape,
     const c10::optional<Tensor>& x_hash_opt_ = c10::nullopt,
     const c10::optional<Tensor>& y_hash_opt_ = c10::nullopt,
+    const bool accumulate_matches = true,
     const bool distributive_with_sum = true
 ) {
   // The common dtype check is relevant when op is done in-place.
@@ -403,7 +404,8 @@ void _sparse_binary_op_intersection_kernel_impl(
       probably_coalesced._values().to(binary_op_res_dtype),
       intersection_first_idx.to(nnz_arange.scalar_type()),
       intersection_count,
-      argsort_hash).to(res.scalar_type());
+      argsort_hash,
+      accumulate_matches).to(res.scalar_type());
   const auto res_sparse_dim = source.sparse_dim();
   const auto res_dense_dim = source.dense_dim();
   const auto& res_shape = broadcasted_shape;

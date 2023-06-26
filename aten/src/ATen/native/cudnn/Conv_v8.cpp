@@ -31,7 +31,6 @@ C10_DIAGNOSTIC_POP()
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <mutex>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -159,30 +158,29 @@ struct CacheKeyFused {
 
 template <typename T, typename KeyType>
 struct BenchmarkCache {
-std::mutex mutex;
 std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsHash<KeyType>, ParamsEqual<KeyType>> engine_cache;
 
-// TODO: is this thread safe if cache is updated? is pointer stale?
+// no mutexes here as caches are now thread local for v8, can also return a pointer
+// to the Execution Plan if we know it will not be invalidated by another thread
 cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
-  std::lock_guard<std::mutex> guard(mutex);
   auto it = engine_cache.find(key);
   if (it == engine_cache.end()) {
     return nullptr;
   }
-  // TODO: probably want ExecutionPlan copy constructor or better way to return
   return &(it->second);
 }
 
 void update(const KeyType& key, T& results) {
-  std::lock_guard<std::mutex> guard(mutex);
   engine_cache.erase(key);
   engine_cache.emplace(key, std::move(results));
 }
 
 };
 
-BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKey> benchmark_cache;
-BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fused;
+// @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to be thread safe across all engines
+// see Limitations in https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
+thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKey> benchmark_cache;
+thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFused> benchmark_cache_fused;
 
 } // namespace
 
@@ -387,7 +385,7 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
       break;
     } catch (c10::OutOfMemoryError &e) {
       max_workspace_size /= 2;
-      cudaGetLastError(); // clear CUDA error
+      (void)cudaGetLastError(); // clear CUDA error
       remove_invalid = true;
     }
   }
@@ -494,7 +492,7 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
@@ -508,7 +506,7 @@ void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFuse
       return;
     } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
@@ -529,7 +527,7 @@ bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& o
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -550,7 +548,7 @@ bool try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::str
       return true;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::OutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
     }
   }
   return false;
@@ -570,7 +568,7 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
       run_conv_plan(handle, x, y, w, *search);
       return;
     } catch(c10::OutOfMemoryError &e) {
-      cudaGetLastError(); // clear CUDA error
+      (void)cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {
@@ -597,7 +595,9 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
                                                                  deterministic, allow_tf32);
     // Replicate v7 behavior: clear cached blocks as benchmark incurs
     // significant memory consumptiont that is not needed after this step
-    c10::cuda::CUDACachingAllocator::emptyCache();
+    if (at::native::_cudnn_get_conv_benchmark_empty_cache()) {
+      c10::cuda::CUDACachingAllocator::emptyCache();
+    }
     try_plans(plans, key, handle, x, y, w);
   }
 }
@@ -615,7 +615,7 @@ void run_fused_conv(const Tensor& x, const Tensor& y, const Tensor& w, const Ten
       run_conv_plan_fused(handle, x, y, w, z, b, *search);
       return;
     } catch(c10::OutOfMemoryError &e) {
-      cudaGetLastError(); // clear CUDA error
+      (void)cudaGetLastError(); // clear CUDA error
     }
   }
   if (!benchmark) {

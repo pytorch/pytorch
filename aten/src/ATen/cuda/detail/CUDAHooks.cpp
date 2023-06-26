@@ -140,14 +140,14 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   cudaError_t err = cudaPointerGetAttributes(&attr, const_cast<void*>(data));
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear CUDA error
     return false;
   }
   AT_CUDA_CHECK(err);
 #else
   // HIP throws hipErrorUnknown here
   if (err != cudaSuccess) {
-    cudaGetLastError();
+    (void)cudaGetLastError(); // clear HIP error
     return false;
   }
 #endif
@@ -176,6 +176,8 @@ bool CUDAHooks::hasCuDNN() const {
 
 bool CUDAHooks::hasCuSOLVER() const {
 #if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
+  return true;
+#elif AT_ROCM_ENABLED() && defined(ROCM_VERSION) && ROCM_VERSION >= 50300
   return true;
 #else
   return false;

@@ -2,6 +2,7 @@
 from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
+import importlib
 
 import torch
 from torch import _VF
@@ -1733,7 +1734,7 @@ where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distr
 When the approximate argument is 'tanh', Gelu is estimated with
 
 .. math::
-    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
 
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
 """)
@@ -3163,8 +3164,14 @@ def binary_cross_entropy_with_logits(
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        pos_weight (Tensor, optional): a weight of positive examples.
-                Must be a vector with length equal to the number of classes.
+        pos_weight (Tensor, optional): a weight of positive examples to be broadcasted with target.
+            Must be a tensor with equal size along the class dimension to the number of classes.
+            Pay close attention to PyTorch's broadcasting semantics in order to achieve the desired
+            operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
+            size [B, C, H, W] will apply different pos_weights to each element of the batch or
+            [C, H, W] the same pos_weights across the batch. To apply the same positive weight
+            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            Default: ``None``
 
     Examples::
 
@@ -3777,6 +3784,15 @@ if upsample.__doc__:
     upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
+def _is_integer(x) -> bool:
+    r"""Type check the input number is an integer.
+    Will return True for int, SymInt and Tensors with integer elements.
+    """
+    if isinstance(x, (int, torch.SymInt)):
+        return True
+    return isinstance(x, Tensor) and not x.is_floating_point()
+
+
 @_overload  # noqa: F811
 def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
     pass
@@ -3906,8 +3922,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                     f"input with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
-
                 )
+            if not torch.jit.is_scripting():
+                if not all(_is_integer(x) for x in size):
+                    raise TypeError(
+                        "expected size to be one of int or Tuple[int] or Tuple[int, int] or "
+                        f"Tuple[int, int, int], but got size with types {[type(x) for x in size]}"
+                    )
             output_size = size
         else:
             output_size = [size for _ in range(dim)]
@@ -3991,6 +4012,15 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         assert align_corners is not None
         if antialias:
             return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
+        # Two levels are necessary to prevent TorchScript from touching
+        # are_deterministic_algorithms_enabled.
+        if not torch.jit.is_scripting():
+            if torch.are_deterministic_algorithms_enabled() and input.is_cuda:
+                # Use slow decomp whose backward will be in terms of index_put
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module('torch._decomp.decompositions').upsample_bilinear2d_vec(
+                    input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
