@@ -218,6 +218,15 @@ _scaled_dot_product_flash_attention_cpu(
     bool is_causal,
     bool return_debug_mask,
     c10::optional<double> scale) {
+  // Check validation
+  TORCH_CHECK(at::hasMKL());
+  TORCH_CHECK(query.scalar_type() == at::kFloat
+      || query.scalar_type() == at::kBFloat16);
+  TORCH_CHECK(query.stride(1) == query.size(-1));
+  TORCH_CHECK(query.dim() == 4);
+  TORCH_CHECK(dropout_p == 0.0);
+  TORCH_CHECK(!is_causal);
+
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
   // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
   // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
@@ -280,7 +289,7 @@ _scaled_dot_product_flash_attention_cpu(
   }
 
   output =
-      output.reshape({batchSize, qSize, num_head, headSize}).transpose(1, 2);
+      output.view({batchSize, qSize, num_head, headSize}).transpose(1, 2);
 
   return std::make_tuple(
       output,
