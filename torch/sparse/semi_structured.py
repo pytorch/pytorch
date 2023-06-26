@@ -18,6 +18,7 @@ _DTYPE_TO_SEMI_STRUCTURED_SPARSE_CONFIG = {
     torch.int8: _SEMI_STRUCTURED_SPARSE_CONFIG(10, 128),
 }
 
+_WARNING_SHOWN = False
 
 class SparseSemiStructuredTensor(torch.Tensor):
     """This class implementes semi-structured sparsity as a Tensor subclass.
@@ -111,15 +112,18 @@ class SparseSemiStructuredTensor(torch.Tensor):
             NotImplementedError: If ``mask=None``, as we currently do not support inferring a mask from the dense tensor.
             RuntimeError: If original_tensor is not a supported dtype, dim, shape, or device.
         """
-        warnings.warn(
-            (
-                "The PyTorch API of SparseSemiStructuredTensor is in prototype stage "
-                "and will change in the near future. Please open a Github issue "
-                "for features requests and see our documentation on the torch.sparse "
-                "module for further information about the project."
-            ),
-            UserWarning,
-        )
+        global _WARNING_SHOWN
+        if not _WARNING_SHOWN:
+            warnings.warn(
+                (
+                    "The PyTorch API of SparseSemiStructuredTensor is in prototype stage "
+                    "and will change in the near future. Please open a Github issue "
+                    "for features requests and see our documentation on the torch.sparse "
+                    "module for further information about the project."
+                ),
+                UserWarning,
+            )
+            _WARNING_SHOWN = True
 
         # if original tensor is passed in, we need to compress it and store the compressed representation.
         if original_tensor is not None:
