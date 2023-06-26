@@ -45,24 +45,24 @@ struct ParamsWrapper {
   T pod;
   static_assert(std::is_standard_layout_v<T>, "ParamsWrapper cannot wrap non-POD data");
 
-  ParamsWrapper() {
+  ParamsWrapper<T>() {
     memset(&(this->pod), 0, sizeof(T));
   }
 
-  ParamsWrapper(const ParamsWrapper<T> &other) {
+  ParamsWrapper<T>(const ParamsWrapper<T> &other) {
     memcpy(&(this->pod), &(other.pod), sizeof(T));
   }
 
-  ParamsWrapper(ParamsWrapper<T> &&other) {
+  ParamsWrapper<T>(ParamsWrapper<T> &&other) {
     memcpy(&(this->pod), &(other.pod), sizeof(T));
   }
 
-  ParamsWrapper& operator=(const ParamsWrapper<T> &other) {
+  ParamsWrapper<T>& operator=(const ParamsWrapper<T> &other) {
     memcpy(&(this->pod), &(other.pod), sizeof(T));
     return *this;
   }
 
-  ParamsWrapper& operator=(ParamsWrapper<T> &&other) {
+  ParamsWrapper<T>& operator=(ParamsWrapper<T> &&other) {
     memcpy(&(this->pod), &(other.pod), sizeof(T));
     return *this;
   }
