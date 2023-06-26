@@ -101,6 +101,25 @@ class SSGraph:
         self.build_graph(nodes)
         self.stream_scheduling()
 
+    def has_cycle(self):
+        visited = set()
+        path = set()
+
+        def visit(vertex):
+            if vertex in visited:
+                return False
+            visited.add(vertex)
+            path.add(vertex)
+            for neighbor in self.name_mapping[vertex.name].successors.values():
+                if neighbor in path or visit(neighbor):
+                    # add debug info
+                    print("Cycle detected: ", vertex.name, " -> ", neighbor.name)
+                    return True
+            path.remove(vertex)
+            return False
+
+        return any(visit(v) for v in self.ssnodes)
+
 
     def build_graph(self, nodes):
 
@@ -134,6 +153,12 @@ class SSGraph:
                 output_node.predecessors[ssnode.get_name()] = ssnode
                 ssnode.successors[output_node.get_name()] = output_node
             update_successor_predecessor(ssnode, ssnode.original_user_names)
+
+        if self.has_cycle():
+            raise RuntimeError("Cycle detected in building graph")
+        else:
+            print("No cycle detected in building graph")
+
         tmp_queue = []
         self.reverse_level[output_node] = 0
 
@@ -141,18 +166,18 @@ class SSGraph:
             # only append the node that has only one successor OUTPUT
             if len(predecessor.successors) == 1:
                 tmp_queue.append(predecessor)
-        # TODO: add a count to avoid infinite loop
-        count = 0
-        while len(tmp_queue) != 0:
+        finished = set()
+        finished.add(output_node)
+        # TODO(Yueming): what's the theorectical maximum iteration? (n-1)^n?
+        for i in range(len(self.ssnodes) ** 3):
+            if len(tmp_queue) == 0:
+                break
             cur_node = tmp_queue.pop(0)
-            count += 1
-            if count > len(self.ssnodes) * len(self.ssnodes) * len(self.ssnodes) * len(self.ssnodes) * len(self.ssnodes):
-                raise RuntimeError("Infinite loop in building graph")
             # if one of the successors is not assigned, then we cannot assign the level to cur_node
             for successor in cur_node.successors.values():
                 if successor not in self.reverse_level:
                     if successor not in tmp_queue:
-                        if len(cur_node.successors) == 1:
+                        if len(cur_node.successors) == 1 and successor not in tmp_queue:
                             tmp_queue.append(successor)
                         # Yueming TODO: This can be delayed.
                         tmp_queue.append(cur_node)
@@ -169,7 +194,11 @@ class SSGraph:
                         self.reverse_level[cur_node] = max_value + 1
                         self.reverse_level_predecessors[cur_node] = successor
                 for predecessor in cur_node.predecessors.values():
-                    tmp_queue.append(predecessor)
+                    if predecessor not in finished and predecessor not in tmp_queue:
+                        tmp_queue.append(predecessor)
+                finished.add(cur_node)
+        if len(tmp_queue) != 0:
+            raise RuntimeError("Error when processing the queue. The queue is not empty after the loop.")
         buf0_level = self.reverse_level[self.name_mapping['buf0']]
         log.info(f"buf0's level is {buf0_level}")
         for ssnode, level in self.reverse_level.items():
@@ -225,7 +254,6 @@ class SSGraph:
                     ssnode.cuda_event = True
 
     def stream_scheduling(self):
-        assert "buf0" in self.ssnodes[0].get_name()
         for i in range(self.stream_pool_size + 1):
             self.stream_pool.append(0)
         # Yueming TODO: do we need keep this fake 0?
