@@ -4936,7 +4936,7 @@ else:
     # FIXME: move to test distributions
     @skipIfMps
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.half)
     def test_multinomial(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
@@ -5300,7 +5300,7 @@ else:
         self._test_multinomial_empty(device, False, 2)
 
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
-    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16)
+    @dtypesIfCPU(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypes(torch.float, torch.double)
     def test_multinomial_cpu(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
