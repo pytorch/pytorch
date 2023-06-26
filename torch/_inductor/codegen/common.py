@@ -217,6 +217,8 @@ class ExprPrinter(Printer):
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
             return self._helper_sqrt(base)
+        elif exp == -0.5:
+            return "1/" + self._helper_sqrt(base)
         base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
@@ -226,6 +228,9 @@ class ExprPrinter(Printer):
             return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
             return "1"
+
+    def _print_Unequality(self, expr):
+        return " != ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -586,8 +591,9 @@ class KernelArgs:
 
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
-    The backends can inherit from this class and overload the "create_cse_var" Kernel to do that.
-    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py.
+    To do so, the backends can simply overload `Kernel.create_cse_var`
+    The "CSEVariable.update_on_args" method gives you a hook for annotations
+    See example of TritonCSEVariable in triton.py
     """
 
     def __init__(self, name):
@@ -672,7 +678,8 @@ class CSE:
         if isinstance(expr, CSEVariable):
             return expr
         cache_key = expr
-        if cache_key not in self.cache:
+        var = self.cache.get(cache_key, None)
+        if not var:
             var = self.newvar() if assignment else None
             self.cache[cache_key] = var
             if write:
@@ -686,7 +693,7 @@ class CSE:
                     line = f"{expr}{self.suffix}"
                 buffer.writeline(line)
 
-        return self.cache[cache_key]
+        return var
 
     def newvar(self) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"

@@ -1088,6 +1088,11 @@ namespace {
         AssertVectorized<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
         AssertVectorized<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
     }
+    TEST(ComplexTests, TestComplexConstructor) {
+        auto actual1 = vcomplex(1.0);
+        auto expected1 = vcomplex(Complex<float>(1.0));
+        AssertVectorized<vcomplex>(NAME_INFO(complex constructor), expected1, actual1).check();
+    }
     TYPED_TEST(QuantizationTests, Quantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;

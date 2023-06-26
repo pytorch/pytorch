@@ -615,7 +615,7 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, compute_logsumexp, dropout_p, is_causal, scale);
+          query_, key, value, compute_logsumexp, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::math:
@@ -682,12 +682,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
       if (dropout_mask.has_value()) {
-        // In order to validate the correctness of the fused kernels, we need to
-        // use the same dropout mask in order to compare the results.
-        TORCH_WARN_ONCE("Dropout mask should only be used for testing purposes.");
-        attn = attn.masked_fill(dropout_mask->logical_not(), 0.0);
+        auto attn_dropout_masked = attn.masked_fill(dropout_mask->logical_not(), 0.0);
         auto dropout_scaling = 1.0 / (1 - dropout_p);
-        return std::make_tuple(at::matmul(attn, value * dropout_scaling), attn);
+        return std::make_tuple(at::matmul(attn_dropout_masked, value * dropout_scaling), attn);
       } else {
         attn = at::dropout(attn, dropout_p, true);
       }

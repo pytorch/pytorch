@@ -108,6 +108,7 @@ static uint64_t _get_model_bytecode_version_zip(
 }
 
 uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size) {
+  TORCH_CHECK(data != nullptr, "Pointer to bytes is null.");
   TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");
   auto format = getFileFormat(data);
   switch (format) {

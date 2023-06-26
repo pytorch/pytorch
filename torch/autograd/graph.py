@@ -258,16 +258,17 @@ class save_on_cpu(saved_tensors_hooks):
         >>> # all intermediary tensors are released (deleted) after the call to backward
 
     """
-    def __init__(self, pin_memory=False):
+    def __init__(self, pin_memory=False, device_type="cuda"):
+        device_module = getattr(torch, device_type, torch.cuda)
+
         def pack_to_cpu(tensor):
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
-
             packed = torch.empty(
                 tensor.size(),
                 dtype=tensor.dtype,
                 layout=tensor.layout,
-                pin_memory=(torch.cuda.is_available() and not tensor.is_sparse))
+                pin_memory=(device_module.is_available() and not tensor.is_sparse))
             packed.copy_(tensor)
             return (tensor.device, packed)
 

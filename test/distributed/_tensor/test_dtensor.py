@@ -317,6 +317,20 @@ class DTensorTest(DTensorTestBase):
         sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
         self.assertEqual(sharded_tensor.device.type, self.device_type)
 
+    @with_comms
+    def test_dtensor_save_load(self):
+        import io
+
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+        local_tensor = torch.randn(3, 3)
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+        buffer = io.BytesIO()
+        torch.save(sharded_tensor, buffer)
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer)
+        self.assertEqual(sharded_tensor, reloaded_st)
+
 
 class DTensorMeshTest(DTensorTestBase):
     @property

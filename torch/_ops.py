@@ -190,33 +190,35 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-pyop_namespace = {}
+_global_higher_order_ops = {}
+_higher_order_ops = {}
 
 
 class HigherOrderOperator(OperatorBase):
-    def __init__(self, name, module=None):
+    # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
+    # (True) torch.ops.{name}
+    # (False) torch.ops.higher_order.{name}
+    #
+    # If you're creating a new HigherOrderOperator, please do not change the
+    # default. Adding operators to the global torch.ops namespace is a bad
+    # practice due to name collisions.
+    def __init__(self, name, *, _deprecated_global_ns=False):
         super().__init__()
         self._name = name
 
-        # Set __name__ and __module__ so that the HigherOrderOperator
-        # looks like a function. This is necessary for make_fx tracing
-        # to work correctly (because it stores the string name of an
-        # operator)
+        # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
-        if module is not None:
-            self.__module__ = module
+        if _deprecated_global_ns:
+            _global_higher_order_ops[name] = self
+            self._ns = None
         else:
-            # Get module from calling frame
-            frame = inspect.stack()[1]
-            mod = inspect.getmodule(frame[0])
-            assert mod is not None, "Can't infer module, please pass it in"
-            self.__module__ = mod.__name__
-
-        # TODO: excise this in a couple of days.
-        # HigherOrderOperator should not be registered to appear under torch.ops
-        pyop_namespace[name] = self
-
+            _higher_order_ops[name] = self
+            self._ns = "higher_order"
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
+    @property
+    def namespace(self):
+        return self._ns
 
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
@@ -257,17 +259,31 @@ class HigherOrderOperator(OperatorBase):
         return kernel(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        flat_args = _to_flat_tuple(args, kwargs)
-        if torch.overrides.has_torch_function(flat_args):
-            return torch.overrides.handle_torch_function(
-                self, flat_args, *args, **kwargs
+        # Dynamo already traces the body of HigherOrderOp beforehand when it
+        # so no need to trace into it.
+        import torch._dynamo
+        from torch._dynamo.eval_frame import disable
+
+        @disable
+        def wrapper():
+            flat_args = _to_flat_tuple(args, kwargs)
+            if torch.overrides.has_torch_function(flat_args):
+                return torch.overrides.handle_torch_function(
+                    self, flat_args, *args, **kwargs
+                )
+
+            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+            return self.dispatch(
+                dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
             )
 
-        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-        return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
+        return wrapper()
+
+    def __str__(self):
+        return f"{self.name()}"
 
     def name(self):
-        return self.name
+        return self._name
 
 
 def _to_flat_tuple(args, kwargs):
@@ -745,9 +761,12 @@ class _OpNamespace(types.ModuleType):
 
 
 class _PyOpNamespace(_OpNamespace):
-    def __init__(self):
-        super().__init__("torch.ops")
-        self.pyop_namespace = pyop_namespace
+    def __init__(self, name, ops):
+        super().__init__(name)
+        self._ops = ops
+
+    def __getattr__(self, name):
+        return self._ops[name]
 
 
 class _Ops(types.ModuleType):
@@ -756,13 +775,20 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
-        self.pyops = _PyOpNamespace()
+        self._global_higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops", _global_higher_order_ops
+        )
+        self._higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops.higher_order", _higher_order_ops
+        )
         self._dir = []
 
     def __getattr__(self, name):
-        # Check if the name is a pyop
-        if name in self.pyops.pyop_namespace:
-            return self.pyops.pyop_namespace[name]
+        # Check if the name is a HigherOrderOperator
+        if name in self._global_higher_order_op_namespace._ops:
+            return getattr(self._global_higher_order_op_namespace, name)
+        if name == "higher_order":
+            return self._higher_order_op_namespace
 
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)

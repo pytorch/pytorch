@@ -256,7 +256,7 @@ def _is_binary_build() -> bool:
 
 def _accepted_compilers_for_platform() -> List[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
-    return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc']
+    return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc', 'clang++', 'clang']
 
 
 def get_default_build_root() -> str:
@@ -302,7 +302,8 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
         results = re.findall(pattern, version_string)
         if len(results) != 1:
-            return False
+            # Clang is also a supported compiler on Linux
+            return version_string.startswith('clang version')
         compiler_path = os.path.realpath(results[0].strip())
         # On RHEL/CentOS c++ is a gcc compiler wrapper
         if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:

@@ -25,6 +25,9 @@
 #include <ATen/ops/_batch_norm_impl_index.h>
 #include <ATen/ops/_batch_norm_impl_index_backward_native.h>
 #include <ATen/ops/_batch_norm_impl_index_native.h>
+#include <ATen/ops/_native_batch_norm_legit_native.h>
+#include <ATen/ops/_native_batch_norm_legit_no_training.h>
+#include <ATen/ops/_native_batch_norm_legit_no_training_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/batch_norm.h>
 #include <ATen/ops/batch_norm_native.h>
@@ -383,7 +386,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   auto in_channel_stride = input.strides()[1];
   auto in_data = input.data_ptr<scalar_t>();
   auto grad_in_channel_stride = grad_input_mask[0] ? grad_input.strides()[1] : 0;
-  auto grad_in_data = grad_input_mask[0] ? grad_input.data_ptr<scalar_t>() : nullptr;
+  auto grad_in_data = grad_input_mask[0] ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   auto grad_out_channel_stride = grad_out_.strides()[1];
   auto grad_out_data = grad_out_.data_ptr<scalar_t>();
 

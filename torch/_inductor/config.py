@@ -27,10 +27,10 @@ size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
-# generate inplace computations
+# reuse a kernel input as the output
 inplace_buffers = True
 
-# allow reusing buffers for more efficient memory use
+# reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
 
 # codegen benchmark harness
@@ -51,6 +51,9 @@ split_cat_fx_passes = True
 # enable reordering pass
 reordering = True
 
+# inductor engine name
+dll_name = "inductor_engine.so"
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -68,6 +71,12 @@ autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
+)
+coordinate_descent_check_all_directions = (
+    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS") == "1"
+)
+coordinate_descent_search_radius = int(
+    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
 layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
@@ -119,6 +128,9 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
+
+# constant folding on the joint graph
+joint_graph_constant_folding = True
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
@@ -192,6 +204,16 @@ profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
 disable_cpp_codegen = is_fbcode()
+
+
+# Freezing will attempt to inline weights as constants in optimization
+# and run constant folding and other optimizations on them. After freezing, weights
+# can no longer be updated.
+freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
+
+# Make freezing invalidate the eager Parameters of nn modules, to avoid memory overhead
+# of potentially keeping multiple copies of weights.
+freezing_discard_parameters: bool = False
 
 
 # config specific to codegen/cpp.py
