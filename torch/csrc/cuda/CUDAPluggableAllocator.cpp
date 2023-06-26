@@ -3,7 +3,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <utility>
-
+#include <iostream>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 
 namespace torch {
@@ -144,7 +144,14 @@ void CUDAPluggableAllocator::raw_delete(void* ptr) {
     stream = metadata.stream;
     allocation_metadata_.erase(ptr);
   }
-  free_fn_(ptr, size, device_idx, stream);
+  std::cout<<"Calling free"<<std::endl;
+  int error = free_fn_(ptr, size, device_idx, stream);
+  if (error) {
+    // Error messages when a free fails are not displayed in `TORCH_CHECK`
+    // and the process just dies with SIGABRT
+    std::cerr<< "Memory free failed with error " << error << "\n";
+    TORCH_CHECK(false);
+  }
 }
 
 void CUDAPluggableAllocator::init(int device_count) {

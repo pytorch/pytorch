@@ -5770,6 +5770,158 @@ class TestBlockStateAbsorption(TestCase):
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
 
+class TestCUDAPluggableAllocator(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._template = """\
+import torch
+from setuptools import setup
+from torch.utils import cpp_extension
+
+custom_allocator_code = '''
+#include <sys/types.h>
+#include <cuda_runtime_api.h>
+#include <torch/extension.h>
+
+extern "C" {{
+int my_malloc(void** ptr, ssize_t size, int device, cudaStream_t stream) {{
+   {malloc}
+}}
+
+int my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {{
+   {free}
+}}
+}}
+
+// Needed for torch extension to work
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {{}}
+'''
+module = cpp_extension.load_inline(
+    name='{name}',
+    cpp_sources=custom_allocator_code,
+    build_directory='.',
+    with_cuda=True,
+)
+
+# Load the allocator
+new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+    '{name}.so', 'my_malloc', 'my_free')
+
+# Swap the current allocator
+torch.cuda.memory.change_current_allocator(new_alloc)
+# This will allocate memory in the device using the new allocator
+b = torch.zeros(10, device='cuda')
+del b
+b = torch.zeros(10, device='cuda')
+print('done')
+""" 
+
+    def test_pluggable_allocator_ok(self):
+        # Since we can't swap an already initialized allocator, we fork a new process for these tests
+        malloc = """
+   int err = cudaMalloc(ptr, size);
+   std::cout<<"custom alloc"<<std::endl;
+   return err;
+"""
+        free = """
+   std::cout<<"custom free"<<std::endl;
+   int err = cudaFree(ptr);
+   return err;
+"""
+        rc = subprocess.check_output(
+            [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="allocator")],
+            cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
+        expected_messages = [
+            'custom alloc',
+            'custom free',
+            'done',
+        ]
+        self.assertTrue(all(msg in rc for msg in expected_messages))
+ 
+    def test_pluggable_allocator_with_error_on_malloc(self):
+        # Since we can't swap an already initialized allocator, we fork a new process for these tests
+        malloc = """
+   std::cout<<"custom alloc"<<std::endl;
+   return 123;
+"""
+        free = """
+   std::cout<<"custom free"<<std::endl;
+   int err = cudaFree(ptr);
+   return err;
+"""
+        error = False
+        try:
+            rc = subprocess.check_output(
+                [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="error_malloc")],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
+        except subprocess.CalledProcessError as e:
+            expected_message = 'Memory allocation failed with error 123'
+            self.assertTrue(expected_message in e.output.decode('ascii'))
+            error = True
+        self.assertTrue(error)
+
+
+    def test_pluggable_allocator_with_error_on_free(self):
+        # Since we can't swap an already initialized allocator, we fork a new process for these tests
+        malloc = """
+   int err = cudaMalloc(ptr, size);
+   std::cout<<"custom alloc"<<std::endl;
+   return err;
+"""
+        free = """
+   std::cout<<"custom free returning error"<<std::endl;
+   return 123;
+"""
+        error = False
+        try:
+            rc = subprocess.check_output(
+                [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="error_free")],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
+        except subprocess.CalledProcessError as e:
+            expected_message = 'Memory free failed with error 123'
+            self.assertTrue(expected_message in e.output.decode('ascii'))
+            error = True
+        self.assertTrue(error)
+
+    def test_pluggable_allocator_with_error_initialized(self):
+        from torch.utils.cpp_extension import load_inline
+        custom_allocator_code = """
+#include <sys/types.h>
+#include <cuda_runtime_api.h>
+#include <torch/extension.h>
+
+extern "C" {
+int my_malloc(void** ptr, ssize_t size, int device, cudaStream_t stream) {
+   return cudaMalloc(ptr, size);
+}
+
+int my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
+   return cudaFree(ptr);
+}
+}
+
+// Needed for torch extension to work
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
+"""
+        a = torch.zeros(10, device='cuda')
+        module = load_inline(
+            name='allocator',
+            cpp_sources=custom_allocator_code,
+            build_directory='.',
+            with_cuda=True,
+        )
+        
+        # Load the allocator
+        new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+            'allocator.so', 'my_malloc', 'my_free')
+        
+        # Swap the current allocator
+        with self.assertRaisesRegex(RuntimeError, "swap an already initialized"):
+            torch.cuda.memory.change_current_allocator(new_alloc)
+
+
 instantiate_parametrized_tests(TestCuda)
 
 if __name__ == '__main__':
