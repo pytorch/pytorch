@@ -49,11 +49,9 @@ random = make_prim(
     "inductor_random(SymInt[] size, Tensor seed, str mode) -> Tensor",
     lambda size, seed, mode: getattr(torch, mode)(size, device=seed.device),
     doc="torch.rand()/torch.randn() using backend-specific RNG that can be fused",
-    tags=(torch.Tag.nondeterministic_seeded,),
 )
 randint = make_prim(
     "inductor_randint(SymInt low, SymInt high, SymInt[] size, Tensor seed) -> Tensor",
     lambda low, high, size, seed: torch.randint(low, high, size, device=seed.device),
     doc="torch.randint() using backend-specific RNG that can be fused",
-    tags=(torch.Tag.nondeterministic_seeded,),
 )
