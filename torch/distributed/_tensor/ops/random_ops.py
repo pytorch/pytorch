@@ -11,6 +11,7 @@ aten = torch.ops.aten
 random_ops = [
     aten.normal_.default,
     aten.uniform_.default,
+    aten.bernoulli_.float,
 ]
 
 

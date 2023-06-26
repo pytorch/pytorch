@@ -2,7 +2,7 @@
 from collections import OrderedDict
 
 import torch
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.api import (
     _parallelize_linear,
@@ -16,6 +16,9 @@ from torch.distributed.tensor.parallel.style import (
     PairwiseParallel,
     ParallelStyle,
     RowwiseParallel,
+    make_input_shard_1d_last_dim,
+    make_sharded_output_tensor,
+    make_output_tensor,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -281,6 +284,21 @@ class TensorParallelAPITests(DTensorTestBase):
         model_tp = _parallelize_linear(model_tp, device_mesh, colwise)
 
         self._compare_module(model, model_tp, inp_size)
+
+    @with_comms
+    def test_dropout(self):
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        size = [4, 1]
+        tensor = torch.ones(*size, device="cuda", requires_grad=True)
+        dropout = torch.nn.Dropout(p=0.2, inplace=True)
+
+        dropout_tp = parallelize_module(
+            dropout,
+            device_mesh,
+            PairwiseParallel(make_input_shard_1d_last_dim, make_sharded_output_tensor),
+        )
+
+        res = dropout_tp(tensor)
 
 
 if __name__ == "__main__":

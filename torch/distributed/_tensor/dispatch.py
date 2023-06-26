@@ -225,6 +225,7 @@ def _operator_dispatch(
             aten.native_dropout.default,
             aten.normal_.default,
             aten.uniform_.default,
+            aten.bernoulli_.float,
         ]
         # before running local op computation, check if op is random op
         # for random ops, set RNG offset

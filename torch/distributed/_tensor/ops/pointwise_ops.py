@@ -142,6 +142,7 @@ pointwise_ops = [
     aten.div.Tensor_mode,
     aten.div.out,
     aten.div.out_mode,
+    aten.div_.Scalar,
     aten.div_.Tensor,
     aten.div_.Tensor_mode,
     aten.eq.Tensor,
