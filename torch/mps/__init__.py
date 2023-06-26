@@ -1,5 +1,5 @@
 r"""
-This package enables an interface for accessing MPS backend in python
+This package enables an interface for accessing MPS (Metal Performance Shaders) backend in Python. MPS is an acceleration backend for MacOS that utilizes GPU for computations.
 """
 import torch
 from .. import Tensor
