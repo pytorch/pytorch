@@ -67,6 +67,9 @@ from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.compile_fx import (
+    align_inputs_from_check_set,
+    copy_misaligned_inputs,
+    get_check_inputs,
     get_expanded_dims,
     index_expanded_dims,
     remove_unaligned_input_idxs,
@@ -346,9 +349,6 @@ def get_manager(
 
 def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
     fn = None
-    # remove unaligned idxs on initial compilation before unaligned inputs have
-    # been copied out
-    static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
     del inputs
 
     def deferred_cudagraphify(inputs):
@@ -356,7 +356,15 @@ def cudagraphify_impl(model, inputs, static_input_idxs, *args, **kwargs):
         if fn is not None:
             return fn(inputs)
 
-        fn, out = cudagraphify(model, inputs, static_input_idxs, *args, **kwargs)
+        # first get indices we need to check to align, then update our static inputs,
+        # and finally copy
+        check_input_idxs = get_check_inputs(inputs, static_input_idxs)
+        new_static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
+        copy_misaligned_inputs(inputs, check_input_idxs)
+
+        fn, out = cudagraphify(model, inputs, new_static_input_idxs, *args, **kwargs)
+        fn = align_inputs_from_check_set(fn, inputs_to_check=check_input_idxs)
+
         return out
 
     return deferred_cudagraphify
