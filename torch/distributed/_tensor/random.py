@@ -12,7 +12,7 @@ from torch.distributed._tensor.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 
 
-_rng_tracker: Optional[CudaRNGStateTracker] = None
+_rng_tracker: Optional["CudaRNGStateTracker"] = None
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -130,9 +130,9 @@ class OffsetBasedRNGTracker(CudaRNGStateTracker):
     def __init__(self):
         super().__init__()
         # synchronize RNG state using rank 0's current one
-        rng_state = torch.cuda.get_rng_state()
+        rng_state = torch.cuda.get_rng_state().to("cuda")
         dist.broadcast(rng_state, 0)
-        self.rng_states["parallel-rng"] = rng_state
+        self.rng_states["parallel-rng"] = rng_state.to("cpu")
 
     def _manual_seed(self, parallel_seed: int) -> None:
         self.set_seed("parallel-rng", parallel_seed)

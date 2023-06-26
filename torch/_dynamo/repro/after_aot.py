@@ -377,7 +377,7 @@ def isolate_fails(
 def inductor_fails(fx_g, args, check_str=None):
     has_cuda = False
     for arg in args:
-        if arg.is_cuda:
+        if isinstance(arg, torch.Tensor) and arg.is_cuda:
             has_cuda = True
             break
 
