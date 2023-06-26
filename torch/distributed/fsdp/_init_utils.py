@@ -794,7 +794,9 @@ def _need_to_materialize_module(
     """
     managed_params = list(_get_orig_params(module, ignored_params))
     is_meta_module = any(param.is_meta for param in managed_params)
-    # TODO: We need to establish a contract for FSDP and buffers.
+    # TODO: We need to establish a contract for FSDP and buffers. For now, we
+    # skip checking for meta buffers from ignored modules. We should consider
+    # refactoring the initialization holistically to avoid so many traversals.
     for submodule in module.modules():
         if submodule in ignored_modules:
             continue
