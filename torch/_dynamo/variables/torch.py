@@ -894,7 +894,7 @@ def speculate_subgraph(
             # like bwd.
             if always_restore:
                 # Nothing left to do here
-                return output, tx.output.graph, tracer.lifted_freevars
+                return output, tx.output.graph, tracer.lifted_freevars, kwargs_name_map
             else:
                 if isinstance(output, (ListVariable, TupleVariable)):
                     if any(
