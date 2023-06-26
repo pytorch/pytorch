@@ -1,4 +1,3 @@
-
 import torch
 
 import torch._inductor.config as cfg
@@ -54,8 +53,8 @@ def semi_structured_sparse_compress_2by4(dense):
     bit1 = m3 & m2
     bit2 = m3 | ~m2
     bit3 = m3 | m2
-    idxs0 = bit0 | (bit1 << 1)
-    idxs1 = bit2 | (bit3 << 1)
+    idxs0 = bit0 | (bit1.to(torch.int64) << 1)
+    idxs1 = bit2 | (bit3.to(torch.int64) << 1)
 
     sparse0 = dense_4.gather(-1, idxs0.unsqueeze(-1))
     sparse1 = dense_4.gather(-1, idxs1.unsqueeze(-1))

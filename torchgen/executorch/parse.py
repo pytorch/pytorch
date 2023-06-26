@@ -34,11 +34,8 @@ def parse_from_yaml(ei: Dict[str, object]) -> Dict[ETKernelKey, BackendMetadata]
     if (kernels := e.pop("kernels", None)) is None:
         return {}
 
-    type_alias: Dict[str, List[str]] = e.pop("type_alias", None)  # type: ignore[assignment]
-    dim_order_alias: Dict[str, List[str]] = e.pop("dim_order_alias", None)  # type: ignore[assignment]
-    assert (
-        type_alias is not None and dim_order_alias is not None
-    ), "type_alias and dim_order_alias cannot be None: " + str(ei)
+    type_alias: Dict[str, List[str]] = e.pop("type_alias", {})  # type: ignore[assignment]
+    dim_order_alias: Dict[str, List[str]] = e.pop("dim_order_alias", {})  # type: ignore[assignment]
     dim_order_alias.pop("__line__", None)
 
     kernel_mapping: Dict[ETKernelKey, BackendMetadata] = {}
