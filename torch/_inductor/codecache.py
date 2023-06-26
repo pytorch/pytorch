@@ -654,11 +654,10 @@ def get_include_and_linking_paths(
                 ):
                     libs = ["iomp5"]
             elif os.getenv("HOMEBREW_PREFIX") is not None:
+                # Homebrew installs libomp keg-only, that's why it is found under opt/
                 lpaths.append(
                     os.path.join(os.getenv("HOMEBREW_PREFIX"), "opt/libomp/lib")
                 )
-                # TODO use brew ipath or ship omp.h?
-                # TODO x86 special case like above?
         else:
             libs = ["gomp"]
     ipaths = " ".join(["-I" + p for p in ipaths])
