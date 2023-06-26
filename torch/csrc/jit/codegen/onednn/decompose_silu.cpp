@@ -10,7 +10,7 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
-static bool shouldDecomposeSilu(Node* node) {
+bool shouldDecomposeSilu(Node* node) {
   if (node->kind() != aten::silu) {
     return false;
   }
@@ -26,7 +26,7 @@ static bool shouldDecomposeSilu(Node* node) {
   return false;
 }
 
-static void DecomposeSilu(Node* node) {
+void DecomposeSilu(Node* node) {
   if (shouldDecomposeSilu(node)) {
     auto dtype = node->input(0)->type()->expect<TensorType>();
 

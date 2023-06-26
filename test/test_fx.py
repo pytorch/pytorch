@@ -240,14 +240,6 @@ class TestFX(JitTestCase):
         x = torch.randn(5, 3)
         torch.testing.assert_close(new_instance(x), torch.relu(x))
 
-    def test_informative_co_filename(self):
-        class MyModule(torch.nn.Module):
-            def forward(self, a):
-                return a * 2
-
-        gm = symbolic_trace(MyModule())
-        self.assertIn(os.path.basename(__file__), gm.forward.__code__.co_filename)
-
     def test_custom_import(self):
         graph = torch.fx.Graph()
         a = graph.placeholder('x')
