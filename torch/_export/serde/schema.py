@@ -116,6 +116,12 @@ class TensorArgument:
     name: str
 
 
+@dataclass
+class GraphArgument:
+    name: str
+    graph: 'Graph'
+
+
 # This is actually a union type
 @dataclass
 class Argument(_Union):
@@ -137,6 +143,7 @@ class Argument(_Union):
     as_bools: List[bool]
     as_sym_bool: SymBoolArgument
     as_sym_bools: List[SymBoolArgument]
+    as_graph: GraphArgument
 
 
 @dataclass
@@ -204,7 +211,6 @@ class GraphModule:
     call_spec: CallSpec
 
 
-# TODO(angelayi) to add symbol to hint
 @dataclass
 class ExportedProgram:
     graph_module: GraphModule

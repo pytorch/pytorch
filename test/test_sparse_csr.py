@@ -933,7 +933,7 @@ class TestSparseCompressed(TestCase):
                 elif n_batchdim and dim >= n_batchdim and dim < n_batchdim + 2:
                     with self.assertRaisesRegex(
                             RuntimeError,
-                            "selecting sparse dimensions is not implemented for batched sparse compressed tensors"):
+                            "selecting sparse dimensions is not supported for batched sparse compressed tensors"):
                         torch.select_copy(sparse, dim, 0)
                 else:
                     for index in {0, sparse.shape[dim] // 2, sparse.shape[dim] - 1}:
@@ -1043,7 +1043,7 @@ class TestSparseCSR(TestCase):
             sparse[0, 0, 0, 0] = 99.0
 
         # select from sparse dimensions without removing batch dims
-        msg = "selecting sparse dimensions is not implemented for batched sparse compressed tensors."
+        msg = "selecting sparse dimensions is not supported for batched sparse compressed tensors."
         with self.assertRaisesRegex(RuntimeError, msg):
             sparse.select(-2, 0)
 
@@ -1368,7 +1368,8 @@ class TestSparseCSR(TestCase):
             t = self.genSparseCSRTensor((16, 16), nnz, dtype=dtype,
                                         device=device, index_dtype=index_dtype)
 
-            with self.assertRaisesRegex(RuntimeError, r"size \(16, 16\) with block size \(5, 5\)"):
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"tensor sparse size \(.*,.*\) must be divisible by given blocksize \(.*,.*\)"):
                 block_t = t.to_sparse_bsr((5, 5))
 
     # TODO: Support auto generation of device check for sparse tensors
@@ -3105,7 +3106,8 @@ class TestSparseCSR(TestCase):
                 # change of blocksize upon conversion is not yet supported.
                 if b.layout in block_layouts:
                     for block_layout in block_layouts:
-                        with self.assertRaisesRegex(RuntimeError, "conversion from.*to.*is not implemented"):
+                        with self.assertRaisesRegex(RuntimeError,
+                                                    "conversion from.*to.*with blocksize changed from.*to.*is not supported"):
                             b.to_sparse(layout=block_layout, blocksize=(3, 3))
 
         batch_dims = [(), (2,), (2, 2), (2, 2, 2)]

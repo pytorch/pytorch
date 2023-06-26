@@ -734,9 +734,9 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
     SymInt s1 = input1.sym_size(dims1[i]);
     SymInt s2 = input2.sym_size(dims2[i]);
     if (s2 == 1) { // broadcasted dimensions can be summed right away
-      t1 = t1.sum(dims1[i], true);
+      t1 = t1.sum(dims1[i], true, t1.scalar_type());
     } else if (s1 == 1) {
-      t2 = t2.sum(dims2[i], true);
+      t2 = t2.sum(dims2[i], true, t2.scalar_type());
     } else {
       TORCH_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
                " and second has size ", s2, " in dim ", dims2[i]);

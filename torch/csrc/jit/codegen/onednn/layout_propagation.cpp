@@ -7,7 +7,7 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
-static void LayoutPropagation(Node* n) {
+void LayoutPropagation(Node* n) {
   if (!LlgaGraphHelper::isLlgaSubgraph(n))
     return;
 
@@ -37,7 +37,7 @@ static void LayoutPropagation(Node* n) {
   }
 }
 
-static void LayoutPropagation(at::ArrayRef<Block*> blocks) {
+void LayoutPropagation(at::ArrayRef<Block*> blocks) {
   for (Block* block : blocks)
     for (Node* node : block->nodes())
       LayoutPropagation(node);
