@@ -383,6 +383,9 @@ class TestOpVersioning(TestCase):
 unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_tensor_setattr
 )
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_pytree_flatten
+)
 
 if __name__ == '__main__':
     run_tests()

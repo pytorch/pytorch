@@ -21,7 +21,7 @@ class FindOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_DISPATCH_HELPER;
 
-  bool RunOnDevice() override {
+  bool RunOnDevice() {
     return DispatchHelper<TensorTypes<int, long>>::call(this, Input(0));
   }
 

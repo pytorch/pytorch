@@ -1,9 +1,8 @@
 # Owner(s): ["module: optimizer", "module: LrScheduler" ]
-
+import types
 import warnings
 import math
 import pickle
-import weakref
 
 import torch
 import torch.optim as optim
@@ -1532,7 +1531,7 @@ class TestLRScheduler(TestCase):
     def test_cycle_lr_state_dict_picklable(self):
         adam_opt = optim.Adam(self.net.parameters())
         scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
-        self.assertIsInstance(scheduler._scale_fn_ref, weakref.WeakMethod)
+        self.assertIsInstance(scheduler._scale_fn_ref, types.FunctionType)
         state = scheduler.state_dict()
         self.assertNotIn("_scale_fn_ref", state)
         pickle.dumps(state)
