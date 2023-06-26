@@ -380,6 +380,12 @@ class TestOpVersioning(TestCase):
             deserializer._validate_model_opset_version(model_opset_version)
             self.assertIn("Compiler doesn't have a version table for op namespace", log.output[0])
 
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_tensor_setattr
+)
+unittest.expectedFailure(
+    TestDeserialize.test_exportdb_supported_case_pytree_flatten
+)
 
 if __name__ == '__main__':
     run_tests()

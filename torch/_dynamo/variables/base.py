@@ -194,6 +194,7 @@ class VariableTracker(metaclass=HasPostInit):
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         options = VariableTracker.propagate(self)
+
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError()

@@ -190,18 +190,35 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-pyop_namespace = {}
+_global_higher_order_ops = {}
+_higher_order_ops = {}
 
 
 class HigherOrderOperator(OperatorBase):
-    def __init__(self, name):
+    # _deprecated_global_ns: Whether or not the HigherOrderOperator appears as:
+    # (True) torch.ops.{name}
+    # (False) torch.ops.higher_order.{name}
+    #
+    # If you're creating a new HigherOrderOperator, please do not change the
+    # default. Adding operators to the global torch.ops namespace is a bad
+    # practice due to name collisions.
+    def __init__(self, name, *, _deprecated_global_ns=False):
         super().__init__()
         self._name = name
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
-        pyop_namespace[name] = self
+        if _deprecated_global_ns:
+            _global_higher_order_ops[name] = self
+            self._ns = None
+        else:
+            _higher_order_ops[name] = self
+            self._ns = "higher_order"
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
+    @property
+    def namespace(self):
+        return self._ns
 
     def fallthrough(self, dispatch_key):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
@@ -744,9 +761,12 @@ class _OpNamespace(types.ModuleType):
 
 
 class _PyOpNamespace(_OpNamespace):
-    def __init__(self):
-        super().__init__("torch.ops")
-        self.pyop_namespace = pyop_namespace
+    def __init__(self, name, ops):
+        super().__init__(name)
+        self._ops = ops
+
+    def __getattr__(self, name):
+        return self._ops[name]
 
 
 class _Ops(types.ModuleType):
@@ -755,13 +775,20 @@ class _Ops(types.ModuleType):
     def __init__(self):
         super().__init__("torch.ops")
         self.loaded_libraries = set()
-        self.pyops = _PyOpNamespace()
+        self._global_higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops", _global_higher_order_ops
+        )
+        self._higher_order_op_namespace = _PyOpNamespace(
+            "torch.ops.higher_order", _higher_order_ops
+        )
         self._dir = []
 
     def __getattr__(self, name):
-        # Check if the name is a pyop
-        if name in self.pyops.pyop_namespace:
-            return self.pyops.pyop_namespace[name]
+        # Check if the name is a HigherOrderOperator
+        if name in self._global_higher_order_op_namespace._ops:
+            return getattr(self._global_higher_order_op_namespace, name)
+        if name == "higher_order":
+            return self._higher_order_op_namespace
 
         # Here we are creating `torch.ops.my_namespace`
         namespace = _OpNamespace(name)
