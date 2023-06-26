@@ -14,6 +14,10 @@ import sys
 # we functionalize only CUDA rng ops today.
 functionalize_rng_ops = False
 
+# Converts aten assertion ops like `_assert_async` to their functional equivalents
+# (like `_functional_assert_async`).
+functionalize_assertion_ops = False
+
 # can be useful for debugging if we are incorrectly creating meta fake tensors
 fake_tensor_allow_meta = os.environ.get("FAKE_ALLOW_META", True)
 
