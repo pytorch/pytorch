@@ -11,7 +11,11 @@
 #define INT_T int32_t
 #endif
 #else
+#ifdef OPENBLAS_USE64BITINT
+#define INT_T int64_t
+#else
 #define INT_T int
+#endif
 #endif
 
 // Forward declare TI
@@ -25,7 +29,7 @@ enum class TransposeType;
 
 }
 
-namespace at { namespace native {
+namespace at::native {
 
 enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 
@@ -327,4 +331,4 @@ using ldl_solve_fn = void (*)(
     bool /*upper*/,
     bool /*hermitian*/);
 DECLARE_DISPATCH(ldl_solve_fn, ldl_solve_stub);
-}} // namespace at::native
+} // namespace at::native

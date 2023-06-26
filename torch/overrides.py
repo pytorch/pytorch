@@ -185,6 +185,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_max,
         torch.sym_min,
         torch.sym_not,
+        torch.sym_constrain_range,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,
@@ -225,10 +226,18 @@ def get_ignored_functions() -> Set[Callable]:
         torch.clear_autocast_cache,
         torch.set_autocast_cpu_enabled,
         torch.is_autocast_cpu_enabled,
+        torch.set_autocast_xla_enabled,
+        torch.is_autocast_xla_enabled,
+        torch.set_autocast_ipu_enabled,
+        torch.is_autocast_ipu_enabled,
         torch.set_autocast_cpu_dtype,
         torch.get_autocast_cpu_dtype,
+        torch.set_autocast_ipu_dtype,
+        torch.get_autocast_ipu_dtype,
         torch.get_autocast_gpu_dtype,
         torch.set_autocast_gpu_dtype,
+        torch.get_autocast_xla_dtype,
+        torch.set_autocast_xla_dtype,
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
         torch.is_autocast_cache_enabled,
@@ -251,6 +260,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.vmap,
         torch.frombuffer,
         torch.asarray,
+        torch._functional_sym_constrain_range,
+        torch._make_dep_token,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
@@ -286,6 +297,11 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.to_sparse_csc,
         Tensor.to_sparse_bsr,
         Tensor.to_sparse_bsc,
+        Tensor._to_sparse,
+        Tensor._to_sparse_csr,
+        Tensor._to_sparse_csc,
+        Tensor._to_sparse_bsr,
+        Tensor._to_sparse_bsc,
         Tensor._typed_storage,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
@@ -574,6 +590,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.frac: lambda input, out=None: -1,
         torch.frexp: lambda input, out=None: -1,
         torch.full_like: lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
+        torch._functional_assert_async: lambda input, msg, dep_token: -1,
         torch.lu_unpack: lambda LU_data, LU_pivots, unpack_data=True, unpack_pivots=True: -1,
         torch.gather: lambda input, dim, index, out=None, sparse_grad=False: -1,
         torch.gcd: lambda input, other, out=None: -1,
@@ -1205,6 +1222,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.dtype.__get__: lambda self: -1,
         Tensor.is_cuda.__get__: lambda self: -1,
         Tensor.is_cpu.__get__: lambda self: -1,
+        Tensor.is_xla.__get__: lambda self: -1,
         Tensor.is_xpu.__get__: lambda self: -1,
         Tensor.is_ipu.__get__: lambda self: -1,
         Tensor.is_leaf.__get__: lambda self: -1,
@@ -1331,6 +1349,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.slice_scatter: lambda self, src, dim=0, start=None, end=None, step=1: -1,
         Tensor.sparse_dim: lambda self: -1,
         Tensor.sparse_mask: lambda self, mask: -1,
+        Tensor._sparse_mask_projection: lambda self, mask: -1,
         Tensor.sparse_resize_: lambda self, size1, size2, dense_dim: -1,
         Tensor.sparse_resize_and_clear_: lambda self, size1, size2, dense_dim: -1,
         Tensor.sspaddmm: lambda self, mat1, mat2, beta=1, alpha=1, out=None: -1,
@@ -1876,12 +1895,20 @@ class BaseTorchFunctionMode(TorchFunctionMode):
         return func(*args, **kwargs)
 
 
-class enable_reentrant_dispatch():
-    def __enter__(self):
-        self._raii_guard = torch._C._RestorePythonTLSSnapshot()
-
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        del self._raii_guard
+@contextlib.contextmanager
+def enable_reentrant_dispatch():
+    # NB: this can't simply be
+    # `enable_reentrant_dispatch = torch._C._RestorePythonTLSSnapshot`
+    # because:
+    # 1. torch._C._RestorePythonTLSSnapshot is unavailable when this file
+    #    initially gets imported. Probably an import order thing.
+    # 2. enable_reentrant_dispatch is technically public API; assigning
+    #    it the object would change the __module__ to look private.
+    with torch._C._RestorePythonTLSSnapshot():
+        try:
+            yield
+        finally:
+            pass
 
 def get_buffer(tensor_subclass, data, prefix):
     import ctypes

@@ -158,7 +158,7 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
         int64_t len = end - begin;
         if (len > 0) {
           VSLStreamStatePtr stream;
-          if (std::is_same<scalar_t, double>::value) {
+          if constexpr (std::is_same<scalar_t, double>::value) {
             vslNewStream(&stream, VSL_BRNG_MCG31, seed);
             vslSkipAheadStream(stream, begin);
             vdRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,

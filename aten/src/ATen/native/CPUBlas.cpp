@@ -17,7 +17,11 @@
 #define INT_T int32_t
 #endif
 #else
+#ifdef OPENBLAS_USE64BITINT
+#define INT_T int64_t
+#else
 #define INT_T int
+#endif
 #endif
 
 #if AT_BUILD_WITH_BLAS()

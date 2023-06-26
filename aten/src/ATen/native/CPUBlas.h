@@ -7,9 +7,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
 
-namespace at {
-namespace native {
-namespace cpublas {
+namespace at::native::cpublas {
 
 namespace internal {
 void normalize_last_dims(
@@ -161,4 +159,4 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy);
 void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
 void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
-}}}  // namespace at::native::cpublas
+}  // namespace at::native::cpublas

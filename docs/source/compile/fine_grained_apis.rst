@@ -11,10 +11,7 @@ Existing APIs
 * torch._dynamo.allow_in_graph
 
 
-Section 1 - Summary Table
-=========================
-
-.. _section-1-summary-table:
+## Section 1 - Summary Table
 
 .. csv-table:: TorchDynamo APIs to control fine-grained tracing
    :header: "API", "Description", "When to use?"
@@ -27,10 +24,7 @@ Section 1 - Summary Table
 
 
 
-Section 2 - torch._dynamo.disable
-=================================
-
-.. _section-2-torch-_dynamo-disable:
+## Section 2 - torch._dynamo.disable
 
 **tl;dr** - Disables PT2 stack on the decorated function frame and all the function frames recursively invoked from the decorated function frame.
 
@@ -47,10 +41,7 @@ You can decorate the offending function with `@torch._dynamo.disable`
 
 You can also use the non-decorator syntax if you don’t want to change the source code (however avoid this style if possible. Here, you have to take care that all users of the original function are now using the patched version).
 
-Section 3 - torch._dynamo.disallow_in_graph
-===========================================
-
-.. _section-3-torch-_dynamo-disallow_in_graph:
+## Section 3 - torch._dynamo.disallow_in_graph
 
 **tl;dr** - Disallows an operator (not the function) to be present in the TorchDynamo extracted graph. Note that this is suitable for operators (and not general functions as in the case of `_dynamo.disable`).
 
@@ -61,10 +52,7 @@ The catch is that you will have to find the corresponding Dynamo level operator 
 **Warning** - This is a global flag. So be cautious, if you are comparing different backend compilers. You might have to call `allow_in_graph` for the disallowed op when switching to the other compiler.
 
 
-Section 4 - torch._dynamo.disallow_in_graph
-===========================================
-
-.. _section-4-torch-_dynamo-disallow_in_graph:
+## Section 4 - torch._dynamo.disallow_in_graph
 
 **Usecase** - This is useful when the relevant function frame has some known hard-to-support TorchDynamo feature (like hooks and autograd.Function) and you are confident that downstream PT2 components like AOTAutograd can safely trace through the decorated function. When a function is decorated with `allow_in_graph`, TorchDynamo treats it as a black-box and puts it as-is in the generated graph.
 
@@ -72,20 +60,15 @@ Section 4 - torch._dynamo.disallow_in_graph
 **Warning - `allow_in_graph`** skips TorchDynamo completely on the decorated function, skipping all TorchDynamo safety checks (graph breaks, handling closures etc). Therefore, one has to be very careful with `allow_in_graph`. Today downstream components like AOT Autograd rely on TorchDynamo to take care of complex Python features, but `allow_in_graph` bypasses TorchDynamo. If not careful, this could lead to soundness and really hard-to-debug issues.
 
 
-Section 5 - Limitations
-=======================
+## Section 5 - Limitations
 
-.. _section-5-limitations:
 
 All the existing APIs are applied at the TorchDynamo level. Therefore, these APIs have visibility to only what TorchDynamo sees. This can lead to confusing scenarios.
 
 For example, `_dynamo.disallow_in_graph` will not work for aten operators because they are visible to AOT Autograd (example - `torch._dynamo.disallow_in_graph(torch.ops.aten.add)` will not work in the above example).
 
 
-Section 6 - FAQ
-===============
-
-.. _section-6-faq:
+## Section 6 - FAQ
 
 **FAQ - How do I graph break on a function?**
 

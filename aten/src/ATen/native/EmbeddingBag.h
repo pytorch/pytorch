@@ -6,8 +6,7 @@
 #include <fbgemm/FbgemmEmbedding.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void check_arguments(
     const Tensor& weight,
@@ -137,5 +136,4 @@ void _embedding_bag_cpu_out(
     const c10::optional<int64_t>& padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache = nullptr);
 
-} // native
-} // at
+} // namespace at::native

@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import getpass
 import hashlib
+import importlib
 import json
 import logging
 import multiprocessing
@@ -17,13 +18,16 @@ import sysconfig
 import tempfile
 import threading
 import types
+import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
+from dataclasses import field
 from functools import partial
+from importlib import abc
 from threading import Thread
 from time import sleep, time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Set, Union
 
 import torch
 
@@ -73,18 +77,25 @@ def cache_dir():
     return cache_dir
 
 
-@functools.lru_cache(None)
-def cubin_cache_dir():
-    cubin_dir = os.path.join(cache_dir(), "cubin")
-    os.makedirs(cubin_dir, exist_ok=True)
-    return cubin_dir
+def cpp_wrapper_cache_dir(name):
+    cu_str = (
+        "cpu"
+        if torch.version.cuda is None
+        else f'cu{torch.version.cuda.replace(".", "")}'
+    )
+    python_version = f"py{sys.version_info.major}{sys.version_info.minor}"
+    build_folder = f"{python_version}_{cu_str}"
+
+    cpp_wrapper_dir = os.path.join(cache_dir(), build_folder)
+    cpp_wrapper_build_directory = os.path.join(cpp_wrapper_dir, name)
+    os.makedirs(cpp_wrapper_build_directory, exist_ok=True)
+    return cpp_wrapper_build_directory
 
 
 class CacheBase:
-    def __init__(self):
-        if not torch.cuda.is_available():
-            return
-
+    @staticmethod
+    @functools.lru_cache(None)
+    def get_system():
         try:
             import triton
 
@@ -92,20 +103,31 @@ class CacheBase:
         except ModuleNotFoundError:
             triton_version = None
 
-        self.system = {
-            "device": torch.cuda.get_device_properties(
-                torch.cuda.current_device()
-            ).name,
+        system = {
+            "device": {
+                "name": torch.cuda.get_device_properties(
+                    torch.cuda.current_device()
+                ).name,
+            },
             "version": {
                 "cuda": torch.version.cuda,
                 "triton": triton_version,
             },
         }
-        self.system["hash"] = hashlib.sha256(
-            json.dumps(self.system, sort_keys=True).encode("utf-8")
+
+        system["hash"] = hashlib.sha256(
+            json.dumps(system, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
-        self.local_cache_path = os.path.join(cache_dir(), "cache")
+        return system
+
+    def __init__(self):
+        if not torch.cuda.is_available():
+            return
+
+        self.system = CacheBase.get_system()
+
+        self.local_cache_path = os.path.join(cache_dir(), self.system["hash"])
         self.global_cache_path = (
             os.path.join(os.path.dirname(config.global_cache_dir), self.system["hash"])
             if config.global_cache_dir is not None
@@ -117,9 +139,6 @@ class CacheBase:
             return {}
         with open(self.local_cache_path, "r") as local_cache_fp:
             local_cache = json.load(local_cache_fp)
-        if local_cache["system"]["hash"] != self.system["hash"]:
-            os.remove(self.local_cache_path)
-            return {}
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache):
@@ -231,40 +250,101 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code):
+def code_hash(code, extra=""):
+    hashing_str = code
+    if extra != "":
+        hashing_str = hashing_str + "||" + extra
     return (
         "c"
-        + base64.b32encode(hashlib.sha256(code.encode("utf-8")).digest())[:51]
+        + base64.b32encode(hashlib.sha256(hashing_str.encode("utf-8")).digest())[:51]
         .decode("utf-8")
         .lower()
     )
 
 
-def get_code_path(source_code, ext, extra):
-    basename = code_hash(source_code + extra)
+def get_path(basename: str, extension: str):
     subdir = os.path.join(cache_dir(), basename[1:3])
-    path = os.path.join(subdir, f"{basename}.{ext}")
-    return extra + basename, subdir, path
+    path = os.path.join(subdir, f"{basename}.{extension}")
+    return basename, subdir, path
 
 
-def write(source_code, ext, extra=""):
-    basename, subdir, path = get_code_path(source_code, ext, extra)
+def get_hash(content: Union[str, bytes], extra="", hash_type="code"):
+    assert hash_type in ["code", "cubin"], "Hash type not supported"
+    if hash_type == "code":
+        return code_hash(content, extra)
+    if hash_type == "cubin":
+        return code_hash(repr(content))
+
+
+def write(
+    content: Union[str, bytes], extension: str, extra="", hash_type: str = "code"
+):
+    key: str = get_hash(content, extra, hash_type)
+    basename, subdir, path = get_path(key, extension)
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
     if not os.path.exists(path):
-        write_atomic(path, source_code)
+        write_atomic(path, content)
     return basename, path
 
 
-def write_atomic(path: str, source_code: str):
+def write_atomic(path: str, content: Union[str, bytes]):
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
+    assert isinstance(
+        content, (str, bytes)
+    ), "Only strings and byte arrays can be saved in the cache"
     path = pathlib.Path(path)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
-    with tmp_path.open("w") as f:
-        f.write(source_code)
-
+    write_mode = "w" if isinstance(content, str) else "wb"
+    with tmp_path.open(write_mode) as f:
+        f.write(content)
     tmp_path.rename(path)
+
+
+@dataclasses.dataclass
+class CompiledFxGraph:
+    """Class holding a compiled FX graph"""
+
+    compiled_artifact: Callable = None
+    current_callable: Callable = None
+    cache_key: str = None
+    artifact_path: str = None
+    cache_linemap: List = None
+    device_types: Set[str] = field(default_factory=set)
+    device_idxs: Set[int] = field(default_factory=set)
+    mutated_inputs: Set[str] = field(default_factory=set)
+    _boxed_call: bool = None
+
+    def __call__(self, inputs) -> Any:
+        return self.get_current_callable()(inputs)
+
+    def get_current_callable(self):
+        if self.current_callable is None:
+            # This prevents a circular reference that makes CompiledFxGraph
+            # get stuck without getting garbage collected
+            return functools.partial(_run_from_cache, weakref.proxy(self))
+        else:
+            return self.current_callable
+
+
+def _run_from_cache(compiled_graph: CompiledFxGraph, inputs):
+    # We can't really serialize callables that may be C++/Triton/etc.,
+    # so we serialize their disk cache location instead
+    # TODO: When making an API that can save compiled models e2e to disk
+    # this will need to be better
+    if compiled_graph.compiled_artifact is None:
+        from .codecache import PyCodeCache
+
+        compiled_graph.compiled_artifact = PyCodeCache.load_by_key_path(
+            compiled_graph.cache_key,
+            compiled_graph.artifact_path,
+            compiled_graph.cache_linemap
+            if compiled_graph.cache_linemap is not None
+            else (),
+        ).call
+
+    return compiled_graph.compiled_artifact(inputs)
 
 
 def cpp_compiler():
@@ -614,16 +694,9 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        from filelock import FileLock
-
-        cubin_path = os.path.join(cubin_cache_dir(), f"{key}.cubin")
-        params["cubin_path"] = cubin_path
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            cls.cache[key] = params
-            with open(cubin_path, "wb") as f:
-                f.write(cubin)
+        _, path = write(cubin, "cubin", hash_type="cubin")
+        params["cubin_path"] = path
+        cls.cache[key] = params
 
     @classmethod
     def get(cls, key):
@@ -638,20 +711,21 @@ class AotCodeCache:
     def compile(cls, graph, source_code, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
-        key, input_path = write(
-            source_code,
-            "cpp",
-            code_hash(
-                repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda))
-            ),
+        cpp_command = repr(
+            cpp_compile_command("i", "o", vec_isa=picked_vec_isa, cuda=cuda)
         )
+        key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_so = f"{input_path[:-4]}.so"
+                output_so_dir = input_path[:-4]
+                if not os.path.exists(output_so_dir):
+                    os.makedirs(output_so_dir, exist_ok=False)
+                so_name = f"{config.dll_name}.so"
+                output_so = os.path.join(output_so_dir, so_name)
                 if not os.path.exists(output_so):
                     cmd = cpp_compile_command(
                         input=input_path,
@@ -699,11 +773,8 @@ class CppCodeCache:
     @classmethod
     def load(cls, source_code):
         picked_vec_isa = pick_vec_isa()
-        key, input_path = write(
-            source_code,
-            "cpp",
-            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
-        )
+        cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
+        key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
 
@@ -732,8 +803,12 @@ class PyCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
+    def write(cls, source_code, extra=""):
+        return write(source_code, "py", extra=extra)
+
+    @classmethod
     def load(cls, source_code, extra="", linemap=()):
-        key, path = write(source_code, "py", extra)
+        key, path = write(source_code, "py", extra=extra)
         return cls.load_by_key_path(key, path, linemap)
 
     @classmethod
@@ -782,7 +857,70 @@ class PyCodeCache:
                 for f, l, n in reversed(matches)
             ]
 
-        return parse_stack_trace(entry.stack_trace)
+        return parse_stack_trace(entry)
+
+
+class CppWrapperCodeCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def load(cls, source_code, func_name, key, cuda):
+        name = f"inline_extension_{key}"
+        cpp_wrapper_dir = cpp_wrapper_cache_dir(name)
+        if not os.path.exists(cpp_wrapper_dir):
+            os.makedirs(cpp_wrapper_dir)
+
+        ext = "so"
+        filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
+        log.debug("Cpp wrapper code path %s", filepath)
+
+        if key not in cls.cache:
+            log.debug("Cpp wrapper cache miss for %s", filepath)
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                if not os.path.exists(filepath):
+                    log.debug("Cpp wrapper building %s", filepath)
+
+                    _cpp_flags = cpp_flags()
+                    _opt_flags = optimization_flags()
+                    _shared = get_shared()
+                    _warning_all_flag = get_warning_all_flag()
+                    _ipaths, _lpaths, _libs, _macros = get_include_and_linking_paths(
+                        vec_isa=pick_vec_isa(),
+                        cuda=cuda,
+                    )
+                    _use_custom_generated_macros = use_custom_generated_macros()
+
+                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_use_custom_generated_macros}"
+                    extra_ldflags = f"{_shared} {_lpaths} {_libs}"
+                    extra_include_paths = f"{_ipaths}"
+
+                    mod = torch.utils.cpp_extension.load_inline(
+                        name=name,
+                        build_directory=cpp_wrapper_dir,
+                        cpp_sources=[source_code],
+                        functions=[func_name],
+                        extra_cflags=[extra_cflags],
+                        extra_ldflags=[extra_ldflags],
+                        extra_include_paths=[extra_include_paths],
+                    )
+                    log.debug("Cpp wrapper done building %s", filepath)
+                else:
+                    log.debug("Found target .so, cpp wrapper loading %s", filepath)
+                    spec = importlib.util.spec_from_file_location(name, filepath)
+                    assert spec is not None
+                    mod = importlib.util.module_from_spec(spec)
+                    assert isinstance(spec.loader, abc.Loader)
+                    spec.loader.exec_module(mod)
+                    log.debug("Cpp wrapper done loading %s", filepath)
+
+                cls.cache[key] = mod
+
+        return cls.cache[key]
 
 
 class TritonCodeCache:

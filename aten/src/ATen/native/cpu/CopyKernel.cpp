@@ -1,7 +1,9 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/CopyKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/TypeCast.h>
 #include <ATen/native/cpu/zmath.h>
@@ -10,10 +12,8 @@
 
 namespace at::native {
 inline namespace CPU_CAPABILITY {
-void neg_kernel(TensorIteratorBase &iter);
-void conj_kernel(TensorIteratorBase &iter);
 
-void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
+static void float_bfloat16_copy_kernel(TensorIteratorBase &iter, bool requires_neg) {
   auto strides_out = iter.strides(0);
   auto strides_in = iter.strides(1);
   auto shape = iter.shape();
@@ -193,7 +193,7 @@ void direct_copy_kernel(TensorIteratorBase &iter) {
   }
 }
 
-void neg_conj_kernel(TensorIteratorBase &iter) {
+static void neg_conj_kernel(TensorIteratorBase &iter) {
   // fused a = b.neg().conj_physical()
   AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "neg_conj_cpu", [&] {
     cpu_kernel_vec(
@@ -203,7 +203,7 @@ void neg_conj_kernel(TensorIteratorBase &iter) {
   });
 }
 
-void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires_neg) {
+static void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires_neg) {
   if (requires_neg) {
     // This case should never actually happen since currently there's no way to get a complex tensor
     // with negative bit.
