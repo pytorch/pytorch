@@ -9,6 +9,7 @@ from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
 
 aten = torch.ops.aten
 random_ops = [
+    aten.bernoulli_.float,
     aten.normal_.default,
     aten.uniform_.default,
 ]

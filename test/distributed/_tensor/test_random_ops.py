@@ -108,37 +108,44 @@ class DistTensorRandomOpTest(DTensorTestBase):
         # test suite sets each rank's seed to the same value but in actual
         # execution the default random seed will be different (a random value).
         torch.cuda.manual_seed(self.rank)
-        # TODO: add test before/after enabling distribute region
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [4, 4]
 
-        dtensor = distribute_tensor(
-            torch.empty(*size, device="cuda"), device_mesh, [Shard(1)]
-        )
-
-        # a random op call shifts the offset
-        dtensor.uniform_(0, 1)
-
-        # the dtensor is now replicate on all ranks
-        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-
-        dropout = torch.nn.Dropout(p=0.2)
-        dtensor = dropout(dtensor)
-
-        # allgather the local tensors
-        dtensor = DTensor.from_local(dtensor.to_local(), device_mesh, [Shard(0)])
-        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-        local_tensor = dtensor.to_local()
-
-        # compare with local tensors from other ranks
-        self_slice = slice(4 * self.rank, 4 * self.rank + 4)
-        for other_rank in range(self.world_size):
-            if self.rank != other_rank:
-                # other rank should have an identical local tensor
-                other_slice = slice(4 * other_rank, 4 * other_rank + 4)
-                self.assertEqual(
-                    local_tensor[self_slice, :], local_tensor[other_slice, :]
+        for inplace_flag in [False, True]:
+            for enable_distribute_flag in [False, True]:
+                dtensor = distribute_tensor(
+                    torch.empty(*size, device="cuda"), device_mesh, [Shard(1)]
                 )
+                random._rng_tracker.distribute_region_enabled = enable_distribute_flag
+
+                # a random op call shifts the offset
+                dtensor.uniform_(0, 1)
+
+                # the dtensor is now replicate on all ranks
+                dtensor = dtensor.redistribute(device_mesh, [Replicate()])
+
+                dropout = torch.nn.Dropout(p=0.2, inplace=inplace_flag)
+                dtensor = dropout(dtensor)
+
+                # allgather the local tensors
+                dtensor = DTensor.from_local(dtensor.to_local(), device_mesh, [Shard(0)])
+                dtensor = dtensor.redistribute(device_mesh, [Replicate()])
+                local_tensor = dtensor.to_local()
+
+                # compare with local tensors from other ranks
+                self_slice = slice(4 * self.rank, 4 * self.rank + 4)
+                for other_rank in range(self.world_size):
+                    if self.rank != other_rank:
+                        # other rank should have an identical local tensor
+                        other_slice = slice(4 * other_rank, 4 * other_rank + 4)
+                        if enable_distribute_flag:
+                            self.assertEqual(
+                                local_tensor[self_slice, :], local_tensor[other_slice, :]
+                            )
+                        else:
+                            self.assertNotEqual(
+                                local_tensor[self_slice, :], local_tensor[other_slice, :]
+                            )
 
     @with_comms
     @skip_if_lt_x_gpu(4)

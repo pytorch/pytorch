@@ -121,6 +121,15 @@ def parallelize_module(  # type: ignore[return]
             return _parallelize_multihead_attn(module, device_mesh)
         elif _is_mlp_for_pairwise_parallel(module):
             return _parallelize_mlp(module, device_mesh, parallelize_plan)
+        elif isinstance(module, torch.nn.Dropout):
+            distribute_module(
+                module,
+                device_mesh,
+                None,
+                input_fn=parallelize_plan._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
+                output_fn=parallelize_plan._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
+            )
+            return module
         else:
             for n, m in module.named_children():
                 module.register_module(

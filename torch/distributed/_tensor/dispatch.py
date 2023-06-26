@@ -25,12 +25,12 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 
 def _is_random_op(op):
     aten = torch.ops.aten
-    random_ops = [
+    return op in [
+        aten.bernoulli_.float,
         aten.native_dropout.default,
         aten.normal_.default,
         aten.uniform_.default,
     ]
-    return op in random_ops
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
