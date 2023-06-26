@@ -190,7 +190,6 @@ std::unordered_map<KeyType, cudnn_frontend::ExecutionPlan, ParamsWrapperHash<Key
 // to the Execution Plan if we know it will not be invalidated by another thread
 cudnn_frontend::ExecutionPlan* find(const KeyType& key) {
   auto it = engine_cache.find(key);
-  std::cout << "cache size: " << engine_cache.size() << std::endl;
   if (it == engine_cache.end()) {
     return nullptr;
   }
