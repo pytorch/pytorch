@@ -297,10 +297,6 @@ at::Tensor mm_mat1_sparse_backward(
     const at::Tensor& mat1,
     const at::Tensor& mat2,
     const at::Scalar& alpha);
-at::Tensor sparse_mask_backward(
-    const at::Tensor& grad,
-    const at::Tensor& mask,
-    c10::Layout self_layout);
 std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
     const Tensor& grad,
     const Tensor& self,
