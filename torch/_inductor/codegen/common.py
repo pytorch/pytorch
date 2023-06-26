@@ -875,5 +875,3 @@ class OptimizationContext:
 
     # Load uint8 value as float32
     is_load_uint8_as_float: bool = False
-    # Store float32 value as uint8
-    is_store_float_as_uint8: bool = False
