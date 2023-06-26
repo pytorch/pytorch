@@ -128,6 +128,7 @@ skipfiles_inline_module_allowlist = {
     torch._prims,
     torch._decomp,
     torch.utils._contextlib,
+    torch.utils._pytree,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -260,6 +261,9 @@ _save_config_ignore = {
 }
 
 capture_autograd_function = True
+
+# enable/disable dynamo tracing for `torch.func` transforms
+capture_func_transforms = True
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",
