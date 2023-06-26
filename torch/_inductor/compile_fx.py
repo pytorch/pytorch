@@ -436,8 +436,8 @@ def clone_preserve_strides(x):
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
-def copy_misaligned_inputs(new_inputs, check_inputs: Sequence[int]) -> None:
-    for i in check_inputs:
+def copy_misaligned_inputs(new_inputs, check_inputs_idxs: Sequence[int]) -> None:
+    for i in check_inputs_idxs:
         if new_inputs[i].data_ptr() % ALIGNMENT:
             new_inputs[i] = clone_preserve_strides(new_inputs[i])
 
@@ -524,7 +524,6 @@ def remove_unaligned_input_idxs(inputs, static_input_idxs):
     aligned_static_input_idxs = {
         idx for idx in static_input_idxs if (inputs[idx].data_ptr() % ALIGNMENT) == 0
     }
-
     if len(aligned_static_input_idxs) != len(static_input_idxs):
         return aligned_static_input_idxs
     return static_input_idxs

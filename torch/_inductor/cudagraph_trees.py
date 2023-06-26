@@ -69,8 +69,8 @@ from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
-    get_input_idxs_to_check,
     get_expanded_dims,
+    get_input_idxs_to_check,
     index_expanded_dims,
     remove_unaligned_input_idxs,
     static_input,
