@@ -86,14 +86,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         c10::str("Backend ", getBackendName(), " does not support allreduce"));
   }
 
-  virtual c10::intrusive_ptr<Work> allreduce_sparse(
-      std::vector<at::Tensor>& /* tensors */,
-      const AllreduceOptions& /* opts */ = AllreduceOptions()) {
-    TORCH_CHECK(
-        false,
-        c10::str("Backend ", getBackendName(), "does not support allreduce"));
-  }
-
   virtual c10::intrusive_ptr<Work> allreduce_coalesced(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceCoalescedOptions& /* opts */ =

@@ -130,8 +130,6 @@ class TORCH_API Reducer {
   // rebuilt.
   bool rebuild_buckets();
 
-  void setSparseMetadata(std::map<std::string, at::Tensor>& metadata);
-
   // Install futures that should be awaited at end of backwards. Currently these
   // are only used by user-defined custom buffer reduction hooks, but can be generalized
   // to any user-originating futures that need to be awaited.
@@ -377,9 +375,6 @@ class TORCH_API Reducer {
     // If `true`, then this implies that `bucket.variables.size() == 1`.
     bool expect_sparse_gradient = false;
 
-    // Sparse indices tensor
-    c10::optional<at::Tensor> sparse_tensor_indices = c10::nullopt;
-
     // TODO(@pietern)
     // Memory copies from gradient tensors into the bucket are potentially
     // done on different CUDA streams. We record an event for every copy
@@ -510,12 +505,6 @@ class TORCH_API Reducer {
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
-
-  // Sparse metadata contains the indices that will be used
-  // when calling into sparse allreduce.
-  // This is only used in the sparse allreduce collective calls
-  std::unique_ptr<std::map<std::string, at::Tensor>> sparse_metadata_;
-
   // Debug level setting. It is parsed once when Reducer is constructed, and
   // remains the same across a single invocation of DDP training.
   DebugLevel ddp_debug_level_;
