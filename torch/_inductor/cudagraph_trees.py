@@ -39,6 +39,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import gc
 import itertools
 import logging
 import sys
@@ -1513,6 +1514,10 @@ def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWr
     # we know it will error
     if torch._C._cuda_checkPoolLiveAllocations(device, pool_id, unique_storages):
         return
+
+    # at this point we are past the fast-path. we have seen rare cases where a dead tensor is dead,
+    # but hasn't been gc'd yet, and gives false positive for allocated_not_in_live_storages
+    gc.collect()
 
     segments = get_cudagraph_segments(pool_id)
 
