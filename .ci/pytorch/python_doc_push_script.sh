@@ -68,6 +68,8 @@ build_docs () {
 }
 
 
+# install hipify_torch required for ROCm.
+pip install third_party/hipify_torch
 git clone https://github.com/pytorch/pytorch.github.io -b "$branch" --depth 1
 pushd pytorch.github.io
 
