@@ -333,6 +333,16 @@ static PyObject* THPStorage_fromBuffer(
         src + offset,
         do_byte_swap,
         count);
+  } else if (scalar_type == at::kFloat8_e5m2) {
+    torch::utils::THP_decodeFloat8_e5m2Buffer(
+        static_cast<c10::Float8_e5m2*>(storage->mutable_data()),
+        src + offset,
+        count);
+  } else if (scalar_type == at::kFloat8_e4m3) {
+    torch::utils::THP_decodeFloat8_e4m3Buffer(
+        static_cast<c10::Float8_e4m3*>(storage->mutable_data()),
+        src + offset,
+        count);
   } else if (scalar_type == at::kFloat) {
     torch::utils::THP_decodeFloatBuffer(
         static_cast<float*>(storage->mutable_data()),

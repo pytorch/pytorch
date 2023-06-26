@@ -3,6 +3,8 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
+#include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e4m3.h>
 
 // Defines the accumulation type for a scalar type.
 // Example:
@@ -67,6 +69,14 @@ struct AccumulateType<Half, true> {
   using type = float;
 };
 template <>
+struct AccumulateType<Float8_e5m2, true> {
+  using type = float;
+};
+template <>
+struct AccumulateType<Float8_e4m3, true> {
+  using type = float;
+};
+template <>
 struct AccumulateType<float, true> {
   using type = float;
 };
@@ -108,6 +118,14 @@ struct AccumulateType<Half, false> {
 };
 template <>
 struct AccumulateType<BFloat16, false> {
+  using type = float;
+};
+template <>
+struct AccumulateType<Float8_e5m2, false> {
+  using type = float;
+};
+template <>
+struct AccumulateType<Float8_e4m3, false> {
   using type = float;
 };
 template <>

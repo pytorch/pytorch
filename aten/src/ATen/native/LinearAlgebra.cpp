@@ -1438,7 +1438,7 @@ static void addmm_impl_cpu_(
 
   if(!dispatched) {
     // Apply BLAS routine
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBFloat16, kFloat8_e5m2, kFloat8_e4m3,
         result.scalar_type(), "addmm_impl_cpu_",
         [&]{
           using opmath_t = at::opmath_type<scalar_t>;

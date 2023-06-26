@@ -47,6 +47,8 @@ complexHalfT = BaseCppType(
 complexFloatT = BaseCppType("c10", "complex<float>")
 complexDoubleT = BaseCppType("c10", "complex<double>")
 bfloat16T = BaseCppType("at", "BFloat16")
+float8_e5m2T = BaseCppType("at", "Float8_e5m2")
+float8_e4m3T = BaseCppType("at", "Float8_e4m3")
 stringT = BaseCppType("c10", "string_view")
 generatorT = BaseCppType("at", "Generator")
 scalarTypeT = BaseCppType("at", "ScalarType")
@@ -93,7 +95,8 @@ ScalarTypeToCppMapping: Dict[ScalarType, BaseCppType] = {
     ScalarType.ComplexFloat: complexFloatT,
     ScalarType.ComplexDouble: complexDoubleT,
     ScalarType.Bool: boolT,
-    ScalarType.BFloat16: bfloat16T,
+    ScalarType.Float8_e5m2: float8_e5m2T,
+    ScalarType.Float8_e4m3: float8_e4m3T,
 }
 
 BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {

@@ -4,6 +4,8 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
+#include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e4m3.h>
 
 namespace at {
 
@@ -18,6 +20,14 @@ struct OpMathType<at::Half> {
 };
 template <>
 struct OpMathType<at::BFloat16> {
+  using type = float;
+};
+template <>
+struct OpMathType<at::Float8_e5m2> {
+  using type = float;
+};
+template <>
+struct OpMathType<at::Float8_e4m3> {
   using type = float;
 };
 template <>

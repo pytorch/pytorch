@@ -7,6 +7,8 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
+#include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e4m3.h>
 #include <c10/util/complex.h>
 
 #include <cmath>
@@ -62,6 +64,18 @@ inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
   return at::_isnan(static_cast<float>(val));
 }
 
+template <typename T,
+         typename std::enable_if<std::is_same<T, at::Float8_e5m2>::value, int>::type = 0>
+inline C10_HOST_DEVICE bool _isnan(T val) {
+  return at::_isnan(static_cast<float>(val));
+}
+
+template <typename T,
+         typename std::enable_if<std::is_same<T, at::Float8_e4m3>::value, int>::type = 0>
+inline C10_HOST_DEVICE bool _isnan(T val) {
+  return at::_isnan(static_cast<float>(val));
+}
+
 // std::isinf isn't performant to use on integral types; it will
 // (uselessly) convert to floating point and then do the test.
 // This function is.
@@ -89,6 +103,14 @@ inline C10_HOST_DEVICE bool _isinf(at::Half val) {
 }
 
 inline C10_HOST_DEVICE bool _isinf(at::BFloat16 val) {
+  return at::_isinf(static_cast<float>(val));
+}
+
+inline C10_HOST_DEVICE bool _isinf(at::Float8_e5m2 val) {
+  return at::_isinf(static_cast<float>(val));
+}
+
+inline C10_HOST_DEVICE bool _isinf(at::Float8_e4m3 val) {
   return at::_isinf(static_cast<float>(val));
 }
 

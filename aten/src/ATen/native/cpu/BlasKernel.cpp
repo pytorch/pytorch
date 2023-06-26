@@ -272,7 +272,7 @@ void cpublas_gemm_impl(
     const void *b, int64_t ldb,
     const Scalar& beta,
     void *c, int64_t ldc) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::kHalf, at::kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(at::kHalf, at::kBFloat16, kFloat8_e5m2, kFloat8_e4m3,
     type, "cpublas_gemm_impl",
       [&]{
         using opmath_t = at::opmath_type<scalar_t>;
