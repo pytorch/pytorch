@@ -2656,7 +2656,7 @@ def one_layer_lstm_data(inp, hidden, params, has_biases, batch_sizes, reverse=Fa
 
 
 def use_mkldnn(input, hx, params):
-    if not torch._C.has_mkldnn:
+    if not torch._C._has_mkldnn:
         return False
 
     tensors = [input] + list(hx) + list(chain.from_iterable(params))
