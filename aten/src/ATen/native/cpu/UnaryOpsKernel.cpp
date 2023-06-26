@@ -689,7 +689,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
             }                                                                      \
           }
 
-#define IMPLEMENT_FLOAT_KERNEL(op, compile_kernel)                                  \
+#define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
   inline namespace CPU_CAPABILITY {                                                 \
   static void op##_kernel(TensorIteratorBase& iter) {                               \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
@@ -700,14 +700,9 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     iter.cast_outputs();                                                            \
   }                                                                                 \
   }                                                                                 \
-  if (compile_kernel == true) {                                                     \
-    REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)                      \
-  } else {                                                                          \
-    REGISTER_DISPATCH(op##_stub, nullptr)                                           \
-  }                                                                                 
-                                                                             
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
-#define IMPLEMENT_COMPLEX_KERNEL(op, compile_kernel)                                             \
+#define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
   inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
@@ -718,13 +713,9 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     iter.cast_outputs();                                                                         \
   }                                                                                              \
   }                                                                                              \
-  if (compile_kernel == true) {                                                                  \
-    REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)                                   \
-  } else {                                                                                       \
-    REGISTER_DISPATCH(op##_stub, nullptr)                                                        \
-  }
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
-#define STATIC_IMPLEMENT_COMPLEX_KERNEL(op, compile_kernel)                                      \
+#define STATIC_IMPLEMENT_COMPLEX_KERNEL(op)                                                      \
   inline namespace CPU_CAPABILITY {                                                              \
   static void op##_kernel(TensorIteratorBase& iter) {                                            \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
@@ -735,34 +726,55 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
     iter.cast_outputs();                                                                         \
   }                                                                                              \
   }                                                                                              \
-  if (compile_kernel == true) {                                                                  \
-    REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)                                   \
-  } else {                                                                                       \
-    REGISTER_DISPATCH(op##_stub, nullptr)                                                        \
-  }                                                                                  
+  REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
+
+// Kernel macros with empty bodies that dispatch to a nullptr, so that their
+// AVX2 kernels would be used instead. In the future, if AVX512 performance
+// becomes better than AVX2 even for memory-bound ops (perhaps due to higher 
+// memory bandwidth, then the "real" counterparts of these kernels can be used).
+
+#define IMPLEMENT_NULLPTR_FLOAT_KERNEL(op)                                          \
+  inline namespace CPU_CAPABILITY {                                                 \
+  static void op##_kernel(TensorIteratorBase& iter) {}                              \
+  }                                                                                 \
+  REGISTER_NO_AVX512_DISPATCH(op##_stub)
+
+#define IMPLEMENT_NULLPTR_COMPLEX_KERNEL(op)                                                     \
+  inline namespace CPU_CAPABILITY {                                                              \
+  void op##_kernel(TensorIteratorBase& iter) {}                                                  \
+  }                                                                                              \
+  REGISTER_NO_AVX512_DISPATCH(op##_stub)
+
+// For future use. Will not affect binary-size
+#define STATIC_IMPLEMENT_NULLPTR_COMPLEX_KERNEL(op)                                              \
+  inline namespace CPU_CAPABILITY {                                                              \
+  static void op##_kernel(TensorIteratorBase& iter) {}                                           \
+  }                                                                                              \
+  REGISTER_NO_AVX512_DISPATCH(op##_stub)
 
 } // CPU_CAPABILITY namespace
 
 
 #ifdef CPU_CAPABILITY_AVX512
 // The following kernels are slower with AVX512 & faster with AVX2
-REGISTER_DISPATCH(round_decimals_stub, nullptr);
-REGISTER_DISPATCH(abs_stub, nullptr);
-REGISTER_DISPATCH(angle_stub, nullptr);
-REGISTER_DISPATCH(nan_to_num_stub, nullptr);
-REGISTER_DISPATCH(neg_stub, nullptr);
-REGISTER_DISPATCH(sign_stub, nullptr);
-REGISTER_DISPATCH(signbit_stub, nullptr);
-REGISTER_DISPATCH(sgn_stub, nullptr);
-REGISTER_DISPATCH(bitwise_not_stub, nullptr);
-REGISTER_DISPATCH(logical_not_stub, nullptr);
-REGISTER_DISPATCH(conj_physical_stub, nullptr);
-IMPLEMENT_FLOAT_KERNEL(ceil, false)
-IMPLEMENT_FLOAT_KERNEL(floor, false)
-IMPLEMENT_FLOAT_KERNEL(round, false)
-IMPLEMENT_COMPLEX_KERNEL(sqrt, false)
-IMPLEMENT_FLOAT_KERNEL(trunc, false)
+REGISTER_NO_AVX512_DISPATCH(round_decimals_stub);
+REGISTER_NO_AVX512_DISPATCH(abs_stub);
+REGISTER_NO_AVX512_DISPATCH(angle_stub);
+REGISTER_NO_AVX512_DISPATCH(nan_to_num_stub);
+REGISTER_NO_AVX512_DISPATCH(neg_stub);
+REGISTER_NO_AVX512_DISPATCH(sign_stub);
+REGISTER_NO_AVX512_DISPATCH(signbit_stub);
+REGISTER_NO_AVX512_DISPATCH(sgn_stub);
+REGISTER_NO_AVX512_DISPATCH(bitwise_not_stub);
+REGISTER_NO_AVX512_DISPATCH(logical_not_stub);
+REGISTER_NO_AVX512_DISPATCH(conj_physical_stub);
+IMPLEMENT_NULLPTR_FLOAT_KERNEL(ceil)
+IMPLEMENT_NULLPTR_FLOAT_KERNEL(floor)
+IMPLEMENT_NULLPTR_FLOAT_KERNEL(round)
+IMPLEMENT_NULLPTR_COMPLEX_KERNEL(sqrt)
+IMPLEMENT_NULLPTR_FLOAT_KERNEL(trunc)
 #else
+// The following kernels are slower with AVX512
 REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 REGISTER_DISPATCH(abs_stub, &CPU_CAPABILITY::abs_kernel);
 REGISTER_DISPATCH(angle_stub, &CPU_CAPABILITY::angle_kernel);
@@ -774,11 +786,11 @@ REGISTER_DISPATCH(sgn_stub, &CPU_CAPABILITY::sgn_kernel);
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel);
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel);
-IMPLEMENT_FLOAT_KERNEL(ceil, true)
-IMPLEMENT_FLOAT_KERNEL(floor, true)
-IMPLEMENT_FLOAT_KERNEL(round, true)
-IMPLEMENT_COMPLEX_KERNEL(sqrt, true)
-IMPLEMENT_FLOAT_KERNEL(trunc, true)
+IMPLEMENT_FLOAT_KERNEL(ceil)
+IMPLEMENT_FLOAT_KERNEL(floor)
+IMPLEMENT_FLOAT_KERNEL(round)
+IMPLEMENT_COMPLEX_KERNEL(sqrt)
+IMPLEMENT_FLOAT_KERNEL(trunc)
 #endif
 
 // The following kernels are compute-intensive & are compiled with both AVX512
@@ -816,24 +828,23 @@ REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bes
 REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
 REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
 
-// The second argument determines whether or not kernels would be compiled
-STATIC_IMPLEMENT_COMPLEX_KERNEL(acos, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(asin, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(atan, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(cos, true)
-IMPLEMENT_FLOAT_KERNEL(erf, true)
-IMPLEMENT_FLOAT_KERNEL(erfc, true)
-IMPLEMENT_FLOAT_KERNEL(erfinv, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(exp, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(expm1, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log10, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log1p, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(log2, true)
-IMPLEMENT_FLOAT_KERNEL(i0, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(sin, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(tan, true)
-STATIC_IMPLEMENT_COMPLEX_KERNEL(tanh, true)
-IMPLEMENT_FLOAT_KERNEL(lgamma, true)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(acos)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(asin)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(atan)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(cos)
+IMPLEMENT_FLOAT_KERNEL(erf)
+IMPLEMENT_FLOAT_KERNEL(erfc)
+IMPLEMENT_FLOAT_KERNEL(erfinv)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(exp)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(expm1)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log10)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log1p)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(log2)
+IMPLEMENT_FLOAT_KERNEL(i0)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(sin)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(tan)
+STATIC_IMPLEMENT_COMPLEX_KERNEL(tanh)
+IMPLEMENT_FLOAT_KERNEL(lgamma)
 
 } // namespace at::native
