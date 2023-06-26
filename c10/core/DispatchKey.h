@@ -353,9 +353,11 @@ enum class DispatchKey : uint16_t {
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
   AutocastXPU,
+  AutocastIPU,
   AutocastHPU,
-  // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
-  // it probably should get its own Autocast key
+  AutocastXLA,
+  // AutocastXLA is only being used for TPUs. XLA GPUs continue to use
+  // AutocastCUDA.
   AutocastCUDA,
   AutocastPrivateUse1,
 
@@ -405,6 +407,12 @@ enum class DispatchKey : uint16_t {
   // aten/src/ATen/core/dispatch/backend_fallback_test.cpp
   // for a usage example
   TESTING_ONLY_GenericMode,
+
+  // This key is used for pre-dispatch tracing in make_fx.
+  // It has lower priority than the PythonDispatcher key
+  // because we use the PythonDispatcher to intercept the key from python,
+  // and avoid having to implement it in C++.
+  PreDispatch,
 
   // This is a bypass that allows you to skip running the C++ dispatcher
   // entirely
