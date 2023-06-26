@@ -568,7 +568,6 @@ static Tensor maybe_permute_values(
   bool advanced_indices_are_adjacent = are_advanced_indices_adjacent(orig_indices);
   auto num_leading_nones = get_num_leading_nones(orig_indices);
   auto max_index_dim = get_max_index_logical_dim(orig_indices, orig_indices_bdims);
-  TORCH_INTERNAL_ASSERT(values.dim() >= num_leading_nones + max_index_dim);
 
   // NB: values has its B dimension at the front
   if (!indices_batched) {

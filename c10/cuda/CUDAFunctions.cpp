@@ -14,7 +14,7 @@ int32_t driver_version() {
 }
 
 int device_count_impl(bool fail_if_no_driver) {
-  int count;
+  int count = 0;
   auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDeviceCount(&count));
   if (err == cudaSuccess) {
     return count;
@@ -121,7 +121,7 @@ DeviceIndex device_count_ensure_non_zero() {
 }
 
 DeviceIndex current_device() {
-  int cur_device;
+  int cur_device = 0;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
   return static_cast<DeviceIndex>(cur_device);
 }

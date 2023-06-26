@@ -16,7 +16,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda11.8-py3.10-gcc7-sm80
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [

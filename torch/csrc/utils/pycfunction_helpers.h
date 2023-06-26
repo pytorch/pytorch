@@ -1,9 +1,13 @@
 #pragma once
 
-#include <torch/csrc/utils/unsafe_cast_function.h>
+#include <c10/macros/Macros.h>
 
 #include <Python.h>
 
 inline PyCFunction castPyCFunctionWithKeywords(PyCFunctionWithKeywords func) {
-  return torch::unsafe_cast_function<PyCFunction>(func);
+  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wcast-function-type")
+  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wcast-function-type-strict")
+  return reinterpret_cast<PyCFunction>(func);
+  C10_DIAGNOSTIC_POP()
+  C10_DIAGNOSTIC_POP()
 }

@@ -1427,8 +1427,6 @@ def _fast_gradcheck(func, func_out, inputs, outputs, eps, rtol,
 # If https://mypy.readthedocs.io/en/latest/additional_features.html?highlight=callable#extended-callable-types is accepted,
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
-# the '...' first argument of Callable can be replaced with VarArg(Tensor).
-# For now, we permit any input.
 def gradcheck(
     func: Callable[..., Union[_TensorOrTensors]],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,

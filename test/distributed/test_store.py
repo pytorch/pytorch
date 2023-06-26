@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import socket
 import sys
 import tempfile
 import time
@@ -121,6 +122,41 @@ class StoreTestBase:
 
     def test_simple_wait(self):
         self._test_simple_wait(self._create_store())
+
+    def _test_append(self, store):
+        if not store.has_extended_api():
+            self.skipTest("Store doesn't support extended APIs")
+        store.set("foo", "po")
+        store.append("foo", "tato")
+        store.append("bar", "po")
+        store.append("bar", "tato")
+        self.assertEqual(b"potato", store.get("foo"))
+        self.assertEqual(b"potato", store.get("bar"))
+
+    def test_append(self):
+        self._test_append(self._create_store())
+
+    def _test_multi_set(self, store):
+        if not store.has_extended_api():
+            self.skipTest("Store doesn't support extended APIs")
+        store.multi_set(["foo", "bar"], ["po", "tato"])
+        self.assertEqual(b"po", store.get("foo"))
+        self.assertEqual(b"tato", store.get("bar"))
+
+    def test_multi_set(self):
+        self._test_multi_set(self._create_store())
+
+    def _test_multi_get(self, store):
+        if not store.has_extended_api():
+            self.skipTest("Store doesn't support extended APIs")
+        store.set("foo", "po")
+        store.set("bar", "tato")
+        v0, v1 = store.multi_get(["foo", "bar"])
+        self.assertEqual(b"po", v0)
+        self.assertEqual(b"tato", v1)
+
+    def test_multi_get(self):
+        self._test_multi_get(self._create_store())
 
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
@@ -272,6 +308,18 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
         rpc.shutdown()
 
+    @skip_if_win32()
+    def test_take_over_listen_socket(self):
+        listen_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listen_sock.bind(("localhost", 0))
+        addr, port, *_ = listen_sock.getsockname()
+        listen_fd = listen_sock.detach()
+
+        store = dist.TCPStore(addr, port, 1, is_master=True, master_listen_fd=listen_fd)
+
+        store.set("key", "value")
+        self.assertEqual(b"value", store.get("key"))
+
     # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
     # the user and one additional key used for coordinate all the workers.
     @property
@@ -327,6 +375,28 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_multi_worker_with_nonfixed_world_size(self):
         self._multi_worker_helper(None)
 
+    def test_append(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.append("foo", "tato")
+        store.append("bar", "po")
+        store.append("bar", "tato")
+        self.assertEqual(b"potato", store.get("foo"))
+        self.assertEqual(b"potato", store.get("bar"))
+
+    def test_multi_set(self):
+        store = self._create_store()
+        store.multi_set(["foo", "bar"], ["po", "tato"])
+        self.assertEqual(b"po", store.get("foo"))
+        self.assertEqual(b"tato", store.get("bar"))
+
+    def test_multi_get(self):
+        store = self._create_store()
+        store.set("foo", "po")
+        store.set("bar", "tato")
+        v0, v1 = store.multi_get(["foo", "bar"])
+        self.assertEqual(b"po", v0)
+        self.assertEqual(b"tato", v1)
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -344,7 +414,6 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
     @property
     def num_keys_total(self):
         return 6
-
 
 class MyPythonStore(dist.Store):
     def __init__(self):
@@ -369,6 +438,16 @@ class MyPythonStore(dist.Store):
         self.set(key, bytes(str(new).encode("utf-8")))
         return new
 
+    def compare_set(self, key, expected, newValue):
+        if type(expected) is not bytes:
+            raise AssertionError("compare_set::expected not bytes")
+        if type(newValue) is not bytes:
+            raise AssertionError("compare_set::newValue not bytes")
+
+        val = self.store.get(key, None)
+        if expected == val or val is None:
+            val = self.store[key] = newValue
+        return val
 
 class PythonStoreTest(TestCase):
     def test_set_get(self):
@@ -577,6 +656,18 @@ class TestPythonStore(TestCase):
         self.assertEqual(1, len(store.multi_sets))
         self.assertEqual(["p/foo", "p/bar"], store.multi_sets[0][0])
         self.assertEqual([b'x', b'y'], store.multi_sets[0][1])
+
+    def test_extended_methods_fallbacks(self):
+        test_store = MyPythonStore()
+        store = dist.PrefixStore("p", test_store)
+        self.assertFalse(store.has_extended_api())
+        store.append("foo", b"po")
+        store.append("foo", b"tato")
+        self.assertEqual(store.get("foo"), b"potato")
+
+        store.multi_set(["a", "b"], [b"c", b"d"])
+        self.assertEqual(store.multi_get(["a", "b", "foo"]), [b"c", b"d", b"potato"])
+
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
     # TODO: Use less hacky means of instantiating stores.

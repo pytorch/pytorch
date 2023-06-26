@@ -54,7 +54,8 @@ Tensor& random_mps_impl(Tensor& self,
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self}) + ":" + to_string(val1) + ":" + to_string(val2);
+    string key = op_name + getTensorsStringKey({self, mean_opt.value_or(Tensor()), std_opt.value_or(Tensor())}) + ":" +
+        to_string(val1) + ":" + to_string(val2);
     auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->stateTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
@@ -62,12 +63,12 @@ Tensor& random_mps_impl(Tensor& self,
       // FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
       const MPSDataType inputDataType = [&] {
         // only for random_mps, we pass interval range of type int64_t
-        if (std::is_same<scalar_t, int64_t>::value)
+        if constexpr (std::is_same_v<scalar_t, int64_t>) {
           return MPSDataTypeInt32;
-        else
-          return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
+        }
+        return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
       }();
-      const MPSDataType outputDataType = (std::is_same<scalar_t, bool>::value) ? MPSDataTypeBool : inputDataType;
+      const MPSDataType outputDataType = std::is_same_v<scalar_t, bool> ? MPSDataTypeBool : inputDataType;
 
       MPSGraphRandomOpDescriptor* desc = [MPSGraphRandomOpDescriptor descriptorWithDistribution:distribution
                                                                                        dataType:inputDataType];
@@ -179,12 +180,16 @@ Tensor& normal_mps_impl(Tensor& self,
 }
 
 Tensor& bernoulli_mps_impl(Tensor& self, const Tensor& prob_t, c10::optional<Generator> gen, std::string op_name) {
-  TORCH_CHECK(prob_t.is_same_size(self), op_name, ": probability and self tensor should be of the same shape")
+  TORCH_CHECK(prob_t.is_same_size(self) || prob_t.dim() == 0,
+              op_name,
+              ": probability and self tensor should be of the same shape")
 
   RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
     cachedGraph->stdTensor = mpsGraphRankedPlaceHolder(mpsGraph, prob_t);
-    return [mpsGraph lessThanWithPrimaryTensor:randomTensor secondaryTensor:cachedGraph->stdTensor name:nil];
+    return [mpsGraph lessThanWithPrimaryTensor:randomTensor
+                               secondaryTensor:castMPSTensor(mpsGraph, cachedGraph->stdTensor, [randomTensor dataType])
+                                          name:nil];
   };
   // Bernoulli generates binary output so we use bool type
   return mps::random_mps_impl<bool>(self,
@@ -267,7 +272,7 @@ Tensor& bernoulli_out_mps(const Tensor& p_, c10::optional<Generator> gen, Tensor
 
 Tensor& bernoulli_mps_(Tensor& self, double p, c10::optional<Generator> gen) {
   TORCH_CHECK(0.0 <= p && p <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p);
-  Tensor prob_t = at::full_like(self, Scalar(p));
+  Tensor prob_t = at::full({}, Scalar(p), c10::TensorOptions().dtype(kFloat).device(kMPS));
   return mps::bernoulli_mps_impl(self, prob_t, gen, __func__);
 }
 

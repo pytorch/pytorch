@@ -3,7 +3,6 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/unsafe_cast_function.h>
 
 #include <ATen/Layout.h>
 
@@ -36,7 +35,7 @@ PyTypeObject THPLayoutType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    torch::unsafe_cast_function<reprfunc>(THPLayout_repr), /* tp_repr */
+    (reprfunc)THPLayout_repr, /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */

@@ -178,7 +178,11 @@ class TORCH_API Reducer {
   // current iteration, which means unused params set has not changed.
   bool ddp_graph_static();
 
+  // Removes autograd hooks registered by the Reducer on the model parameters.
   void remove_autograd_hooks();
+
+  // Checks whether or not the reducer has finalized the current backward iteration.
+  void check_finalized();
 
  protected:
   // Forward declaration.
@@ -400,6 +404,11 @@ class TORCH_API Reducer {
 
   // track the number of iterations to synchronize grads in training so far.
   long num_iterations_;
+  // track distinct iteration of backward call. This is distinct from num_iterations_,
+  // for example in the case of multiple forward before backward.
+  long num_bwd_calls_;
+  // whether the first autograd hook for a distinct backward pass has been called.
+  bool first_autograd_hook_called_;
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;
