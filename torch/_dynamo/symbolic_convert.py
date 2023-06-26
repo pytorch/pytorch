@@ -1946,6 +1946,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 frame_state,
                 local_scope=f_locals,
                 global_scope=f_globals,
+                f_code=f_code,
             ),
             instructions=instructions,
             f_locals=f_locals,

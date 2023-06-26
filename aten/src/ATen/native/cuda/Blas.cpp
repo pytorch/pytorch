@@ -179,7 +179,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     if (!disable_addmm_cuda_lt) {
       useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
-          self.is_contiguous() &&
+          self.is_contiguous() && result.is_contiguous() &&
           (scalar_type == at::ScalarType::Double ||
            scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
@@ -287,13 +287,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               self.const_data_ptr<scalar_t>(),
               result_->data_ptr<scalar_t>(),
               result_ld,
-#if 0
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11080
               activation_to_gemm_and_blas_arg(activation)
 #else
               // GELU is not supported (and does not compile!) prior
-              // to CUDA 11.4.  Have observed accuracy issues with
+              // to CUDA 11.4. Have observed accuracy issues with
               // GELU epilogue in 11.4; disabling the GELU epilogue
-              // path until we confirm which version it's working in.
+              // path for CUDA version < 11.8.
               activation != Activation::GELU
               ? activation_to_gemm_and_blas_arg(activation)
               : cuda::blas::GEMMAndBiasActivationEpilogue::None
@@ -345,7 +345,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // gating activation_to_gemm_and_blas_arg above; here we are manually
 // performing a post-GELU because we weren't able to use the GELU
 // epilogue above.
-#if !0
+#if !defined(CUDA_VERSION) || CUDA_VERSION < 11080
   if (useLtInterface && activation == Activation::GELU) {
     at::gelu_(const_cast<Tensor&>(*result_));
   }
