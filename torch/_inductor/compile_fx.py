@@ -214,8 +214,10 @@ def inner_compile_with_cpp_wrapper(inner_compile):
                 assert torch._guards.TracingContext.get()
                 real_inputs = [
                     materialize(x)
-                    for x in torch._guards.TracingContext.get().params_flat
-                    + V.real_inputs
+                    for x in [
+                        *torch._guards.TracingContext.get().params_flat,
+                        *V.real_inputs,
+                    ]
                 ]
 
                 with torch.utils._python_dispatch._disable_current_modes():
