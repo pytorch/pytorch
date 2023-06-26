@@ -30,7 +30,7 @@ class GatherDNNLowPOp final : public GatherOp<CPUContext> {
 
  public:
   GatherDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
-  ~GatherDNNLowPOp();
+  ~GatherDNNLowPOp() override;
   bool RunOnDevice() override;
 
   template <typename Index>
