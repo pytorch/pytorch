@@ -15,7 +15,7 @@ layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 
 /*
- * Returns the input tensor, filled with zeros
+ * Returns a tensor filled with zeros
  */
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
