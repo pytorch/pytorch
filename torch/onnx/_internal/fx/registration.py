@@ -47,12 +47,12 @@ class OnnxRegistry:
         register_custom_op: Registers a custom operator.
         get_functions: Returns the set of SymbolicFunctions for the given op.
         is_registered_op: Returns whether the given op is registered.
-        all_registered_ops: Returns the set of all registered op names.
 
     Private Methods:
         _register: Registers a SymbolicFunction to an operator.
         _initiate_registry_from_torchlib: Populates the registry with ATen functions from torchlib.
         _get_custom_functions: Returns the set of custom functions for the given name.
+        _all_registered_ops: Returns the set of all registered op names.
 
     """
 
@@ -95,74 +95,104 @@ class OnnxRegistry:
     @_beartype.beartype
     def register_custom_op(
         self,
-        op_name: str,
         function: Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"],
+        domain: str,
+        op_name: str,
+        overload: Optional[str] = None,
     ) -> None:
-        """Registers a custom operator.
+        """Registers a custom operator: torch.ops.<domain>.<op_name>.<overload>.
 
         Args:
-            op_name: The qualified name of the operator to register. In the form of 'domain::op'.
-                E.g. 'aten::add' or 'aten::pow.int'.
             function: The onnx-sctip function to register.
+            domain: The domain of the operator to register.
+            op_name: The name of the operator to register.
+            overload: The overload of the operator to register. If it's default overload,
+                leave it to None.
 
         Raises:
             ValueError: If the name is not in the form of 'domain::op'.
         """
-        if "::" not in op_name:
-            raise ValueError(
-                f"The name must be in the form of 'domain::op', not '{op_name}'"
-            )
+        if overload is None:
+            # NOTE: "default" overload
+            name = f"{domain}::{op_name}"
+        else:
+            name = f"{domain}::{op_name}.{overload}"
         symbolic_function = SymbolicFunction(
-            onnx_function=function, op_name=op_name, is_custom=True
+            onnx_function=function, op_name=name, is_custom=True
         )
         self._register(symbolic_function)
 
     @_beartype.beartype
-    def get_functions(self, name: str) -> Optional[Set[SymbolicFunction]]:
-        """Returns the set of SymbolicFunctions for the given op.
+    def get_functions(
+        self, domain: str, op_name: str, overload: Optional[str] = None
+    ) -> Optional[Set[SymbolicFunction]]:
+        """Returns the set of SymbolicFunctions for the given op: torch.ops.<domain>.<op_name>.<overload>.
 
         Args:
-            name: The qualified op name of the functions to retrieve.
-
+            domain: The domain of the operator to get.
+            op_name: The name of the operator to get.
+            overload: The overload of the operator to get. If it's default overload,
+                leave it to None.
         Returns:
             Thethe set of SymbolicFunctions corresponding to the given name, or None if
             the name is not in the registry.
         """
+        if overload is None:
+            # NOTE: "default" overload
+            name = f"{domain}::{op_name}"
+        else:
+            name = f"{domain}::{op_name}.{overload}"
         if (functions := self._registry.get(name)) is not None:
             return functions
         return None
 
     @_beartype.beartype
-    def _get_custom_functions(self, op_name: str) -> Optional[Set[SymbolicFunction]]:
-        """Returns the set of custom functions for the given name.
+    def _get_custom_functions(
+        self, domain: str, op_name: str, overload: Optional[str] = None
+    ) -> Optional[Set[SymbolicFunction]]:
+        """Returns the set of custom functions for the given name: torch.ops.<domain>.<op_name>.<overload>.
 
         Args:
-            op_name: The qualified op name of the functions to retrieve.
+            domain: The domain of the operator to get.
+            op_name: The name of the operator to get.
+            overload: The overload of the operator to get. If it's default overload,
+                leave it to None.
 
         Returns:
             The set of custom SymbolicFunctions corresponding to the given name, or None
             if the name is not in the registry.
         """
-        if (functions := self.get_functions(op_name)) is not None:
+        if (
+            functions := self.get_functions(
+                domain=domain, op_name=op_name, overload=overload
+            )
+        ) is not None:
             custom_functions = {func for func in functions if func.is_custom}
             if custom_functions:
                 return custom_functions
         return None
 
     @_beartype.beartype
-    def is_registered_op(self, op_name: str) -> bool:
-        """Returns whether the given op is registered.
+    def is_registered_op(
+        self, domain: str, op_name: str, overload: Optional[str] = None
+    ) -> bool:
+        """Returns whether the given op is registered: torch.ops.<domain>.<op_name>.<overload>.
 
         Args:
-            op_name: The qualified op name of the function to check.
+            domain: The domain of the operator to check.
+            op_name: The name of the operator to check.
+            overload: The overload of the operator to check. If it's default overload,
+                leave it to None.
 
         Returns:
             True if the given op is registered, otherwise False.
         """
-        functions = self.get_functions(op_name)
+        functions = self.get_functions(
+            domain=domain, op_name=op_name, overload=overload
+        )
         return functions is not None
 
     @_beartype.beartype
-    def all_registered_ops(self) -> Set[str]:
+    def _all_registered_ops(self) -> Set[str]:
         """Returns the set of all registered function names."""
         return set(self._registry)

@@ -96,13 +96,13 @@ class OnnxFunctionDispatcher:
         # If there are no overloaded functions available for the given FX node, raise an
         # unsupported error
         all_functions, custom_functions = self.get_function_overloads(
-            node, aten_name, diagnostic_context
+            node, *aten_name, diagnostic_context
         )
         # If there are overloaded functions available, we will find one that perfect or
         # nearest matches the given arguments and keyword arguments
         return self._find_the_perfect_or_nearest_match_onnxfunction(
             node,
-            aten_name,
+            *aten_name,
             all_functions,
             custom_functions,
             onnx_args,
@@ -114,7 +114,9 @@ class OnnxFunctionDispatcher:
     def _find_the_perfect_or_nearest_match_onnxfunction(
         self,
         node: torch.fx.Node,
-        aten_name: str,
+        domain: str,
+        op_name: str,
+        overload: Optional[str],
         all_functions: Set[registration.SymbolicFunction],
         custom_functions: Optional[Set[registration.SymbolicFunction]],
         onnx_args: Sequence[
@@ -123,7 +125,24 @@ class OnnxFunctionDispatcher:
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
-        """Find the perfect/nearest matched OnnxFunction for the given FX node, arguments, and keyword arguments."""
+        """Find the perfect/nearest matched OnnxFunction for the given FX node, arguments, and keyword arguments.
+
+        Args:
+            node: The TorchFX node to dispatch the function for.
+            domain: The domain of the ONNX node.
+            op_name: The name of the ONNX node.
+            overload: The FX overload of the node. It's None if the node is default overload.
+            all_functions: All overloaded functions.
+            custom_functions: Custom overloaded functions.
+            onnx_args: The arguments of the ONNX function.
+            onnx_kwargs: The keyword arguments of the ONNX function.
+            diagnostic_context: The diagnostic context to use for reporting errors.
+
+            Returns:
+                Either an `onnxscript.OnnxFunction` or `onnxscript.TracedOnnxFunction` instance based on the dispatch algorithm.
+            Raises:
+                RuntimeError: If there are no overloaded functions available for the given FX node.
+        """
         # TODO(justinchuby): Cache the OpSchemaWrapper so we don't need to run the init logic everytime
         overload_match_ranking: Dict[registration.SymbolicFunction, int] = {}
 
@@ -147,9 +166,12 @@ class OnnxFunctionDispatcher:
             # Record the match score for the nearest match if it's not the perfect match
             overload_match_ranking[symbolic_function] = function_opschema.match_score
 
-        # TODO(titaiwang): Change inflight_diagnostic to a new rule. Do we need to handle
-        # the special case where the same scores happended?
         # If the perfect match is not found, find the nearest match
+        if overload is None:
+            # NOTE: "default" overload
+            aten_name = f"{domain}::{op_name}"
+        else:
+            aten_name = f"{domain}::{op_name}.{overload}"
         warnings.warn(
             f"A perfect matched Opchema is not found in torchlib for {aten_name}, but \n"
             f"a nearest match is found. Please check the ONNX output carefully. \n",
@@ -175,7 +197,7 @@ class OnnxFunctionDispatcher:
     @_beartype.beartype
     def get_aten_name(
         self, node: torch.fx.Node, diagnostic_context: diagnostics.DiagnosticContext
-    ) -> str:
+    ) -> tuple[str, str, Optional[str]]:
         """Get the aten name from the target.
 
         Args:
@@ -183,10 +205,10 @@ class OnnxFunctionDispatcher:
             diagnostic_context: The diagnostic context to use for reporting errors.
 
         Returns:
-            The aten name of the given node.
+            The aten name of the given node: domain, op_name, overload.
         """
         if node.target == operator.getitem:
-            return "aten::getitem"
+            return "aten", "getitem", None
         if isinstance(node.target, torch._ops.OpOverloadPacket):
             # aten::sym_size is the only OverloadPacket that we support.
             # schema: aten::sym_size(Tensor self, int dim) -> Tensor
@@ -203,7 +225,8 @@ class OnnxFunctionDispatcher:
             # overloadpacket for some reasons.
             # https://github.com/pytorch/pytorch/issues/97201
             aten_op_default = node.target.default
-            return aten_op_default.name()  # type: ignore[attr-defined]
+            # NOTE: default doesn't have "overload"
+            return split_opname_to_domain_op_overload(aten_op_default.name())  # type: ignore[attr-defined]
 
         if _symint_symfloat_builtin_to_exporter_key_table(node.target) is not None:
             # Make sure it's symint/symfloat consuming builtin ops.
@@ -226,9 +249,11 @@ class OnnxFunctionDispatcher:
                     diagnostic_context.log(diagnostic)
                     raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
             aten_op = _symint_symfloat_builtin_to_exporter_key_table(node.target)
-            return aten_op.name()  # type: ignore[attr-defined]
+            # overload name is torch.ops.<domain>.<op_name>.<overload>
+            return split_opname_to_domain_op_overload(aten_op.name())  # type: ignore[attr-defined]
+
         if isinstance(node.target, torch._ops.OpOverload):
-            return node.target.name()
+            return split_opname_to_domain_op_overload(node.target.name())
 
         # Unexpected target, raise error.
         diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
@@ -244,7 +269,9 @@ class OnnxFunctionDispatcher:
     def get_function_overloads(
         self,
         node: torch.fx.Node,
-        aten_name: str,
+        domain: str,
+        op_name: str,
+        overload: Optional[str],
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Tuple[
         Set[registration.SymbolicFunction], Optional[Set[registration.SymbolicFunction]]
@@ -253,7 +280,9 @@ class OnnxFunctionDispatcher:
 
         Args:
             node: The node to get the function overloads for.
-            aten_name: The aten name of the node.
+            domain: The domain of the node.
+            op_name: The name of the node.
+            overload: The FX overload of the node. It's None if the node is default overload.
             diagnostic_context: The diagnostic context to use for reporting errors.
 
         Returns:
@@ -263,26 +292,39 @@ class OnnxFunctionDispatcher:
         function_group = None
         custom_function_group = None
 
-        if self.onnx_registry.is_registered_op(aten_name):
-            function_group = self.onnx_registry.get_functions(aten_name)
-            custom_function_group = self.onnx_registry._get_custom_functions(aten_name)
+        if self.onnx_registry.is_registered_op(
+            domain=domain, op_name=op_name, overload=overload
+        ):
+            function_group = self.onnx_registry.get_functions(
+                domain=domain, op_name=op_name, overload=overload
+            )
+            custom_function_group = self.onnx_registry._get_custom_functions(
+                domain=domain, op_name=op_name, overload=overload
+            )
 
-        # Fall back to overloadpacket name: eg: aten.add.Tensor -> aten::add
+        # NOTE: Fall back to overloadpacket name: eg: aten.add.Tensor -> aten::add
+        # Support default fallback for overloadpacket.
         elif hasattr(
             node.target, "overloadpacket"
         ) and self.onnx_registry.is_registered_op(
-            node.target.overloadpacket._qualified_op_name,  # type: ignore[union-attr]
+            domain=domain, op_name=op_name, overload=None
         ):
             function_group = self.onnx_registry.get_functions(
-                node.target.overloadpacket._qualified_op_name,  # type: ignore[union-attr]
+                domain=domain, op_name=op_name, overload=None
             )
             custom_function_group = self.onnx_registry._get_custom_functions(
-                node.target.overloadpacket._qualified_op_name,  # type: ignore[union-attr]
+                domain=domain, op_name=op_name, overload=None
             )
 
         if function_group is not None:
             return function_group, custom_function_group
 
+        # If we can't find the function group, raise error.
+        if overload is None:
+            # NOTE: "default" overload
+            aten_name = f"{domain}::{op_name}"
+        else:
+            aten_name = f"{domain}::{op_name}.{overload}"
         diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
             diagnostics.rules.no_symbolic_function_for_call_function,
             diagnostics.levels.ERROR,
@@ -521,3 +563,21 @@ def _find_onnx_data_type(
         return set()
 
     raise RuntimeError(f"Unknown input type from input: {torch_input}")
+
+
+@_beartype.beartype
+def split_opname_to_domain_op_overload(op_name: str) -> tuple[str, str, Optional[str]]:
+    """Split op_name to domain, op, and overload.
+
+    Args:
+        op_name: The op name.
+
+    Returns:
+        A tuple of domain, op, and overload.
+    """
+
+    # overload name is torch.ops.<domain>.<op_name>.<overload>
+    domain, opname_overload = op_name.split("::")
+    op_name, *overload = opname_overload.split(".", 1)
+    overload = overload[0] if overload else None
+    return domain, op_name, overload
