@@ -26,6 +26,7 @@ from torch.fx.experimental import proxy_tensor
 
 # Imported to resolve beartype issue when type checking node.Argument.
 from torch.fx.node import Node  # noqa: F401
+
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
 from torch.utils import _python_dispatch, _pytree
@@ -46,6 +47,7 @@ def _try_getclosurevars(func):
         return inspect.getclosurevars(func)
     except TypeError as e:
         return None
+
 
 @dataclasses.dataclass
 class TypePromotionSnapshot:
@@ -88,8 +90,11 @@ class TypePromotionRule:
     ):
         self.namespace = namespace
         self.op_name = op_name
+        # Positions of args to promote.
         self.promote_args_positions = promote_args_positions
+        # Names of kwargs to promote.
         self.promote_kwargs_names = promote_kwargs_names
+        # Type promotion kind. Checkout _prims_common.elementwise_dtypes for explanation.
         self.promotion_kind = promotion_kind
 
     def __hash__(self) -> int:
@@ -136,10 +141,10 @@ class TypePromotionRule:
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        """Preview type promotion results for the given fx node.
+        """Preview type promotion results for provided set of args and kwargs.
 
         Returns a TypePromotionSnapshot object that contains the promoted dtypes for
-        the arguments and the expected output dtype of the given fx node.
+        the arguments and the expected output dtype.
         """
 
         candidate_args = {
@@ -202,6 +207,7 @@ class DivTypePromotionRule(TypePromotionRule):
             raise ValueError(f"Unknown rounding_mode: {rounding_mode}")
 
 
+# [Note] Update type promotion rule
 # NOTE: BELOW TABLE IS GENERATED FROM `TypePromotionRuleSetGenerator.generate_from_torch_refs`.
 # DO NOT EDIT MANUALLY !!!
 # For missing rules or discrepancies, please
@@ -209,6 +215,7 @@ class DivTypePromotionRule(TypePromotionRule):
 #    If it is not, update with new generated set.
 # 2. If discrepancies still exist, consider debugging torch._refs or report a bug.
 # 3. If rules are still missing, add them to `_EXTRA_TYPE_PROMOTION_RULE_SET` or report a bug.
+# Check `TypePromotionRule` class for how each rule is defined and used.
 _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     TypePromotionRule(
         "aten", "abs", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
@@ -1047,13 +1054,16 @@ def find_compatible_op_overload(
     with op_trace_dispatch_mode:
         op(*args, **kwargs)
     assert (
-        len(op_trace_dispatch_mode.traced_ops) == 1
-    ), f"Expected 1 traced op, got {len(op_trace_dispatch_mode.traced_ops)}"
+        len(op_trace_dispatch_mode.traced_ops) >= 1
+    ), "Expected at least 1 traced op, got 0"
 
     new_op_overload = op_trace_dispatch_mode.traced_ops[0]
     assert isinstance(
         new_op_overload, torch._ops.OpOverload
     ), f"Expected OpOverload, got {type(new_op_overload)}"
+    assert (
+        new_op_overload.overloadpacket == op
+    ), f"Expected same OpOverload packet, got {new_op_overload.overloadpacket} != {op}"
 
     return new_op_overload
 
