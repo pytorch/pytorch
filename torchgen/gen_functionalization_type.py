@@ -59,6 +59,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         # See Note [resize_ in Functionalization]
         "resize_",
         "resize_as_",
+        # This function is used as for testing purposes only.
+        "_fill_mem_eff_dropout_mask_",
     ]
 )
 
