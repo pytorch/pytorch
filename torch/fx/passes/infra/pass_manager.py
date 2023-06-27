@@ -277,7 +277,7 @@ class PassManager:
                             + "Please wrap it with pass_result_wrapper()"
                         )
                     module = res.graph_module
-                    modified = modified or res.modified
+                    modified = modified or (hasattr(res, "modified") and res.modified)
 
                     if isinstance(module, GraphModule):
                         logger.debug("Graph after pass '%s': %s", fn_name, module.graph)

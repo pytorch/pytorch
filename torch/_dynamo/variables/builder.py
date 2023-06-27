@@ -1226,6 +1226,7 @@ def wrap_fx_proxy_cls(
         # This always wants to be in the graph, even if the constraint
         # results in a constant int
         torch._export.constraints.constrain_as_value,
+        torch.ops.aten.sym_size.int,
     ):
         return ConstantVariable(example_value, **options)
     elif istype(example_value, torch.Size) and all(

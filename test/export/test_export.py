@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import unittest
+from functools import partial
 
 import torch
 import torch._dynamo as torchdynamo
@@ -257,6 +258,24 @@ class TestExport(TestCase):
         inp_for_g = 4
         with self.assertRaisesRegex(torchdynamo.exc.UserError, "Expected tensor as input to dynamic_dim"):
             constraints = [dynamic_dim(inp_for_g, 0)]
+
+    def test_export_retrace_with_sym_size_int_succeed(self):
+        def f(a: torch.Tensor, b: float):
+            return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
+
+        inputs = (torch.ones([2, 3]) * 4, 2.)
+        ep = torch._export.export(f, inputs, [])
+
+        # assert that sym_size.int is in the graph
+        self.assertIsNotNone(next(n for n in ep.graph.nodes if n.op == "call_function" and n.target == torch.ops.aten.sym_size.int))
+
+        # retrace and expect no error
+        retraced = ep.transform(partial(torch._export.export, args=inputs))
+
+        # makes sure the result is the same
+        a = retraced(*inputs)
+        self.assertEqual(a, ep(*inputs))
+
 
 if __name__ == '__main__':
     run_tests()
