@@ -120,16 +120,17 @@ class TensorCheck {
     const auto& sizes = v.sizes();
     const auto& strides = v.strides();
     for (auto i : c10::irange(ndim)) {
-      auto known_size = sizes_[i];
-      auto known_stride = strides_[i];
-      if (known_size.has_value() && (known_size.value() != sizes[i])) {
+      auto expected_size = sizes_[i];
+      auto expected_stride = strides_[i];
+      if (expected_size.has_value() && (expected_size.value() != sizes[i])) {
         fail_reason << "size mismatch at index " << i << ". expected "
-                    << sizes[i] << ", actual " << known_size.value();
+                    << expected_size.value() << ", actual " << sizes[i];
         return fail_reason.str();
       }
-      if (known_stride.has_value() && known_stride.value() != strides[i]) {
+      if (expected_stride.has_value() &&
+          expected_stride.value() != strides[i]) {
         fail_reason << "stride mismatch at index " << i << ". expected "
-                    << strides[i] << ", actual " << known_stride.value();
+                    << expected_stride.value() << ", actual " << strides[i];
         return fail_reason.str();
       }
     }
