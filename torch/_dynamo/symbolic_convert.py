@@ -88,6 +88,7 @@ from .variables.lists import (
 from .variables.misc import (
     ClosureVariable,
     GetAttrVariable,
+    InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -493,7 +494,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     next_instruction: Optional[Instruction]
     block_stack: List[BlockStackEntry]
     lineno: int
-    mutated_closure_cell_contents: Set[str]
     kw_names: Optional[ConstantVariable]
     accept_prefix_inst: bool
     prefix_insts: List[Instruction]
@@ -1917,6 +1917,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
 
 class InstructionTranslator(InstructionTranslatorBase):
+    mutated_closure_cell_contents: Set[str]
+
     def __init__(
         self,
         instructions: List[Instruction],
@@ -2316,7 +2318,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 if (
                     maybe_cell is not None
                     and maybe_cell.source.name()
-                    not in self.parent.mutated_closure_cell_contents
+                    not in self.output.root_tx.mutated_closure_cell_contents
                 ):
                     # Why is the source name here unique?
                     # mutated_closure_cell_contents is a per-frame
@@ -2324,7 +2326,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     # locals from the frame.  If you had two locals,
                     # they'll get different source names, and therefore
                     # differ here.
-                    self.parent.mutated_closure_cell_contents.add(
+                    self.output.root_tx.mutated_closure_cell_contents.add(
                         maybe_cell.source.name()
                     )
                     raise exc.RestartAnalysis()
@@ -2346,7 +2348,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def LOAD_CLOSURE(self, inst):
         assert inst.argval in self.cell_and_freevars()
-        self.push(self.closure_cells[inst.argval])
+        if inst.argval in self.closure_cells:
+            self.push(self.closure_cells[inst.argval])
+        else:
+            self.push(InlinedClosureVariable(name=inst.argval))
 
     def check_replace_is_safe(self, oldvar):
         if not is_side_effect_safe(oldvar.mutable_local):
