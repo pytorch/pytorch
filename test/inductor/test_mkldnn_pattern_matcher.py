@@ -9,7 +9,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 unary_list = {
@@ -157,7 +157,7 @@ class TestPaternMatcher(TestCase):
                 .add(1)
                 .to(memory_format=memory_format)
             )
-            self._test_common(mod, (v,), 1, unary_list[unary_fn])
+            self._test_common(mod, (v,), 2, unary_list[unary_fn] + 1)
 
     def test_linear_unary(self):
         class M(torch.nn.Module):
@@ -190,8 +190,10 @@ class TestPaternMatcher(TestCase):
                 # only fuse for linear when the dtype is bf16
                 mod = mod.to(dtype)
                 v = torch.randn(2, 10).to(dtype)
+                matcher_count = 2
+                matcher_nodes = unary_list_bf16[unary_fn] + 1
                 self._test_common(
-                    mod, (v,), 1, unary_list_bf16[unary_fn], atol=1e-5, rtol=1.6e-2
+                    mod, (v,), matcher_count, matcher_nodes, atol=1e-5, rtol=1.6e-2
                 )
 
     def test_conv_transpose2d_unary(self):
@@ -224,7 +226,7 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(x_shape, dtype=torch.float32).to(
                 memory_format=memory_format
             )
-            self._test_common(mod, (v,), 1, unary_list[unary_fn])
+            self._test_common(mod, (v,), 2, unary_list[unary_fn] + 1)
 
     def test_conv2d_binary(self):
         class M(torch.nn.Module):
@@ -270,7 +272,7 @@ class TestPaternMatcher(TestCase):
             match_nodes = (
                 binary_list[binary_fn] + 1 if has_relu else binary_list[binary_fn]
             )
-            self._test_common(mod, (v,), 1, match_nodes)
+            self._test_common(mod, (v,), 3, match_nodes + 2)
 
     @expectedFailureDynamicWrapper
     def test_linear_binary(self):
@@ -294,8 +296,8 @@ class TestPaternMatcher(TestCase):
         out_feature = 30
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             for binary_fn, input_shape, bias in options:
-                match_count = linear_binary_list[binary_fn][0]
-                match_nodes = linear_binary_list[binary_fn][1]
+                match_count = linear_binary_list[binary_fn][0] + 1
+                match_nodes = linear_binary_list[binary_fn][1] + 1
                 if len(input_shape) == 3:
                     is_inplace = linear_binary_list[binary_fn][2]
                     # view + linear + view(joint_graph+post_grad)
@@ -329,7 +331,7 @@ class TestPaternMatcher(TestCase):
         v = torch.randn(1, 3, 28, 28)
         for min_value, max_value in zip(min_values, max_values):
             mod = Model().eval()
-            self._test_common(mod, (v, min_value, max_value), 1, 3)
+            self._test_common(mod, (v, min_value, max_value), 2, 4)
 
     def test_leaky_relu_pattern_fallback(self):
         class Model(torch.nn.Module):
@@ -348,7 +350,7 @@ class TestPaternMatcher(TestCase):
             v = torch.randn(1, 3, 28, 28)
             for negative_slope in negative_slopes:
                 mod = Model().eval()
-                self._test_common(mod, (v, negative_slope), 1, 4)
+                self._test_common(mod, (v, negative_slope), 2, 5)
 
     # https://github.com/pytorch/pytorch/issues/99838.
     def test_conv2d_add_scalar(self):
@@ -367,7 +369,7 @@ class TestPaternMatcher(TestCase):
         with torch.no_grad():
             mod = Model().eval()
             v = torch.randn(1, 3, 28, 28)
-            self._test_common(mod, (v,), 0, 0)
+            self._test_common(mod, (v,), 1, 1)
 
     def test_conv2d_binary_inplace_fusion_pass_cpu(
         self, include_ops=None, exclude_ops=None
@@ -521,10 +523,5 @@ class TestPaternMatcher(TestCase):
 
 
 if __name__ == "__main__":
-    if (
-        IS_LINUX
-        and HAS_CPU
-        and torch.backends.mkldnn.is_available()
-        and not TEST_WITH_ROCM
-    ):
+    if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
         run_tests()

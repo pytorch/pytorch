@@ -38,6 +38,7 @@ jobs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
       keep-going: ${{ steps.filter.outputs.keep-going }}
+      reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -161,27 +162,13 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          PR_BODY: ${{ github.event.pull_request.body }}
+          REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
-
-          COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-main}")
-
-          # sanitize the input commit message and PR body here:
-          #
-          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
-          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          PR_BODY="${PR_BODY//[$'\n\r']}"
-
-          # then trim all special characters like single and double quotes to avoid unescaped inputs to
-          # wreak havoc internally
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
-          export PR_BODY="${PR_BODY//[\'\"]}"
 
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
@@ -201,8 +188,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e PR_BODY \
-            -e COMMIT_MESSAGES \
+            -e REENABLED_ISSUES \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e CUDA_VERSION \

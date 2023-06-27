@@ -16,7 +16,11 @@ from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from .. import config
 
 from ..fx_utils import matches_module_function_pattern
-from ..pattern_matcher import init_once_fakemode, PatternMatcherPass
+from ..pattern_matcher import (
+    init_once_fakemode,
+    PatternMatcherPass,
+    stable_topological_sort,
+)
 from ..utils import is_cpu_device
 
 log = logging.getLogger(__name__)
@@ -61,6 +65,7 @@ def pre_grad_passes(gm, example_inputs):
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
 
+    stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
 
