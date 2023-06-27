@@ -61,7 +61,7 @@ at::Tensor empty_llga(
       std::move(storage_impl), options.dtype(), desc);
 }
 
-static const LlgaTensorDesc& get_llga_desc(const at::Tensor& tensor) {
+const LlgaTensorDesc& get_llga_desc(const at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       tensor.is_mkldnn(), "get_llga_desc expects Mkldnn tensor input");
   return static_cast<LlgaTensorImpl*>(tensor.unsafeGetTensorImpl())->desc();

@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/codegen/onednn/defer_size_check.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 
