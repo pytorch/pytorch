@@ -48,6 +48,11 @@ class FakeProcessGroup(dist.ProcessGroup):
         # since it's not a real allgather, we simply make this copying logic to let
         # some simple validation works (i.e. calling allgather to see if each rank have
         # the same tensor or not)
+        # NOTE: in general it's not good form to try to make FakePG work with 'real data',
+        # but the reasoning here is that we want FakePG to work with DeviceMesh's init
+        # code that have the data validation, which makes it worth the tradeoff.
+        # In general user should use MTPG or normal PG for cases where they may care about
+        # real data from collectives
         chunks = output_tensor.chunk(self._world_size)
         for chunk in chunks:
             chunk.copy_(input_tensor)
