@@ -39,8 +39,12 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
 }
 
 TEST_OP_VERSION_MAP = {
-    "aten::div_.Scalar_mode": torch._C._UpgraderEntry(4, "div__Scalar_mode_0_3", "aten::div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)")
+    "aten::div_.Scalar_mode": torch._C._UpgraderEntry(
+        4,
+        "div__Scalar_mode_0_3",
+        "aten::div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)")
 }
+
 
 def count_op(graph, target_str):
     return len(
@@ -50,7 +54,10 @@ def count_op(graph, target_str):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestUpgrade(TestCase):
     def test_get_upgraders(self):
-        with patch.object(torch._C, "_get_upgraders_entry_map", return_value=TEST_UPGRADERS_ENTRY_MAP), patch.object(torch._C, "_get_operator_version_map", return_value=TEST_OP_VERSION_MAP):
+        with (
+            patch.object(torch._C, "_get_upgraders_entry_map", return_value=TEST_UPGRADERS_ENTRY_MAP),
+            patch.object(torch._C, "_get_operator_version_map", return_value=TEST_OP_VERSION_MAP),
+        ):
             op_upgraders = get_upgraders()
             self.assertEqual(op_upgraders, {
                 "div__Scalar_mode_0_3": (
@@ -62,7 +69,10 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
                 )})
 
     def test_get_upgraders_missing_from_entry_map_raises(self):
-        with patch.object(torch._C, "_get_upgraders_entry_map", return_value={}), patch.object(torch._C, "_get_operator_version_map", return_value=TEST_OP_VERSION_MAP):
+        with (
+            patch.object(torch._C, "_get_upgraders_entry_map", return_value={}),
+            patch.object(torch._C, "_get_operator_version_map", return_value=TEST_OP_VERSION_MAP),
+        ):
             with self.assertRaises(RuntimeError):
                 get_upgraders()
 
