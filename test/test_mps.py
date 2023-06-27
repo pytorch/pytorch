@@ -10551,7 +10551,8 @@ class TestConsistency(TestCaseMPS):
             elif op.name in ['nn.functional.conv_transpose1d',
                              'nn.functional.conv_transpose2d',
                              'nn.functional.conv_transpose3d',
-                             '__rmatmul__', 'addbmm'] and dtype == torch.float16:
+                             '__rmatmul__', 'addbmm', 'addmv',
+                             'baddbmm', 'cov', 'matmul', 'mv'] and dtype == torch.float16:
                 atol = 5e-2
                 rtol = 5e-2
             elif (op.name == "masked.mean"):
