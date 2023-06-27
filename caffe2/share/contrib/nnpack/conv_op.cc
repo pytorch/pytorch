@@ -15,7 +15,7 @@
 C10_DEFINE_bool(caffe2_profile_nnpack, false, "");
 namespace caffe2 {
 
-static void initNNPACK() {
+void initNNPACK() {
   static std::once_flag once;
   std::call_once(once, []() {
     enum nnp_status nnpack_status = nnp_initialize();
