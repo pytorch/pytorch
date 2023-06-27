@@ -124,18 +124,18 @@ class TensorCheck {
       auto known_stride = strides_[i];
       if (known_size.has_value() && (known_size.value() != sizes[i])) {
         fail_reason << "size mismatch at index " << i << ". expected "
-                    << known_size.value() << ", actual " << sizes[i];
+                    << sizes[i] << ", actual " << known_size.value();
         return fail_reason.str();
       }
       if (known_stride.has_value() && known_stride.value() != strides[i]) {
         fail_reason << "stride mismatch at index " << i << ". expected "
-                    << known_stride.value() << ", actual " << strides[i];
+                    << strides[i] << ", actual " << known_stride.value();
         return fail_reason.str();
       }
     }
     if (offset_.has_value() && offset_.value() != v.storage_offset()) {
-      fail_reason << "storage_offset mismatch, expected " << v.storage_offset()
-                  << ", actual " << offset_.value();
+      fail_reason << "storage_offset mismatch, expected " << offset_.value()
+                  << ", actual " << v.storage_offset();
       return fail_reason.str();
     }
     return "";
@@ -151,7 +151,7 @@ class TensorCheck {
   // necessarily capture device indices correctly.
   at::DeviceIndex device_index_;
   bool requires_grad_;
-  // NB: These are always set, but will contains empty optionals if dynamic
+  // NB: These are always set, but will contain empty optionals if dynamic
   // shapes is enabled.
   std::vector<std::optional<int64_t>> sizes_;
   std::vector<std::optional<int64_t>> strides_;
