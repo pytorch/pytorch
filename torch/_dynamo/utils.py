@@ -1680,15 +1680,6 @@ def defake(x):
     return y
 
 
-# NB: The dictionary has to be created lazily after TorchPatcher is called so
-# that we pick up the disabled torch.utils.checkpoint wrapper. Therefore, it is
-# sitting in a separate function.
-# We also need the original untouched/ not disabled torch utils checkpoint
-# becuase distributed checkpointed wrappers import these utils before
-# TorchDynamo TorchPatcher runs.
-# untouched_torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
-
-
 def is_utils_checkpoint(obj):
     return obj is torch.utils.checkpoint.checkpoint
 
@@ -1705,21 +1696,6 @@ def build_checkpoint_variable(guards):
         activation_checkpoint_op,
         source_fn=torch.utils.checkpoint.checkpoint,
         disable_on_reconstruction=True,
-        guards=self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH),
+        guards=guards,
     )
 
-
-# def requires_higher_order_op(obj):
-#     import torch._higher_order_ops.wrap as higher_order_ops
-
-#     activation_checkpoint_op = higher_order_ops.tag_activation_checkpoint
-#     if torch._functorch.config.functionalize_rng_ops:
-#         activation_checkpoint_op = higher_order_ops.wrap_activation_checkpoint
-
-#     d = {
-#         torch.utils.checkpoint.checkpoint: activation_checkpoint_op,
-#         # untouched_torch_utils_checkpoint: activation_checkpoint_op,
-#     }
-#     if obj not in d:
-#         return None
-#     return d[obj]
