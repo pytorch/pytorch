@@ -12736,6 +12736,14 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_norm_([p2], max_norm, norm_type=norm_type, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
+    @onlyCUDA
+    @largeTensorTest("40GB", "cuda")
+    def test_softmax_backward(self, device):
+        for numel in (2147483650, 1):
+            x = torch.empty([1, 1, numel], device=device)
+            x.fill_(0.5)
+            torch._softmax_backward_data(x, x, 2, x)
+
 
 class TestFunctionalPickle(TestCase):
 
