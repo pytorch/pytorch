@@ -85,7 +85,7 @@ class TestSparseSemiStructured(TestCase):
         # Currently we don't support int matmul on GPU, so evaluate on CPU and copy over
         if dtype is torch.int8:
             # This should fail
-            with self.assertRaisesRegex(RuntimeError, "_structured_sparse_linear"):
+            with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
                 sparse_result = torch.mm(A_sparse, B)
 
             # test transpose
