@@ -284,13 +284,15 @@ def convert_conv_weights_to_channels_last(gm):
     Convert 4d convolution weight tensor to channels last format.
 
     This pass is performed before freezing so the added nodes can be constant
-    foled by freezing.
+    folded by freezing.
     """
     convs = [n for n in gm.graph.nodes if n.target == aten.convolution.default]
     for conv in convs:
         weight_node = conv.args[1]
-        if len(weight_node.meta["val"].size()) != 4:
-            # not a 4d tensor, skip
+        if len(weight_node.meta["val"].size()) != 4 or weight_node.meta[
+            "val"
+        ].is_contiguous(memory_format=torch.channels_last):
+            # not a 4d tensor or already channels last, skip
             continue
 
         with gm.graph.inserting_before(conv):
