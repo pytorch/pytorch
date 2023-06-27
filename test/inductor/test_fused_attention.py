@@ -12,7 +12,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
     SM80OrLater,
 )
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -99,6 +99,7 @@ class TestSDPAPatternRewriter(TestCase):
         when an intermediate result is being used / returned downstream
         """
 
+        @skipIfRocm
         @torch.compile(fullgraph=True)
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor

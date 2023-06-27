@@ -11,8 +11,6 @@ from typing import Any, Dict, List, Set, Tuple
 import requests
 from setuptools import distutils  # type: ignore[import]
 
-from tools.github.github_utils import gh_fetch_commit
-
 ALL_SKIPPED_THRESHOLD = 100
 SIMILARITY_THRESHOLD = 0.75
 FAILURE_CHAIN_THRESHOLD = 2
@@ -20,8 +18,6 @@ MAX_CONCURRENT_ALERTS = 1
 FAILED_JOB_PATTERN = (
     r"^- \[(.*)\]\(.*\) failed consecutively starting with commit \[.*\]\(.*\)$"
 )
-PYTORCH_REPO = "pytorch"
-PYTORCH_ORG = "pytorch"
 
 PENDING = "pending"
 NEUTRAL = "neutral"
@@ -261,17 +257,14 @@ def get_recurrently_failing_jobs_alerts(
     (recurrently_failing_jobs, flaky_jobs) = classify_jobs(
         job_names, sha_grid, filtered_job_names
     )
+
     alerts = []
     for job in recurrently_failing_jobs:
-        commit_info = gh_fetch_commit(
-            PYTORCH_ORG, PYTORCH_REPO, job.failure_chain[-1]["sha"]
-        )
-        login = commit_info["author"]["login"]
         entry = {
             "AlertType": "Recurrently Failing Job",
             "AlertObject": job.job_name,
             "OncallTeams": [],
-            "OncallIndividuals": [login],
+            "OncallIndividuals": [],
             "Flags": [],
             "sha": job.failure_chain[-1]["sha"],
             "branch": branch,
