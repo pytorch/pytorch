@@ -117,3 +117,29 @@ def _any_combine(a, b):
 @triton.jit
 def any(a, dim):
     return tl.reduce(a, dim, _any_combine)
+
+
+@triton.jit
+def bucketize_binary_search(
+    values,  # 1D tensor
+    offsets_ptr,
+    indexing_dtype,
+    OFFSETS_SIZE: int,
+    BLOCK_SIZE: tl.constexpr,
+):
+    low = tl.zeros((BLOCK_SIZE,), dtype=indexing_dtype)
+    high = tl.zeros((BLOCK_SIZE,), dtype=indexing_dtype)
+
+    full_range = BLOCK_SIZE
+
+    while full_range > 1:
+        mid = (high + low + 1) // 2
+        bucket_lower_bound = tl.load(offsets_ptr + mid)
+        is_possible = (values >= bucket_lower_bound)
+
+        low = tl.where(is_possible, mid, low)
+        high = tl.where(is_possible, high, mid - 1)
+
+        full_range = (full_range + 1) // 2
+
+    return low

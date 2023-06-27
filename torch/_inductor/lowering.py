@@ -1577,7 +1577,7 @@ def inductor_bucket_index(values: TensorBox, offsets: TensorBox):
     def inner_fn(index):
         val = values_loader(index)
         bucket_index = ops.bucket_index(
-            val, offsets_name, ops.index_expr(offsets_size, torch.int32)
+            val, offsets_name, ops.index_expr(offsets_size, torch.int32), "tl.int32"
         )
         return bucket_index
 

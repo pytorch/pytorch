@@ -1292,7 +1292,7 @@ class TritonKernel(Kernel):
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
 
-    def bucket_index(self, values, offsets_name: str, offsets_size):
+    def bucket_index(self, values, offsets_name: str, offsets_size, indexing_dtype: str):
         # NOTE: this may not necessarily be true. TODO - check this.
         assert isinstance(values, (CSEVariable,))
 
@@ -1302,38 +1302,11 @@ class TritonKernel(Kernel):
         # i.e. don't just cse.newvar(), instead cse.generate()
         # so that expressions can be generated
 
-        offsets_var = self.args.input(offsets_name)
-        lo_var = self.cse.newvar()
-        hi_var = self.cse.newvar()
-        self.compute.writeline(f"{lo_var} = tl.zeros({block_size}, dtype=tl.int32)")
-        self.compute.writeline(
-            f"{hi_var} = tl.full({block_size}, {offsets_size} - 1, dtype=tl.int32)"
+        result = self.cse.generate(
+            self.compute, f"triton_helpers.bucketize_binary_search({values}, {offsets_ptr}, {indexing_dtype}, {offsets_size}, {block_size})"
         )
 
-        range_size = self.cse.newvar()
-        self.compute.writeline(f"{range_size} = {offsets_size}")
-
-        index_var = self.cse.newvar()
-        mid_var = self.cse.newvar()
-        bucket_lb_var = self.cse.newvar()
-        is_possible = self.cse.newvar()
-        self.compute.writeline(f"while {range_size} > 1:")
-        with self.compute.indent():
-            self.compute.writeline(f"{mid_var} = ({hi_var} + {lo_var} + 1) // 2")
-            self.compute.writeline(
-                f"{bucket_lb_var} = tl.load({offsets_var} + {mid_var})"
-            )
-            self.compute.writeline(f"{is_possible} = ({values} >= {bucket_lb_var})")
-            self.compute.writeline(
-                f"{lo_var} = tl.where({is_possible}, {mid_var}, {lo_var})"
-            )
-            self.compute.writeline(
-                f"{hi_var} = tl.where({is_possible}, {hi_var}, {mid_var} - 1)"
-            )
-
-            self.compute.writeline(f"{range_size} = tl.cdiv({range_size}, 2)")
-
-        return lo_var
+        return result
 
     def reduction_resize(self, value):
         ndims = self.triton_tensor_ndim()
