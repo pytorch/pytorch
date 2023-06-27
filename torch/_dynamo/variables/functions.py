@@ -278,15 +278,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
-
         if self.is_constant:
+            options = VariableTracker.propagate(self, args, kwargs.values())
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), options, args, kwargs
-            )
-        elif is_allowed(self.fn):
-            return variables.TorchVariable(self.fn, **options).call_function(
-                tx, args, kwargs
             )
 
         return super().call_function(tx, args, kwargs)
