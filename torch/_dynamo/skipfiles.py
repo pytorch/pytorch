@@ -149,11 +149,7 @@ if torch.distributed.is_available():
         )
     }
 
-    FILENAME_ALLOWLIST |= {
-        inspect.getfile(obj)
-        for obj in torch.distributed.fsdp._utils.__dict__.values()
-        if inspect.isclass(obj) or inspect.isfunction(obj)
-    }
+    FILENAME_ALLOWLIST |= {inspect.getfile(torch.distributed.fsdp._utils._same_storage)}
 
     FILENAME_ALLOWLIST |= {
         inspect.getfile(obj)
@@ -204,6 +200,8 @@ if torch.distributed.is_available():
     FILENAME_ALLOWLIST |= {
         inspect.getfile(torch.distributed.distributed_c10d.all_gather)
     }
+
+    FILENAME_ALLOWLIST |= {inspect.getfile(torch.distributed.is_available)}
 
 # Do trace through match and replace patterns used in PT2E QAT
 # Note: These patterns are comprised of torch ops and for internal use only.
