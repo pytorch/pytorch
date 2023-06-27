@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-import math
 import warnings
 from typing import Dict, List, Optional
 
@@ -16,7 +15,20 @@ _rng_tracker: Optional["CudaRNGStateTracker"] = None
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
-    # currently we only support correct RNG on cuda/cuda-like device
+    """Checks if the current device of `device_mesh` supports DTensor's random APIs.
+    Currently DTensor Random APIs only supports cuda/cuda-like devices. We suggest
+    users call this API to test the availability before using our random APIs.
+
+    Args:
+        device_mesh (:class:`DeviceMesh`): The device mesh on which we check if the
+            random ops APIs are supported.
+
+    Returns:
+        A bool value. True if `device_mesh` supports DTensor Random APIs; False otherwise.
+
+    .. warning::
+        Currently we only support correct RNG on cuda/cuda-like devices.
+    """
     device_handle = _get_device_handle(device_mesh.device_type)
     if device_handle and hasattr(device_handle, "set_rng_state"):
         return True
@@ -27,14 +39,12 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
         return False
 
 
-def manual_seed(seed: int, device_mesh: DeviceMesh, tp_dim: int = 0) -> None:
+def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     """Sets the seed for generating random numbers for the calling rank.
 
     Args:
         seed (int): The desired seed.
         device_mesh (:class:`DeviceMesh`): The device mesh to set the seed.
-        tp_dim (int, optional): The mesh dimension where to apply Tensor Parallel
-            Default: 0
 
     Returns:
         None
@@ -79,8 +89,14 @@ def manual_seed(seed: int, device_mesh: DeviceMesh, tp_dim: int = 0) -> None:
 
 
 class CudaRNGStateTracker:
-    # we assume that the caller of all the methods would already
-    # check if the current device is a CUDA device
+    """
+    CudaRNGStateTracker stores Random Number Generator (RNG) state (a ByteTensor object)
+    in a dict, mapping from a corresponding tag to each state tensor. It also provides
+    a set of convenient utility methods to help access/modify the state tensors. The most
+    important interface is _distribute_region which will be used when DTensor executes
+    a random op (an operator that calls RNG).
+    """
+
     def __init__(self):
         if not torch.cuda.is_available():
             raise RuntimeError(
@@ -125,6 +141,12 @@ class CudaRNGStateTracker:
 
 
 class OffsetBasedRNGTracker(CudaRNGStateTracker):
+    """
+    This subclass of `CudaRNGStateTracker` defines the default policy of how RNG states
+    should be shared and synchronized among all ranks to respect the semantics of DTensor
+    random operators.
+    """
+
     def __init__(self):
         super().__init__()
         # synchronize RNG state using rank 0's current one
@@ -256,7 +278,9 @@ class OffsetBasedRNGTracker(CudaRNGStateTracker):
                     return_offset=False,
                 )[0]
 
-        local_size = math.prod(local_size_on_rank_0)
+        from torch.distributed._tensor.ops.utils import prod
+
+        local_size = prod(local_size_on_rank_0)
 
         # get current RNG offset
         current_offset = self.get_offset("parallel-rng")
@@ -280,7 +304,10 @@ class OffsetBasedRNGTracker(CudaRNGStateTracker):
             None
         """
         dtensor_shape = spec.shape
-        numel = math.prod(dtensor_shape)
+
+        from torch.distributed._tensor.ops.utils import prod
+
+        numel = prod(dtensor_shape)
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         numel = (numel + 3) // 4 * 4
