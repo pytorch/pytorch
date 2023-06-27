@@ -282,15 +282,11 @@ def _builtin_constant_ids():
 def _is_allowed_distributed(obj):
     if not torch.distributed.is_available():
         return True
-    if obj in [torch.distributed._functional_collectives.all_gather_tensor]:
-        return False
     if (
         hasattr(obj, "__module__")
         and obj.__module__
         and "torch.distributed" in obj.__module__
     ):
-        return False
-    if isinstance(obj, torch.distributed.distributed_c10d.ProcessGroup):
         return False
     return True
 
