@@ -16,8 +16,8 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_FBCODE,
+    skipIfRocm,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
 )
 
 try:
@@ -145,6 +145,7 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, ())
         assert compiled([])[0].device.type == "cuda"
 
+    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_no_device_idx_repro_cudagraphs(self):
@@ -173,6 +174,7 @@ class CudaReproTests(TestCase):
 
         self.common(Repro(), ())
 
+    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs(self):
@@ -186,6 +188,7 @@ class CudaReproTests(TestCase):
         )
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
+    @skipIfRocm
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(
         automatic_dynamic_shapes=True,
@@ -234,6 +237,7 @@ class CudaReproTests(TestCase):
         self.assertEqual(real_out, compiled_out)
         torch._dynamo.reset()
 
+    @skipIfRocm
     @config.patch({"triton.cudagraphs": True, "size_asserts": False})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs_no_size_asserts(self):
@@ -248,6 +252,7 @@ class CudaReproTests(TestCase):
         self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
 
     # TODO: enable
+    @skipIfRocm
     @config.patch({"triton.cudagraph_trees": False})
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
@@ -631,6 +636,24 @@ class CudaReproTests(TestCase):
         ref = torch.compile(fn, fullgraph=True)(*args)
         assert same(ref, correct)
 
+    def test_issue_103924(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.temperature = 1
+                self.layer = torch.nn.Softmax(dim=1)
+
+            def forward(self, x):
+                n_samples, _ = x.shape
+                y = 1.0 * torch.ones(n_samples, dtype=x.dtype, device=x.device)
+                inp = x / y[..., None]
+                return self.layer(inp)
+
+        x = torch.rand([4, 4], device="cuda")
+        m = MyModule()
+        opt_m = torch.compile(backend="inductor")(m)
+        self.assertEqual(opt_m(x), m(x))
+
     def test_issue97695_2input(self):
         def fn(arg3_1, arg3_2, relu, permute_1):
             addmm_1 = torch.ops.aten.addmm.default(arg3_1, relu, permute_1)
@@ -791,5 +814,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CUDA
 
-    if HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM:
+    if HAS_CUDA and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

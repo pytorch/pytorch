@@ -27,7 +27,7 @@ class SumElementsOp : public Operator<Context> {
   explicit SumElementsOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs, bool average)
       : Operator<Context>(schema, std::move(inputs), std::move(outputs)), average_(average) {}
 #endif
-  ~SumElementsOp() {}
+  ~SumElementsOp() override {}
 
   bool RunOnDevice() override {
     auto& X = Input(0);
@@ -62,7 +62,7 @@ class SumElementsIntOp : public Operator<Context> {
   template <class... Args>
   explicit SumElementsIntOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
-  ~SumElementsIntOp() {}
+  ~SumElementsIntOp() override {}
 
   bool RunOnDevice() override {
     auto& X = Input(0);
@@ -95,7 +95,7 @@ class SumElementsGradientOp : public Operator<Context> {
   explicit SumElementsGradientOp(const c10::FunctionSchema& schema, std::vector<c10::IValue> inputs, std::vector<c10::IValue*> outputs, bool average)
       : Operator<Context>(schema, std::move(inputs), std::move(outputs)), average_(average) {}
 #endif
-  ~SumElementsGradientOp() {}
+  ~SumElementsGradientOp() override {}
 
   bool RunOnDevice() override;
 
