@@ -181,7 +181,7 @@ class TestCustomOpTesting(TestCase):
         x = torch.tensor([0, 1.], requires_grad=True)
         with self.assertRaisesRegex(
                 RuntimeError,
-                'FooBackward returned an invalid gradient at index 0'):
+                'Shapes .* are not equal'):
             operator_compile_check(f, (x,), {})
 
     def test_missing_functionalization(self, device):
@@ -246,7 +246,7 @@ class TestCustomOpTesting(TestCase):
 
         x = torch.randn([], requires_grad=True)
 
-        with self.assertRaisesRegex(AssertionError, 'incorrect gradients'):
+        with self.assertRaisesRegex(AssertionError, 'mismatched requires_grad-ness'):
             operator_compile_check(f, (x,), {})
 
         # I'm not sure why this is necessary

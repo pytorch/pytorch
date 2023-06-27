@@ -937,8 +937,9 @@ class InputWeightEqualizationDetector(DetectorBase):
             if self._is_supported(module):
                 # we don't need actual observer, just the module weights
                 # calculate min and max vals
-                min_val: torch.Tensor = torch.tensor([float('inf')])
-                max_val: torch.Tensor = torch.tensor([float('-inf')])
+                device = module.weight.device
+                min_val: torch.Tensor = torch.tensor([float('inf')], device=device)
+                max_val: torch.Tensor = torch.tensor([float('-inf')], device=device)
                 x_copy = module.weight
                 x_dim = x_copy.size()
 

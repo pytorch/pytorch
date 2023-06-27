@@ -116,8 +116,9 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     if tensors is None or cat_dim is None:
         log.info("couldn't find cat args")
         return
-    if "example_value" not in cat_node.meta:
-        log.warning("example value absent for node: %s", cat_node)
+    assert isinstance(tensors, (list, tuple))
+    if "example_value" not in tensors[0].meta:
+        log.warning("example value absent for node: %s", tensors[0])
         return
 
     ndim = tensors[0].meta["example_value"].dim()
