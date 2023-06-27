@@ -9,12 +9,12 @@ import warnings
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
-from functorch.compile import min_cut_rematerialization_partition
-
 import torch._functorch.config as functorch_config
 
 import torch.fx
 import torch.utils._pytree as pytree
+
+from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
@@ -445,9 +445,7 @@ def fx_codegen_and_compile(
 
     with V.set_fake_mode(fake_mode):
         # has some issues with memory in training
-        locality_reorder = is_inference and config.reordering
-
-        post_grad_passes(gm, locality_reorder=locality_reorder)
+        post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):

@@ -45,7 +45,7 @@ pass_patterns = [
 inference_patterns = PatternMatcherPass()
 
 
-def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
+def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -56,7 +56,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
         # has some issues with mutation in inference mode
         gm.graph.eliminate_dead_code()
 
-    if locality_reorder:
+    if is_inference and config.reordering:
         reorder_for_locality(gm.graph)
 
     if config.pattern_matcher:
@@ -64,7 +64,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, locality_reorder: bool):
 
         for patterns in pass_patterns:
             patterns.apply(gm.graph)
-        if locality_reorder:
+        if is_inference:
             inference_patterns.apply(gm.graph)
 
     stable_topological_sort(gm.graph)
