@@ -24,6 +24,9 @@ from torch._refs.nn import functional as _functional_refs
 # Imported to resolve beartype issue when type checking node.Argument.
 from torch.fx.node import Node  # noqa: F401
 
+from torch.onnx._internal import _beartype
+from torch.utils import _pytree
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +35,7 @@ def _try_getclosurevars(func):
         return inspect.getclosurevars(func)
     except TypeError as e:
         return None
+
 
 @dataclasses.dataclass
 class TypePromotionSnapshot:
@@ -109,43 +113,35 @@ class TypePromotionRule:
 
         return True
 
-    def preview_type_promotion(self, node: torch.fx.Node) -> TypePromotionSnapshot:
+    def preview_type_promotion(
+        self, args: tuple, kwargs: dict
+    ) -> TypePromotionSnapshot:
         """Preview type promotion results for the given fx node.
 
         Returns a TypePromotionSnapshot object that contains the promoted dtypes for
         the arguments and the expected output dtype of the given fx node.
         """
-        node.args
-        node.kwargs
 
-        candidate_fx_args = {
-            i: node.args[i]
+        candidate_args = {
+            i: args[i]
             for i in self.promote_args_positions
-            if i < len(node.args) and node.args[i] is not None
+            if i < len(args) and args[i] is not None
         }
-        candidate_fx_kwargs = {
-            name: node.kwargs[name]
+        candidate_kwargs = {
+            name: kwargs[name]
             for name in self.promote_kwargs_names
-            if name in node.kwargs and node.kwargs[name] is not None
-        }
-
-        candidate_torch_args = {
-            i: _fx_argument_to_torch_arg(arg) for i, arg in candidate_fx_args.items()
-        }
-        candidate_torch_kwargs = {
-            name: _fx_argument_to_torch_arg(arg)
-            for name, arg in candidate_fx_kwargs.items()
+            if name in kwargs and kwargs[name] is not None
         }
 
         computed_dtype, result_dtype = _prims_common.elementwise_dtypes(
-            *candidate_torch_args.values(),
-            *candidate_torch_kwargs.values(),
+            *_pytree.tree_flatten(candidate_args)[0],
+            *_pytree.tree_flatten(candidate_kwargs)[0],
             type_promotion_kind=self.promotion_kind,
         )
 
         return TypePromotionSnapshot(
-            {i: computed_dtype for i in candidate_fx_args.keys()},
-            {name: computed_dtype for name in candidate_fx_kwargs.keys()},
+            {i: computed_dtype for i in candidate_args.keys()},
+            {name: computed_dtype for name in candidate_kwargs.keys()},
             result_dtype,
         )
 
