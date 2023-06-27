@@ -6,7 +6,7 @@ import pytorch_test_common
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.onnx import dynamo_export, ExportOptions
+from torch.onnx import dynamo_export, enable_symbolic_mode, ExportOptions
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal import common_utils
@@ -174,9 +174,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
 
     def test_symbolic_tracing_simple(self):
-        from torch._subclasses import fake_tensor
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
         class Model(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -186,19 +183,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 out = self.linear(x)
                 return out
 
-        # User-instantiated FakeTensorMode
-        fake_mode = fake_tensor.FakeTensorMode(
-            allow_non_fake_inputs=True,
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
-            ),
-        )
-        # Fakefy input+model before exporting it
-        with fake_mode:
+        with enable_symbolic_mode() as fake_context:
             x = torch.rand(5, 2, 2)
             model = Model()
+            fake_context.save_state_dict(model.state_dict())
+
         # Export the model with fake inputs and parameters
-        export_options = ExportOptions(fake_mode=fake_mode)
+        export_options = ExportOptions(fake_context=fake_context)
         export_output = torch.onnx.dynamo_export(
             model, x, export_options=export_options
         )

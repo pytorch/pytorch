@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import abc
+
+import contextlib
 import io
 import logging
 from typing import (
@@ -47,6 +49,37 @@ _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH = "report_dynamo_export.sarif"
 """The default path to write the SARIF log to if the export fails."""
 
 
+class ONNXFakeContext:
+    """A context used for symbolic tracing.
+
+    This class stores additional information for two purposes during export:
+
+    1) Convert real tensors and model parameters into fake tensors during [symbolic]
+        tracing of a torch.nn.Module into a FX Graph
+    2) Convert fake tensors back into real model parameters during ONNX proto generation.
+    ONNX initializers can either be real tensors or not stored on the ONNX proto.
+    """
+
+    model_state_dict: Any
+    """The model's state_dict with real tensors."""
+
+    fake_mode: fake_tensor.FakeTensorMode
+    """The fake tensor mode to use for symbolic tracing."""
+
+    @_beartype.beartype
+    def __init__(
+        self,
+        *,
+        fake_mode: fake_tensor.FakeTensorMode,
+        model_state_dict: Optional[Any] = None,
+    ):
+        self.fake_mode = fake_mode
+        self.model_state_dict = model_state_dict
+
+    def save_state_dict(self, model_state_dict):
+        self.model_state_dict = model_state_dict
+
+
 class ExportOptions:
     """Options to influence the TorchDynamo ONNX exporter."""
 
@@ -71,8 +104,8 @@ class ExportOptions:
     logger named "torch.onnx" under the current logger (as returned by
     :py:meth:`logging.getLogger`)."""
 
-    fake_mode: Optional[fake_tensor.FakeTensorMode] = None
-    """The fake tensor mode to use for symbolic tracing."""
+    fake_context: Optional[ONNXFakeContext] = None
+    """The fake context used for symbolic tracing."""
 
     @_beartype.beartype
     def __init__(
@@ -82,13 +115,13 @@ class ExportOptions:
         dynamic_shapes: Optional[bool] = None,
         op_level_debug: Optional[bool] = None,
         logger: Optional[logging.Logger] = None,
-        fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
+        fake_context: Optional[ONNXFakeContext] = None,
     ):
         self.opset_version = opset_version
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
         self.logger = logger
-        self.fake_mode = fake_mode
+        self.fake_context = fake_context
 
 
 class ResolvedExportOptions(ExportOptions):
@@ -102,7 +135,7 @@ class ResolvedExportOptions(ExportOptions):
     dynamic_shapes: bool
     op_level_debug: bool
     logger: logging.Logger
-    fake_mode: fake_tensor.FakeTensorMode
+    fake_context: ONNXFakeContext
 
     # Private only attributes
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
@@ -137,7 +170,7 @@ class ResolvedExportOptions(ExportOptions):
             self.onnxfunction_dispatcher = options.onnxfunction_dispatcher
             self.decomposition_table = options.decomposition_table
             self.diagnostic_context = options.diagnostic_context
-            self.fake_mode = options.fake_mode
+            self.fake_context = options.fake_context
         else:
             T = TypeVar("T")
 
@@ -158,7 +191,7 @@ class ResolvedExportOptions(ExportOptions):
             self.logger = resolve(
                 options.logger, lambda: logging.getLogger().getChild("torch.onnx")
             )
-            self.fake_mode = resolve(options.fake_mode, None)
+            self.fake_context = resolve(options.fake_context, None)
             # TODO(bowbao): This introduces onnxscript dependency once diagnostics is moved.
             # Options:
             #   - Add a shim and make it noop if onnxscript is not available.
@@ -193,6 +226,22 @@ class ResolvedExportOptions(ExportOptions):
             for key in dir(options):
                 if not key.startswith("_"):  # skip private attributes
                     assert hasattr(self, key), f"Unresolved option '{key}'"
+
+
+@contextlib.contextmanager
+def enable_symbolic_mode():
+    from torch._subclasses import fake_tensor
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+    fake_mode = fake_tensor.FakeTensorMode(
+        allow_non_fake_inputs=False,
+        shape_env=ShapeEnv(
+            allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
+        ),
+    )
+    fake_context = ONNXFakeContext(fake_mode=fake_mode)
+    with fake_mode:
+        yield fake_context
 
 
 @runtime_checkable
@@ -479,7 +528,7 @@ class Exporter:
         # Export TorchScript graph to ONNX ModelProto.
         onnx_model = onnxscript_graph.to_model_proto(
             self.options.opset_version,
-            include_initializers=self.options.fake_mode is None,
+            include_initializers=self.options.fake_context is None,
         )
         return torch.onnx.ExportOutput(
             onnx_model,
@@ -636,7 +685,7 @@ def pre_export_passes(
         fx_module,
         options.decomposition_table,
         enable_dynamic_axes=options.dynamic_shapes,
-        fake_mode=options.fake_mode,
+        fake_mode=options.fake_context.fake_mode,
     ).run(*fx_module_args)
 
     # ONNX does not support views and mutations.
@@ -645,7 +694,7 @@ def pre_export_passes(
         diagnostic_context,
         module,
         enable_dynamic_axes=options.dynamic_shapes,
-        fake_mode=options.fake_mode,
+        fake_mode=options.fake_context.fake_mode,
     ).run(*fx_module_args)
 
     # Input mutations are detected and distilled after `Functionalize` pass.
