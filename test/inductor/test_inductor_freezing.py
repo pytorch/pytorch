@@ -12,8 +12,8 @@ import torch
 
 import torch._dynamo
 from torch import nn
-from torch._inductor import config, lowering
-from torch._inductor.utils import run_and_get_code
+from torch._inductor import config
+from torch._inductor.utils import override_lowering, run_and_get_code
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
@@ -310,30 +310,19 @@ class OptimizeForInferenceTemplate(TestCase):
 
         num_same_stride = 0
         num_diff_stride = 0
-        orig_inductor_force_stride = lowering.inductor_force_stride
 
-        def debug_inductor_force_stride(input_tensor, stride):
+        def debug_inductor_force_stride(orig_fn, input_tensor, stride):
             nonlocal num_same_stride, num_diff_stride
             input_tensor.realize()
             if tuple(input_tensor.get_stride()) == tuple(stride):
                 num_same_stride += 1
             else:
                 num_diff_stride += 1
-            return orig_inductor_force_stride(input_tensor, stride)
+            return orig_fn(input_tensor, stride)
 
-        @contextlib.contextmanager
-        def mock_inductor_force_stride():
-            lowering.lowerings[
-                prims.inductor_force_stride.default
-            ] = debug_inductor_force_stride
-            try:
-                yield
-            finally:
-                lowering.lowerings[
-                    prims.inductor_force_stride.default
-                ] = orig_inductor_force_stride
-
-        with mock_inductor_force_stride():
+        with override_lowering(
+            prims.inductor_force_stride.default, debug_inductor_force_stride
+        ):
             opt_mod = torch.compile(mod)
             with torch.no_grad():
                 actual_outputs = opt_mod(*inp)
