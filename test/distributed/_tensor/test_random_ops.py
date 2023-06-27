@@ -128,9 +128,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
                 dtensor = dropout(dtensor)
 
                 # allgather the local tensors
-                dtensor = DTensor.from_local(dtensor.to_local(), device_mesh, [Shard(0)])
-                dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-                local_tensor = dtensor.to_local()
+                local_tensor = device_mesh.all_gather(dtensor.to_local(), gather_dim=0)
 
                 # compare with local tensors from other ranks
                 self_slice = slice(4 * self.rank, 4 * self.rank + 4)
@@ -235,10 +233,10 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
             # the local shard
             local_tensor = dtensor.to_local()
+            # allgather the local tensors
             dtensor = dtensor.redistribute(
                 device_mesh, [Replicate(), Replicate(), Replicate()]
             )
-            # the allgather-ed tensor
             local_tensor_gathered = dtensor.to_local()
 
             # compare local tensor with each other shard
@@ -271,9 +269,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor.uniform_()
 
         # allgather the local tensors
-        dtensor = DTensor.from_local(dtensor.to_local(), device_mesh, [Shard(0)])
-        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-        local_tensor = dtensor.to_local()
+        local_tensor = device_mesh.all_gather(dtensor.to_local(), gather_dim=0)
 
         # compare with local tensors from other ranks
         self_slice = slice(1024 * self.rank, 1024 * self.rank + 1024)
@@ -292,9 +288,8 @@ class DistTensorRandomOpTest(DTensorTestBase):
         dtensor = torch.empty_like(meta_dtensor, device=self.device_type)
         dtensor.uniform_()
 
-        dtensor = DTensor.from_local(dtensor.to_local(), device_mesh, [Shard(0)])
-        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-        local_tensor = dtensor.to_local()
+        # allgather the local tensors
+        local_tensor = device_mesh.all_gather(dtensor.to_local(), gather_dim=0)
 
         # compare with local tensors from other ranks
         for other_rank in range(self.world_size):
