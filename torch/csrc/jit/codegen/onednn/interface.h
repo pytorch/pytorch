@@ -10,7 +10,7 @@ namespace onednn {
 
 static std::atomic<bool> onednn_enabled{false};
 
-std::atomic<bool>& getLlgaEnabled() {
+static std::atomic<bool>& getLlgaEnabled() {
   return onednn_enabled;
 }
 
