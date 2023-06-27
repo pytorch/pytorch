@@ -342,7 +342,8 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
   for (const auto i : c10::irange(num_inputs)) {
-    if (inputs[i].defined() || !ctx_.materialize_grads_) {
+    if (inputs[i].defined() || !ctx_.materialize_grads_ ||
+        input_metadata(i).was_default_constructed()) {
       backward_inputs.emplace_back(inputs[i]);
     } else {
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));

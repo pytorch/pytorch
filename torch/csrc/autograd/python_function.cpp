@@ -92,7 +92,8 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   for (const auto i : c10::irange(num_inputs)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyObject* input;
-    if (inputs[i].defined() || !py_fn->materialize_grads) {
+    if (inputs[i].defined() || !py_fn->materialize_grads ||
+        input_metadata(i).was_default_constructed()) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
       input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
