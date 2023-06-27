@@ -33,6 +33,7 @@ DEFINE_DISPATCH(_fused_sdp_choice_stub);
 REGISTER_NO_CPU_DISPATCH(_fused_sdp_choice_stub);
 
 DEFINE_DISPATCH(efficient_attention_kernel);
+DEFINE_DISPATCH(efficient_attention_backward_kernel);
 
 namespace {
 
@@ -512,6 +513,42 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
   lse = lse.transpose(1, 2);
 
   return std::make_tuple(std::move(attn), std::move(lse), Tensor{}, Tensor{});
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cpu(
+    const at::Tensor& grad_out,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& out,
+    const at::Tensor& logsumexp,
+    const at::Tensor& philox_seed,
+    const at::Tensor& philox_offset,
+    double dropout_p,
+    bool causal,
+    c10::optional<double> scale){
+
+  if (!grad_out.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+
+  auto grad_out_t = grad_out.transpose(1, 2);
+  auto q_t = query.transpose(1, 2);
+  auto k_t = key.transpose(1, 2);
+  auto v_t = value.transpose(1, 2);
+  auto lse_t = logsumexp.transpose(1, 2);
+
+  auto grad_q = at::zeros(q_t.sizes(), query.options());
+  auto grad_k = at::zeros(k_t.sizes(), key.options());
+  auto grad_v = at::zeros(v_t.sizes(), value.options());
+
+  efficient_attention_backward_kernel(kCPU, grad_q, grad_k, grad_v, grad_out_t, q_t, k_t, v_t, lse_t, causal, scale);
+
+  grad_q = grad_q.transpose(1, 2);
+  grad_k = grad_k.transpose(1, 2);
+  grad_v = grad_v.transpose(1, 2);
+
+  return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
 }
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,

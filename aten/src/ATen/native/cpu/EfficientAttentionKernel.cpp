@@ -259,6 +259,318 @@ void cpu_efficient_attention(
   });
 }
 
+template <typename scalar_t, int64_t kQueriesPerBlock, int64_t kKeysPerBlock>
+void cpu_efficient_attention_backward(
+    const Tensor& grad_q,
+    const Tensor& grad_k,
+    const Tensor& grad_v,
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& logsumexp,
+    bool is_causal,
+    c10::optional<double> scale) {
+
+  using Vec = vec::Vectorized<scalar_t>;
+  scalar_t scaling_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
+
+  // make sure grad_out has no zero strides (broadcasted dimensions)
+  // since we are going to call gemm next
+  auto grad_out_ = grad_out.contiguous();
+
+  // sizes
+  int64_t B = query.size(0);
+  int64_t M = query.size(1);
+  int64_t H = query.size(2);
+  int64_t N = key.size(1);
+  int64_t K = query.size(-1);
+  int64_t Kv = value.size(-1);
+
+  // strides
+  int64_t q_strideB = query.stride(0);
+  int64_t q_strideM = query.stride(1);
+  int64_t q_strideH = query.stride(2);
+  int64_t k_strideB = key.stride(0);
+  int64_t k_strideN = key.stride(1);
+  int64_t k_strideH = key.stride(2);
+  int64_t v_strideB = value.stride(0);
+  int64_t v_strideN = value.stride(1);
+  int64_t v_strideH = value.stride(2);
+
+  int64_t l_strideB = logsumexp.stride(0);
+  int64_t l_strideM = logsumexp.stride(1);
+  int64_t l_strideH = logsumexp.stride(2);
+
+  int64_t gQ_strideB = grad_q.stride(0);
+  int64_t gQ_strideM = grad_q.stride(1);
+  int64_t gQ_strideH = grad_q.stride(2);
+  int64_t gK_strideB = grad_k.stride(0);
+  int64_t gK_strideN = grad_k.stride(1);
+  int64_t gK_strideH = grad_k.stride(2);
+  int64_t gV_strideB = grad_v.stride(0);
+  int64_t gV_strideN = grad_v.stride(1);
+  int64_t gV_strideH = grad_v.stride(2);
+  int64_t gO_strideB = grad_out.stride(0);
+  int64_t gO_strideM = grad_out.stride(1);
+  int64_t gO_strideH = grad_out.stride(2);
+
+
+  scalar_t* q_data = query.data_ptr<scalar_t>();
+  scalar_t* k_data = key.data_ptr<scalar_t>();
+  scalar_t* v_data = value.data_ptr<scalar_t>();
+  scalar_t* lse_data = logsumexp.data_ptr<scalar_t>();
+  scalar_t* grad_q_data = grad_q.data_ptr<scalar_t>();
+  scalar_t* grad_k_data = grad_k.data_ptr<scalar_t>();
+  scalar_t* grad_v_data = grad_v.data_ptr<scalar_t>();
+  scalar_t* grad_o_data = grad_out_.data_ptr<scalar_t>();
+
+  // allocate per thread temp buffer
+  int64_t size_per_thread =
+      /* attn_v          */ kQueriesPerBlock * kKeysPerBlock +
+      /* grad_attn_v     */ kQueriesPerBlock * kKeysPerBlock +
+      /* buf for grad_q  */ kQueriesPerBlock * K +
+      /* buf2 for grad_k */ kQueriesPerBlock * N;
+
+  auto buffer = at::empty({at::get_num_threads(), size_per_thread}, query.options());
+  scalar_t* buf_data = buffer.data_ptr<scalar_t>();
+
+  at::parallel_for(0, B * H, 1, [&](int64_t begin, int64_t end) {
+    int64_t b{0}, h{0};
+    data_index_init(begin, b, B, h, H);
+
+    // get thread local slices
+    int tid = at::get_thread_num();
+    scalar_t* buf_ptr = buf_data + tid * size_per_thread;
+
+    // attn_v: (kQueriesPerBlock, kKeysPerBlock)
+    scalar_t* attn_v = buf_ptr;
+
+    // grad_attn_v: (kQueriesPerBlock, kKeysPerBlock)
+    scalar_t* grad_attn_v = attn_v + kQueriesPerBlock * kKeysPerBlock;
+
+    // buf: (kQueriesPerBlock, K)
+    scalar_t* buf = grad_attn_v + kQueriesPerBlock * kKeysPerBlock;
+
+    // buf2: (kQueriesPerBlock, N)
+    scalar_t* buf2 = buf + kQueriesPerBlock * K;
+
+    // holds the per row sum of grad_attn_v
+    scalar_t sum[kQueriesPerBlock];
+
+    for (const auto i : c10::irange(begin, end)) {
+      (void)i; // Suppress unused variable
+
+      for (int64_t m = 0; m < M; m += kQueriesPerBlock) {
+        int64_t block_size_m = std::min(kQueriesPerBlock, M - m);
+
+        scalar_t* q_ptr = q_data + b * q_strideB + m * q_strideM + h * q_strideH;
+        scalar_t* lse_ptr = lse_data + b * l_strideB + m * l_strideM + h * l_strideH;
+        scalar_t* grad_o_ptr = grad_o_data + b * gO_strideB + m * gO_strideM + h * gO_strideH;
+        scalar_t* grad_q_ptr = grad_q_data + b * gQ_strideB + m * gQ_strideM + h * gQ_strideH;
+
+        // init buf and sum to zeros before accumulation
+        // no need to init buf2
+        fill_stub<scalar_t>(buf, 0, kQueriesPerBlock * K);
+        fill_stub<scalar_t>(sum, 0, block_size_m);
+
+        // loop over Q and V sequence with block size of kKeysPerBlock
+        //int64_t num_keys = is_causal ? std::min(m + block_size_m, N) : N;
+        for (int64_t n = 0; n < N; n += kKeysPerBlock) {
+          int64_t block_size_n = std::min(kKeysPerBlock, N - n);
+          scalar_t* k_ptr = k_data + b * k_strideB + n * k_strideN + h * k_strideH;
+
+          // calculate attn_v <- q @ k.T
+          cpublas::gemm(
+              TransposeType::Transpose,
+              TransposeType::NoTranspose,
+              block_size_n,
+              block_size_m,
+              K,
+              static_cast<scalar_t>(1),
+              k_ptr,
+              k_strideN,
+              q_ptr,
+              q_strideM,
+              static_cast<scalar_t>(0),
+              attn_v,
+              kKeysPerBlock);
+
+          // restore self attention after softmax from logsumexp
+          // attn_v <- exp(attn_v * scale - normalizer)
+          for (const auto row : c10::irange(block_size_m)) {
+            scalar_t normalizer = lse_ptr[row * l_strideM];
+            vec::map<scalar_t>(
+                [=](Vec s) { return (s * Vec(scaling_factor) - Vec(normalizer)).exp(); },
+                attn_v + row * kKeysPerBlock,
+                attn_v + row * kKeysPerBlock,
+                block_size_n);
+          }
+
+          // calculate the gradient of V
+          // grad_v <- grad_v + attn_v.T @ grad_out
+          scalar_t* grad_v_ptr = grad_v_data + b * gV_strideB + n * gV_strideN + h * gV_strideH;
+          cpublas::gemm(
+              TransposeType::NoTranspose,
+              TransposeType::Transpose,
+              Kv,
+              block_size_n,
+              block_size_m,
+              static_cast<scalar_t>(1),
+              grad_o_ptr,
+              gO_strideM,
+              attn_v,
+              kKeysPerBlock,
+              static_cast<scalar_t>(1),
+              grad_v_ptr,
+              gV_strideN);
+
+          // calculate the gradient of self attention after softmax
+          // grad_attn_v <- grad_out @ v.T
+          scalar_t* v_ptr = v_data + b * v_strideB + n * v_strideN + h * v_strideH;
+          cpublas::gemm(
+              TransposeType::Transpose,
+              TransposeType::NoTranspose,
+              block_size_n,
+              block_size_m,
+              Kv,
+              static_cast<scalar_t>(1),
+              v_ptr,
+              v_strideN,
+              grad_o_ptr,
+              gO_strideM,
+              static_cast<scalar_t>(0),
+              grad_attn_v,
+              kKeysPerBlock);
+
+          // calculate the gradient of softmax
+          // grad_attn_v <- attn_v * grad_attn_v * scale
+          // sum <- sum(grad_attn_v)
+          for (const auto row : c10::irange(block_size_m)) {
+            vec::map2<scalar_t>(
+                [=](Vec attn, Vec grad_attn) { return attn * grad_attn * Vec(scaling_factor); },
+                grad_attn_v + row * kKeysPerBlock,
+                attn_v + row * kKeysPerBlock,
+                grad_attn_v + row * kKeysPerBlock,
+                block_size_n);
+
+             // accumulate the sum per N dimension
+            sum[row] += vec::reduce_all<scalar_t>(
+                [](Vec& x, Vec& y) { return x + y; },
+                grad_attn_v + row * kKeysPerBlock,
+                block_size_n);
+          }
+
+          // calculate the gradient of Q
+          // grad_q <- grad_attn_v @ k
+          // buf <- attn_v @ k
+          cpublas::gemm(
+              TransposeType::NoTranspose,
+              TransposeType::NoTranspose,
+              K,
+              block_size_m,
+              block_size_n,
+              static_cast<scalar_t>(1),
+              k_ptr,
+              k_strideN,
+              grad_attn_v,
+              kKeysPerBlock,
+              static_cast<scalar_t>(1),
+              grad_q_ptr,
+              gQ_strideM);
+
+          cpublas::gemm(
+              TransposeType::NoTranspose,
+              TransposeType::NoTranspose,
+              K,
+              block_size_m,
+              block_size_n,
+              static_cast<scalar_t>(1),
+              k_ptr,
+              k_strideN,
+              attn_v,
+              kKeysPerBlock,
+              static_cast<scalar_t>(1),
+              buf,
+              K);
+
+          // calculate the gradient of K
+          // need to keep a copy of attn in buf2
+          for (const auto row : c10::irange(block_size_m)) {
+            vec::map<scalar_t>(
+                [](Vec attn) { return attn; },
+                buf2 + row * N + n,
+                attn_v + row * kKeysPerBlock,
+                block_size_n);
+          }
+
+          // grad_k <- grad_attn_v.T @ q
+          // grad_k_ptr points to each (n) block
+          scalar_t* grad_k_ptr = grad_k_data + b * gK_strideB + n * gK_strideN + h * gK_strideH;
+          cpublas::gemm(
+              TransposeType::NoTranspose,
+              TransposeType::Transpose,
+              K,
+              block_size_n,
+              block_size_m,
+              static_cast<scalar_t>(1),
+              q_ptr,
+              q_strideM,
+              grad_attn_v,
+              kKeysPerBlock,
+              static_cast<scalar_t>(1),
+              grad_k_ptr,
+              gK_strideN);
+        } // N loop
+
+        // final scale with sum on grad_q
+        // grad_q <- grad_q - buf * sum
+        for (const auto row : c10::irange(block_size_m)) {
+          scalar_t s = sum[row];
+          vec::map2<scalar_t>(
+              [s](Vec grad_q, Vec buf) { return grad_q - buf * Vec(s); },
+              grad_q_ptr + row * gQ_strideM,
+              grad_q_ptr + row * gQ_strideM,
+              buf + row * K,
+              K);
+        }
+
+        // final scale with sum on grad_k
+        // buf2 <- buf2 * (-sum)
+        for (const auto row : c10::irange(block_size_m)) {
+          scalar_t s = sum[row];
+          vec::map<scalar_t>(
+              [s](Vec buf2_vec) { return (buf2_vec * Vec(s)).neg(); },
+              buf2 + row * N,
+              buf2 + row * N,
+              N);
+        }
+
+        // grad_k <- buf2.T @ q
+        // grad_k_ptr points to entire N sequence
+        scalar_t* grad_k_ptr = grad_k_data + b * gK_strideB + h * gK_strideH;
+        cpublas::gemm(
+            TransposeType::NoTranspose,
+            TransposeType::Transpose,
+            K,
+            N,
+            block_size_m,
+            static_cast<scalar_t>(1),
+            q_ptr,
+            q_strideM,
+            buf2,
+            N,
+            static_cast<scalar_t>(1),
+            grad_k_ptr,
+            gK_strideN);
+      } // M loop
+
+      // move to the next index
+      data_index_step(b, B, h, H);
+    }
+  });
+}
+
 void efficient_attention_kernel_impl(
     const Tensor& attn,
     const Tensor& logsumexp,
@@ -275,8 +587,25 @@ void efficient_attention_kernel_impl(
   });
 }
 
+void efficient_attention_backward_kernel_impl(
+    const Tensor& grad_q,
+    const Tensor& grad_k,
+    const Tensor& grad_v,
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& logsumexp,
+    bool is_causal,
+    c10::optional<double> scale) {
+  AT_DISPATCH_FLOATING_TYPES(query.scalar_type(), "efficient_attention_backward", [&] {
+    cpu_efficient_attention_backward<scalar_t, 128, 256>(grad_q, grad_k, grad_v, grad_out, query, key, value, logsumexp, is_causal, scale);
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(efficient_attention_kernel, &efficient_attention_kernel_impl);
+REGISTER_DISPATCH(efficient_attention_backward_kernel, &efficient_attention_backward_kernel_impl)
 
 } // at::native
