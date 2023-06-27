@@ -29,6 +29,7 @@ from .variables.tensor import (
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
+from .variables.torch import HigherOrderCheckpointVariable
 
 
 @dataclasses.dataclass
@@ -100,7 +101,12 @@ class PyCodegen:
             and allow_cache
             and not isinstance(value.source, GeneratorStateSource)
             and not isinstance(
-                value, (DisabledFunctionVariable, DisabledMethodVariable)
+                value,
+                (
+                    DisabledFunctionVariable,
+                    DisabledMethodVariable,
+                    HigherOrderCheckpointVariable,
+                ),
             )
         ):
             output.extend(value.source.reconstruct(self))

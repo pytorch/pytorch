@@ -1207,12 +1207,12 @@ def skip(fn=None):
     return fn
 
 
-disabled_torch_fns = set()
+disabled_torch_fns = dict()
 
 
 def disable_torch_fn(fn):
     assert callable(fn)
-    disabled_torch_fns.add(fn)
+    disabled_torch_fns[id(fn)] = fn
 
 
 class TorchPatcher:
@@ -1321,7 +1321,7 @@ class TorchPatcher:
         #     break. And here, the following disable wrapper ensures that
         #     TorchDynamo does not trigger again on the frames created by
         #     utils.checkpoint innards.
-        torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
+        # torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
 
         torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
         torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()

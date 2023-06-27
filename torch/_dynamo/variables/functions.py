@@ -637,7 +637,7 @@ class DisabledMethodVariable(VariableTracker):
         # here we have to create a wrapper that prepends self (i.e. self.obj in
         # this case) to the call.
         def method_wrapper(*args, **kwargs):
-            return disabled_fn(self.obj, *args, **kwargs)
+            return disabled_fn(self.obj.value, *args, **kwargs)
 
         name = unique_id("__disabled_fn")
         codegen.tx.output.install_global(name, method_wrapper)
