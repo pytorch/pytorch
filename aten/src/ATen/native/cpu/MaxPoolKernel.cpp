@@ -89,6 +89,42 @@ void cpu_max_pool(
 }
 
 template <typename scalar_t>
+vec::Vectorized<scalar_t> isnan(vec::Vectorized<scalar_t> vec) {
+  return vec.isnan();
+}
+
+template <>
+vec::Vectorized<unsigned char> isnan<unsigned char>(vec::Vectorized<unsigned char> vec) {
+  Vectorized<unsigned char> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<signed char> isnan<signed char>(vec::Vectorized<signed char> vec) {
+  Vectorized<signed char> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<short> isnan<short>(vec::Vectorized<short> vec) {
+  Vectorized<short> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<int> isnan<int>(vec::Vectorized<int> vec) {
+  Vectorized<int> ret(false);
+  return ret;
+}
+
+template <>
+vec::Vectorized<int64_t> isnan<int64_t>(vec::Vectorized<int64_t> vec) {
+  Vectorized<int64_t> ret(false);
+  return ret;
+}
+
+
+template <typename scalar_t>
 void cpu_max_pool_channels_last(
     const Tensor& output_,
     const Tensor& indices_,
@@ -173,7 +209,7 @@ void cpu_max_pool_channels_last(
             Vec maxval_vec = Vec::loadu(out + d2);
 
             // true = all ones, false = all zeros
-            Vec mask = (val_vec > maxval_vec) | val_vec.isnan();
+            Vec mask = (val_vec > maxval_vec) | isnan(val_vec);
             iVec imask = vec::cast<integer_t>(mask);
             Vec out_vec = Vec::blendv(maxval_vec, val_vec, mask);
             iVec ind_vec = iVec::blendv(maxindex_vec, index_vec, imask);
@@ -299,8 +335,8 @@ void cpu_max_pool_channels_last<BFloat16>(
             fVec maxval_fvec1 = fVec::loadu(max + d2 + fVec::size());
 
             // true = all ones, false = all zeros
-            fVec mask0 = (val_fvec0 > maxval_fvec0) | val_fvec0.isnan();
-            fVec mask1 = (val_fvec1 > maxval_fvec1) | val_fvec1.isnan();
+            fVec mask0 = (val_fvec0 > maxval_fvec0) | isnan(val_fvec0);
+            fVec mask1 = (val_fvec1 > maxval_fvec1) | isnan(val_fvec1);
             iVec imask0 = vec::cast<int32_t>(mask0);
             iVec imask1 = vec::cast<int32_t>(mask1);
 
@@ -461,7 +497,7 @@ void max_pool2d_kernel_impl(
     int dilationW, int dilationH) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d", [&] {
+      AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d", [&] {
         if (input.scalar_type() == ScalarType::BFloat16) {
           cpu_max_pool<BFloat16, /*accscalar_t*/float>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
         } else {
@@ -471,7 +507,7 @@ void max_pool2d_kernel_impl(
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d_channels_last", [&] {
+      AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool2d_channels_last", [&] {
         cpu_max_pool_channels_last<scalar_t>(output, indices, input, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
       });
       break;
