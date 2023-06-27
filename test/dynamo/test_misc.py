@@ -1748,27 +1748,52 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.op_count, 3)
             cnts.clear()
 
-    # def test_closure_out_of_scope_cell_with_cond(self):
-    #     from functorch.experimental.control_flow import cond
-    #     cell1 = torch.rand(3, 3)
-    #     cell2 = torch.rand(3, 3)
-    #     orig3 = torch.rand(3, 3)
-    #     def test(x):
-    #         cell3 = orig3.clone()
-    #         def then():
-    #             nonlocal cell3
-    #             cell3 += cell1
-    #             return cell3
-    #         def els():
-    #             nonlocal cell3
-    #             cell3 += cell2
-    #             return cell3
-    #         return cond(x > 0, then, els, [])
-    #     opt_fn = torch._dynamo.optimize("eager")(test)
-    #     result1 = opt_fn(1)
-    #     self.assertTrue(torch.allclose(result1, orig3 + cell1))
-    #     result2 = opt_fn(-1)
-    #     self.assertTrue(torch.allclose(result2, orig3 + cell1 + cell2))
+    def test_closure_out_of_scope_cell_with_cond(self):
+        # Test closure with out-of-scope cell variable, used in a cond
+        # where the two branches read different closure variables
+        from functorch.experimental.control_flow import cond
+
+        def g(x):
+            return x
+
+        class ModuleCondDeep(torch.nn.Module):
+            def forward(self, pred, x):
+                return self._indirection(pred, x)
+
+            def _indirection(self, pred, x):
+                return self.indirection(pred, x)
+
+            def indirection(self, pred, x):
+                def true_fn(y):
+                    return y + 2
+
+                def false_fn(y):
+                    return y - 2
+
+                def shallow(x):
+                    return x * 2
+
+                def deep(x):
+                    # y = g(x)
+                    y = x
+                    return cond(
+                        x[0][0] > 0,
+                        true_fn,
+                        false_fn,
+                        [y],
+                    )
+
+                return cond(pred, shallow, deep, [x])
+
+        mod = ModuleCondDeep()
+        opt_mod = torch._dynamo.optimize("eager")(mod)
+        inp = torch.randn(3, 3)
+        exp1 = mod(torch.tensor(False), inp)
+        actual1 = opt_mod(torch.tensor(False), inp)
+        exp2 = mod(torch.tensor(True), inp)
+        actual2 = opt_mod(torch.tensor(True), inp)
+        self.assertTrue(torch.allclose(exp1, actual1))
+        self.assertTrue(torch.allclose(exp2, actual2))
 
     def test_top_package_import(self):
         def fn(x):
