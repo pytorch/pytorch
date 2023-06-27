@@ -94,7 +94,7 @@ class OutputGraphState(NamedTuple):
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
-    tensor_weakref_to_sizes_strides: WeakIdKeyDictionary
+    tensor_weakref_to_sizes_strides_offset: WeakIdKeyDictionary
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
@@ -219,6 +219,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         frame_state,
         local_scope: Scope,
         global_scope: Scope,
+        f_code,
     ):
         super().__init__()
         self.tracers = [SubgraphTracer(self)]
@@ -228,7 +229,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
+        self.tensor_weakref_to_sizes_strides_offset: WeakIdKeyDictionary = {}
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._guards.EXPORT_FAKE_MODE or torch._subclasses.FakeTensorMode(
@@ -236,6 +237,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 allow_scalar_outputs=config.capture_scalar_outputs,
                 allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 frame_id=frame_state["_id"],
+                # TODO: maybe should just pass the entire f_code in here?  Not
+                # sure...
+                co_fields={
+                    "co_name": f_code.co_name,
+                    "co_filename": f_code.co_filename,
+                    "co_firstlineno": f_code.co_firstlineno,
+                },
             ),
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
@@ -420,7 +428,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
-            dict(self.tensor_weakref_to_sizes_strides),
+            dict(self.tensor_weakref_to_sizes_strides_offset),
         )
         self.timestamp += 1
         return state
@@ -436,7 +444,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.param_name_to_source,
             self.side_effects,
             self.timestamp,
-            self.tensor_weakref_to_sizes_strides,
+            self.tensor_weakref_to_sizes_strides_offset,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         self.tracing_context.module_context.restore_graphstate(module_state)
