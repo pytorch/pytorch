@@ -284,7 +284,7 @@ class TestMkldnn(TestCase):
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    # @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_conv_deconv_lower_precision_base(self, dim, conv_module, dtype):
         input_shapes = {1: (224,), 2: (224, 224), 3: (55, 55, 55)}
         options = itertools.product([True, False], [1, 2], [1, 4])
@@ -317,7 +317,7 @@ class TestMkldnn(TestCase):
             else:
                 msg = {
                     torch.bfloat16: r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq",
-                    torch.half: r"fp16 path needs the cpu support avx_vnni, avx512bw, avx512vl, avx512dq, avx512_vnni, avx512_bf16 and avx512_fp16",
+                    torch.half: r"fp16 path needs the cpu support avx512_fp16",
                 }
                 with self.assertRaisesRegex(RuntimeError, msg[dtype]):
                     mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
@@ -399,7 +399,7 @@ class TestMkldnn(TestCase):
         self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    # @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv2d_nhwc_lower_precision(self):
         # when has_bf16_support() or has_fp16_support() returns false,
         # bf16/fp16 CPU conv will fall back to thnn impl
@@ -420,7 +420,7 @@ class TestMkldnn(TestCase):
         self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    # @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv_transpose2d_nhwc_lower_precision(self):
         # when has_bf16_support() or has_fp16_support() returns false,
         # bf16/fp16 CPU conv will fall back to thnn impl
