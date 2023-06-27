@@ -1,11 +1,11 @@
 import inspect
 import os
 import re
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import torch
 import torch._dynamo as torchdynamo
+from torch._export import export
 
 from torch._export.db.case import ExportCase, normalize_inputs
 from torch._export.db.examples import all_examples
@@ -17,18 +17,6 @@ SOURCE = ROOT / Path("source")
 EXPORTDB_SOURCE = SOURCE / Path("generated") / Path("exportdb")
 
 
-@dataclass
-class _DynamoConfig:
-    capture_scalar_outputs: bool = True
-    capture_dynamic_output_shape_ops: bool = True
-    guard_nn_modules: bool = True
-    dynamic_shapes: bool = True
-    specialize_int: bool = True
-    allow_rnn: bool = True
-    verbose: bool = True
-    assume_static_by_default: bool = False
-
-
 def generate_example_rst(example_case: ExportCase):
     """
     Generates the .rst files for all the examples in db/examples/
@@ -36,7 +24,6 @@ def generate_example_rst(example_case: ExportCase):
 
     model = example_case.model
 
-    example_inputs = example_case.example_inputs
     tags = ", ".join(f":doc:`{tag} <{tag}>`" for tag in example_case.tags)
 
     source_file = (
@@ -81,20 +68,16 @@ Result:
 
     # Get resulting graph from dynamo trace
     try:
-        # pyre-ignore
-        with torchdynamo.config.patch(asdict(_DynamoConfig())):
-            inputs = normalize_inputs(example_inputs)
-            exported_model, _ = torchdynamo.export(
-                model,
-                *inputs.args,
-                aten_graph=True,
-                tracing_mode="symbolic",
-                **inputs.kwargs,
-            )
-            graph_output = exported_model.print_readable(False)
-            graph_output = re.sub(r"        # File(.|\n)*?\n", "", graph_output)
-            graph_output = graph_output.replace("\n", "\n    ")
-            output = f"    {graph_output}"
+        inputs = normalize_inputs(example_case.example_inputs)
+        exported_program = export(
+            model,
+            inputs.args,
+            constraints=example_case.constraints,
+        )
+        graph_output = str(exported_program)
+        graph_output = re.sub(r"        # File(.|\n)*?\n", "", graph_output)
+        graph_output = graph_output.replace("\n", "\n    ")
+        output = f"    {graph_output}"
     except torchdynamo.exc.Unsupported as e:
         output = "    Unsupported: " + str(e).split("\n")[0]
 
