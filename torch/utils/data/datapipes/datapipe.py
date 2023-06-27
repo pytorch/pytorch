@@ -96,7 +96,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
             [2, 4, 6, 8, 10]
         Single Iterator Constraint Example:
             >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
-            >>> dp = IterableWrapper(range(10))
+            >>> source_dp = IterableWrapper(range(10))
             >>> it1 = iter(source_dp)
             >>> list(it1)
             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
