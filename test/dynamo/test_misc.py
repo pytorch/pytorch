@@ -1697,6 +1697,57 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(out[0], out[1]))
 
+    def test_closure_out_of_scope_cell(self):
+        cell1 = torch.rand(1).item()
+        cell2 = torch.rand(3, 3)
+
+        def indirect():
+            return direct()
+
+        def direct():
+            def inner():
+                return cell1 + 1, cell2 + 3
+
+            return inner()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(indirect)
+        result1, result2 = opt_fn()
+        self.assertAlmostEqual(cell1 + 1, result1)
+        self.assertTrue(torch.allclose(cell2 + 3, result2))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_closure_out_of_scope_cell_with_mutation(self):
+        cell1 = torch.rand(1).item()
+        orig1 = cell1
+        cell2 = torch.rand(3, 3)
+        orig2 = cell2.clone()
+
+        def indirect():
+            return direct()
+
+        def direct():
+            def inner():
+                nonlocal cell1, cell2
+                x = cell2 + 1
+                cell1 += 1
+                cell2 += 10
+                x = x + cell2
+                return cell1, cell2, x
+
+            return inner()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(indirect)
+        for i in range(1, 4):
+            result1, result2, _ = opt_fn()
+            self.assertAlmostEqual(orig1 + 1 * i, result1)
+            self.assertTrue(torch.allclose(orig2 + 10 * i, result2))
+            self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.op_count, 3)
+            cnts.clear()
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx
