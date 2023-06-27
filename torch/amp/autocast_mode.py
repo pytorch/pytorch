@@ -5,7 +5,7 @@ import warnings
 from typing import Any, Optional
 from torch.types import _dtype
 
-__all__ = ['autocast_decorator', 'autocast', '_enter_autocast', '_exit_autocast']
+__all__ = ['autocast_decorator', 'autocast']
 
 def autocast_decorator(autocast_instance, func):
     @functools.wraps(func)
@@ -41,7 +41,7 @@ class autocast:
             optimizer.zero_grad()
 
             # Enables autocasting for the forward pass (model + loss)
-            with autocast():
+            with torch.autocast(device_type="cuda"):
                 output = model(input)
                 loss = loss_fn(output, target)
 
@@ -56,7 +56,7 @@ class autocast:
 
         class AutocastModel(nn.Module):
             ...
-            @autocast()
+            @torch.autocast(device_type="cuda")
             def forward(self, input):
                 ...
 
@@ -74,7 +74,7 @@ class autocast:
         c_float32 = torch.rand((8, 8), device="cuda")
         d_float32 = torch.rand((8, 8), device="cuda")
 
-        with autocast():
+        with torch.autocast(device_type="cuda"):
             # torch.mm is on autocast's list of ops that should run in float16.
             # Inputs are float32, but the op runs in float16 and produces float16 output.
             # No manual casts are required.
@@ -153,9 +153,9 @@ class autocast:
         c_float32 = torch.rand((8, 8), device="cuda")
         d_float32 = torch.rand((8, 8), device="cuda")
 
-        with autocast():
+        with torch.autocast(device_type="cuda"):
             e_float16 = torch.mm(a_float32, b_float32)
-            with autocast(enabled=False):
+            with torch.autocast(device_type="cuda", enabled=False):
                 # Calls e_float16.float() to ensure float32 execution
                 # (necessary because e_float16 was created in an autocasted region)
                 f_float32 = torch.mm(c_float32, e_float16.float())
@@ -200,6 +200,8 @@ class autocast:
             self.fast_dtype = torch.get_autocast_ipu_dtype()  # type: ignore[attr-defined]
         elif self.device == 'hpu':
             self.fast_dtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
+        elif self.device == 'xla':
+            self.fast_dtype = torch.get_autocast_xla_dtype()  # type: ignore[attr-defined]
         elif self.device == self.custom_backend_name:
             necessary_funcs = ['is_autocast_enabled', 'set_autocast_enabled', 'get_autocast_dtype',
                                'set_autocast_dtype', 'get_amp_supported_dtype']
@@ -266,6 +268,13 @@ class autocast:
         elif self.device == 'cuda':
             if enabled and self.fast_dtype == torch.bfloat16 and not torch.cuda.is_bf16_supported():
                 raise RuntimeError('Current CUDA Device does not support bfloat16. Please switch dtype to float16.')
+        elif self.device == 'xla':
+            supported_dtype = [torch.bfloat16]
+            if self.fast_dtype not in supported_dtype:
+                error_message = 'In XLA autocast, but the target dtype is not supported. Disabling autocast.\n'
+                error_message += 'XLA Autocast only supports dtype of torch.bfloat16 currently.'
+                warnings.warn(error_message)
+                enabled = False
         self._enabled = enabled
 
     def __enter__(self):
@@ -297,6 +306,12 @@ class autocast:
             self.prev_fastdtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_enabled(self._enabled)  # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_dtype(self.fast_dtype)  # type: ignore[attr-defined]
+            torch.autocast_increment_nesting()
+        elif self.device == 'xla':
+            self.prev = torch.is_autocast_xla_enabled()  # type: ignore[attr-defined]
+            self.prev_fastdtype = torch.get_autocast_xla_dtype()  # type: ignore[attr-defined]
+            torch.set_autocast_xla_enabled(self._enabled)  # type: ignore[attr-defined]
+            torch.set_autocast_xla_dtype(self.fast_dtype)  # type: ignore[attr-defined]
             torch.autocast_increment_nesting()
         elif self.device == self.custom_backend_name:
             self.prev = self.custom_device_mod.is_autocast_enabled()
@@ -337,6 +352,11 @@ class autocast:
                 torch.clear_autocast_cache()
             torch.hpu.set_autocast_hpu_enabled(self.prev)            # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
+        elif self.device == 'xla':
+            if torch.autocast_decrement_nesting() == 0:
+                torch.clear_autocast_cache()
+            torch.set_autocast_xla_enabled(self.prev)            # type: ignore[attr-defined]
+            torch.set_autocast_xla_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
         elif self.device == self.custom_backend_name:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
