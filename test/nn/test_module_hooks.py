@@ -449,10 +449,10 @@ class TestModuleHooks(TestCase):
 
         # make sure forward hook runs when forward pre hook raises RuntimeError
         with self.assertRaises(RuntimeError):
-            model(x)
+            model(x, fail=False)
         self.assertEqual(stack, [-1, -1])
 
-        # make sure that forced forward hook is properly rmoved
+        # make sure that forced forward hook is properly removed
         forward_hook_handle.remove()
         self.assertTrue(len(model._forward_hooks_forced) == 0)
 
@@ -460,10 +460,10 @@ class TestModuleHooks(TestCase):
         self.assertTrue(len(nn.modules.module._global_forward_hooks_forced) == 1)
         # make sure global forward hook runs when forward pre hook raises RuntimeError
         with self.assertRaises(RuntimeError):
-            model(x)
+            model(x, fail=False)
         self.assertEqual(stack, [-1, -1, -1])
 
-        # make sure forced global forward hooks is properly removed
+        # make sure forced global forward hook is properly removed
         global_forward_hook_handle.remove()
         self.assertTrue(len(nn.modules.module._global_forward_hooks_forced) == 0)
         with self.assertRaises(RuntimeError):
