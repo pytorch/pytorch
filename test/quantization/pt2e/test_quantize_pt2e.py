@@ -1810,14 +1810,6 @@ class TestQuantizePT2EOps(QuantizationTestCase):
             model_graph = convert_pt2e(model_graph)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
-    def test_maxpool2d_int8(self):
-        x = torch.randint(1, 100, (1, 3, 3, 3), dtype=torch.int8)
-        print(torch.max_pool2d(x, kernel_size=2, stride=1))
-
-    def test_adaptive_avg_pool2d_int32(self):
-        x = torch.randint(1, 100, (1, 3, 3, 3), dtype=torch.int32)
-        print(torch.nn.functional.adaptive_avg_pool2d(x, output_size=(2, 2)))
-
 # TODO: express this using self._test_quantizer
 class TestQuantizePT2EModels(PT2EQuantizationTestCase):
     @skip_if_no_torchvision
