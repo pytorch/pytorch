@@ -9,12 +9,12 @@ import warnings
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
+from functorch.compile import min_cut_rematerialization_partition
+
 import torch._functorch.config as functorch_config
 
 import torch.fx
 import torch.utils._pytree as pytree
-
-from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import detect_fake_mode
 from torch._functorch.aot_autograd import make_boxed_func
