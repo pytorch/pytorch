@@ -144,16 +144,16 @@ try:
                     return z3.BoolVal(bool(a))
                 if isinstance(a, (int, sympy.Integer)):
                     return z3.IntVal(int(a))
-                if isinstance(a, float):
-                    return z3.RealVal(a)
+                if isinstance(a, (float, sympy.Float)):
+                    return z3.RealVal(float(a))
                 raise ValueError(f"can't lift type: {type(a)}")
 
             @functools.wraps(func)
             def wrapper(*args):
                 # Lifts the arguments into a list of Z3 inhabitants.
-                args = tuple(wrap(a) for a in args)
+                wrapped_args = (wrap(a) for a in args)
                 # Run the function on the Z3 expressions.
-                return func(*args)
+                return func(*wrapped_args)
 
             return wrapper
 
