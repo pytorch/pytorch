@@ -267,7 +267,7 @@ class TestInitialization(FSDPTest):
         # NOTE: This check only requires that the data structure state is
         # shared. Namely, sharing the FSDP state object itself is sufficient
         # but not necessary.
-        data_structure_names = ["_streams", "_exec_order_data", "_free_event_queue"]
+        data_structure_names = ["_exec_order_data", "_free_event_queue"]
         for data_structure_name in data_structure_names:
             all_structures = set()
             for module in (

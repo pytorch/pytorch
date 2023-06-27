@@ -60,6 +60,12 @@ def assert_async_msg_decomp(tensor, msg):
     return
 
 
+# Following `assert_async_msg_decomp` and implement as non-op.
+@register_decomposition([aten._functional_assert_async.msg])
+def functional_assert_async_msg_decomp(tensor, msg):
+    return
+
+
 @register_decomposition([aten.clamp])
 @pw_cast_for_opmath
 def clamp(x, min=None, max=None):

@@ -91,6 +91,12 @@ try:
                 number
             )  # type: ignore[return-value]
 
+        def max(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
+            return z3.If(a > b, a, b)  # type: ignore[return-value]
+
+        def min(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
+            return z3.If(a < b, a, b)  # type: ignore[return-value]
+
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             self.validator.add_assertion(q != 0)  # type: ignore[arg-type]
             return Z3Ops.to_int(p) % Z3Ops.to_int(q)
@@ -167,6 +173,8 @@ try:
 
             # Torch module.
             torch.sym_float: lift(ops.to_real),
+            torch.sym_max: lift(ops.max),
+            torch.sym_min: lift(ops.min),
             sym_sqrt: lift(ops.sqrt),
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
