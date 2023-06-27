@@ -244,7 +244,7 @@ bool check_requires_grad_and_nested(sdp_params params, bool debug) {
 bool check_for_attn_mask(sdp_params params, bool debug) {
   if (params.has_attn_mask) {
     if (debug) {
-      TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
+      TORCH_WARN("FlashAttention does not support non-null attn_mask.");
     }
     return false;
   }
@@ -582,7 +582,6 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_requires_grad_and_nested,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
-      check_for_attn_mask,
       check_head_dim_size_mem_efficient,
       check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {

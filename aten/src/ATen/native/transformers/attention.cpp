@@ -592,7 +592,7 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, compute_logsumexp, dropout_p, is_causal, scale);
+          query_, key, value, attn_mask_, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::math:
