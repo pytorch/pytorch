@@ -166,6 +166,42 @@ class TypePromotionRule:
         )
 
 
+class DivTypePromotionRule(TypePromotionRule):
+    def __init__(self):
+        super().__init__(
+            "aten",
+            "div",
+            promote_args_positions=(0, 1),
+            promote_kwargs_names=(),
+            promotion_kind=_prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        )
+
+    def preview_type_promotion(
+        self, args: tuple, kwargs: dict
+    ) -> TypePromotionSnapshot:
+        """Reference type promotion rule from torch._refs.div.
+
+        Rule depends on the value of the `rounding_mode` argument.
+        """
+        rounding_mode = kwargs.get("rounding_mode", None)
+        if rounding_mode is None:
+            # true_divide
+            self.promotion_kind = (
+                _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+            )
+            return super().preview_type_promotion(args, kwargs)
+        elif rounding_mode == "trunc":
+            # trunc_divide
+            self.promotion_kind = _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            return super().preview_type_promotion(args, kwargs)
+        elif rounding_mode == "floor":
+            # floor_divide
+            self.promotion_kind = _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+            return super().preview_type_promotion(args, kwargs)
+        else:
+            raise ValueError(f"Unknown rounding_mode: {rounding_mode}")
+
+
 # NOTE: BELOW TABLE IS GENERATED FROM `TypePromotionRuleSetGenerator.generate_from_torch_refs`.
 # DO NOT EDIT MANUALLY !!!
 # For missing rules or discrepancies, please
@@ -826,6 +862,7 @@ _EXTRA_TYPE_PROMOTION_RULE_SET = {
     ),
     # TODO: torch.ops.aten.div.Tensor_mode applies different type promotion rules
     # depending on the value of the `mode` argument.
+    DivTypePromotionRule(),
 }
 
 
