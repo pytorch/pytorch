@@ -631,7 +631,7 @@ class SliceVariable(BaseListVariable):
                 return arg.as_python_constant()
 
         constant_items = list(map(_to_constant, self.items))
-        return slice(*constant_items)
+        return slice(*[_to_constant(x) for x in self.items])
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
