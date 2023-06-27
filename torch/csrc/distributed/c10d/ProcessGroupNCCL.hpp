@@ -353,6 +353,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const BroadcastOptions& opts = BroadcastOptions());
 
+  c10::intrusive_ptr<Work> allreduce_sparse(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override;
+
   c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;

@@ -21,6 +21,7 @@
 #else
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
+#include <ATen/ops/_functional_assert_async_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/allclose_native.h>
@@ -408,6 +409,15 @@ void _assert_async_cpu(const Tensor& self) {
 void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
   TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
+
+Tensor _functional_assert_async_msg_cpu(
+  const Tensor& self,
+  c10::string_view assert_msg,
+  const Tensor& dep_token) {
+  _assert_async_msg_cpu(self, assert_msg);
+  return dep_token;
+}
+
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
