@@ -1174,7 +1174,7 @@ def run(fn=None):
     return RunOnlyContext()
 
 
-def disable(fn=None, recursive=True):
+def disable(fn, recursive=True):
     """
     Decorator and context manager to disable TorchDynamo
 
@@ -1183,15 +1183,23 @@ def disable(fn=None, recursive=True):
 
     If recursive=False, Dynamo skips frames associated with the function code,
     but still process recursively invoked frames.
+
+    NB: disable is called lazily to postpone the imports called from the inside
+    of DisableContext() call - mainly skipfiles - to the actual invocation of
+    disable decorated function.
     """
-    if recursive:
-        if fn is not None:
+
+    @functools.wraps(fn)
+    def lazy_disable(*args, **kwargs):
+        nonlocal fn, recursive
+        if recursive:
             fn = innermost_fn(fn)
             assert callable(fn)
-            return DisableContext()(fn)
-        return DisableContext()
-    else:
-        return skip(fn)
+            return DisableContext()(fn)(*args, **kwargs)
+        else:
+            return skip(fn)(*args, **kwargs)
+
+    return lazy_disable
 
 
 def skip(fn=None):

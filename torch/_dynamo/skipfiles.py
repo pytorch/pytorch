@@ -31,9 +31,6 @@ import unittest
 import weakref
 
 import torch
-import torch._inductor.test_operators
-import torch.distributed
-import torch.utils._content_store
 
 from . import comptime, config, external_utils
 
@@ -52,6 +49,65 @@ frame-by-frame boundary as dynamo traces, but apply to all functions in that fil
 @skip is a helper decorator that can be applied to your function to cause it to be
 included here.
 """
+
+FILENAME_ALLOWLIST = set()
+
+
+@functools.lru_cache(None)
+def lazily_build_filename_allowlist():
+    global FILENAME_ALLOWLIST
+
+    import torch
+    import torch._inductor.test_operators
+    import torch.distributed
+    import torch.utils._content_store
+
+    FILENAME_ALLOWLIST = {
+        torch.nn.Sequential.__init__.__code__.co_filename,
+        torch.set_rng_state.__code__.co_filename,
+        torch._inductor.test_operators.__file__,
+        torch.utils._content_store.__file__,
+        # These are dynamo files!
+        external_utils.__file__,
+        comptime.__file__,  # Want to inline these helpers
+    }
+
+    if torch.distributed.is_available():
+        # Inline the checkpoint code from distributed
+        import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
+
+        FILENAME_ALLOWLIST |= {
+            torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
+        }
+
+    # Include optimizer code for tracing
+    FILENAME_ALLOWLIST |= {
+        inspect.getfile(obj)
+        for obj in torch.optim.__dict__.values()
+        if inspect.isclass(obj)
+    }
+    FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
+    FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
+
+    # Do trace through match and replace patterns used in PT2E QAT
+    # Note: These patterns are comprised of torch ops and for internal use only.
+    # They are exported to aten graphs before being passed to the FX subgraph rewriter.
+    # TODO: find a better way to express this path without having to import
+    # `torch.ao.quantization._pt2e`, which interferes with memory profiling
+    FILENAME_ALLOWLIST |= {
+        _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
+        _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
+    }
+
+    # TODO (zhxchen17) Make exportdb importable here.
+    FILENAME_ALLOWLIST |= set(
+        glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
+    )
+
+    # torch.func.grad: need to allow this file to be able to look at `grad_impl`
+    FILENAME_ALLOWLIST |= {
+        _module_dir(torch) + "_functorch/apis.py",
+    }
 
 
 def _strip_init_py(s):
@@ -106,53 +162,6 @@ SKIP_DIRS = [
     )
 ]
 
-FILENAME_ALLOWLIST = {
-    torch.nn.Sequential.__init__.__code__.co_filename,
-    torch.set_rng_state.__code__.co_filename,
-    torch._inductor.test_operators.__file__,
-    torch.utils._content_store.__file__,
-    # These are dynamo files!
-    external_utils.__file__,
-    comptime.__file__,  # Want to inline these helpers
-}
-
-if torch.distributed.is_available():
-    # Inline the checkpoint code from distributed
-    import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
-
-    FILENAME_ALLOWLIST |= {
-        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
-    }
-
-# Include optimizer code for tracing
-FILENAME_ALLOWLIST |= {
-    inspect.getfile(obj)
-    for obj in torch.optim.__dict__.values()
-    if inspect.isclass(obj)
-}
-FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
-FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
-
-# Do trace through match and replace patterns used in PT2E QAT
-# Note: These patterns are comprised of torch ops and for internal use only.
-# They are exported to aten graphs before being passed to the FX subgraph rewriter.
-# TODO: find a better way to express this path without having to import
-# `torch.ao.quantization._pt2e`, which interferes with memory profiling
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "ao/quantization/_pt2e/qat_utils.py",
-    _module_dir(torch) + "ao/quantization/_pt2e/quantizer/qnnpack_quantizer.py",
-}
-
-# TODO (zhxchen17) Make exportdb importable here.
-FILENAME_ALLOWLIST |= set(
-    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
-)
-
-# torch.func.grad: need to allow this file to be able to look at `grad_impl`
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "_functorch/apis.py",
-}
-
 SKIP_DIRS_RE = None
 
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
@@ -188,6 +197,7 @@ def add(import_name: str):
 
 def check(filename, allow_torch=False):
     """Should skip this file?"""
+    lazily_build_filename_allowlist()
     if filename is None:
         return True
     if filename in FILENAME_ALLOWLIST:
