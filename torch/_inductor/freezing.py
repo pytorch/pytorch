@@ -1,10 +1,19 @@
 import itertools
+
+import unittest
 import weakref
 from typing import List, Optional, Tuple
 
 import torch
+import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import detect_fake_mode
+from torch.ao.quantization._pt2e.utils import _fuse_conv_bn_
+from torch.fx.experimental.proxy_tensor import make_fx
 from . import config
+from .decomposition import select_decomp_table
+
+aten = torch.ops.aten
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -148,10 +157,36 @@ def constant_fold(gm):
     gm.recompile()
 
 
+@torch.utils._python_dispatch._disable_current_modes()
+def fuse_conv_bn(gm):
+    return _fuse_conv_bn_(gm)
+
+
+def decompose_unfused_batchnorms(gm, example_inputs, preserved_arg_indices):
+    if not any(
+        node.target is aten._native_batch_norm_legit_no_training.default
+        for node in gm.graph.nodes
+    ):
+        return gm
+
+    fake_mode = detect_fake_mode(example_inputs)
+
+    # constant params will be real tensors, not fake
+    # TODO: fake_mode should should enable py dispatcher if its symbolic ?
+    with unittest.mock.patch.object(
+        fake_mode, "allow_non_fake_inputs", True
+    ), fake_mode:
+        args = [e for i, e in enumerate(example_inputs) if i in preserved_arg_indices]
+        with fx_traceback.preserve_node_meta():
+            gm = make_fx(gm, select_decomp_table())(*args)
+
+    return gm
+
+
 def freeze(
     dynamo_gm: torch.fx.GraphModule,
     aot_autograd_gm: torch.fx.GraphModule,
-    fw_metadata,
+    example_inputs: List[torch._subclasses.FakeTensor],
 ) -> Tuple[torch.fx.GraphModule, List[int]]:
     """
     Inlines parameters that are not mutated into constants and optimizes the graph through constant propagation
@@ -162,19 +197,27 @@ def freeze(
     Args:
         dynamo_gm (torch.fx.GraphModule): The Dynamo constructed GraphModule.
         aot_autograd_gm (torch.fx.GraphModule): The aot_autograd constructed GraphModule to be frozen.
-        example_inputs_ (List[torch.Tensor]): A list of example input tensors to be used in the freezing process.
-        fw_metadata: Metadata for the forward method of the graph module.
+        example_inputs (List[torch.Tensor]): A list of example input tensors to be used in the freezing process.
 
     Returns:
         Tuple[torch.fx.GraphModule, List[int]]: A tuple containing the frozen GraphModule and a list of indices
         of the inputs that were preserved (not turned into constants).
     """
+    fw_metadata = torch._guards.TracingContext.get().fw_metadata
     params_flat = torch._guards.TracingContext.get().params_flat
+    assert fw_metadata is not None and params_flat is not None
+
     preserved_arg_indices = replace_params_with_constants(
         aot_autograd_gm, params_flat, fw_metadata
     )
 
     constant_fold(aot_autograd_gm)
+
+    fuse_conv_bn(aot_autograd_gm)
+    # now, decomp batch norm if we were unable to fuse it
+    aot_autograd_gm = decompose_unfused_batchnorms(
+        aot_autograd_gm, example_inputs, preserved_arg_indices
+    )
 
     # invalidate nn Modules
     if config.freezing_discard_parameters:

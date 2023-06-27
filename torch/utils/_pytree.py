@@ -251,7 +251,7 @@ class TreeSpec:
         repr_prefix: str = f'TreeSpec({self.type.__name__}, {self.context}, ['
         children_specs_str: str = ''
         if len(self.children_specs):
-            indent += len(repr_prefix)
+            indent += 2
             children_specs_str += self.children_specs[0].__repr__(indent)
             children_specs_str += ',' if len(self.children_specs) > 1 else ''
             children_specs_str += ','.join(['\n' + ' ' * indent + child.__repr__(indent) for child in self.children_specs[1:]])
