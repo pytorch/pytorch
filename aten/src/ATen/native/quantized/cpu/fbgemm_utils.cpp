@@ -436,9 +436,11 @@ TORCH_API int register_conv_params<2>();
 template
 TORCH_API int register_conv_params<3>();
 
+TORCH_API int register_linear_params();
+
 TORCH_API int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
-  static auto register_linear_params_ =
+  static auto register_linear_params =
       torch::selective_class_<LinearPackedParamsBase>(
           "quantized", TORCH_SELECTIVE_CLASS("LinearPackedParamsBase"))
           .def_pickle(
