@@ -41,6 +41,15 @@ class TestCustomOperators(JitTestCase):
         op2 = torch.ops._test.leaky_relu
         self.assertEqual(op, op2)
 
+    def test_getting_invalid_attr(self):
+        for attr in ["__origin__", "__self__"]:
+            with self.assertRaisesRegexWithHighlight(
+                AttributeError,
+                f"Invalid attribute '{attr}' for '_OpNamespace' '_test'",
+                ""
+            ):
+                getattr(torch.ops._test, attr)
+
     def test_simply_calling_an_operator(self):
         input = torch.randn(100)
         output = torch.ops.aten.relu(input)

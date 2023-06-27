@@ -752,7 +752,12 @@ public:
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
   }
   static Vectorized<T> loadu_one_fourth(const void* ptr) {
-      // Fast path if only load element number of 16
+      // Fast path if only load element number of 16.
+      // Note: We didn't merge it as fast path of loadu(const void* ptr, T count),
+      // Because loadu(const void* ptr, T count) requires zero initialization for upper 384 bits.
+      // However, by using _mm512_castsi128_si512, the upper 384 bits of the result are undefined.
+      // TODO<leslie> We can use _mm512_zextsi128_si512 in the furture,
+      // since gcc 9.3 doesn't support it now.
       __m128i input_128 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(ptr));
       return _mm512_castsi128_si512(input_128);
   }
