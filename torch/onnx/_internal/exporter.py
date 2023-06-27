@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import abc
 
-import contextlib
 import io
 import logging
 from typing import (
@@ -228,8 +227,12 @@ class ResolvedExportOptions(ExportOptions):
                     assert hasattr(self, key), f"Unresolved option '{key}'"
 
 
-@contextlib.contextmanager
-def enable_symbolic_mode():
+def enable_symbolic_mode(
+    model: Union[torch.nn.Module, Callable],
+    /,
+    *model_args,
+    **model_kwargs,
+):
     from torch._subclasses import fake_tensor
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -239,9 +242,24 @@ def enable_symbolic_mode():
             allow_scalar_outputs=False, allow_dynamic_output_shape_ops=False
         ),
     )
-    fake_context = ONNXFakeContext(fake_mode=fake_mode)
-    with fake_mode:
-        yield fake_context
+    fake_context = ONNXFakeContext(
+        fake_mode=fake_mode, model_state_dict=model.state_dict()
+    )
+    fake_model = torch._dynamo.utils.deepcopy_to_fake_tensor(model, fake_mode)
+
+    fake_model_args = [fake_mode.from_tensor(arg) for arg in model_args]
+    if len(model_kwargs) == 0:
+        fake_model_args = fake_model_args[0]
+
+    fake_model_kwargs = {k: fake_mode.from_tensor(v) for k, v in model_kwargs}
+    if model_args and model_kwargs:
+        return fake_context, fake_model, fake_model_args, fake_model_kwargs
+    elif model_args and not model_kwargs:
+        return fake_context, fake_model, fake_model_args
+    elif not model_args and model_kwargs:
+        return fake_context, fake_model, fake_model_kwargs
+    else:
+        raise RuntimeError("No model args or kwargs provided")
 
 
 @runtime_checkable

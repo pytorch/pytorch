@@ -183,15 +183,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 out = self.linear(x)
                 return out
 
-        with enable_symbolic_mode() as fake_context:
-            x = torch.rand(5, 2, 2)
-            model = Model()
-            fake_context.save_state_dict(model.state_dict())
-
+        x = torch.rand(5, 2, 2)
+        model = Model()
         # Export the model with fake inputs and parameters
+        fake_context, fake_model, fake_x = enable_symbolic_mode(model, x)
         export_options = ExportOptions(fake_context=fake_context)
         export_output = torch.onnx.dynamo_export(
-            model, x, export_options=export_options
+            fake_model, fake_x, export_options=export_options
         )
 
         assert export_output is not None
