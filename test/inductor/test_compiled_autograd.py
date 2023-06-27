@@ -213,6 +213,7 @@ class TestCompiledAutograd(TestCase):
                 yield model[2].bias.grad
                 model.zero_grad()
 
+        # TODO(jansel): we should be able to get this count to 1
         self._common(fn, count=2)
 
     def test_accumulate_without_zero(self):
