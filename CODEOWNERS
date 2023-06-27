@@ -22,20 +22,20 @@
 /aten/src/ATen/native/tags.yaml @ezyang
 
 # Architecture Optimization (quantization, sparsity, etc.)
-/aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cpu @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/ao_sparse @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu @jerryzh168 @salilsdesai @kimishpatel @digantdesai @jianyuh
 /aten/src/ATen/native/quantized/cuda @jerryzh168
 /aten/src/ATen/native/quantized/cudnn @jerryzh168
 /test/test_quantization.py @jerryzh168
-/test/ao/ @jerryzh168 @z-a-f @hdcharles
-/test/quantization/ @jerryzh168 @z-a-f
+/test/ao/ @jerryzh168 @hdcharles
+/test/quantization/ @jerryzh168
 /torch/quantization/ @jerryzh168
-ao/sparisty/ @z-a-f @hdcharles
+ao/sparisty/ @hdcharles
 ao/quantization/ @jerryzh168
 nn/intrinsic/ @jerryzh168
 nn/quantized/ @jerryzh168
-nn/quantizable/ @jerryzh168 @z-a-f
+nn/quantizable/ @jerryzh168
 nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
@@ -111,13 +111,13 @@ aten/src/ATen/mps/ @kulinseth
 aten/src/ATen/native/mps/ @kulinseth
 
 # Profiler
-torch/csrc/autograd/profiler* @robieta
-torch/autograd/profiler* @robieta
-torch/csrc/profiler/ @robieta
-torch/profiler/ @robieta
+torch/csrc/autograd/profiler* @aaronenyeshi
+torch/autograd/profiler* @aaronenyeshi
+torch/csrc/profiler/ @aaronenyeshi
+torch/profiler/ @aaronenyeshi
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
-torch/utils/data/ @NivekT @ejguan
+torch/utils/data/ @ejguan
