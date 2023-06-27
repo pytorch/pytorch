@@ -359,14 +359,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             use ``torch.compile()``. Setting this to ``False`` exposes FSDP's
             internal :class:`FlatParameter` s to the user via
             :meth:`nn.Module.named_parameters`. (Default: ``False``)
-        ignored_parameters (Optional[Iterable[torch.nn.Parameter]]): Ignored
-            parameters will not be managed by this FSDP instance, which means
-            that they will not be flattened and sharded and that their
-            gradients will not be reduced across ranks. With this newly added
-            argument, ``ignored_modules`` could be deprecated soon. For
-            backward compatibility, we keep both ``ignored_modules`` and
-            ``ignored_parameters``, but FSDP only allows one of them to be
-            specified as not ``None``.
+        ignored_states (Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]):
+            Ignored parameters or modules that will not be managed by this FSDP
+            instance, meaning that the parameters are not sharded and their
+            gradients are not reduced across ranks. This argument unifies with
+            the existing ``ignored_modules`` argument, and we may deprecate
+            ``ignored_modules`` soon. For backward compatibility, we keep both
+            ``ignored_states`` and `ignored_modules``, but FSDP only allows one
+            of them to be specified as not ``None``.
     """
 
     def __init__(
