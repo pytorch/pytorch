@@ -1,4 +1,5 @@
 import operator
+import traceback
 import typing
 from contextlib import nullcontext
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -37,6 +38,11 @@ class ExportPassBase(PassBase):
     Interpreter-based pass class to help users maintain the IR spec while writing
     transformations.
     """
+
+    @staticmethod
+    def _create_dummy_node_metadata():
+        return NodeMetadata({"stack_trace": traceback.format_exc(-1)})
+
 
     class ExportTracer(PythonKeyTracer):
         """
