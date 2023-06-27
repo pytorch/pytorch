@@ -30,7 +30,7 @@ from torch.fx.experimental import proxy_tensor
 from torch.fx.node import Node  # noqa: F401
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import _pass, diagnostics
-
+from torch.utils import _python_dispatch, _pytree
 
 logger = logging.getLogger(__name__)
 
@@ -70,28 +70,6 @@ def _get_fake_tensor_val(node: torch.fx.Node) -> fake_tensor.FakeTensor:
             f"Cannot retrieve fake tensor from node {node}. Got type({type(val)}) instead."
         )
     return val
-
-
-@_beartype.beartype
-def _fx_argument_to_torch_arg(arg: torch.fx.node.Argument) -> TorchArg:
-    """Convert fx argument to torch arg. The latter serves as input to type promotion check."""
-    if isinstance(arg, torch.fx.Node):
-        val = arg.meta.get("val", None)
-        if isinstance(
-            val, (_prims_common.TensorLike, _prims_common.Number, sympy.Symbol)
-        ):
-            return val
-
-        raise RuntimeError(f"Unrecognized meta['val'] type {type(val)} for arg {arg}")
-    elif isinstance(
-        arg, (_prims_common.TensorLike, _prims_common.Number, sympy.Symbol)
-    ):
-        return arg
-    elif isinstance(arg, (tuple, list, dict)):
-        # TODO: e.g. aten.cat
-        raise NotImplementedError(f"Unimplemented type {type(arg)} for arg {arg}")
-    else:
-        raise RuntimeError(f"Unrecognized type {type(arg)} for arg {arg}")
 
 
 class TypePromotionRule:
@@ -152,50 +130,46 @@ class TypePromotionRule:
 
         return True
 
-    def preview_type_promotion(self, node: torch.fx.Node) -> TypePromotionSnapshot:
+    def preview_type_promotion(
+        self, args: tuple, kwargs: dict
+    ) -> TypePromotionSnapshot:
         """Preview type promotion results for the given fx node.
 
         Returns a TypePromotionSnapshot object that contains the promoted dtypes for
         the arguments and the expected output dtype of the given fx node.
         """
-        node.args
-        node.kwargs
 
-        candidate_fx_args = {
-            i: node.args[i]
+        candidate_args = {
+            i: args[i]
             for i in self.promote_args_positions
-            if i < len(node.args) and node.args[i] is not None
+            if i < len(args) and args[i] is not None
         }
-        candidate_fx_kwargs = {
-            name: node.kwargs[name]
+        candidate_kwargs = {
+            name: kwargs[name]
             for name in self.promote_kwargs_names
-            if name in node.kwargs and node.kwargs[name] is not None
-        }
-
-        candidate_torch_args = {
-            i: _fx_argument_to_torch_arg(arg) for i, arg in candidate_fx_args.items()
-        }
-        candidate_torch_kwargs = {
-            name: _fx_argument_to_torch_arg(arg)
-            for name, arg in candidate_fx_kwargs.items()
+            if name in kwargs and kwargs[name] is not None
         }
 
         computed_dtype, result_dtype = _prims_common.elementwise_dtypes(
-            *candidate_torch_args.values(),
-            *candidate_torch_kwargs.values(),
+            *_pytree.tree_flatten(candidate_args)[0],
+            *_pytree.tree_flatten(candidate_kwargs)[0],
             type_promotion_kind=self.promotion_kind,
         )
 
         return TypePromotionSnapshot(
-            {i: computed_dtype for i in candidate_fx_args.keys()},
-            {name: computed_dtype for name in candidate_fx_kwargs.keys()},
+            {i: computed_dtype for i in candidate_args.keys()},
+            {name: computed_dtype for name in candidate_kwargs.keys()},
             result_dtype,
         )
 
 
 # NOTE: BELOW TABLE IS GENERATED FROM `TypePromotionRuleSetGenerator.generate_from_torch_refs`.
 # DO NOT EDIT MANUALLY !!!
-# For missing rules, please add them to `_EXTRA_TYPE_PROMOTION_RULE_SET`.
+# For missing rules or discrepancies, please
+# 1. Run `pytest test/onnx/test_fx_type_promotion.py` to validate if the generated rule set is current.
+#    If it is not, update with new generated set.
+# 2. If discrepancy still exists, consider debugging torch._refs or report a bug.
+# 3. If rule is still missing, add them to `_EXTRA_TYPE_PROMOTION_RULE_SET` or report a bug.
 _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     TypePromotionRule(
         "aten", "abs", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
@@ -596,6 +570,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "logaddexp", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     TypePromotionRule(
+        "aten", "logaddexp2", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    TypePromotionRule(
         "aten", "logical_and", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
     TypePromotionRule(
@@ -882,7 +859,7 @@ class TypePromotionRuleSetGenerator:
     ) -> Optional[TypePromotionRule]:
         """Retrieve and parse type promotion decorator from op under torch._refs."""
         fn = decorated_op
-        fn_closure_vars = None
+        type_promo_wrapper = None
         while fn_closure_vars := _try_getclosurevars(fn):
             if "fn" not in fn_closure_vars.nonlocals:
                 break
@@ -890,27 +867,20 @@ class TypePromotionRuleSetGenerator:
                 fn_closure_vars.nonlocals["self"],
                 _prims_common_wrappers.elementwise_type_promotion_wrapper,
             ):
+                type_promo_wrapper = fn_closure_vars.nonlocals["self"]
                 break
             fn = fn_closure_vars.nonlocals["fn"]
 
-        if (
-            fn_closure_vars is not None
-            and "self" in fn_closure_vars.nonlocals
-            and isinstance(
-                fn_closure_vars.nonlocals["self"],
-                _prims_common_wrappers.elementwise_type_promotion_wrapper,
-            )
-        ):
-            wrapper = fn_closure_vars.nonlocals["self"]
+        if type_promo_wrapper is not None:
             signature = inspect.signature(decorated_op)
 
             pos = 0
             promote_args_positions = []
             promote_kwargs_names = []
 
-            if wrapper.type_promoting_arg_names is not None:
+            if type_promo_wrapper.type_promoting_arg_names is not None:
                 for name, param in signature.parameters.items():
-                    if name in wrapper.type_promoting_arg_names:
+                    if name in type_promo_wrapper.type_promoting_arg_names:
                         if param.kind in (
                             param.POSITIONAL_OR_KEYWORD,
                             param.POSITIONAL_ONLY,
@@ -925,7 +895,7 @@ class TypePromotionRuleSetGenerator:
                 decorated_op.__name__,
                 promote_args_positions=promote_args_positions,
                 promote_kwargs_names=promote_kwargs_names,
-                promotion_kind=wrapper.type_promotion_kind,
+                promotion_kind=type_promo_wrapper.type_promotion_kind,
             )
 
         logger.warning(
@@ -1018,6 +988,52 @@ def get_type_promotion_rule(
     return rule
 
 
+class _OpTraceDispatchMode(_python_dispatch.TorchDispatchMode):
+    """Trace ops that were dispatched."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.traced_ops = []
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.traced_ops.append(func)
+        return func(*args, **kwargs)
+
+
+@_beartype.beartype
+def find_compatible_op_overload(
+    node: torch.fx.Node, args: tuple, kwargs: dict
+) -> torch._ops.OpOverload:
+    """Find the compatible op overload for a node with a given set of args and kwargs.
+
+    Returns:
+        Compatible op overload for the node.
+
+    Raises:
+        RuntimeError: If no compatible op overload is found.
+        AssertionError: If compatible op overload is not an instance of torch._ops.OpOverload.
+        AssertionError: If op is being decomposed.
+    """
+    target = node.target
+    assert isinstance(
+        target, torch._ops.OpOverload
+    ), f"Expected OpOverload, got {type(target)}"
+    op = target.overloadpacket
+    op_trace_dispatch_mode = _OpTraceDispatchMode()
+    with op_trace_dispatch_mode:
+        op(*args, **kwargs)
+    assert (
+        len(op_trace_dispatch_mode.traced_ops) == 1
+    ), f"Expected 1 traced op, got {len(op_trace_dispatch_mode.traced_ops)}"
+
+    new_op_overload = op_trace_dispatch_mode.traced_ops[0]
+    assert isinstance(
+        new_op_overload, torch._ops.OpOverload
+    ), f"Expected OpOverload, got {type(new_op_overload)}"
+
+    return new_op_overload
+
+
 @dataclasses.dataclass
 class NodeMeta:
     """Required meta data for fx.Node during onnx export.
@@ -1074,7 +1090,11 @@ class ExplicitTypePromotionPass(_pass.Transform, torch.fx.Interpreter):
         if node_meta is not None:
             node_meta.assign_to_node(node)
         else:
-            node.meta.update(fx_traceback.get_current_meta())
+            node.meta.update(
+                (k, v)
+                for k, v in fx_traceback.get_current_meta().items()
+                if k not in node.meta
+            )
         return node
 
     @_beartype.beartype
@@ -1133,9 +1153,17 @@ class ExplicitTypePromotionPass(_pass.Transform, torch.fx.Interpreter):
             )
             return fx_arg
         elif isinstance(fx_arg, (tuple, list)):
-            raise NotImplementedError(
-                f"Type promoting arg type '{type(fx_arg)}' not supported yet."
+            new_fx_arg = []
+            diagnostic.with_additional_message(
+                f"Argument {fx_arg} is a tuple/list. Promoting each element."
             )
+            for fx_arg_elem in fx_arg:
+                new_fx_arg.append(
+                    self._explicit_type_promote_arg(
+                        diagnostic, node, fx_arg_elem, dtype
+                    )
+                )
+            return type(fx_arg)(new_fx_arg)
         else:
             raise NotImplementedError(f"Unknown fx arg type: {type(fx_arg)}")
 
@@ -1147,8 +1175,8 @@ class ExplicitTypePromotionPass(_pass.Transform, torch.fx.Interpreter):
     ) -> None:
         node_val = node.meta.get("val", None)
         assert node_val is not None, f"Node {node} node.meta['val'] is not set."
-        # TODO(bowbao): Pick the correct overload.
-        # E.g. Failing aten.pow.Tensor_Scalar after second arg is promoted to tensor.
+        args, kwargs = self.fetch_args_kwargs_from_env(node)
+        node.target = find_compatible_op_overload(node, args, kwargs)
 
         new_node_val = self._run_node_and_update_meta_val(node)
         assert isinstance(new_node_val, type(node_val)), (
@@ -1202,7 +1230,8 @@ class ExplicitTypePromotionPass(_pass.Transform, torch.fx.Interpreter):
         node: torch.fx.Node,
         rule: TypePromotionRule,
     ) -> None:
-        type_promotion_info = rule.preview_type_promotion(node)
+        args, kwargs = self.fetch_args_kwargs_from_env(node)
+        type_promotion_info = rule.preview_type_promotion(args, kwargs)
         new_args = []
         new_kwargs = {}
         for i, arg in enumerate(node.args):
@@ -1240,15 +1269,59 @@ class ExplicitTypePromotionPass(_pass.Transform, torch.fx.Interpreter):
 
         return super().run_node(node)
 
+    def _detect_fake_mode(self) -> Optional[fake_tensor.FakeTensorMode]:
+        """Detect fake mode from the graph.
+
+        Scan through all nodes in graph and their meta['val'] to detect fake mode.
+        """
+        fake_tensors = []
+        for node in self.module.graph.nodes:
+            try:
+                fake_tensors.append(_get_fake_tensor_val(node))
+            except RuntimeError:
+                continue
+        return torch._dynamo.utils.detect_fake_mode(fake_tensors)
+
+    def _fetch_fake_args(self) -> Sequence[Optional[fake_tensor.FakeTensor]]:
+        """Fetch fake args from the graph.
+
+        For each argument, try to fetch fake tensor from the matching placeholder node.
+        Return None if the fake tensor is not available.
+        """
+        fake_args = []
+        for node in self.module.graph.nodes:
+            if node.op == "placeholder":
+                try:
+                    fake_tensor = _get_fake_tensor_val(node)
+                except RuntimeError as e:
+                    if not node.users:
+                        # If the placeholder is not used, we can safely ignore it and put
+                        # None as placeholder.
+                        fake_tensor = None
+                    else:
+                        raise RuntimeError(
+                            "Cannot fetch symbolic fake args from fx graph. "
+                            "TypePromotionPass needs to run with pre-existing fake args, "
+                            "Otherwise the pass will produce inaccurate dynamic shape. "
+                        ) from e
+
+                fake_args.append(fake_tensor)
+        return fake_args
+
     @_beartype.beartype
     def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
+        assert not args, (
+            "`TypePromotionPass` infers symbolic fake args from graph. "
+            "It does not support concrete args as arguments."
+        )
         assert not kwargs, "`kwargs` is not supported"
 
-        fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(
-            args
-        ) or fake_tensor.FakeTensorMode(allow_non_fake_inputs=True)
+        fake_tensor_mode = self._detect_fake_mode() or fake_tensor.FakeTensorMode(
+            allow_non_fake_inputs=True
+        )
+        fake_args = self._fetch_fake_args()
 
-        with fake_tensor_mode:
-            torch.fx.Interpreter.run(self, *args)
+        with fake_tensor_mode, fx_traceback.preserve_node_meta():
+            torch.fx.Interpreter.run(self, *fake_args)
 
         return self.module

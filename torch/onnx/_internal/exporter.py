@@ -637,9 +637,7 @@ def pre_export_passes(
 
     # ONNX does not support concept of (implicit) type promotion.
     # Insert type casts explicitly where needed.
-    module = passes.ExplicitTypePromotionPass(diagnostic_context, module).run(
-        *fx_module_args
-    )
+    module = passes.ExplicitTypePromotionPass(diagnostic_context, module).run()
 
     # Run ShapeInferenceWithFakeTensor to get static shape of nodes for op_level_debug purposes
     # The pass added nodes with static shape into original node metadata:
