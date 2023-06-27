@@ -350,7 +350,7 @@ def meta_multi_margin_loss(
     margin: NumberType = 1,
     weight: Optional[Tensor] = None,
     reduction: int = Reduction.MEAN.value,
-):
+) -> Tensor:
     ndims = input.ndim
     torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
     nframe, _ = _multi_margin_loss_shape_check(ndims, input, target)
@@ -370,10 +370,10 @@ def meta_multi_margin_loss_backward(
     margin: NumberType,
     weight: Optional[Tensor] = None,
     reduction: int = Reduction.MEAN.value,
-):
+) -> Tensor:
     ndims = input.ndim
     torch._check(p == 1 or p == 2, lambda: "only p == 1 and p == 2 supported")
-    nframe, _ = _multi_margin_loss_shape_check(ndims, input, target)
+    _multi_margin_loss_shape_check(ndims, input, target)
     return input.new_empty(input.shape)
 
 
