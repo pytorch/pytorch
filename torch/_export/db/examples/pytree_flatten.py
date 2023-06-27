@@ -6,7 +6,7 @@ from torch.utils import _pytree as pytree
 
 @export_case(
     example_inputs=({1: torch.randn(3, 2), 2: torch.randn(3, 2)},),
-    support_level=SupportLevel.NOT_SUPPORTED_YET,
+    support_level=SupportLevel.SUPPORTED,
 )
 def pytree_flatten(x):
     """
