@@ -248,14 +248,23 @@ def _init_ignored_module_states(
         Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
     ] = None,
 ) -> _FSDPState:
-    assert (
-        ignored_modules is None or ignored_states is None
-    ), "Can not pass `ignored_modules` and `ignored_states` at the same time. \
-        Please either pass `ignored_modules` or `ignored_states`."
+    if ignored_modules is not None and ignored_states is not None:
+        raise ValueError(
+            "Cannot pass both ignored_modules and ignored_states at the "
+            "same time. Please just pass ignored_states."
+        )
     ignored_parameters = None
-    ignored_states_list = list(ignored_states) if ignored_states is not None else []
-    if ignored_states_list and len(ignored_states_list) > 0:
-        if isinstance(ignored_states_list[0], torch.nn.Parameter):
+    passed_as_ignored_states = ignored_states is not None
+    if passed_as_ignored_states:
+        ignored_states_list = list(ignored_states)
+        _check_ignored_states(ignored_states_list, True)
+    else:
+        ignored_states_list = []
+        _check_ignored_states(
+            list(ignored_modules) if ignored_modules is not None else [], False
+        )
+    if len(ignored_states_list) > 0:
+        if isinstance(ignored_states_list[0], nn.Parameter):
             ignored_parameters = ignored_states_list
         else:
             ignored_modules = ignored_states_list
@@ -271,6 +280,38 @@ def _init_ignored_module_states(
     # precision). We should formalize this contract and decide if we need to
     # compute and store `_ignored_buffers`.
     return state
+
+
+def _check_ignored_states(
+    ignored_states: List[Any], passed_as_ignored_states: bool
+) -> None:
+    """
+    Checks that the ignored states are uniformly parameters or uniformly
+    modules. We may remove this check in the future if we permit mixing.
+    """
+    if len(ignored_states) == 0:
+        return
+    if passed_as_ignored_states:
+        all_params = all(isinstance(state, nn.Parameter) for state in ignored_states)
+        all_modules = all(isinstance(state, nn.Module) for state in ignored_states)
+        if not all_params and not all_modules:
+            # Sort for consistent ordering for unit test regex matching
+            sorted_types = sorted(
+                {type(state) for state in ignored_states}, key=lambda x: repr(x)
+            )
+            raise ValueError(
+                "ignored_states expects all nn.Parameter or all nn.Module list "
+                f"elements but got types {sorted_types}"
+            )
+    else:
+        if not all(isinstance(state, nn.Module) for state in ignored_states):
+            sorted_types = sorted(
+                {type(state) for state in ignored_states}, key=lambda x: repr(x)
+            )
+            raise ValueError(
+                "ignored_modules expects nn.Module list elements but got "
+                f"types {sorted_types}"
+            )
 
 
 @no_type_check
