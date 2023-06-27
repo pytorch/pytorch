@@ -60,7 +60,7 @@ class UnsupportedFxNodesAnalysis(_pass.Analysis):
                         node, self.diagnostic_context
                     )
                     self.onnxfunction_dispatcher.get_function_overloads(
-                        node, aten_name, self.diagnostic_context
+                        node, *aten_name, self.diagnostic_context
                     )
                 except diagnostics.RuntimeErrorWithDiagnostic as e:
                     errors.append(e)

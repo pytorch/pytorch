@@ -556,7 +556,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         and sample.kwargs.get("padding") == 1,
         reason="FIXME: After https://github.com/microsoft/onnxruntime/issues/15446 is fixed",
     ),
-    xfail(
+    skip(
         "nn.functional.nll_loss",
         matcher=lambda sample: isinstance(sample.kwargs.get("reduction"), str),
         reason=onnx_test_common.reason_onnx_script_does_not_support(
