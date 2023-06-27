@@ -7,6 +7,7 @@ import unittest
 import functorch.experimental.control_flow as control_flow
 
 import torch
+import torch._dynamo.config as config
 
 import torch._dynamo.test_case
 import torch._functorch.config
@@ -34,6 +35,15 @@ def normalize_gm(gm_str):
     # strip comments as comments have path to files which may differ from
     # system to system.
     return remove_trailing_space(strip_comment(gm_str))
+
+
+def check_dynamic_shape_capture():
+    # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
+    if config.assume_static_by_default and config.automatic_dynamic_shapes:
+        return True
+    if not config.assume_static_by_default and not config.automatic_dynamic_shapes:
+        return True
+    return False
 
 
 # Equivalent to backend="eager", but also records graphs that
@@ -855,14 +865,14 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertTrue(activations.keys() == forward_handles.keys())
 
-    def _grad_compile_check(self, fn, inputs, fullgraph=True):
+    def _grad_compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
         expected = torch.compile(fn, backend=backend, fullgraph=fullgraph)(*inputs)
 
         self.assertEqual(actual, expected)
 
-        wrapped_gm = backend.graphs[0]
+        wrapped_gm = backend.graphs[graph_idx]
         return wrapped_gm
 
     def test_grad(self):
@@ -878,7 +888,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
+        if check_dynamic_shape_capture():
             return
 
         expected = """\
@@ -894,8 +904,12 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
             sum_1 = sin.sum();  sin = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """
 
@@ -938,7 +952,7 @@ class GraphModule(torch.nn.Module):
         wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
+        if check_dynamic_shape_capture():
             return
 
         expected = """\
@@ -954,9 +968,13 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
             add = sin + 3;  sin = None
             sum_1 = add.sum();  add = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
@@ -977,29 +995,38 @@ class GraphModule(torch.nn.Module):
 
         # Graph break because dynamo is unable to get source `fn` and
         # functools.wraps in `grad` leads to graph-break
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
+        # There are two graphs, first for generating `y` and
+        # second for application of `grad`.
+        # We are interested in the second graph.
+        wrapped_gm = self._grad_compile_check(
+            wrapper_fn, (x,), fullgraph=False, graph_idx=1
+        )
 
         # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
+        if check_dynamic_shape_capture():
             return
 
         expected = """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_ : torch.Tensor, L_fn_closure_0_cell_contents : torch.Tensor):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
-        l_fn_closure_0_cell_contents = L_fn_closure_0_cell_contents
+        l_y_ = L_y_
 
         grad_body_0 = self.grad_body_0
         grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
-        call = grad_proxy.__call__(l_x_, l_fn_closure_0_cell_contents);  grad_proxy = l_x_ = l_fn_closure_0_cell_contents = None
+        call = grad_proxy.__call__(l_x_, l_y_);  grad_proxy = l_x_ = l_y_ = None
         contiguous = call.contiguous();  call = None
         return (contiguous,)
 
     class GraphModule(torch.nn.Module):
-        def forward(self, l_x_, l_fn_closure_0_cell_contents):
+        def forward(self, l_x_, l_y_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
-            add = sin + l_fn_closure_0_cell_contents;  sin = l_fn_closure_0_cell_contents = None
+            add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
@@ -1023,7 +1050,7 @@ class GraphModule(torch.nn.Module):
         wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
 
         # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
+        if check_dynamic_shape_capture():
             return
 
         expected = """\
@@ -1039,9 +1066,13 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
             add = sin + 3.14;  sin = None
             sum_1 = add.sum();  add = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return sum_1
 """
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
@@ -1062,7 +1093,7 @@ class GraphModule(torch.nn.Module):
         wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
+        if check_dynamic_shape_capture():
             return
 
         expected = """\
@@ -1080,10 +1111,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin()
             add = sin + 3.14;  sin = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
@@ -1103,7 +1138,7 @@ class GraphModule(torch.nn.Module):
         wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
+        if check_dynamic_shape_capture():
             return
 
         expected = """\
@@ -1122,10 +1157,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin()
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
@@ -1145,7 +1184,7 @@ class GraphModule(torch.nn.Module):
         wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
+        if check_dynamic_shape_capture():
             return
 
         expected = """\
@@ -1167,10 +1206,14 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, l_y_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin()
             add = sin + l_y_;  sin = l_y_ = None
             sum_1 = add.sum();  add = None
             cos = l_x_.cos();  l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
@@ -1188,8 +1231,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(())
         wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
 
-        # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
+        if check_dynamic_shape_capture():
             return
 
         expected = """\
@@ -1205,16 +1247,24 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             grad_body_0 = self.grad_body_0
             grad_proxy = torch.func.grad(grad_body_0, 0, False);  grad_body_0 = None
             call = grad_proxy.__call__(l_x_);  grad_proxy = l_x_ = None
             contiguous = call.contiguous();  call = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return contiguous
 
         class GraphModule(torch.nn.Module):
             def forward(self, l_x_):
+                _set_grad_enabled = torch._C._set_grad_enabled(True)
+
                 sin = l_x_.sin();  l_x_ = None
                 sum_1 = sin.sum();  sin = None
+
+                _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
                 return sum_1
 """
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
@@ -1295,7 +1345,7 @@ class GraphModule(torch.nn.Module):
         wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
-        if torch._dynamo.config.dynamic_shapes:
+        if check_dynamic_shape_capture():
             return
 
         expected = """\
@@ -1311,9 +1361,13 @@ class GraphModule(torch.nn.Module):
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_, const):
+            _set_grad_enabled = torch._C._set_grad_enabled(True)
+
             sin = l_x_.sin();  l_x_ = None
             sum_1 = sin.sum();  sin = None
             add = sum_1 + 3.0;  sum_1 = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return add
 """
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
