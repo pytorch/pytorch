@@ -1263,26 +1263,38 @@ class TestMkldnn(TestCase):
             if bias:
                 self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def test_linear_bf16(self):
-        in_features = torch.randint(3, 10, (1,)).item()
-        out_features = torch.randint(3, 100, (1,)).item()
-        x = torch.randn(3, in_features, dtype=torch.float32) * 10
-        x_bf16 = x.bfloat16()
+    def test_linear_lowp(self):
+        def helper(dtype):
+            in_features = torch.randint(3, 10, (1,)).item()
+            out_features = torch.randint(3, 100, (1,)).item()
+            x = torch.randn(3, in_features, dtype=torch.float32) * 10
+            x_lowp = x.to(dtype=dtype)
 
-        for bias in [True, False]:
-            linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
-            mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
-            mkldnn_linear_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(linear), torch.bfloat16)
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-                y = mkldnn_linear(x.to_mkldnn()).to_dense()
-                y_bf16 = mkldnn_linear_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
-                self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
-            else:
-                msg = "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
-                self.assertRaisesRegex(RuntimeError,
-                                       msg,
-                                       lambda: mkldnn_linear_bf16(x_bf16.to_mkldnn()))
+            for bias in [True, False]:
+                linear = torch.nn.Linear(in_features, out_features, bias=bias).float()
+                mkldnn_linear = mkldnn_utils.to_mkldnn(copy.deepcopy(linear))
+                mkldnn_linear_lowp = mkldnn_utils.to_mkldnn(copy.deepcopy(linear), dtype)
+                lowp_support = {
+                    torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+                    torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported
+                }
+                if lowp_support[dtype]():
+                    y = mkldnn_linear(x.to_mkldnn()).to_dense()
+                    y_lowp = mkldnn_linear_lowp(x_lowp.to_mkldnn()).to_dense(torch.float32)
+                    if dtype == torch.bfloat16:
+                        self.assertEqual(y, y_lowp, atol=1e-1, rtol=1e-3)
+                    else:
+                        self.assertEqual(y, y_lowp, atol=5e-3, rtol=1e-3)
+                else:
+                    msg = {
+                        torch.bfloat16: r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq",
+                        torch.half: r"fp16 path needs the cpu support avx512_fp16",
+                    }
+                    self.assertRaisesRegex(RuntimeError,
+                                        msg[dtype],
+                                        lambda: mkldnn_linear_lowp(x_lowp.to_mkldnn()))
+        helper(torch.bfloat16)
+        helper(torch.float16)
 
     def test_softmax(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32) * 10
@@ -1501,7 +1513,6 @@ class TestMkldnn(TestCase):
                         cn2.sum().backward(retain_graph=True)
                         self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_matmul_lower_precision(self):
         support_check = {
             torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
