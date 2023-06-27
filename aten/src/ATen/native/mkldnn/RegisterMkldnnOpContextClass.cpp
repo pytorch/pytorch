@@ -21,7 +21,7 @@ static bool is_mkldnn_bf16_supported() {
 #endif
 }
 
-bool is_mkldnn_fp16_supported() {
+static bool is_mkldnn_fp16_supported() {
   return mkldnn_fp16_device_check();
 }
 
