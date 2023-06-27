@@ -192,7 +192,7 @@ class DynamoExport(exporter.FXGraphExtractor):
             wrapped_model,
             *model_args,
             tracing_mode=fx_mode,
-            fake_mode=options.fake_mode,
+            fake_mode=options.fake_context.fake_mode,
             **model_kwargs,
         )
         del graph_guard  # Unused

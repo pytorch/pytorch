@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import io
 import os
-from typing import Tuple, TYPE_CHECKING
+from typing import Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch.onnx import _type_utils as jit_type_utils
@@ -84,7 +85,7 @@ def save_model_with_external_data(
     basepath: str,
     model_location: str,
     initializer_location: str,
-    torch_load_paths: Tuple[str, ...],
+    torch_load_paths: Tuple[Union[str, io.BytesIO], ...],
     onnx_model: onnx.ModelProto,
 ) -> None:
     """Load PyTorch tensors from files and add to "onnx_model" as external initializers.
