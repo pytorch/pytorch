@@ -63,8 +63,9 @@ struct CPUValueSelectionIntersectionKernel {
     auto lhs_nnz_stride = lhs_values.stride(0);
     auto rhs_nnz_stride = rhs_values.stride(0);
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, res_values.scalar_type(),
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, at::ScalarType::ComplexHalf,
+        res_values.scalar_type(),
         "binary_op_intersection_cpu", [&] {
             // COO indices are only 64-bit for now.
             using index_t = int64_t;

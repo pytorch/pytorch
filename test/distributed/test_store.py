@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import socket
 import sys
 import tempfile
 import time
@@ -306,6 +307,18 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
         rpc.shutdown()
+
+    @skip_if_win32()
+    def test_take_over_listen_socket(self):
+        listen_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listen_sock.bind(("localhost", 0))
+        addr, port, *_ = listen_sock.getsockname()
+        listen_fd = listen_sock.detach()
+
+        store = dist.TCPStore(addr, port, 1, is_master=True, master_listen_fd=listen_fd)
+
+        store.set("key", "value")
+        self.assertEqual(b"value", store.get("key"))
 
     # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
     # the user and one additional key used for coordinate all the workers.
