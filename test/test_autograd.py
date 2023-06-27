@@ -2674,7 +2674,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_a, grad_b):
-                self.assertTrue((grad_a == 0).all())
+                self.assertIsNone(grad_a)
                 self.assertTrue((grad_b == 1).all())
                 return grad_b
 

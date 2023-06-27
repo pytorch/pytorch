@@ -521,11 +521,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return retains_grad_hooks_;
   }
 
-  virtual void set_non_differentiable_idx(
-      std::unordered_set<int> non_differentiable_idx) {
-    // This is only used when Node is a PyNode or a CppNode
-  }
-
   // Customization Points for Subclasses
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

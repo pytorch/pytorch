@@ -34,8 +34,6 @@ struct PyNode : public Node {
   void release_variables() override;
   std::string name() const override;
   bool is_traceable() override;
-  void set_non_differentiable_idx(
-      std::unordered_set<int> non_differentiable_idx) override;
 
   // THPFunction this Function is wrapping.  Owning!
   PyObject* obj;
@@ -95,14 +93,9 @@ struct THPFunction {
   // Default is true.
   bool materialize_grads;
 
-  // A set of indices corresponding to outputs that are not differentiable
-  // we do not materialize output grad tensors into zeros for these outputs.
-  std::unordered_set<int> non_differentiable_idx_;
-
   std::vector<torch::autograd::VariableInfo> output_info;
   std::vector<torch::autograd::VariableInfo> input_info;
   std::vector<torch::autograd::SavedVariable> saved_variables;
-
   // For each input, true if the input is a THPVariable
   std::vector<bool> is_variable_input;
   char has_freed_buffers;

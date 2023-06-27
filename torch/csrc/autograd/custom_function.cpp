@@ -361,10 +361,11 @@ static optional_variable_list _process_backward_mode_ad(
   std::unordered_set<at::TensorImpl*> outputs_impl; // For dirty_inputs check
   outputs.reserve(num_outputs);
   int num_diff_outputs = 0;
-  std::unordered_set<int> non_differentiable_idx{};
 
   for (const auto i : c10::irange(num_outputs)) {
-    // For outputs that are not tensors, put a placeholder undefined input.
+    // For outputs that are not tensors put a placeholder undefined input.
+    // Note that below, we also put a placeholder undefined inputs for when
+    // the output tensor is not differentiable
     if (!raw_outputs[i].has_value()) {
       if (cdata) {
         auto output_nr = cdata->add_input_metadata(Node::undefined_input());
@@ -382,14 +383,16 @@ static optional_variable_list _process_backward_mode_ad(
     bool is_differentiable = cdata &&
         non_differentiable.count(out_tensor_impl) == 0 &&
         isDifferentiableType(var.scalar_type());
-    if (!is_differentiable) {
-      non_differentiable_idx.insert(i);
-    }
     bool is_saved_and_setup_context =
         to_save_if_setup_context.count(out_tensor_impl) > 0;
 
     if (cdata) {
-      auto output_nr = cdata->add_input_metadata(var);
+      auto output_nr = -1;
+      if (!is_differentiable) {
+        output_nr = cdata->add_input_metadata(Node::undefined_input());
+      } else {
+        output_nr = cdata->add_input_metadata(var);
+      }
       AT_ASSERT(i == (int)output_nr);
     }
     set_history(
@@ -417,10 +420,6 @@ static optional_variable_list _process_backward_mode_ad(
 
     outputs_impl.insert(out_tensor_impl);
     outputs.emplace_back(var);
-  }
-
-  if (cdata) {
-    cdata->set_non_differentiable_idx(non_differentiable_idx);
   }
 
   // If multiple differentiable outputs are returned, we do not allow views to
