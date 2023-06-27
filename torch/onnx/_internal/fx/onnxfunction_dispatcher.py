@@ -86,7 +86,6 @@ class OnnxFunctionDispatcher:
         self.diagnostic_context = diagnostic_context
 
     @_beartype.beartype
-    @diagnostics.diagnose_call(diagnostics.rules.no_symbolic_function_for_call_function)
     def dispatch(
         self,
         node: torch.fx.Node,
