@@ -228,7 +228,6 @@ def _operator_dispatch(
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
-        # For DTensor random operator, run it within a parallel region
         assert isinstance(mesh, DeviceMesh)
         if _is_random_op(op_call) and is_rng_supported_mesh(mesh):
             if not random._rng_tracker:
@@ -238,6 +237,7 @@ def _operator_dispatch(
                     "Try calling random.manual_seed() or distribute_tensor() "
                     "before executing a DTensor random op."
                 )
+            # For DTensor random operator, run it within a distribute region
             with random._rng_tracker._distribute_region(arg_list[0]._spec):
                 local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
         else:
