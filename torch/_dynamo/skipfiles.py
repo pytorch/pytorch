@@ -8,6 +8,7 @@ import copyreg
 import dataclasses
 import enum
 import functools
+import genericpath
 import glob
 import importlib
 import inspect
@@ -138,6 +139,7 @@ SKIP_DIRS = [
         dataclasses,
         enum,
         functools,
+        genericpath,
         importlib,
         inspect,
         linecache,
