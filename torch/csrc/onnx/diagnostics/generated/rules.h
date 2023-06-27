@@ -101,7 +101,8 @@ enum class Rule : uint32_t {
   kUnsupportedFxNodeAnalysis,
 
   /**
-   * @brief TODO
+   * @brief Determine if type promotion is required for the FX node. Explicitly
+   * insert cast nodes if needed.
    */
   kFxNodeExplicitTypePromotion,
 
