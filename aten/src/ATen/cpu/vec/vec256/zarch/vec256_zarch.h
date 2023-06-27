@@ -2370,11 +2370,11 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
 
   vinner_data abs_() const {
     auto ret = abs_2_();
-    return Vectorized<T>{ret}.sqrt().data();
+    return Vectorized<T>{ret}.real().sqrt().data();
   }
 
   Vectorized<T> abs() const {
-    return Vectorized<T>{abs_()}.real();
+    return Vectorized<T>{abs_()};
   }
 
   Vectorized<T> exp() const {
