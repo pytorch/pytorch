@@ -58,6 +58,19 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   export VALGRIND=OFF
 fi
 
+if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
+  # When rerunning disable tests, do not generate core dumps as it could consume
+  # the runner disk space when crashed tests are run multiple times. Running out
+  # of space is a nasty issue because there is no space left to even download the
+  # GHA to clean up the disk
+  ulimit -c 0
+
+  # Note that by piping the core dump to a script set in /proc/sys/kernel/core_pattern
+  # as documented in https://man7.org/linux/man-pages/man5/core.5.html, we could
+  # dynamically stop generating more core file when the disk space drops below a
+  # certain threshold. However, this is not supported inside Docker container atm
+fi
+
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
@@ -127,7 +140,7 @@ fi
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true
-    export UBSAN_OPTIONS=print_stacktrace=1
+    export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
@@ -314,7 +327,6 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
-  local dtype=amp
   local backend=inductor
   local modes=()
   if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
@@ -322,12 +334,16 @@ test_perf_for_dashboard() {
   fi
   if [[ "$DASHBOARD_TAG" == *inference-true* ]]; then
     modes+=(inference)
-    dtype=bfloat16
   fi
   # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
   local targets=(accuracy performance)
 
   for mode in "${modes[@]}"; do
+    if [[ "$mode" == "inference" ]]; then
+      dtype=bfloat16
+    elif [[ "$mode" == "training" ]]; then
+      dtype=amp
+    fi
     for target in "${targets[@]}"; do
       local target_flag=("--${target}")
       if [[ "$target" == "performance" ]]; then

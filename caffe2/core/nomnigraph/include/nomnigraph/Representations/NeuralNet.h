@@ -188,7 +188,7 @@ class TORCH_API Tensor : public NeuralNetData {
     name_ = name;
   }
 
-  ~Tensor() {}
+  ~Tensor() override {}
 
  private:
   std::string name_;
