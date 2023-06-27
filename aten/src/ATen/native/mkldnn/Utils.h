@@ -95,7 +95,7 @@ inline void mkldnn_check_low_precision(ScalarType input_t, std::string name) {
     TORCH_CHECK(
         mkldnn_fp16_device_check(),
         name,
-        ": fp16 path needs the cpu support avx_vnni, avx512bw, avx512vl, avx512dq, avx512_vnni, avx512_bf16 and avx512_fp16");
+        ": fp16 path needs the cpu support avx512_fp16, avx_vnni, avx512bw, avx512vl, avx512dq, avx512_vnni and avx512_bf16");
   }
 }
 
