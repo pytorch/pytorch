@@ -1221,7 +1221,8 @@ class TorchPatcher:
     def patch():
         # torch.jit.trace still has to be disabled because it is skipped by
         # TorchDynamo, and therefore remains unchanged, and the child frames get
-        # intercepted by TorchDynamo.
+        # intercepted by TorchDynamo. This is a limitation.
+        disable_torch_fn(torch.jit.trace)
         torch.jit.trace = disable(torch.jit.trace)
         disable_torch_fn(torch.jit._get_trace_graph)
         disable_torch_fn(torch.jit.trace_module)
@@ -1233,6 +1234,7 @@ class TorchPatcher:
         torch.distributions.Distribution.set_default_validate_args(False)
 
         disable_torch_fn(proxy_tensor.dispatch_trace)
+        proxy_tensor.dispatch_trace = disable(proxy_tensor.dispatch_trace)
 
         optimizers = [
             opt
