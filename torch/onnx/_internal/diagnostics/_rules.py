@@ -415,7 +415,7 @@ class _UnsupportedFxNodeAnalysis(infra.Rule):
 
 
 class _FxNodeExplicitTypePromotion(infra.Rule):
-    """TODO"""
+    """Determine if type promotion is required for the FX node. Explicitly insert cast nodes if needed."""
 
     def format_message(self, target) -> str:  # type: ignore[override]
         """Returns the formatted default message of this Rule.
@@ -869,8 +869,13 @@ class _POERules(infra.RuleCollection):
             **{
                 "id": "FXE0013",
                 "name": "fx-node-explicit-type-promotion",
-                "short_description": {"text": "TODO"},
-                "full_description": {"text": "TODO", "markdown": "TODO\n"},
+                "short_description": {
+                    "text": "Determine if type promotion is required for the FX node. Explicitly insert cast nodes if needed."
+                },
+                "full_description": {
+                    "text": "Determine if type promotion is required for the FX node. Explicitly insert cast nodes if needed.",
+                    "markdown": "This diagnostic tracks the process of node level explicit type promotion. Implicit [type promotion](https://pytorch.org/docs/stable/tensor_attributes.html#type-promotion-doc) is a\nprocess in PyTorch that it automatically promotes the input types of an operator to a common type.\nThe common type is determined by the type promotion rule, and each operator has its own type promotion rules.\nTo learn more about PyTorch type promotion rules, checkout [elementwise_dtypes doc](https://github.com/pytorch/pytorch/blob/f044613f78df713fb57f70c608483c9f10ad332e/torch/_prims_common/__init__.py#L1252-L1335),\nand [torch._refs ops](https://github.com/pytorch/pytorch/blob/a475ea4542dfe961c9d097e33ab5041f61c8c17f/torch/_refs/__init__.py#L484).\n\nIn ONNX, implicit type promotion is not supported. Therefore, we need to explicitly insert cast nodes to emulate\nthe PyTorch behavior. This diagnostic tracks the process of node level explicit type promotion.\n\nA set of type promotion rules supported by this pass is materialized under `torch/onnx/_internal/fx/passes/type_promotion.py`.\nCheckout [Note: Add type promotion rule] how to update or add new type promotion rules.\n",
+                },
                 "message_strings": {
                     "default": {
                         "text": "Performing explicit type promotion for node {target}. "
@@ -882,7 +887,7 @@ class _POERules(infra.RuleCollection):
         ),
         init=False,
     )
-    """TODO"""
+    """Determine if type promotion is required for the FX node. Explicitly insert cast nodes if needed."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(
