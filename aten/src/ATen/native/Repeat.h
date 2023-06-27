@@ -10,8 +10,7 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template <
     typename index_t,
@@ -46,5 +45,4 @@ static inline Tensor repeat_interleave_common(
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

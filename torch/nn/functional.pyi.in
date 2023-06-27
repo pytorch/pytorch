@@ -1,7 +1,18 @@
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    overload,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from torch import Tensor
-from torch.types import _dtype, _size
+from torch.types import _dtype, _int, _size
 
 from .common_types import (
     _ratio_any_t,
@@ -131,7 +142,6 @@ def adaptive_max_pool3d_with_indices(
     output_size: _size_3_opt_t,
     return_indices: bool = ...,
 ) -> Tuple[Tensor, Tensor]: ...
-def adaptive_avg_pool1d(input: Tensor, output_size: _size_1_t) -> Tensor: ...
 def adaptive_avg_pool2d(input: Tensor, output_size: _size_2_opt_t) -> Tensor: ...
 def adaptive_avg_pool3d(input: Tensor, output_size: _size_3_opt_t) -> Tensor: ...
 def dropout(
@@ -193,7 +203,6 @@ def leaky_relu(
     negative_slope: float = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
-def prelu(input: Tensor, weight: Tensor) -> Tensor: ...
 def rrelu(
     input: Tensor,
     lower: float = ...,
@@ -201,8 +210,6 @@ def rrelu(
     training: bool = ...,
     inplace: bool = ...,
 ) -> Tensor: ...
-def gelu(input: Any, approximate: str = ...): ...
-def hardshrink(input: Tensor, lambd: float = ...) -> Tensor: ...
 def tanhshrink(input: Any): ...
 def softsign(input: Any): ...
 def softmin(
@@ -233,13 +240,6 @@ def log_softmax(
 def tanh(input: Any): ...
 def sigmoid(input: Any) -> Tensor: ...
 def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor: ...
-def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = ...) -> Tensor: ...
-def bilinear(
-    input1: Tensor,
-    input2: Tensor,
-    weight: Tensor,
-    bias: Optional[Tensor] = ...,
-) -> Tensor: ...
 def silu(input: Tensor, inplace: bool = False) -> Tensor: ...
 def mish(input: Tensor, inplace: bool = False) -> Tensor: ...
 def hardswish(input: Tensor, inplace: bool = False) -> Tensor: ...
@@ -500,19 +500,6 @@ def affine_grid(
     theta: Tensor,
     size: List[int],
     align_corners: Optional[Any] = ...,
-) -> Tensor: ...
-def pad(
-    input: Tensor,
-    pad: Sequence[int],
-    mode: str = ...,
-    value: float = ...,
-) -> Tensor: ...
-def pairwise_distance(
-    x1: Tensor,
-    x2: Tensor,
-    p: float = ...,
-    eps: float = ...,
-    keepdim: bool = ...,
 ) -> Tensor: ...
 def triplet_margin_loss(
     anchor: Tensor,

@@ -28,8 +28,8 @@ class IDEEPInt8ConvOp : public IDEEPConvPoolOpBase {
     CAFFE_ENFORCE(zero_point_ == 128 || zero_point_ == 0);
     Y_scales_ = ConvertScales({scale_});
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPInt8ConvOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPInt8ConvOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto &X = Input(INPUT_X);
@@ -198,8 +198,8 @@ class IDEEPInt8ConvReluOp final : public IDEEPInt8ConvOp {
     attr_ = iattr::fuse_relu();
     fusion_type_ = FUSION_CONV_RELU;
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPInt8ConvReluOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPInt8ConvReluOp() override {}
 };
 
 class IDEEPInt8ConvSumOp final : public IDEEPInt8ConvOp {
@@ -213,8 +213,8 @@ class IDEEPInt8ConvSumOp final : public IDEEPInt8ConvOp {
     attr_ = iattr::fuse_sum();
     fusion_type_ = FUSION_CONV_SUM;
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPInt8ConvSumOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPInt8ConvSumOp() override {}
 };
 
 class IDEEPInt8ConvSumReluOp final : public IDEEPInt8ConvOp {
@@ -228,8 +228,8 @@ class IDEEPInt8ConvSumReluOp final : public IDEEPInt8ConvOp {
     attr_ = iattr::residual();
     fusion_type_ = FUSION_CONV_SUM_RELU;
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPInt8ConvSumReluOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPInt8ConvSumReluOp() override {}
 };
 
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Conv, DNNLOWP, IDEEPInt8ConvOp);
