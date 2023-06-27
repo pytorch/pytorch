@@ -11,6 +11,10 @@ on:
         required: true
         type: string
         description: The build environment
+      runs_on:
+        required: true
+        type: string
+        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.t4g.2xlarge and linux.rocm.gpu
       PYTORCH_ROOT:
         required: true
         type: string
@@ -58,13 +62,13 @@ on:
 
 jobs:
   build:
-    runs-on: linux.t4g.2xlarge
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 180
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
-      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64:latest
+      DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
       DESIRED_CUDA: cpu
       SKIP_ALL_TESTS: 1
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}

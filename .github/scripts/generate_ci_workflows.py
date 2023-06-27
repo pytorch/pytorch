@@ -357,6 +357,10 @@ def main() -> None:
         ),
         (
             jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
+            AARCH64_BINARY_BUILD_WORKFLOWS,
+        ),
+        (
+            jinja_env.get_template("linux_binary_build_workflow.yml.j2"),
             LINUX_BINARY_SMOKE_WORKFLOWS,
         ),
         (
@@ -370,10 +374,6 @@ def main() -> None:
         (
             jinja_env.get_template("macos_binary_build_workflow.yml.j2"),
             MACOS_BINARY_BUILD_WORKFLOWS,
-        ),
-        (
-            jinja_env.get_template("aarch64_binary_build_workflow.yml.j2"),
-            AARCH64_BINARY_BUILD_WORKFLOWS,
         ),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.

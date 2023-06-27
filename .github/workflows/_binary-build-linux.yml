@@ -11,6 +11,10 @@ on:
         required: true
         type: string
         description: The build environment
+      runs_on:
+          required: true
+          type: string
+          description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, and linux.rocm.gpu
       PYTORCH_ROOT:
         required: true
         type: string
@@ -67,7 +71,7 @@ on:
 
 jobs:
   build:
-    runs-on: linux.12xlarge
+    runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 180
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}

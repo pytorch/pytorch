@@ -1,6 +1,6 @@
 # @generated DO NOT EDIT MANUALLY
 
-# Template is at:    .github/templates/aarch64_binary_build_workflow.yml.j2
+# Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: linux-aarch64-binary-manywheel
 
@@ -19,8 +19,6 @@ on:
 
 env:
   # Needed for conda builds
-  # Using public apline as arm64v8 is not available
-  # at 308535385114.dkr.ecr.us-east-1.amazonaws.com just yet
   ALPINE_IMAGE: "arm64v8/alpine"
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
@@ -31,7 +29,6 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
   PYTORCH_ROOT: /pytorch
-  DESIRED_CUDA: cpu
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
@@ -39,224 +36,231 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  wheel-py3_8-cpu-build: # Building
+  manywheel-py3_8-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-aarch64.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.8"
-      build_name: wheel-py3_8-cpu
+      runs_on: linux.t4g.2xlarge
+      build_name: manywheel-py3_8-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  wheel-py3_8-cpu-test:  # Testing
+  manywheel-py3_8-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_8-cpu-build
+    needs: manywheel-py3_8-cpu-aarch64-build
     uses: ./.github/workflows/_binary-test-aarch64.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.8"
-      build_name: wheel-py3_8-cpu
+      build_name: manywheel-py3_8-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
       runs_on: linux.t4g.2xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  wheel-py3_8-cpu-upload:  # Uploading
+  manywheel-py3_8-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_8-cpu-test
+    needs: manywheel-py3_8-cpu-aarch64-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.8"
-      build_name: wheel-py3_8-cpu
+      build_name: manywheel-py3_8-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_9-cpu-build: # Building
+
+  manywheel-py3_9-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-aarch64.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.9"
-      build_name: wheel-py3_9-cpu
+      runs_on: linux.t4g.2xlarge
+      build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  wheel-py3_9-cpu-test:  # Testing
+  manywheel-py3_9-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_9-cpu-build
+    needs: manywheel-py3_9-cpu-aarch64-build
     uses: ./.github/workflows/_binary-test-aarch64.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.9"
-      build_name: wheel-py3_9-cpu
+      build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
       runs_on: linux.t4g.2xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  wheel-py3_9-cpu-upload:  # Uploading
+  manywheel-py3_9-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_9-cpu-test
+    needs: manywheel-py3_9-cpu-aarch64-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.9"
-      build_name: wheel-py3_9-cpu
+      build_name: manywheel-py3_9-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_10-cpu-build: # Building
+
+  manywheel-py3_10-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-aarch64.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.10"
-      build_name: wheel-py3_10-cpu
+      runs_on: linux.t4g.2xlarge
+      build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  wheel-py3_10-cpu-test:  # Testing
+  manywheel-py3_10-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_10-cpu-build
+    needs: manywheel-py3_10-cpu-aarch64-build
     uses: ./.github/workflows/_binary-test-aarch64.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.10"
-      build_name: wheel-py3_10-cpu
+      build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
       runs_on: linux.t4g.2xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  wheel-py3_10-cpu-upload:  # Uploading
+  manywheel-py3_10-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_10-cpu-test
+    needs: manywheel-py3_10-cpu-aarch64-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.10"
-      build_name: wheel-py3_10-cpu
+      build_name: manywheel-py3_10-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  wheel-py3_11-cpu-build: # Building
+
+  manywheel-py3_11-cpu-aarch64-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-aarch64.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.11"
-      build_name: wheel-py3_11-cpu
+      runs_on: linux.t4g.2xlarge
+      build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  wheel-py3_11-cpu-test:  # Testing
+  manywheel-py3_11-cpu-aarch64-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_11-cpu-build
+    needs: manywheel-py3_11-cpu-aarch64-build
     uses: ./.github/workflows/_binary-test-aarch64.yml
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.11"
-      build_name: wheel-py3_11-cpu
+      build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
       runs_on: linux.t4g.2xlarge
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  wheel-py3_11-cpu-upload:  # Uploading
+  manywheel-py3_11-cpu-aarch64-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: wheel-py3_11-cpu-test
+    needs: manywheel-py3_11-cpu-aarch64-test
     with:
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
-      PACKAGE_TYPE: wheel
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
-      GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      GPU_ARCH_TYPE: cpu-aarch64
+      DOCKER_IMAGE: quay.io/pypa/manylinux2014_aarch64
       DESIRED_PYTHON: "3.11"
-      build_name: wheel-py3_11-cpu
+      build_name: manywheel-py3_11-cpu-aarch64
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
