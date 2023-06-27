@@ -306,7 +306,7 @@ class ForeachTests(TestCase):
             gen_args(op),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops
@@ -323,7 +323,7 @@ class ForeachTests(TestCase):
             ),
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @all_ops
@@ -398,7 +398,7 @@ class ForeachTests(TestCase):
             check_lowp=False,
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops
@@ -423,7 +423,7 @@ class ForeachTests(TestCase):
             check_lowp=False,
         )
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
     @bin_ops
