@@ -700,6 +700,10 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.Tensor.index_copy` when called on a CPU or CUDA tensor
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
+        * :func:`torch.Tensor.resize_`, when called with a tensor that is not
+          quantized, sets new elements to a known value.  Floating point or
+          complex values are set to NaN. Integer values are set to the maximum
+          value.
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -741,6 +745,7 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
+        * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
