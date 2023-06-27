@@ -412,8 +412,8 @@ Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& 
   };
 
   return mps::random_mps_impl<int64_t>(result,
-                                       0.0,
-                                       1.0,
+                                       std::numeric_limits<int64_t>::min(),
+                                       std::numeric_limits<int64_t>::max(),
                                        c10::nullopt,
                                        c10::nullopt,
                                        MPSGraphRandomDistributionUniform,
