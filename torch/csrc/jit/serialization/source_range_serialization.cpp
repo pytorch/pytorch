@@ -70,6 +70,9 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
     int64_t starting_line_no_ = tup_elems[2].toInt();
     c10::optional<std::string> filename = c10::nullopt;
 
+    TORCH_CHECK(
+        (uint64_t)fnameIndex < text_table_.size(),
+        "Text table index is out of range")
     filename = *text_table_[fnameIndex];
 
     std::vector<c10::string_view> pieces;

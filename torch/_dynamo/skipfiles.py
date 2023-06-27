@@ -116,6 +116,14 @@ FILENAME_ALLOWLIST = {
     comptime.__file__,  # Want to inline these helpers
 }
 
+if torch.distributed.is_available():
+    # Inline the checkpoint code from distributed
+    import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
+
+    FILENAME_ALLOWLIST |= {
+        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
+    }
+
 # Include optimizer code for tracing
 FILENAME_ALLOWLIST |= {
     inspect.getfile(obj)
@@ -136,9 +144,9 @@ if torch.distributed.is_available():
     }
 
     FILENAME_ALLOWLIST |= {
-        inspect.getfile(obj)
-        for obj in torch.distributed.fsdp._runtime_utils.__dict__.values()
-        if inspect.isfunction(obj)
+        inspect.getfile(
+            torch.distributed.fsdp._runtime_utils._cast_buffers_to_dtype_and_device
+        )
     }
 
     FILENAME_ALLOWLIST |= {

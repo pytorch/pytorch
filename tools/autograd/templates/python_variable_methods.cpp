@@ -875,7 +875,11 @@ static PyObject * THPVariable_item(PyObject* self, PyObject* args)
   }
   jit::tracer::warn("Converting a tensor to a Python number", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = THPVariable_Unpack(self);
-  return py::cast(self_.item()).release().ptr();
+  auto dispatch_item_ = [](const Tensor& self) -> at::Scalar {
+    pybind11::gil_scoped_release no_gil;
+    return self.item();
+  };
+  return py::cast(dispatch_item_(self_)).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
