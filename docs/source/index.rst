@@ -68,6 +68,13 @@ Features described in this documentation are classified by release status:
    compile/transformations
 
 .. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: torch._export.export
+
+   generated/exportdb/index
+
+.. toctree::
    :maxdepth: 1
    :caption: Language Bindings
 

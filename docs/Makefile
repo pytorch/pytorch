@@ -24,6 +24,9 @@ onnx:
 opset:
 	@$(PYCMD) source/scripts/build_opsets.py
 
+exportdb:
+	@$(PYCMD) source/scripts/exportdb/generate_example_rst.py
+
 docset: html
 	doc2dash --name $(SPHINXPROJ) --icon $(SOURCEDIR)/_static/img/pytorch-logo-flame.png --enable-js --online-redirect-url https://pytorch.org/docs/ --force $(BUILDDIR)/html/
 
@@ -38,11 +41,11 @@ html-stable:
 	# See conf.py for more details.
 	RELEASE=1 make html
 
-.PHONY: help Makefile docset onnx
+.PHONY: help Makefile docset onnx exportdb
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).
-%: Makefile figures onnx opset
+%: Makefile figures onnx opset exportdb
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 clean:
