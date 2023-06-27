@@ -157,22 +157,10 @@ if torch.distributed.is_available():
         if inspect.isclass(obj)
     }
 
-    FILENAME_ALLOWLIST |= {
-        inspect.getfile(obj)
-        for obj in torch.nn.parallel.scatter_gather.__dict__.values()
-        if inspect.isclass(obj)
-    }
+    FILENAME_ALLOWLIST |= {inspect.getfile(torch.nn.parallel.scatter_gather.scatter)}
 
     FILENAME_ALLOWLIST |= {
-        inspect.getfile(obj)
-        for obj in torch.distributed.utils.__dict__.values()
-        if inspect.isclass(obj) or inspect.isfunction(obj)
-    }
-
-    FILENAME_ALLOWLIST |= {
-        inspect.getfile(obj)
-        for obj in torch.distributed._composable_state.__dict__.values()
-        if inspect.isclass(obj) or inspect.isfunction(obj)
+        inspect.getfile(torch.distributed._composable_state._insert_module_state)
     }
 
     FILENAME_ALLOWLIST |= {
