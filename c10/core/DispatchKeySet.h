@@ -645,6 +645,7 @@ constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastXPU,
     DispatchKey::AutocastIPU,
     DispatchKey::AutocastHPU,
+    DispatchKey::AutocastXLA,
     DispatchKey::AutocastPrivateUse1,
 });
 
@@ -660,6 +661,7 @@ constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastXPU,
     DispatchKey::AutocastIPU,
     DispatchKey::AutocastHPU,
+    DispatchKey::AutocastXLA,
     DispatchKey::AutocastPrivateUse1,
 });
 
@@ -845,6 +847,7 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_ipu_ks = DispatchKeySet(DispatchKey::AutocastIPU);
   constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
   constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
+  constexpr auto autocast_xla_ks = DispatchKeySet(DispatchKey::AutocastXLA);
   constexpr auto autocast_privateuse1_ks =
       DispatchKeySet(DispatchKey::AutocastPrivateUse1);
   switch (t) {
@@ -857,8 +860,9 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
     case BackendComponent::HPUBit:
       return autocast_hpu_ks;
     case BackendComponent::CUDABit:
-    case BackendComponent::XLABit:
       return autocast_cuda_ks;
+    case BackendComponent::XLABit:
+      return autocast_xla_ks;
     case BackendComponent::PrivateUse1Bit:
       return autocast_privateuse1_ks;
     default:
