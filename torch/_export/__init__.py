@@ -237,7 +237,7 @@ def export(
 
             if _add_runtime_assertions:
                 exported_program = exported_program._add_runtime_assertions(
-                    functionalize_assertions=_functionalize_runtime_assertions,
+                    functionalize=_functionalize_runtime_assertions,
                 )
 
             return exported_program.transform(_ReplaceSymSizeOpPass())

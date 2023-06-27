@@ -2,7 +2,7 @@ import operator
 import traceback
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from functorch.experimental import control_flow
@@ -28,10 +28,6 @@ Value = Any
 Fn = Callable[..., Any]
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
 
-if TYPE_CHECKING:
-    # Avoid circular dependency
-    from torch._export.exported_program import ExportGraphSignature, ExportedProgram
-
 
 class ExportPassBaseError(RuntimeError):
     pass
@@ -47,20 +43,6 @@ class ExportPassBase(PassBase):
     def _create_dummy_node_metadata():
         return NodeMetadata({"stack_trace": traceback.format_exc(-1)})
 
-    @classmethod
-    def update_exported_program_signature(
-        cls, old_ep: "ExportedProgram", new_ep: "ExportedProgram",
-    ) -> Optional["ExportGraphSignature"]:
-        """
-        Update graph signature of exported program.
-
-        Args:
-            old_ep: Exported program before pass.
-            new_ep: Exported program after pass.
-
-        Returns: new graph signature.
-        """
-        raise NotImplementedError()
 
     class ExportTracer(PythonKeyTracer):
         """
