@@ -779,7 +779,7 @@ def fw_compiler_freezing(
 
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
-    model_outputs, _ = pytree.tree_flatten(model_outputs_node.args)
+    model_outputs = model_outputs_node.args[0]
     user_visible_outputs = [n.name for n in model_outputs]
 
     # constant params will be real tensors, not fake

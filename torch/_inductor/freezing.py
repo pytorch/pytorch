@@ -255,7 +255,7 @@ def enforce_output_layout(gm):
     Only used for inference so we can assume all graph outputs are model outputs.
     """
     *_, output_node = gm.graph.nodes
-    out_list, spec = pytree.tree_flatten(output_node.args)
+    out_list = output_node.args[0]
     with gm.graph.inserting_before(output_node):
         for n in out_list:
             if not isinstance(
