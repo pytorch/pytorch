@@ -130,13 +130,13 @@ class DataTypePropagation:
         if node.target in (
             "load",
             "store",
+            "store_reduction",
         ):
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
         if node.target == "reduction":
-            _, _, dtype, _, _, _, _ = node.args
-            return dtype
+            return node.args[1]
 
         if node.target.startswith("masked_subblock"):
             return self.deduce_node_dtype_by_subgraph(node)
@@ -217,6 +217,8 @@ class ExprPrinter(Printer):
         # into Tensor expressions earlier and do that instead.
         if exp == 0.5:
             return self._helper_sqrt(base)
+        elif exp == -0.5:
+            return "1/" + self._helper_sqrt(base)
         base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
@@ -226,6 +228,9 @@ class ExprPrinter(Printer):
             return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
             return "1"
+
+    def _print_Unequality(self, expr):
+        return " != ".join(map(self.paren, map(self._print, expr.args)))
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
@@ -826,6 +831,7 @@ class Kernel(CodeGen):
 
             @staticmethod
             def store_reduction(name, index, value):
+                self.store_buffer_names.add(name)
                 self.cse.store_cache[name] = value
                 if self.current_node:
                     for other_name in self.current_node.get_mutations():

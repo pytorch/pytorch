@@ -289,8 +289,9 @@ def stride_at(var: sympy.Symbol, index: sympy.Expr):
 def cpp_prefix():
     path = Path(__file__).parent / "cpp_prefix.h"
     with path.open() as f:
+        content = f.read()
         _, filename = codecache.write(
-            f.read(),
+            content,
             "h",
         )
     return f'#include "{filename}"'
@@ -329,8 +330,9 @@ class CppPrinter(ExprPrinter):
         # Uses float constants to perform FP div
         base, exp = expr.args
         base = self._print(base)
-        if exp == 0.5:
-            r = f"std::sqrt({base})"
+
+        if exp == 0.5 or exp == -0.5:
+            r = f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
             return f"static_cast<INDEX_TYPE>({r})" if expr.is_integer else r
         assert exp.is_integer
         exp = int(exp)
@@ -1193,8 +1195,13 @@ class CppKernel(Kernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+
+        reduction_key = src_dtype, reduction_type, value
+        if reduction_key in self.reduction_cse.reduction_cache:
+            return self.reduction_cse.reduction_cache[reduction_key]
+
         acc = self.reduction_cse.generate(
-            self.loads, f"reduction {name} {cexpr_index(index)}", write=False
+            self.loads, f"reduction {reduction_key}", write=False
         )
         self.reduction_var_map[acc] = reduction_type
         if argmax_or_argmin:
@@ -1209,7 +1216,6 @@ class CppKernel(Kernel):
                     "}",
                 ],
             )
-            return f"{tmpvar}.index"
         else:
             acc_type = reduction_acc_type(reduction_type, dtype)
             self.reduction_prefix.writeline(
@@ -1219,18 +1225,18 @@ class CppKernel(Kernel):
                 f"{acc} = {reduction_combine(reduction_type, acc, value)};"
             )
 
-        tmpvar = self.cse.generate(
+        result = self.cse.generate(
             self.reduction_suffix, f"{reduction_project(reduction_type, acc)}"
         )
+        self.reduction_cse.reduction_cache[reduction_key] = result
+        return result
 
     def store_reduction(self, name, index, value):
         index = self.rename_indexing(index)
-        if name not in V.graph.removed_buffers:
-            var = self.args.output(name)
-            self.reduction_suffix.writeline(
-                DeferredLine(name, f"{var}[{cexpr_index(index)}] = {value};")
-            )
-        self.cse.store_cache[name] = value
+        var = self.args.output(name)
+        self.reduction_suffix.writeline(
+            DeferredLine(name, f"{var}[{cexpr_index(index)}] = {value};")
+        )
 
     def set_ranges(self, lengths, reduction_lengths):
         if self.call_ranges:
@@ -1527,8 +1533,13 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             )
             self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
 
+
+        reduction_key = src_dtype, reduction_type, value
+        if reduction_key in self.reduction_cse.reduction_cache:
+            return self.reduction_cse.reduction_cache[reduction_key]
+
         acc = self.reduction_cse.generate(
-            self.loads, f"reduction {name} {cexpr_index(index)}", write=False
+            self.loads, f"reduction {reduction_key}", write=False
         )
         acc_vec = f"{acc}_vec"
 
@@ -1567,52 +1578,47 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                 self.reduction_suffix, reduction_project(reduction_type, acc_vec)
             )
 
-        return reduction_project(reduction_type, tmpvar)
+        result = self.cse.generate(
+            self.reduction_suffix, reduction_project(reduction_type, tmpvar)
+        )
+        self.reduction_cse.reduction_cache[reduction_key] = result
+        return result
 
     def store_reduction(self, name, index, value):
-        if name not in V.graph.removed_buffers:
-            var = self.args.output(name)
-            out_dtype = V.graph.get_dtype(name)
-            if self.tiling_idx >= self.reduction_depth:
-                # Horizontal reduction
-                self.reduction_suffix.writeline(
-                    DeferredLine(
-                        name,
-                        f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({tmpvar});",
+        var = self.args.output(name)
+        out_dtype = V.graph.get_dtype(name)
+        if self.tiling_idx >= self.reduction_depth:
+            # Horizontal reduction
+            self.reduction_suffix.writeline(
+                DeferredLine(
+                    name,
+                    f"{var}[{cexpr_index(index)}] = static_cast<{DTYPE_TO_CPP[out_dtype]}>({value});",
+                )
+            )
+        else:
+            # Vertical reduction
+            store_lines = [
+                DeferredLine(name, f"{value}.store({var} + {cexpr_index(index)});")
+            ]
+            if out_dtype != dtype:
+                if out_dtype == torch.bfloat16 and dtype == torch.float:
+                    bf16_tmpvar = f"bf16_{value}"
+                    store_lines = [
+                        DeferredLine(
+                            name,
+                            f"auto {bf16_tmpvar} = cvt_fp32_to_bf16({value});",
+                        ),
+                        DeferredLine(
+                            name,
+                            f"{bf16_tmpvar}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
+                        ),
+                    ]
+                else:
+                    raise AssertionError(
+                        f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
                     )
-                )
-            else:
-                # Vertical reduction
-                store_lines = [
-                    DeferredLine(name, f"{tmpvar}.store({var} + {cexpr_index(index)});")
-                ]
-                if out_dtype != dtype:
-                    if out_dtype == torch.bfloat16 and dtype == torch.float:
-                        bf16_tmpvar = f"bf16_{tmpvar}"
-                        store_lines = [
-                            DeferredLine(
-                                name,
-                                f"auto {bf16_tmpvar} = cvt_fp32_to_bf16({tmpvar});",
-                            ),
-                            DeferredLine(
-                                name,
-                                f"{bf16_tmpvar}.store({var} + {cexpr_index(index)}, {self.tiling_factor});",
-                            ),
-                        ]
-                    else:
-                        raise AssertionError(
-                            f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
-                        )
-                self.reduction_suffix.writelines(store_lines)
-                    DeferredLine(name, f"{var}[{cexpr_index(index)}] = {value};")
-                )
-            else:
-                # Vertical reduction
-                self.reduction_suffix.writeline(
-                    DeferredLine(name, f"{value}.store({var} + {cexpr_index(index)});")
-                )
+            self.reduction_suffix.writelines(store_lines)
 
-        self.cse.store_cache[name] = value
 
 
 class CppTile2DKernel(CppVecKernel):
@@ -1656,8 +1662,15 @@ class CppTile2DKernel(CppVecKernel):
         return sympy_symbol(f"{self.itervars[self.outer_idx]}_inner")
 
     def need_vec_transpose(self, index):
-        return stride_at(self.itervars[self.outer_idx], index) == 1 and index.has(
-            self.itervars[self.tiling_idx]
+        return (
+            stride_at(self.itervars[self.outer_idx], index) == 1
+            and index.has(self.itervars[self.tiling_idx])
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.tiling_idx]
+            )
+            and not stride_at(self.itervars[self.tiling_idx], index).has(
+                self.itervars[self.outer_idx]
+            )
         )
 
     def gen_transposed_tile_load_store(self, name, var, index, is_store):
@@ -1708,6 +1721,11 @@ class CppTile2DKernel(CppVecKernel):
             loadbuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
                 line = f"at::vec::Vectorized<bfloat16>::loadu({loadbuf}, {self.tiling_factor})"
+            elif (
+                V.graph.get_dtype(name) in [torch.uint8]
+                and opt_ctx.is_load_uint8_as_float
+            ):
+                line = f"at::vec::load_uint8_as_float({loadbuf})"
             else:
                 line = f"at::vec::Vectorized<float>::loadu({loadbuf})"
             return self.cse.generate(self.loads, line)
@@ -1734,7 +1752,12 @@ class CppTile2DKernel(CppVecKernel):
             # vector store inside the kernel inner loop
             storebuf = f"{tile_var} + {cexpr_index(inner * self.tiling_factor)}"
             if V.graph.get_dtype(name) in [torch.bfloat16]:
-                line = f"{value}.store({storebuf}, {self.tiling_factor})"
+                line = f"{value}.store({storebuf}, {self.tiling_factor});"
+            elif (
+                V.graph.get_dtype(name) in [torch.uint8]
+                and opt_ctx.is_store_float_as_uint8
+            ):
+                line = f"at::vec::store_float_as_uint8({value}, {storebuf});"
             else:
                 line = f"{value}.store({storebuf});"
             self.stores.writeline(DeferredLine(name, line))

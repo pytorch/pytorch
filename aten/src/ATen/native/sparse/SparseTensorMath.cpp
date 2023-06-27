@@ -1159,7 +1159,8 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
       s_i++;
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        at::ScalarType::ComplexHalf, at::ScalarType::BFloat16, at::ScalarType::Half,
         commonDtype, "mul_out_sparse", [&] {
           auto r_accessor = r_buffer.accessor<scalar_t, 1>();
           auto t_accessor = t_values.accessor<scalar_t, 1>();
