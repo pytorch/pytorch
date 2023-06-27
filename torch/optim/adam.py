@@ -82,7 +82,7 @@ class Adam(Optimizer):
         exp_avgs,
         exp_avg_sqs,
         max_exp_avg_sqs,
-        state_steps,
+        state_steps
     ):
         for p in group['params']:
             if p.grad is not None:
@@ -99,7 +99,7 @@ class Adam(Optimizer):
                     # This is because kernel launches are costly on CUDA and XLA.
                     state['step'] = (
                         torch.zeros((), dtype=torch.float, device=p.device)
-                        if group['capturable'] or group['fused'] or self.compiled
+                        if group['capturable'] or group['fused']
                         else torch.tensor(0.)
                     )
                     # Exponential moving average of gradient values
@@ -469,7 +469,7 @@ def _multi_tensor_adam(params: List[Tensor],
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
         torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
 
-        if capturable or torch._utils.is_compiling():
+        if capturable:
             bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
             bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
             # foreach_sub doesn't allow a scalar as the first arg
