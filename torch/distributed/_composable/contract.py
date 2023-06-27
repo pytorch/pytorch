@@ -189,9 +189,5 @@ def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name.
     """
-    if hasattr(module, REGISTRY_KEY):
-        return getattr(module, REGISTRY_KEY)
-    else:
-        default_registry: Dict[str, RegistryItem] = OrderedDict()
-        setattr(module, REGISTRY_KEY, default_registry)
-        return default_registry
+    default_registry: Dict[str, RegistryItem] = OrderedDict()
+    return module.__dict__.setdefault(REGISTRY_KEY, default_registry)  # type: ignore[call-overload]
