@@ -33,6 +33,23 @@ def _try_getclosurevars(func):
     except TypeError as e:
         return None
 
+@dataclasses.dataclass
+class TypePromotionSnapshot:
+    """Type promotion snapshot for a fx node and its inputs.
+
+    Contains the promoted dtype for args and kwargs that needs promoting.
+    Contains the expected node output dtype.
+    """
+
+    args_dtypes: Mapping[int, torch.dtype]
+    """Mapping from arg position to dtype to promote to."""
+
+    kwargs_dtypes: Mapping[str, torch.dtype]
+    """Mapping from kwarg name to dtype to promote to."""
+
+    out_dtype: torch.dtype
+    """Expected output dtype of the node."""
+
 
 class TypePromotionRule:
     """Defines how to perform type promotion for 'torch.ops.{namespace}.{op_name}'."""
@@ -138,8 +155,8 @@ class TypePromotionRule:
 # For missing rules or discrepancies, please
 # 1. Run `pytest test/onnx/test_fx_type_promotion.py` to validate if the generated rule set is current.
 #    If it is not, update with new generated set.
-# 2. If discrepancy still exists, consider debugging torch._refs or report a bug.
-# 3. If rule is still missing, add them to `_EXTRA_TYPE_PROMOTION_RULE_SET` or report a bug.
+# 2. If discrepancies still exist, consider debugging torch._refs or report a bug.
+# 3. If rules are still missing, add them to `_EXTRA_TYPE_PROMOTION_RULE_SET` or report a bug.
 _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     TypePromotionRule(
         "aten", "abs", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
@@ -775,8 +792,8 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
 
 # Manually curated extra type promotion rules.
 _EXTRA_TYPE_PROMOTION_RULE_SET = {
-    # torch._refs skips type promotion annotations for `clamp_min` and `clamp_max` since
-    # the call is routed to `aten.clamp`, which is annotated with type promotion rules.
+    # torch._refs skips type promotion decoration for `clamp_min` and `clamp_max` since
+    # the call is routed to the decorated `aten.clamp` op.
     TypePromotionRule(
         "aten",
         "clamp_min",
@@ -802,25 +819,25 @@ class TypePromotionRuleSetGenerator:
     @classmethod
     def generate_from_torch_refs(cls) -> Set[TypePromotionRule]:
         """Parse type promotion rules from reference ops under torch._C._refs."""
-        table = set()
-        table.update(cls._parse_torch_refs(_refs))
-        table.update(cls._parse_torch_refs(_nn_refs))
-        table.update(cls._parse_torch_refs(_linalg_refs))
-        table.update(cls._parse_torch_refs(_special_refs))
-        table.update(cls._parse_torch_refs(_functional_refs))
-        return table
+        rule_set = set()
+        rule_set.update(cls._parse_torch_refs(_refs))
+        rule_set.update(cls._parse_torch_refs(_nn_refs))
+        rule_set.update(cls._parse_torch_refs(_linalg_refs))
+        rule_set.update(cls._parse_torch_refs(_special_refs))
+        rule_set.update(cls._parse_torch_refs(_functional_refs))
+        return rule_set
 
     @classmethod
     def _parse_torch_refs(cls, ref_module: ModuleType) -> Set[TypePromotionRule]:
         logger.info("Processing module: %s", ref_module.__name__)
-        table = set()
+        rule_set = set()
         for name in ref_module.__all__:
             decorated_op = getattr(ref_module, name)
             rule = cls._parse_type_promotion_rule_from_refs_op(decorated_op)
             if rule is not None and rule.is_valid():
-                table.add(rule)
+                rule_set.add(rule)
 
-        return table
+        return rule_set
 
     @classmethod
     def _parse_type_promotion_rule_from_refs_op(
@@ -886,7 +903,8 @@ class TypePromotionTable:
         for rule in _EXTRA_TYPE_PROMOTION_RULE_SET:
             self.add_rule(rule)
 
-    def add_rule(self, rule: TypePromotionRule):
+    @_beartype.beartype
+    def add_rule(self, rule: TypePromotionRule) -> None:
         """Add a type promotion rule for a python op in a torch.ops module.
 
         Args:
@@ -900,26 +918,9 @@ class TypePromotionTable:
             raise ValueError("Invalid type promotion rule: {}".format(rule))
         self._rule_table[f"{rule.namespace}.{rule.op_name}"] = rule
 
+    @_beartype.beartype
     def get_rule(
         self, py_op: torch._ops.OpOverloadPacket
     ) -> Optional[TypePromotionRule]:
         """Get type promotion rule for a python op under 'torch.ops.<namespace>'."""
         return self._rule_table.get(str(py_op), None)
-
-
-@dataclasses.dataclass
-class TypePromotionSnapshot:
-    """Type promotion snapshot for a node in a graph.
-
-    Contains info about the dtype to promote to for args and kwargs that needs promoting.
-    Contains the expected output dtype of the node.
-    """
-
-    args_dtypes: Mapping[int, torch.dtype]
-    """Mapping from arg position to dtype to promote to."""
-
-    kwargs_dtypes: Mapping[str, torch.dtype]
-    """Mapping from kwarg name to dtype to promote to."""
-
-    out_dtype: torch.dtype
-    """Expected output dtype of the node."""
