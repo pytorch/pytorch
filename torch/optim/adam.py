@@ -279,7 +279,7 @@ def adam(params: List[Tensor],
     if foreach is None:
         foreach = False
 
-    if not all(isinstance(t, torch.Tensor) for t in state_steps):
+    if not torch._utils.is_compiling() and not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach and torch.jit.is_scripting():
@@ -339,7 +339,7 @@ def _single_tensor_adam(params: List[Tensor],
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
-        if capturable:
+        if not torch._utils.is_compiling() and capturable:
             assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
 
         # update step
@@ -428,7 +428,9 @@ def _multi_tensor_adam(params: List[Tensor],
     if len(params) == 0:
         return
 
-    if capturable:
+    # If we are compiling, the compiler will determine if cudagraphs
+    # is applicable
+    if not torch._utils.is_compiling() and capturable:
         assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
             "If capturable=True, params and state_steps must be CUDA tensors."
 
