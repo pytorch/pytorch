@@ -95,7 +95,7 @@ struct LibraryInfo {
   EHFrameHdr eh_frame_hdr_;
 };
 
-const char* process_name() {
+static const char* process_name() {
   static char name[PATH_MAX + 1] = "";
   if (*name == '\0') {
     ssize_t len = readlink("/proc/self/exe", name, PATH_MAX);
@@ -267,6 +267,7 @@ struct UnwindCache {
 static UnwindCache unwind_cache;
 static std::shared_timed_mutex cache_mutex_;
 
+extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
 extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   std::shared_lock lock(cache_mutex_);
   UnwindState state;

@@ -93,66 +93,6 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_8-cuda11_7-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda11_7
-      build_environment: linux-binary-conda
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  conda-py3_8-cuda11_7-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cuda11_7-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda11_7
-      build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_8-cuda11_7-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_8-cuda11_7-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.8"
-      build_name: conda-py3_8-cuda11_7
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_8-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -324,66 +264,6 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       DESIRED_PYTHON: "3.9"
       build_name: conda-py3_9-cpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_9-cuda11_7-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.9"
-      build_name: conda-py3_9-cuda11_7
-      build_environment: linux-binary-conda
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  conda-py3_9-cuda11_7-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda11_7-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.9"
-      build_name: conda-py3_9-cuda11_7
-      build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_9-cuda11_7-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_9-cuda11_7-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.9"
-      build_name: conda-py3_9-cuda11_7
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
@@ -567,66 +447,6 @@ jobs:
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_10-cuda11_7-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.10"
-      build_name: conda-py3_10-cuda11_7
-      build_environment: linux-binary-conda
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  conda-py3_10-cuda11_7-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda11_7-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.10"
-      build_name: conda-py3_10-cuda11_7
-      build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_10-cuda11_7-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_10-cuda11_7-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.10"
-      build_name: conda-py3_10-cuda11_7
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
   conda-py3_10-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -798,66 +618,6 @@ jobs:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       DESIRED_PYTHON: "3.11"
       build_name: conda-py3_11-cpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-    uses: ./.github/workflows/_binary-upload.yml
-  conda-py3_11-cuda11_7-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.11"
-      build_name: conda-py3_11-cuda11_7
-      build_environment: linux-binary-conda
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-
-  conda-py3_11-cuda11_7-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda11_7-build
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.11"
-      build_name: conda-py3_11-cuda11_7
-      build_environment: linux-binary-conda
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  conda-py3_11-cuda11_7-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs: conda-py3_11-cuda11_7-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: conda
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu117
-      GPU_ARCH_VERSION: 11.7
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.7
-      DESIRED_PYTHON: "3.11"
-      build_name: conda-py3_11-cuda11_7
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}

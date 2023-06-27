@@ -223,7 +223,18 @@ class TestFlopCounter(TestCase):
         self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
         self.assertExpectedInline(str(flops_fw_bw_flash), """939524096""")
 
+    def test_hook_registration(self):
+        model = torch.nn.Linear(100, 100)
+        x = torch.randn(3, 100)
 
+        flop_counter = FlopCounterMode(model)
+        with flop_counter:
+            self.assertEqual(len(model._forward_pre_hooks), 1)
+            self.assertEqual(len(model._forward_hooks), 1)
+            model(x).sum().backward()
+
+        self.assertEqual(len(model._forward_pre_hooks), 0)
+        self.assertEqual(len(model._forward_hooks), 0)
 
 
 if __name__ == '__main__':
