@@ -135,7 +135,11 @@ class TypePromotionRule:
 
 # NOTE: BELOW TABLE IS GENERATED FROM `TypePromotionRuleSetGenerator.generate_from_torch_refs`.
 # DO NOT EDIT MANUALLY !!!
-# For missing rules, please add them to `_EXTRA_TYPE_PROMOTION_RULE_SET`.
+# For missing rules or discrepancies, please
+# 1. Run `pytest test/onnx/test_fx_type_promotion.py` to validate if the generated rule set is current.
+#    If it is not, update with new generated set.
+# 2. If discrepancy still exists, consider debugging torch._refs or report a bug.
+# 3. If rule is still missing, add them to `_EXTRA_TYPE_PROMOTION_RULE_SET` or report a bug.
 _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     TypePromotionRule(
         "aten", "abs", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
@@ -536,6 +540,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "logaddexp", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     TypePromotionRule(
+        "aten", "logaddexp2", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    TypePromotionRule(
         "aten", "logical_and", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
     ),
     TypePromotionRule(
@@ -822,7 +829,7 @@ class TypePromotionRuleSetGenerator:
     ) -> Optional[TypePromotionRule]:
         """Retrieve and parse type promotion decorator from op under torch._refs."""
         fn = decorated_op
-        fn_closure_vars = None
+        type_promo_wrapper = None
         while fn_closure_vars := _try_getclosurevars(fn):
             if "fn" not in fn_closure_vars.nonlocals:
                 break
@@ -830,27 +837,20 @@ class TypePromotionRuleSetGenerator:
                 fn_closure_vars.nonlocals["self"],
                 _prims_common_wrappers.elementwise_type_promotion_wrapper,
             ):
+                type_promo_wrapper = fn_closure_vars.nonlocals["self"]
                 break
             fn = fn_closure_vars.nonlocals["fn"]
 
-        if (
-            fn_closure_vars is not None
-            and "self" in fn_closure_vars.nonlocals
-            and isinstance(
-                fn_closure_vars.nonlocals["self"],
-                _prims_common_wrappers.elementwise_type_promotion_wrapper,
-            )
-        ):
-            wrapper = fn_closure_vars.nonlocals["self"]
+        if type_promo_wrapper is not None:
             signature = inspect.signature(decorated_op)
 
             pos = 0
             promote_args_positions = []
             promote_kwargs_names = []
 
-            if wrapper.type_promoting_arg_names is not None:
+            if type_promo_wrapper.type_promoting_arg_names is not None:
                 for name, param in signature.parameters.items():
-                    if name in wrapper.type_promoting_arg_names:
+                    if name in type_promo_wrapper.type_promoting_arg_names:
                         if param.kind in (
                             param.POSITIONAL_OR_KEYWORD,
                             param.POSITIONAL_ONLY,
@@ -865,7 +865,7 @@ class TypePromotionRuleSetGenerator:
                 decorated_op.__name__,
                 promote_args_positions=promote_args_positions,
                 promote_kwargs_names=promote_kwargs_names,
-                promotion_kind=wrapper.type_promotion_kind,
+                promotion_kind=type_promo_wrapper.type_promotion_kind,
             )
 
         logger.warning(
