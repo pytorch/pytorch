@@ -94,6 +94,8 @@ _global_backward_hooks: Dict[int, Callable] = OrderedDict()
 _global_is_full_backward_hook: Optional[bool] = None
 _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
+# dict that maps id of forced hook to whether it has been fired
+_global_forward_hooks_forced: Dict[int, bool] = OrderedDict()
 
 _EXTRA_STATE_KEY_SUFFIX = '_extra_state'
 
@@ -202,7 +204,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
     return handle
 
 
-def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
+def register_module_forward_hook(hook: Callable[..., None], *, force: bool = False) -> RemovableHandle:
     r"""Registers a global forward hook for all the modules
 
     .. warning ::
@@ -221,6 +223,11 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     it will not have effect on forward since this is called after
     :func:`forward` is called.
 
+    Parameters:
+        hook (Callable): The user defined hook to be registered.
+        force (bool): If ``True`` the ``hook`` will be run regardless of
+            whether an exception is raised by the preceding operations.
+            (Default: ``False``)
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
             a handle that can be used to remove the added hook by calling
@@ -229,8 +236,11 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     This hook will be executed before specific module hooks registered with
     ``register_forward_hook``.
     """
-    handle = hooks.RemovableHandle(_global_forward_hooks)
+    handle = hooks.RemovableHandle(_global_forward_hooks,
+                                   extra_dict=_global_forward_hooks_forced)
     _global_forward_hooks[handle.id] = hook
+    if force:
+        _global_forward_hooks_forced[handle.id] = False
     return handle
 
 
@@ -422,6 +432,8 @@ class Module:
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_hooks_with_kwargs: Dict[int, bool]
+    # Marks whether the corresponding forced _forward_hooks have been run
+    _forward_hooks_forced: Dict[int, bool]
     _forward_pre_hooks: Dict[int, Callable]
     # Marks whether the corresponding _forward_hooks accept kwargs or not.
     # As JIT does not support Set[int], this dict is used as a set, where all
@@ -468,6 +480,7 @@ class Module:
         super().__setattr__('_is_full_backward_hook', None)
         super().__setattr__('_forward_hooks', OrderedDict())
         super().__setattr__('_forward_hooks_with_kwargs', OrderedDict())
+        super().__setattr__('_forward_hooks_forced', OrderedDict())
         super().__setattr__('_forward_pre_hooks', OrderedDict())
         super().__setattr__('_forward_pre_hooks_with_kwargs', OrderedDict())
         super().__setattr__('_state_dict_hooks', OrderedDict())
@@ -1423,6 +1436,7 @@ class Module:
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
+        force: bool = False,
     ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
@@ -1457,6 +1471,9 @@ class Module:
             with_kwargs (bool): If ``True``, the ``hook`` will be passed the
                 kwargs given to the forward function.
                 Default: ``False``
+            force (bool): If ``True`` the ``hook`` will be run regardless of
+                whether an exception is raised by the preceding operations.
+                (Default: ``False``)
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
@@ -1465,12 +1482,13 @@ class Module:
         """
         handle = hooks.RemovableHandle(
             self._forward_hooks,
-            extra_dict=self._forward_hooks_with_kwargs
+            extra_dict=[self._forward_hooks_with_kwargs, self._forward_hooks_forced],
         )
         self._forward_hooks[handle.id] = hook
         if with_kwargs:
             self._forward_hooks_with_kwargs[handle.id] = True
-
+        if force:
+            self._forward_hooks_forced[handle.id] = False
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
@@ -1509,78 +1527,105 @@ class Module:
                 or _global_backward_pre_hooks or _global_backward_hooks
                 or _global_forward_hooks or _global_forward_pre_hooks):
             return forward_call(*args, **kwargs)
-        # Do not call functions when jit is used
-        full_backward_hooks, non_full_backward_hooks = [], []
-        backward_pre_hooks = []
-        if self._backward_pre_hooks or _global_backward_pre_hooks:
-            backward_pre_hooks = self._get_backward_pre_hooks()
 
-        if self._backward_hooks or _global_backward_hooks:
-            full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
+        try:
+            result = None
+            # Do not call functions when jit is used
+            full_backward_hooks, non_full_backward_hooks = [], []
+            backward_pre_hooks = []
+            if self._backward_pre_hooks or _global_backward_pre_hooks:
+                backward_pre_hooks = self._get_backward_pre_hooks()
 
-        if _global_forward_pre_hooks or self._forward_pre_hooks:
-            for hook_id, hook in (
-                *_global_forward_pre_hooks.items(),
-                *self._forward_pre_hooks.items(),
-            ):
-                if hook_id in self._forward_pre_hooks_with_kwargs:
-                    result = hook(self, args, kwargs)  # type: ignore[misc]
-                    if result is not None:
-                        if isinstance(result, tuple) and len(result) == 2:
-                            args, kwargs = result
+            if self._backward_hooks or _global_backward_hooks:
+                full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
+
+            if _global_forward_pre_hooks or self._forward_pre_hooks:
+                for hook_id, hook in (
+                    *_global_forward_pre_hooks.items(),
+                    *self._forward_pre_hooks.items(),
+                ):
+                    if hook_id in self._forward_pre_hooks_with_kwargs:
+                        args_kwargs_result = hook(self, args, kwargs)  # type: ignore[misc]
+                        if args_kwargs_result is not None:
+                            if isinstance(args_kwargs_result, tuple) and len(args_kwargs_result) == 2:
+                                args, kwargs = args_kwargs_result
+                            else:
+                                raise RuntimeError(
+                                    "forward pre-hook must return None or a tuple "
+                                    f"of (new_args, new_kwargs), but got {args_kwargs_result}."
+                                )
+                    else:
+                        args_result = hook(self, args)
+                        if args_result is not None:
+                            if not isinstance(args_result, tuple):
+                                args_result = (args_result,)
+                            args = args_result
+
+            bw_hook = None
+            if full_backward_hooks or backward_pre_hooks:
+                bw_hook = hooks.BackwardHook(self, full_backward_hooks, backward_pre_hooks)
+                args = bw_hook.setup_input_hook(args)
+
+            result = forward_call(*args, **kwargs)
+            if _global_forward_hooks or self._forward_hooks:
+                for hook_id, hook in (
+                    *_global_forward_hooks.items(),
+                    *self._forward_hooks.items(),
+                ):
+                    if hook_id in self._forward_hooks_with_kwargs:
+                        hook_result = hook(self, args, kwargs, result)
+                    else:
+                        hook_result = hook(self, args, result)
+
+                    # mark that forced hook has been run
+                    if hook_id in self._forward_hooks_forced:
+                        self._forward_hooks_forced[hook_id] = True
+                    elif hook_id in _global_forward_hooks_forced:
+                        _global_forward_hooks_forced[hook_id] = True
+
+                    if hook_result is not None:
+                        result = hook_result
+
+            if bw_hook:
+                if not isinstance(result, (torch.Tensor, tuple)):
+                    warnings.warn("For backward hooks to be called,"
+                                  " module output should be a Tensor or a tuple of Tensors"
+                                  f" but received {type(result)}")
+                result = bw_hook.setup_output_hook(result)
+
+            # Handle the non-full backward hooks
+            if non_full_backward_hooks:
+                var = result
+                while not isinstance(var, torch.Tensor):
+                    if isinstance(var, dict):
+                        var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
+                    else:
+                        var = var[0]
+                grad_fn = var.grad_fn
+                if grad_fn is not None:
+                    for hook in non_full_backward_hooks:
+                        grad_fn.register_hook(_WrappedHook(hook, self))
+                    self._maybe_warn_non_full_backward_hook(args, result, grad_fn)
+
+            return result
+
+        finally:
+            # run forced hooks if they have not already been run
+            # For now only forward hooks have the force option but perhaps this
+            # functionality should be added to full backward hooks as well.
+            if not all(_global_forward_hooks_forced.values()):
+                for hook_id, hook in _global_forward_hooks.items():
+                    if hook_id in _global_forward_hooks_forced and not _global_forward_hooks_forced[hook_id]:
+                        hook_result = hook(self, args, result)
+
+            if not all(self._forward_hooks_forced.values()):
+                for hook_id, hook in self._forward_hooks.items():
+                    if hook_id in self._forward_hooks_forced and not self._forward_hooks_forced[hook_id]:
+                        if hook_id in self._forward_hooks_with_kwargs:
+                            hook_result = hook(self, args, kwargs, result)
                         else:
-                            raise RuntimeError(
-                                "forward pre-hook must return None or a tuple "
-                                f"of (new_args, new_kwargs), but got {result}."
-                            )
-                else:
-                    result = hook(self, args)
-                    if result is not None:
-                        if not isinstance(result, tuple):
-                            result = (result,)
-                        args = result
+                            hook_result = hook(self, args, result)
 
-        bw_hook = None
-        if full_backward_hooks or backward_pre_hooks:
-            bw_hook = hooks.BackwardHook(self, full_backward_hooks, backward_pre_hooks)
-            args = bw_hook.setup_input_hook(args)
-
-        result = forward_call(*args, **kwargs)
-        if _global_forward_hooks or self._forward_hooks:
-            for hook_id, hook in (
-                *_global_forward_hooks.items(),
-                *self._forward_hooks.items(),
-            ):
-                if hook_id in self._forward_hooks_with_kwargs:
-                    hook_result = hook(self, args, kwargs, result)
-                else:
-                    hook_result = hook(self, args, result)
-
-                if hook_result is not None:
-                    result = hook_result
-
-        if bw_hook:
-            if not isinstance(result, (torch.Tensor, tuple)):
-                warnings.warn("For backward hooks to be called,"
-                              " module output should be a Tensor or a tuple of Tensors"
-                              f" but received {type(result)}")
-            result = bw_hook.setup_output_hook(result)
-
-        # Handle the non-full backward hooks
-        if non_full_backward_hooks:
-            var = result
-            while not isinstance(var, torch.Tensor):
-                if isinstance(var, dict):
-                    var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
-                else:
-                    var = var[0]
-            grad_fn = var.grad_fn
-            if grad_fn is not None:
-                for hook in non_full_backward_hooks:
-                    grad_fn.register_hook(_WrappedHook(hook, self))
-                self._maybe_warn_non_full_backward_hook(args, result, grad_fn)
-
-        return result
 
     __call__ : Callable[..., Any] = _wrapped_call_impl
 
