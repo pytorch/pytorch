@@ -2,6 +2,7 @@ import contextlib
 
 import dataclasses
 import enum
+import functools
 import logging
 import traceback
 import unittest.mock
@@ -150,11 +151,17 @@ class Guard:
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
-            self.create_fn.__code__.co_firstlineno,
+            self.inner_create_fn().__code__.co_firstlineno,
         )
 
     def __lt__(self, other):
         return self.sort_key() < other.sort_key()
+
+    def inner_create_fn(self):
+        if isinstance(self.create_fn, functools.partial):
+            return self.create_fn.func
+        else:
+            return self.create_fn
 
     @staticmethod
     def weakref_to_str(obj_weakref):
@@ -183,7 +190,7 @@ class Guard:
 
     def __repr__(self):
         s = f"""
-        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.create_fn.__name__}
+        {self.source.name.lower() if self.source else ""} {repr(self.name)} {self.inner_create_fn().__name__}
         {{
             'guard_types': {self.guard_types},
             'code': {self.code_list},
@@ -197,7 +204,7 @@ class Guard:
         output = f"Name: {repr(self.name)}\n"
         source = self.source.name.lower() if self.source else ""
         output += f"    Source: {source}\n"
-        output += f"    Create Function: {self.create_fn.__name__}\n"
+        output += f"    Create Function: {self.inner_create_fn().__name__}\n"
         output += f"    Guard Types: {self.guard_types}\n"
         output += f"    Code List: {self.code_list}\n"
         output += f"    Object Weakref: {self.weakref_to_str(self.obj_weakref)}\n"

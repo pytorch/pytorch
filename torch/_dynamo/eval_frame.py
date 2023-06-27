@@ -791,7 +791,7 @@ def export(
     f: Callable[..., Any],
     *args,
     aten_graph: bool = False,
-    pre_autograd: bool = False,
+    pre_dispatch: bool = False,
     decomposition_table: Optional[
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
@@ -812,9 +812,10 @@ def export(
         aten_graph (bool): If True, exports a graph with ATen operators.
         If False, exports a graph with Python operators. Default is False.
 
-        pre_autograd (bool): If True, exports a graph with ATen operators,
-        but before autograd has run. This can be useful if you want to apply further tranformations
-        on a graph before running it through autograd.
+        pre_dispatch (bool): If True, exports a graph with ATen operators,
+        but before any logic in the PyTorch dispatcher has run.
+        This can be useful if you want to apply further tranformations on a graph before running it
+        through autograd, autocast, or any other functionalities that are integrated into the dispatcher.
         This flag is only valid if aten_graph=True is set.
         Default is False.
 
@@ -848,8 +849,8 @@ def export(
         assert (
             aten_graph
         ), "Specifying a decomposition_table table or tracing mode is illegal without setting aten_graph=True"
-    if pre_autograd:
-        assert aten_graph, "pre_autograd=True can only be used when aten_graph=True"
+    if pre_dispatch:
+        assert aten_graph, "pre_dispatch=True can only be used when aten_graph=True"
     f = innermost_fn(f)
     call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
     original_signature = inspect.signature(call_to_inspect)
@@ -1018,7 +1019,7 @@ def export(
                     decomposition_table=decomposition_table,
                     tracing_mode="real",
                     _allow_non_fake_inputs=True,
-                    pre_autograd=pre_autograd,
+                    pre_dispatch=pre_dispatch,
                     _allow_fake_constant=_allow_fake_constant,
                 )(*example_fake_inputs)
             except CondOpArgsMismatchError as e:
@@ -1237,10 +1238,35 @@ class TorchPatcher:
                 DistributedDataParallel._inside_ddp_forward, recursive=False
             )
 
-        from ..optim import adagrad, adam, adamax, adamw, asgd, nadam, sgd
+        # Note: this excludes the optimizers that are unsupported in excluded_opts below
+        from ..optim import (
+            adadelta,
+            adagrad,
+            adam,
+            adamax,
+            adamw,
+            asgd,
+            nadam,
+            rmsprop,
+            rprop,
+            sgd,
+        )
 
-        for opt_mod in adagrad, adam, adamax, adamw, asgd, nadam, sgd:
-            multi_tensor_fn_name = f"_multi_tensor_{opt_mod.__name__.split('.')[-1]}"
+        for opt_mod in (
+            adadelta,
+            adagrad,
+            adam,
+            adamax,
+            adamw,
+            asgd,
+            nadam,
+            rmsprop,
+            rprop,
+            sgd,
+        ):
+            opt_name = opt_mod.__name__.split(".")[-1]
+            multi_tensor_fn_name = f"_multi_tensor_{opt_name}"
+            fused_fn_name = f"_fused_{opt_name}"
             if hasattr(opt_mod, multi_tensor_fn_name):
                 setattr(
                     opt_mod,
@@ -1248,6 +1274,12 @@ class TorchPatcher:
                     disable(getattr(opt_mod, multi_tensor_fn_name)),
                 )
 
+            if hasattr(opt_mod, fused_fn_name):
+                setattr(
+                    opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
+                )
+
+        # Note: we don't support sparsity, data-dependent control, or tracing through backwards
         excluded_opts = {torch.optim.SparseAdam, torch.optim.RAdam, torch.optim.LBFGS}
         for opt in optimizers:
             if opt in excluded_opts:
@@ -1284,6 +1316,10 @@ class TorchPatcher:
         #     TorchDynamo does not trigger again on the frames created by
         #     utils.checkpoint innards.
         torch.utils.checkpoint.checkpoint = disable(torch.utils.checkpoint.checkpoint)
+
+        torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
+        torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
+        torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

@@ -12,7 +12,13 @@ from torch import sym_float, sym_int
 
 from .. import config, variables
 from ..allowed_functions import is_allowed
-from ..exc import unimplemented, Unsupported, UserError, UserErrorType
+from ..exc import (
+    AttributeMutationError,
+    unimplemented,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
@@ -1106,6 +1112,10 @@ class BuiltinVariable(VariableTracker):
                 f"setattr(UserDefinedObjectVariable) {type(obj.value).__setattr__}"
             )
         elif isinstance(obj, variables.NNModuleVariable):
+            if not tx.output.is_root_tracer():
+                raise AttributeMutationError(
+                    "Can't inplace modify module params/buffers inside HigherOrderOp"
+                )
             obj.convert_to_unspecialized(tx)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
@@ -1230,11 +1240,23 @@ class BuiltinVariable(VariableTracker):
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
 
         if (
-            isinstance(left, NNModuleVariable)
-            and isinstance(right, NNModuleVariable)
-            and op in supported_const_comparison_ops
+            all(
+                isinstance(x, (NNModuleVariable, ConstantVariable))
+                for x in [left, right]
+            )
+            and op in supported_const_comparison_ops.values()
         ):
-            self.push(ConstantVariable(op(left, right)))
+            left = (
+                tx.output.get_submodule(left.module_key)
+                if isinstance(left, NNModuleVariable)
+                else left.as_python_constant()
+            )
+            right = (
+                tx.output.get_submodule(right.module_key)
+                if isinstance(right, NNModuleVariable)
+                else right.as_python_constant()
+            )
+            return ConstantVariable(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():
