@@ -139,17 +139,17 @@ psutil
 #Pinned versions:
 #test that import: test_profiler.py, test_openmp.py, test_dataloader.py
 
-pytest
+pytest==7.3.2
 #Description: testing framework
 #Pinned versions:
 #test that import: test_typing.py, test_cpp_extensions_aot.py, run_test.py
 
-pytest-xdist
+pytest-xdist==3.3.1
 #Description: plugin for running pytest in parallel
 #Pinned versions:
 #test that import:
 
-pytest-shard
+pytest-shard==0.1.2
 #Description: plugin spliting up tests in pytest
 #Pinned versions:
 #test that import:
