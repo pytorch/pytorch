@@ -374,7 +374,9 @@ def compile_fx_inner(
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
-        new_callable = align_inputs(compiled_graph.get_current_callable(), example_inputs, range(num_fixed))
+        new_callable = align_inputs(
+            compiled_graph.get_current_callable(), example_inputs, range(num_fixed)
+        )
         if new_callable is not compiled_graph.get_current_callable():
             compiled_graph.current_callable = new_callable
 

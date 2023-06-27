@@ -151,14 +151,12 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     at::TensorList,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
-                    const c10::optional<at::Tensor>& sparse_indices,
                     int64_t)>();
 
     return std::get<1>(op.call(
         tensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<ReduceOp>(opts.reduceOp),
-        opts.sparseIndices,
         opts.timeout.count()));
   }
 
