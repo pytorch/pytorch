@@ -5484,12 +5484,17 @@ class CommonTemplate:
         grad_zero = (inp.grad == 0).sum().item()
         self.assertEqual(zero_out, grad_zero)
 
-        self.assertEqual(fw_code.count("tl.rand"), 1)
-        self.assertEqual(bw_code.count("tl.rand"), 1)
+        if self.device == "cuda":
+            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 1)
 
-        # seed generation
-        self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
-        self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
+            # seed generation
+            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
+            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
+
+        else:
+            self.assertEqual(fw_code.count("aten.bernoulli"), 1)
+            self.assertEqual(bw_code.count("aten.bernoulli"), 0)
 
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
