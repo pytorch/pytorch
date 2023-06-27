@@ -631,7 +631,6 @@ meta_function_expected_failures = {
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
-    torch.nn.functional.multi_margin_loss : {f64, f32},
     torch.nn.functional.multilabel_margin_loss : {f64, f32},
     torch.nn.functional.one_hot : {i64},
     torch._segment_reduce : {f64, f16, bf16, f32},
@@ -720,7 +719,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
     torch.median: {f16},  # aten::median, aten::median.dim_values
-    torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
 }
@@ -846,7 +844,6 @@ meta_dispatch_expected_failures = {
     aten.median.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.median.dim : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.mode.default : {f16, i8, f64, i64, bf16, f32, i32, b8, i16, u8},
-    aten.multi_margin_loss.default : {f32, f64},
     aten.multilabel_margin_loss_forward.default : {f32, f64},
     aten.nll_loss2d_forward.default : {bf16, f32, f64},
     aten.rrelu_with_noise.default : {bf16, f32, f64},
@@ -904,7 +901,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.log_sigmoid_forward.output : {bf16, f16, f64, f32},  # aten::log_sigmoid_forward.output
     aten.median.default: {f16},  # aten::median
     aten.median.dim: {f16},  # aten::median.dim_values
-    aten.multi_margin_loss.default: {bf16, f16},  # aten::multi_margin_loss
     aten.multilabel_margin_loss_forward.default: {bf16, f16},  # aten::multilabel_margin_loss_forward
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
