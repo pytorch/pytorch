@@ -88,7 +88,8 @@ def should_pad_addmm(match):
     )
 
 
-def addmm_replace(input, mat1, mat2, beta=1.0, alpha=1.0):
+def addmm_replace(input, mat1, mat2):
+
     m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
     k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
     n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
@@ -101,11 +102,9 @@ def addmm_replace(input, mat1, mat2, beta=1.0, alpha=1.0):
             m_padded_length,
             k_padded_length,
             n_padded_length,
-            beta,
-            alpha,
         )
 
-    return aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
+    return aten.addmm(input, mat1, mat2)
 
 
 def pad_addmm(
@@ -410,11 +409,6 @@ def _pad_mm_init():
     dim3b = functools.partial(torch.empty, (4, 4, 4), device=device, requires_grad=True)
 
     dim1a = functools.partial(torch.empty, (4), device=device, requires_grad=True)
-
-    # workaround https://github.com/pytorch/pytorch/issues/97894
-    # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
-    rep = {"beta": 0.213377, "alpha": 0.113377}
-
     counters_ref = counters["inductor"].copy()
 
     for pattern, replacement, args, workaround, extra_check in [
@@ -436,7 +430,7 @@ def _pad_mm_init():
             addmm_pattern,
             addmm_replace,
             [dim1a(), dim2a(), dim2b()],
-            rep,
+            {},
             should_pad_addmm,
         ),
     ]:
