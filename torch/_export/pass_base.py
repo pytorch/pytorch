@@ -189,6 +189,14 @@ class ExportPassBase(PassBase):
             elif target == _map.map_impl:
                 f, num_args, *rest = args  # type: ignore[assignment]
                 return self.callback.call_map(f, num_args, list(rest), meta)
+            # For other unregistered HigherOrderOps, just interpret them blindly
+            elif isinstance(target, torch._ops.HigherOrderOperator):
+                return self.callback.call_operator(
+                    target,
+                    args,
+                    kwargs,
+                    meta,
+                )
             else:
                 raise ExportPassBaseError(f"Unsupported target type: {target}")
 
