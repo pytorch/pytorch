@@ -734,10 +734,8 @@ class TritonKernel(Kernel):
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
-        is_rocm = torch.version.hip is not None and torch.cuda.is_available()
         self.no_x_dim = (
-            not is_rocm
-            and self.reduction_hint == ReductionHint.INNER
+            self.reduction_hint == ReductionHint.INNER
             and self.persistent_reduction
             and len(self.numels) == 2
             and self.numels[-1] >= 256
@@ -1847,9 +1845,7 @@ class TritonScheduling:
         can fuse node1 and node2.  These nodes might already be
         FusedSchedulerNodes.
         """
-        if isinstance(node1, scheduler.ForeachKernelSchedulerNode) and isinstance(
-            node2, scheduler.ForeachKernelSchedulerNode
-        ):
+        if isinstance(node1, scheduler.ForeachKernelSchedulerNode):
             return node1.can_fuse(node2)
 
         if isinstance(node1, scheduler.ForeachKernelSchedulerNode) or isinstance(
