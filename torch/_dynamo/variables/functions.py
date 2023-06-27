@@ -285,8 +285,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 tx, self.fn, self.get_name(), options, args, kwargs
             )
         elif is_allowed(self.fn):
-            return variables.TorchVariable(self.fn, **options).call_function(tx, args, kwargs)
-
+            return variables.TorchVariable(self.fn, **options).call_function(
+                tx, args, kwargs
+            )
 
         return super().call_function(tx, args, kwargs)
 

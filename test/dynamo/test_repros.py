@@ -3353,6 +3353,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         When it's not a TorchVariable, dynamo tries to trace through and fails.
         This makes sure that the self.fn is handled as a TorchVariable.
         """
+
         class UserModule(torch.nn.Module):
             torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
 
