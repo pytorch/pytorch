@@ -2000,6 +2000,48 @@ class TestTracer(JitTestCase):
                                        'x': torch.ones(1), "y": (torch.ones(1), torch.ones(1))})
         self.assertEqual(model(**input_dict), traced_model(**input_dict))
 
+    def test_trace_no_duplicated_lifted_input_output(self):
+        class Normalize(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = nn.GroupNorm(num_groups=32, num_channels=32)
+
+            def forward(self, x, y):
+                if y is None:
+                    y = x
+                else:
+                    y = self.norm(y)
+                y = y * 2
+                return y
+
+        class G(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.norm = Normalize()
+
+            def forward(self, x):
+                A = self.norm(x, None)
+                B = F.relu(A)
+                return A, B
+
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.g = G()
+                self.norm_1 = Normalize()
+
+            def forward(self, x):
+                hs = self.g(x)
+                A, B = hs
+                h = self.norm_1(B, A)
+                return h
+
+        net = Net()
+        net = net.eval()
+        x = torch.randn(1, 32, 16, 16)
+        traced = torch.jit.trace(net, x)
+        FileCheck().check_not("prim::TupleUnpack").run(str(traced.graph))
+
 
 @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
 class TestMixTracingScripting(JitTestCase):
