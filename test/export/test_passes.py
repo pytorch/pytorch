@@ -5,6 +5,8 @@ with test_functionalization_with_native_python_assertion)
 
 # Owner(s): ["module: dynamo"]
 import unittest
+from typing import List, Set
+import operator
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -24,6 +26,9 @@ from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
 )
 from functorch.experimental.control_flow import cond
+from torch.fx.passes.operator_support import OperatorSupport
+from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner, Partition
+from torch.fx._symbolic_trace import symbolic_trace
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
@@ -538,6 +543,79 @@ class TestPasses(TestCase):
             )
         )
         self.assertTrue(torch._dynamo.utils.same(ep(inp), Foo()(inp)))
+
+    def test_graph_partition(self) -> None:
+        class _AddOperatorSupport(OperatorSupport):
+            def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+                return node.op == "call_function" and node.target in {operator.add}
+
+        class _AtenAddOperatorSupport(OperatorSupport):
+            def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+                return node.op == "call_function" and node.target in {
+                    torch.ops.aten.add.Tensor
+                }
+
+        def _to_partition_names(partitions: List[Partition]) -> List[Set[str]]:
+            return [{n.name for n in p.nodes} for p in partitions]
+
+        def f1(a, b):
+            add = a + b
+            add_1 = add + b
+
+            relu_1 = add_1.relu()  # blocked by this
+
+            add_3 = add_1 + relu_1
+            add_4 = add_1 + add_3
+            return add_4, add_1
+
+        partitioner1 = CapabilityBasedPartitioner(
+            graph_module=symbolic_trace(f1),
+            operator_support=_AddOperatorSupport(),
+        )
+        partitions1 = partitioner1.propose_partitions()
+
+        self.assertEqual(
+            _to_partition_names(partitions1),
+            [{"add_3", "add_2"}, {"add_1", "add"}],
+        )
+
+        def f2(a, b):
+            add = a + b
+            add_1 = add + b
+
+            relu_1 = add_1.relu()  # blocked by this
+
+            assert add_1.shape[0] == 2
+
+            add_3 = add_1 + relu_1
+            add_4 = add_1 + add_3
+            return add_4, add_1
+
+        inps = (torch.rand(2, 3), torch.rand(2, 3))
+        gm = export(
+            f2,
+            inps,
+            constraints=[dynamic_dim(inps[0], 0) == dynamic_dim(inps[1], 0)],
+            _functionalize_runtime_assertions=True,
+        ).graph_module
+        partitioner2 = CapabilityBasedPartitioner(
+            graph_module=gm,
+            operator_support=_AtenAddOperatorSupport(),
+        )
+        partitions2 = partitioner2.propose_partitions()
+
+        self.assertEqual(
+            _to_partition_names(partitions2),
+            [{"add_tensor_2", "add_tensor_3"}, {"add_tensor", "add_tensor_1"}]
+        )
+
+        fused_gm1 = partitioner1.fuse_partitions(partitions1)
+        fused_gm2 = partitioner2.fuse_partitions(partitions2)
+
+        inps = (torch.rand(2, 3), torch.rand(2, 3))
+        self.assertTrue(
+            torch._dynamo.utils.same(fused_gm1(*inps)[0], fused_gm2(*inps)[0]),
+        )
 
 
 if __name__ == '__main__':
