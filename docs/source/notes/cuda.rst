@@ -468,17 +468,16 @@ traces all the memory operations.
    #include <iostream>
    // Compile with g++ alloc.cc -o alloc.so -I/usr/local/cuda/include -shared -fPIC
    extern "C" {
-   int my_malloc(void** ptr, ssize_t size, int device, cudaStream_t stream) {
+   void* my_malloc(ssize_t size, int device, cudaStream_t stream) {
       void *ptr;
-      int err = cudaMalloc(ptr, size);
+      cudaMalloc(&ptr, size);
       std::cout<<"alloc "<<ptr<<size<<std::endl;
-      return err;
+      return ptr;
    }
 
-   int my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
+   void my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
       std::cout<<"free "<<ptr<< " "<<stream<<std::endl;
-      int err = cudaFree(ptr);
-      return err;
+      cudaFree(ptr);
    }
    }
 
@@ -561,10 +560,11 @@ compilation process.
 Error Handling
 ^^^^^^^^^^^^^^
 
-To deal with errors, the custom allocator user defined functions need to return an
-error code when invoked. If the code is other than zero, the current execution will
-fail with the actual error code reported to the user. It is the responsibility of  the
-allocator developer to stablish meaningful error codes and document them.
+To deal with errors, the custom allocator user defined functions need to raise
+an exception or use `TORCH_CHECK`. Note that errors that happen during `free`
+calls may not be propagated instantly to Python due the GIL being released
+during free functions calls. The error will be stored and rethrown the next time
+a memory allocation is attempted.
  
 .. cublas-workspaces:
 

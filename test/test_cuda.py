@@ -5785,11 +5785,11 @@ custom_allocator_code = '''
 #include <torch/extension.h>
 
 extern "C" {{
-int my_malloc(void** ptr, ssize_t size, int device, cudaStream_t stream) {{
+void* my_malloc(ssize_t size, int device, cudaStream_t stream) {{
    {malloc}
 }}
 
-int my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {{
+void my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {{
    {free}
 }}
 }}
@@ -5815,19 +5815,19 @@ b = torch.zeros(10, device='cuda')
 del b
 b = torch.zeros(10, device='cuda')
 print('done')
-""" 
+"""
 
     def test_pluggable_allocator_ok(self):
         # Since we can't swap an already initialized allocator, we fork a new process for these tests
         malloc = """
-   int err = cudaMalloc(ptr, size);
+   void* ptr = nullptr;
+   cudaMalloc(&ptr, size);
    std::cout<<"custom alloc"<<std::endl;
-   return err;
+   return ptr;
 """
         free = """
    std::cout<<"custom free"<<std::endl;
-   int err = cudaFree(ptr);
-   return err;
+   cudaFree(ptr);
 """
         rc = subprocess.check_output(
             [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="allocator")],
@@ -5839,53 +5839,6 @@ print('done')
         ]
         self.assertTrue(all(msg in rc for msg in expected_messages))
  
-    def test_pluggable_allocator_with_error_on_malloc(self):
-        # Since we can't swap an already initialized allocator, we fork a new process for these tests
-        malloc = """
-   std::cout<<"custom alloc"<<std::endl;
-   return 123;
-"""
-        free = """
-   std::cout<<"custom free"<<std::endl;
-   int err = cudaFree(ptr);
-   return err;
-"""
-        error = False
-        try:
-            rc = subprocess.check_output(
-                [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="error_malloc")],
-                stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
-        except subprocess.CalledProcessError as e:
-            expected_message = 'Memory allocation failed with error 123'
-            self.assertTrue(expected_message in e.output.decode('ascii'))
-            error = True
-        self.assertTrue(error)
-
-
-    def test_pluggable_allocator_with_error_on_free(self):
-        # Since we can't swap an already initialized allocator, we fork a new process for these tests
-        malloc = """
-   int err = cudaMalloc(ptr, size);
-   std::cout<<"custom alloc"<<std::endl;
-   return err;
-"""
-        free = """
-   std::cout<<"custom free returning error"<<std::endl;
-   return 123;
-"""
-        error = False
-        try:
-            rc = subprocess.check_output(
-                [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="error_free")],
-                stderr=subprocess.STDOUT,
-                cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
-        except subprocess.CalledProcessError as e:
-            expected_message = 'Memory free failed with error 123'
-            self.assertTrue(expected_message in e.output.decode('ascii'))
-            error = True
-        self.assertTrue(error)
-
     def test_pluggable_allocator_with_error_initialized(self):
         from torch.utils.cpp_extension import load_inline
         custom_allocator_code = """
@@ -5895,12 +5848,14 @@ print('done')
 #include <stdexcept>
 
 extern "C" {
-int my_malloc(void** ptr, ssize_t size, int device, cudaStream_t stream) {
-   return cudaMalloc(ptr, size);
+void* my_malloc(ssize_t size, int device, cudaStream_t stream) {
+   void* ptr = nullptr;
+   cudaMalloc(&ptr, size);
+   return ptr;
 }
 
-int my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
-   return cudaFree(ptr);
+void my_free(void* ptr, ssize_t size, int device, cudaStream_t stream) {
+   cudaFree(ptr);
 }
 }
 
@@ -5914,11 +5869,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
             build_directory='.',
             with_cuda=True,
         )
-        
         # Load the allocator
         new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
             'allocator.so', 'my_malloc', 'my_free')
-        
         # Swap the current allocator
         with self.assertRaisesRegex(RuntimeError, "swap an already initialized"):
             torch.cuda.memory.change_current_allocator(new_alloc)
@@ -5927,10 +5880,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
         # Since we can't swap an already initialized allocator, we fork a new process for these tests
         malloc = """
    throw std::runtime_error("bad custom alloc");
-   return 0;
+   return nullptr;
 """
         free = """
-   return cudaFree(ptr);
+   cudaFree(ptr);
 """
         error = False
         try:
@@ -5944,15 +5897,32 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
             error = True
         self.assertTrue(error)
 
+        # Fail using TORCH_CHECK
+        error = False
+        malloc = """
+   TORCH_CHECK(false, "custom alloc failed");
+   return nullptr;
+"""
+        try:
+            rc = subprocess.check_output(
+                [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="malloc_except")],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
+        except subprocess.CalledProcessError as e:
+            expected_message = "custom alloc failed"
+            self.assertTrue(expected_message in e.output.decode('ascii'))
+            error = True
+        self.assertTrue(error)
+
     def test_pluggable_allocator_with_exception_on_free(self):
         # Since we can't swap an already initialized allocator, we fork a new process for these tests
         malloc = """
-   int err = cudaMalloc(ptr, size);
-   return err;
+   void* ptr;
+   cudaMalloc(&ptr, size);
+   return ptr;
 """
         free = """
    throw std::runtime_error("bad custom free");
-   return 0;
 """
         error = False
         try:
@@ -5962,6 +5932,22 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
                 cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
         except subprocess.CalledProcessError as e:
             expected_message = "bad custom free"
+            print(e.output.decode)
+            self.assertTrue(expected_message in e.output.decode('ascii'))
+            error = True
+        self.assertTrue(error)
+
+        free = """
+   TORCH_CHECK(false, "custom free failed");
+"""
+        error = False
+        try:
+            rc = subprocess.check_output(
+                [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="malloc_except")],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
+        except subprocess.CalledProcessError as e:
+            expected_message = "custom free failed"
             print(e.output.decode)
             self.assertTrue(expected_message in e.output.decode('ascii'))
             error = True
