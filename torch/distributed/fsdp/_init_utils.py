@@ -109,15 +109,6 @@ def _init_process_group_state(
             )
         else:
             state = _init_process_group_state_for_hybrid_shard(state, process_group)
-            assert (
-                state.process_group is not None
-            ), "Expected to populate state.process_group for hybrid shard"
-            assert (
-                state._inter_node_pg is not None
-            ), "Expected to populate state._inter_node_pg for hybrid shard"
-            assert (
-                state._inter_node_state is not None
-            ), "Expected to populate state._inter_node_state for hybrid shad."
     else:
         state.process_group = (
             process_group if process_group is not None else _get_default_group()
