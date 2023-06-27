@@ -562,3 +562,37 @@ Kernel(
         )
 
         self.assertEqual(expected_str, result)
+
+    def test_codegen_unboxed_default_kernel_key_selected(self) -> None:
+        """
+        This test checks that if there is no specialized kernel, the default kernel is used, when the selector only has default key.
+        """
+        selector = SelectiveBuilder.from_yaml_dict(
+            {
+                "include_all_operators": True,
+                "et_kernel_metadata": {"custom_1::op_1": ["default"]},
+            }
+        )
+        use_aten_lib = False
+        entry = (self.native_function_no_kern, self.default_kernel_entry)
+
+        result = ComputeCodegenUnboxedKernels(selector, use_aten_lib)(entry)
+        # Concat used to prevent whitespace stripping
+        expected_str = (
+            """
+Kernel(
+    "custom_1::op_1",
+    [](torch::executor::RuntimeContext & context, EValue** stack) {
+        """
+            + """
+
+        EXECUTORCH_SCOPE_PROF("native_call_op_1");
+        bool result_ = at::native::default_kernel(context, );
+
+        *stack[0] = EValue(result_);
+    }
+),
+"""
+        )
+
+        self.assertEqual(expected_str, result)
