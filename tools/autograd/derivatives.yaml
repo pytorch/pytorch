@@ -57,8 +57,8 @@
 # differentiable.
 #
 # Gradient expressions are standard C++ expressions operating on ATen
-# variables.  In a gradient expression, the following variables are in
-# scope:
+# variables.  In a gradient expression, the following variables/functions
+# are in scope:
 #
 #   - 'grad', the gradient of the output (often spelled grad_output
 #     in Python) which we are going to left-multiply.
@@ -109,8 +109,6 @@
 #     run again later.  This allows an optimization where we can
 #     destroy saved buffers if we know variables are not going to be retained,
 #     e.g., it is used by _cudnn_rnn
-#
-# In a gradient expression, the following functions are in scope:
 #
 #   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
 #     variable and a boolean condition that dictates whether to save that
