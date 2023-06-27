@@ -1,1 +1,1 @@
-vptr:warn_mod.so
+vptr:pybind11::detail::translate_exception
