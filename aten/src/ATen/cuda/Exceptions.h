@@ -50,6 +50,9 @@ class CuDNNError : public c10::Error {
 
 namespace at { namespace cuda { namespace blas {
 C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
+#if defined(USE_ROCM) && ROCM_VERSION >= 50600
+C10_EXPORT const char* _hipblasGetErrorEnum(hipblasStatus_t error);
+#endif
 }}} // namespace at::cuda::blas
 
 
