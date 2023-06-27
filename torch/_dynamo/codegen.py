@@ -15,6 +15,7 @@ from .bytecode_transformation import (
     create_load_global,
     create_rot_n,
     Instruction,
+    unique_id,
 )
 from .exc import unimplemented
 from .source import AttrSource, GeneratorStateSource, Source
@@ -28,6 +29,7 @@ from .variables.tensor import (
     TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
+from .variables.torch import HigherOrderCheckpointVariable
 
 
 @dataclasses.dataclass
@@ -98,6 +100,7 @@ class PyCodegen:
             value.source is not None
             and allow_cache
             and not isinstance(value.source, GeneratorStateSource)
+            and not isinstance(value, HigherOrderCheckpointVariable)
         ):
             output.extend(value.source.reconstruct(self))
         elif value.is_python_constant() and is_safe_constant(
@@ -344,3 +347,11 @@ class PyCodegen:
             self.create_load_const(kw_names),
             create_instruction("CALL_FUNCTION_KW", arg=nargs),
         ]
+
+    def create_and_load_disabled_fn(self, fn, name):
+        from .eval_frame import disable
+
+        disabled_fn = disable(fn)
+        name = unique_id(name)
+        self.tx.output.install_global(name, disabled_fn)
+        return self.load_function_name(name, True)

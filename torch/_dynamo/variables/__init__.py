@@ -47,7 +47,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchHigherOrderOperatorVariable, TorchVariable
+from .torch import (
+    HigherOrderCheckpointVariable,
+    TorchHigherOrderOperatorVariable,
+    TorchVariable,
+)
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [

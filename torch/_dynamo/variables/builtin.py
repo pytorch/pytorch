@@ -23,13 +23,13 @@ from ..guards import GuardBuilder
 from ..replay_record import DummyModule
 from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
+    build_checkpoint_variable,
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
-    get_higher_order_op,
+    is_utils_checkpoint,
     istype,
     proxy_args_kwargs,
-    requires_higher_order_op,
     specialize_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
@@ -999,7 +999,6 @@ class BuiltinVariable(VariableTracker):
             ConstantVariable,
             GetAttrVariable,
             PythonModuleVariable,
-            TorchHigherOrderOperatorVariable,
             TorchVariable,
             UserFunctionVariable,
         )
@@ -1067,10 +1066,9 @@ class BuiltinVariable(VariableTracker):
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
-            if requires_higher_order_op(member):
-                return TorchHigherOrderOperatorVariable(
-                    get_higher_order_op(member), **options
-                )
+            if is_utils_checkpoint(member):
+                options["source"] = source
+                return build_checkpoint_variable(**options)
             elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
