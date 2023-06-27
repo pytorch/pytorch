@@ -303,43 +303,55 @@ class UserMethodVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        # Special case for when function is marked constant
-        # We error for some reason when we go down the super().call_function path.
-        if self.is_constant and isinstance(self.obj, variables.NNModuleVariable):
-            module_attr = getattr(self.fn, "__module__", "")
+        module_attr = getattr(self.fn, "__module__", "")
+        def do_call_method():
             return self.obj.call_method(
                 tx, self.fn.__name__, args, kwargs, constant=self.is_constant
             ).add_options(self)
+        # Special case for when function is marked constant
+        # We error for some reason when we go down the super().call_function path.
+        if self.is_constant and isinstance(self.obj, variables.NNModuleVariable):
+            return do_call_method()
 
         # For nn.Module methods, redirecting to NNModuleVariable.call_method for optimized solution
         # rather than simple inlining. E.g, putting `call_method` op in FX graph for `forward` method
         # since we ensure `forward` of allowed modules can be traced by AOT safely.
         # Note this is not only for allowed modules, as user customized modules can extend from
         # allowed modules but using parent's `forward` method, which is also covered by this branch.
-        try:
-            return super().call_function(tx, args, kwargs)
-        except Unsupported as e:
-            if isinstance(e.__cause__, fake_tensor_exceptions):
-                # We would've raised below anyway, but catch explicitly
-                raise
+        if torch._dynamo.config.inline_nn_modules:
+            try:
+                # Try inlining instead of `call_method`, and if we failed to inline
+                # we fallback to the logic as if `config.inline_nn_modules=False`
+                # making sure to still raise if call_method would've resulted in
+                # inlining or if the error is in `fake_tensor_exceptions`.
+                return super().call_function(tx, args, kwargs)
+            except Unsupported as e:
+                if isinstance(e.__cause__, fake_tensor_exceptions):
+                    # We would've raised below anyway, but catch explicitly
+                    raise
 
-            if isinstance(self.obj, variables.NNModuleVariable):
-                mod = tx.output.get_submodule(self.obj.module_key)
-                if self.fn.__name__ in ("_call_impl", "_wrapped_call_impl") and \
-                   not is_allowed(mod.__class__):
+                if isinstance(self.obj, variables.NNModuleVariable):
+                    mod = tx.output.get_submodule(self.obj.module_key)
+                    if self.fn.__name__ in ("_call_impl", "_wrapped_call_impl") and \
+                    not is_allowed(mod.__class__):
                         # If we would've inlined anyway, we don't want to hide the
                         # graph break
                         raise
+                    if (
+                        module_attr is not None
+                        and module_attr.startswith("torch.nn.")
+                    ):
+                        return do_call_method()
+                raise
+        else:
+            if (
+                isinstance(self.obj, variables.NNModuleVariable)
+                and module_attr is not None
+                and module_attr.startswith("torch.nn.")
+            ):
+                return do_call_method()
 
-                module_attr = getattr(self.fn, "__module__", "")
-                if (
-                    module_attr is not None
-                    and module_attr.startswith("torch.nn.")
-                ):
-                    return self.obj.call_method(
-                        tx, self.fn.__name__, args, kwargs, constant=self.is_constant
-                    ).add_options(self)
-            raise
+            return super().call_function(tx, args, kwargs)
 
     def num_parameters(self):
         return super().num_parameters() - 1
