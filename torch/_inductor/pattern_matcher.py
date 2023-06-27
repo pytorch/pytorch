@@ -648,7 +648,11 @@ class ReplacementPatternEntry(PatternEntry):
             last_node = output_nodes[0]
         else:
             nodes = list(output_nodes[0].graph.nodes)
-            indices = [(nodes.index(n), n) for n in output_nodes]
+            indices = [
+                (nodes.index(n), n)
+                for n in output_nodes
+                if isinstance(n, torch.fx.Node)
+            ]
             last_node = min(indices, key=lambda tup: tup[0])[1]
 
         with graph.inserting_before(last_node):
