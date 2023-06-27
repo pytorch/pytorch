@@ -45,8 +45,8 @@ namespace c10 {
   _(MTIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
-  _(Meta, extra)                                \
-  _(PrivateUse3, extra)
+  _(PrivateUse3, extra)                         \
+  _(Meta, extra)
 
 // WARNING!  If we add a new per-backend functionality key that has higher
 // priority than Autograd, then make sure you update EndOfRuntimeBackendKeys
@@ -95,7 +95,7 @@ enum class BackendComponent : uint8_t {
 
   // Define an alias to represent end of backend dispatch keys.
   // If you add new backend keys after PrivateUse3, please also update it here.
-  EndOfBackendKeys = PrivateUse3Bit,
+  EndOfBackendKeys = MetaBit,
 };
 
 // Semantically, a dispatch key identifies a possible "level" in our
@@ -433,7 +433,7 @@ enum class DispatchKey : uint16_t {
   StartOf##fullname##Backends,                         \
       C10_FORALL_BACKEND_COMPONENTS(                   \
           DEFINE_PER_BACKEND_KEYS_FOR_BACKEND, prefix) \
-          EndOf##fullname##Backends = prefix##PrivateUse3,
+          EndOf##fullname##Backends = prefix##Meta,
 
   C10_FORALL_FUNCTIONALITY_KEYS(DEFINE_PER_BACKEND_KEYS)
 
