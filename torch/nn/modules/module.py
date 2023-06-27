@@ -796,9 +796,10 @@ class Module:
             "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
-    def _apply(self, fn):
-        for module in self.children():
-            module._apply(fn)
+    def _apply(self, fn, recurse=True):
+        if recurse:
+            for module in self.children():
+                module._apply(fn)
 
         def compute_should_use_set_data(tensor, tensor_applied):
             if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
@@ -1015,17 +1016,19 @@ class Module:
         """
         return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
 
-    def to_empty(self: T, *, device: Union[str, device]) -> T:
+    def to_empty(self: T, *, device: Union[str, device], recurse: bool = True) -> T:
         r"""Moves the parameters and buffers to the specified device without copying storage.
 
         Args:
             device (:class:`torch.device`): The desired device of the parameters
                 and buffers in this module.
+            recurse (bool): Whether parameters and buffers of submodules should
+                be recursively moved to the specified device.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: torch.empty_like(t, device=device))
+        return self._apply(lambda t: torch.empty_like(t, device=device), recurse=recurse)
 
     @overload
     def to(self: T, device: Optional[Union[int, device]] = ..., dtype: Optional[Union[dtype, str]] = ...,
@@ -1896,6 +1899,9 @@ class Module:
         For state dicts without metadata, :attr:`local_metadata` is empty.
         Subclasses can achieve class-specific backward compatible loading using
         the version number at `local_metadata.get("version", None)`.
+        Additionally, :attr:`local_metadata` can also contain the key
+        `assign_to_params_buffers` that indicates whether keys should be
+        assigned their corresponding tensor in the state_dict.
 
         .. note::
             :attr:`state_dict` is not the same object as the input
@@ -1926,6 +1932,7 @@ class Module:
         persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
+        assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
 
         for name, param in local_state.items():
             key = prefix + name
@@ -1954,7 +1961,15 @@ class Module:
                     continue
                 try:
                     with torch.no_grad():
-                        param.copy_(input_param)
+                        if assign_to_params_buffers:
+                            # Shape checks are already done above
+                            if (isinstance(param, torch.nn.Parameter) and
+                                    not isinstance(input_param, torch.nn.Parameter)):
+                                setattr(self, name, torch.nn.Parameter(input_param))
+                            else:
+                                setattr(self, name, input_param)
+                        else:
+                            param.copy_(input_param)
                 except Exception as ex:
                     error_msgs.append('While copying the parameter named "{}", '
                                       'whose dimensions in the model are {} and '
@@ -1982,11 +1997,15 @@ class Module:
                         unexpected_keys.append(key)
 
     def load_state_dict(self, state_dict: Mapping[str, Any],
-                        strict: bool = True):
+                        strict: bool = True, assign: bool = False):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
         by this module's :meth:`~torch.nn.Module.state_dict` function.
+
+        .. warning::
+            If :attr:`assign` is ``True`` the optimizer must be created after
+            the call to :attr:`load_state_dict`.
 
         Args:
             state_dict (dict): a dict containing parameters and
@@ -1994,6 +2013,13 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
+            assign (bool, optional): whether to assign items in the state
+                dictionary to their corresponding keys in the module instead
+                of copying them inplace into the module's current parameters and buffers.
+                When ``False``, the properties of the tensors in the current
+                module are preserved while when ``True``, the properties of the
+                Tensors in the state dict are preserved.
+                Default: ``False``
 
         Returns:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
@@ -2021,6 +2047,8 @@ class Module:
 
         def load(module, local_state_dict, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
+            if assign:
+                local_metadata['assign_to_params_buffers'] = assign
             module._load_from_state_dict(
                 local_state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
