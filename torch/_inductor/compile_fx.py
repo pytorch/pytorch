@@ -7,7 +7,7 @@ import unittest
 import warnings
 
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from functorch.compile import min_cut_rematerialization_partition
 
@@ -372,7 +372,13 @@ def compile_fx_inner(
                         "skipping cudagraphs due to multiple device indexes"
                     )
 
-    result = align_inputs(compiled_graph, example_inputs, range(num_fixed))
+    # cudagraphs does its own aligning of inputs
+    if not cudagraphs:
+        new_callable = align_inputs(
+            compiled_graph.get_current_callable(), example_inputs, range(num_fixed)
+        )
+        if new_callable is not compiled_graph.get_current_callable():
+            compiled_graph.current_callable = new_callable
 
     _step_logger()(
         logging.INFO,
@@ -382,8 +388,8 @@ def compile_fx_inner(
     )
 
     # aot autograd needs to know to pass in inputs as a list
-    result._boxed_call = True
-    return result
+    compiled_graph._boxed_call = True
+    return compiled_graph
 
 
 def fx_codegen_and_compile(
@@ -485,11 +491,17 @@ def clone_preserve_strides(x):
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
-def align_inputs(compiled_graph: CompiledFxGraph, inputs, static_input_idxs=()):
+def copy_misaligned_inputs(new_inputs, check_inputs_idxs: Sequence[int]) -> None:
+    for i in check_inputs_idxs:
+        if new_inputs[i].data_ptr() % ALIGNMENT:
+            new_inputs[i] = clone_preserve_strides(new_inputs[i])
+
+
+def get_input_idxs_to_check(inputs, static_input_idxs) -> Sequence[int]:
     def is_aligned(storage_offset, dtype):
         return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
 
-    check_inputs = [
+    return [
         i
         for i in range(len(inputs))
         if isinstance(inputs[i], torch.Tensor)
@@ -500,20 +512,21 @@ def align_inputs(compiled_graph: CompiledFxGraph, inputs, static_input_idxs=()):
         and inputs[i].device.type == "cuda"
     ]
 
-    if len(check_inputs) == 0:
-        return compiled_graph
 
-    old_compiled_artifact = compiled_graph.get_current_callable()
+def align_inputs_from_check_idxs(model, inputs_to_check: Sequence[int]):
+    if len(inputs_to_check) == 0:
+        return model
 
     def run(new_inputs):
-        for i in check_inputs:
-            if new_inputs[i].data_ptr() % ALIGNMENT:
-                new_inputs[i] = clone_preserve_strides(new_inputs[i])
-        return old_compiled_artifact(new_inputs)
+        copy_misaligned_inputs(new_inputs, inputs_to_check)
+        return model(new_inputs)
 
-    compiled_graph.current_callable = run
+    return run
 
-    return compiled_graph
+
+def align_inputs(model, inputs, static_input_idxs=()):
+    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
+    return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
 @dynamo_utils.dynamo_timed
@@ -595,7 +608,9 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
+    check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
+    copy_misaligned_inputs(inputs, check_input_idxs)
 
     assert isinstance(inputs, (list, tuple))
 
@@ -672,7 +687,7 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
             graph.replay()
             return static_outputs
 
-    return run
+    return align_inputs_from_check_idxs(run, check_input_idxs)
 
 
 def count_tangents(fx_g: torch.fx.GraphModule):
