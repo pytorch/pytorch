@@ -191,7 +191,8 @@ class ExportPassBase(PassBase):
                 return self.callback.call_map(f, num_args, list(rest), meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
             elif isinstance(target, torch._ops.HigherOrderOperator):
-                return self.callback.call_operator(
+                return self.callback._fx(
+                    "call_function",
                     target,
                     args,
                     kwargs,
