@@ -3487,8 +3487,9 @@ class TestSparseCompressedTritonKernels(TestCase):
             if bsr.dim() == 2 and dtype != torch.float:
                 # Test against linear to check dispatch
                 # which takes place for torch.half and torch.bfloat16.
-                res_tri = torch.nn.functional.linear(dense, bsr)
                 res_dense = torch.nn.functional.linear(dense, bsr.to_dense())
+                res_tri_out = torch.empty_like(res_dense)
+                res_tri = torch.nn.functional.linear(dense, bsr, out=res_tri_out)
 
                 # Check dispatch worked with non-trivial outputs
                 if m > 0 and n > 0 and k > 0:
@@ -3500,7 +3501,8 @@ class TestSparseCompressedTritonKernels(TestCase):
                 res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
                 res_tri_out = torch.empty_like(res_dense)
                 res_tri = kernel(bsr, dense.transpose(-2, -1), out=res_tri_out)
-                self.assertTrue(res_tri is res_tri_out)
+
+            self.assertTrue(res_tri is res_tri_out)
             self.assertEqual(res_tri, res_dense)
 
             res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
@@ -3591,18 +3593,19 @@ class TestSparseCompressedTritonKernels(TestCase):
 
             # We make attn_mask block lower/upper triangular so that BSR and Strided
             # function variants are directly comparable.
-            # NOTE: only boolean mask is directly compatible with the Strided version
-            # without any pre-/post-processing.
             attn_mask = torch.ones(bam + (m, n), device=device, dtype=torch.bool)
             attn_mask = self._to_block_triangular_inplace(attn_mask, block_size, block_size)
             attn_mask_bsr = attn_mask.to_sparse_bsr(block_size)
 
+            # NOTE: only boolean mask is directly compatible with the Strided version
+            # without any pre-/post-processing. Hence we test against a boolean mask.
             expected = torch.nn.functional.scaled_dot_product_attention(
                 *broadcast_input(query, key, value, attn_mask)
             )
-            res = _scaled_dot_product_attention(query, key, value, attn_mask.to_sparse_bsr(block_size))
 
-            self.assertEqual(res, expected)
+            for mask_dtype in (torch.bool, dtype):
+                res = _scaled_dot_product_attention(query, key, value, attn_mask_bsr.to(mask_dtype))
+                self.assertEqual(res, expected)
 
 
     @parametrize("block_size", [16, 32, 64])
