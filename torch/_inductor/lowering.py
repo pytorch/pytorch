@@ -430,11 +430,14 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             if len(args) < 2:
                 return False
             else:
-                dtype = args[0].data.get_dtype()
-                return any(
-                    isinstance(t, TensorBox) and t.data.get_dtype() != dtype
-                    for t in args
-                )
+                dtype = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        if dtype is None:
+                            dtype = t.data.get_dtype()
+                        elif dtype != t.data.get_dtype():
+                            return True
+                return False
 
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
@@ -445,7 +448,15 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             out = defaultdict(list)
             for i, args in enumerate(arg_pairs):
                 use_foreach = not (is_dynamic(*args) or has_type_promotion(*args))
-                out[(args[0].get_device(), use_foreach)].append((i, args))
+                device = None
+                for t in args:
+                    if isinstance(t, TensorBox):
+                        device = t.data.get_device()
+                        break
+                assert (
+                    device is not None
+                ), "foreach op should have at least one tensor arg"
+                out[(device, use_foreach)].append((i, args))
             return out
 
         realize_outputs = False
@@ -454,12 +465,26 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 if not (user.op == "call_function" and user.target in foreach_ops):
                     realize_outputs = True
 
-        # replicate scalar input to match lenghth of list input
-        if len(inputs) > 1 and not isinstance(inputs[1], (list, tuple)):
-            inputs = (inputs[0], [inputs[1] for _ in inputs[0]])
+        a_list_input = None
+        for input in inputs:
+            if isinstance(input, (list, tuple)):
+                a_list_input = input
+                break
+        assert (
+            a_list_input is not None
+        ), "at least one input must be a list to a foreach op"
 
-        groups = group_args(zip(*inputs))
-        outputs = [None] * len(inputs[0])
+        # broadcast scalar inputs to match length of list inputs
+        broadcast_inputs = []
+        for input in inputs:
+            if not isinstance(input, (list, tuple)):
+                broadcast_inputs.append([input] * len(a_list_input))
+            else:
+                broadcast_inputs.append(input)
+
+        groups = group_args(zip(*broadcast_inputs))
+
+        outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
             buffer_list = []
             for (
@@ -4229,6 +4254,7 @@ register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 register_foreach_pointwise(aten._foreach_div.List, div)
 register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
