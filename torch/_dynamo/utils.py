@@ -1684,7 +1684,7 @@ def is_utils_checkpoint(obj):
     return obj is torch.utils.checkpoint.checkpoint
 
 
-def build_checkpoint_variable(guards):
+def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
     from .variables.torch import HigherOrderCheckpointVariable
 
@@ -1695,7 +1695,5 @@ def build_checkpoint_variable(guards):
     return HigherOrderCheckpointVariable(
         activation_checkpoint_op,
         source_fn=torch.utils.checkpoint.checkpoint,
-        disable_on_reconstruction=True,
-        guards=guards,
+        **options,
     )
-

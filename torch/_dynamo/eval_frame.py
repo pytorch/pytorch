@@ -1219,10 +1219,12 @@ class TorchPatcher:
     @staticmethod
     @functools.lru_cache(None)
     def patch():
-        # Disable TorchDynamo on some torch.* compilers generated frames
-        disable_torch_fn(torch.jit.trace)
-        disable_torch_fn(torch.jit.trace_module)
+        # torch.jit.trace still has to be disabled because it is skipped by
+        # TorchDynamo, and therefore remains unchanged, and the child frames get
+        # intercepted by TorchDynamo.
+        torch.jit.trace = disable(torch.jit.trace)
         disable_torch_fn(torch.jit._get_trace_graph)
+        disable_torch_fn(torch.jit.trace_module)
 
         # symbolic_trace creates new frames. We disable Dynamo on such frames
         disable_torch_fn(torch.fx._symbolic_trace.Tracer.trace)

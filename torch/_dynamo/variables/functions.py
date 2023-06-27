@@ -603,13 +603,9 @@ class DisabledFunctionVariable(VariableTracker):
         return f"DisabledFunctionVariable({self.value})"
 
     def reconstruct(self, codegen):
-        from ..bytecode_transformation import unique_id
-        from ..eval_frame import disable
-
-        disabled_fn = disable(self.value)
-        name = unique_id("__disabled_fn")
-        codegen.tx.output.install_global(name, disabled_fn)
-        return codegen.load_function_name(name, True)
+        return codegen.create_and_load_disabled_fn(
+            self.value, f"__disabled_{self.value.__name__}"
+        )
 
 
 class DisabledMethodVariable(VariableTracker):
@@ -628,17 +624,12 @@ class DisabledMethodVariable(VariableTracker):
         return f"DisabledMethodVariable({self.value})"
 
     def reconstruct(self, codegen):
-        from ..bytecode_transformation import unique_id
-        from ..eval_frame import disable
-
-        disabled_fn = disable(self.value)
-
         # Method descriptor automatically prepends self to the args, kwargs. So,
         # here we have to create a wrapper that prepends self (i.e. self.obj in
         # this case) to the call.
         def method_wrapper(*args, **kwargs):
-            return disabled_fn(self.obj.value, *args, **kwargs)
+            return self.value(self.obj.value, *args, **kwargs)
 
-        name = unique_id("__disabled_fn")
-        codegen.tx.output.install_global(name, method_wrapper)
-        return codegen.load_function_name(name, True)
+        return codegen.create_and_load_disabled_fn(
+            method_wrapper, f"__disabled_{self.value.__name__}"
+        )

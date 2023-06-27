@@ -467,7 +467,7 @@ class VariableBuilder:
             )
         elif is_utils_checkpoint(value):
             guards = self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
-            return build_checkpoint_variable(guards)
+            return build_checkpoint_variable(source=self.source, guards=guards)
         elif id(value) in disabled_torch_fns:
             return DisabledFunctionVariable(value)
         elif is_allowed(value):

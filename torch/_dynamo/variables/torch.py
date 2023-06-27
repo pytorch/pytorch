@@ -1474,20 +1474,12 @@ class HigherOrderCheckpointVariable(TorchHigherOrderOperatorVariable):
         value,
         source: Optional[Source] = None,
         source_fn=None,
-        disable_on_reconstruction=False,
         **kwargs,
     ):
         super().__init__(value, source, **kwargs)
         self.source_fn = source_fn
-        self.disable_on_reconstruction = disable_on_reconstruction
 
     def reconstruct(self, codegen):
-        if self.disable_on_reconstruction:
-            from ..bytecode_transformation import unique_id
-            from ..eval_frame import disable
-
-            disabled_fn = disable(self.source_fn)
-            name = unique_id("__disabled_fn")
-            codegen.tx.output.install_global(name, disabled_fn)
-            return codegen.load_function_name(name, True)
-        return super().reconstruct(codegen)
+        return codegen.create_and_load_disabled_fn(
+            self.source_fn, f"__disabled_{self.source_fn.__name__}"
+        )

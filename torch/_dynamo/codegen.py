@@ -15,6 +15,7 @@ from .bytecode_transformation import (
     create_load_global,
     create_rot_n,
     Instruction,
+    unique_id,
 )
 from .exc import unimplemented
 from .source import AttrSource, GeneratorStateSource, Source
@@ -354,3 +355,11 @@ class PyCodegen:
             self.create_load_const(kw_names),
             create_instruction("CALL_FUNCTION_KW", arg=nargs),
         ]
+
+    def create_and_load_disabled_fn(self, fn, name):
+        from .eval_frame import disable
+
+        disabled_fn = disable(fn)
+        name = unique_id(name)
+        self.tx.output.install_global(name, disabled_fn)
+        return self.load_function_name(name, True)

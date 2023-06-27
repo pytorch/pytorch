@@ -1069,7 +1069,8 @@ class BuiltinVariable(VariableTracker):
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
             if is_utils_checkpoint(member):
-                return build_checkpoint_variable(options["guards"])
+                options["source"] = source
+                return build_checkpoint_variable(**options)
             elif id(member) in disabled_torch_fns:
                 return DisabledFunctionVariable(member, **options)
             elif is_allowed(member):

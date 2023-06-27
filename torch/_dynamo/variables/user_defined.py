@@ -348,7 +348,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             }
             partial_kwargs.update(kwargs)
             if is_utils_checkpoint(self.value.func):
-                return build_checkpoint_variable(options["guards"])
+                options["source"] = self.source
+                return build_checkpoint_variable(**options).call_function(
+                    tx, partial_args, partial_kwargs
+                )
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
@@ -443,7 +446,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return variables.functions.DisabledFunctionVariable(func, **options)
 
                 if is_utils_checkpoint(func):
-                    return build_checkpoint_variable(options["guards"])
+                    options["source"] = source
+                    return build_checkpoint_variable(**options)
                 return variables.UserFunctionVariable(func, source=source, **options)
 
         if (
