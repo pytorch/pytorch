@@ -127,6 +127,8 @@ struct CUDAPluggableAllocator
   virtual std::string name() override;
 
  protected:
+  void check_last_error();
+
   std::function<int(void**, size_t, int, cudaStream_t)> alloc_fn_;
   std::function<int(void*, size_t, int, cudaStream_t)> free_fn_;
   std::function<void(int)> init_fn_;
@@ -141,8 +143,9 @@ struct CUDAPluggableAllocator
   std::mutex allocator_mutex_;
   // We do the bookeeping here in order to simplify custom allocators
   std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
-
+ 
   bool initialized_ = false;
+  std::exception_ptr last_error_ = nullptr;
 };
 } // namespace CUDAPluggableAllocator
 } // namespace cuda

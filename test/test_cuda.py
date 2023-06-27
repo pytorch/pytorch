@@ -5892,6 +5892,7 @@ print('done')
 #include <sys/types.h>
 #include <cuda_runtime_api.h>
 #include <torch/extension.h>
+#include <stdexcept>
 
 extern "C" {
 int my_malloc(void** ptr, ssize_t size, int device, cudaStream_t stream) {
@@ -5922,6 +5923,49 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {}
         with self.assertRaisesRegex(RuntimeError, "swap an already initialized"):
             torch.cuda.memory.change_current_allocator(new_alloc)
 
+    def test_pluggable_allocator_with_exception_on_malloc(self):
+        # Since we can't swap an already initialized allocator, we fork a new process for these tests
+        malloc = """
+   throw std::runtime_error("bad custom alloc");
+   return 0;
+"""
+        free = """
+   return cudaFree(ptr);
+"""
+        error = False
+        try:
+            rc = subprocess.check_output(
+                [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="malloc_except")],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
+        except subprocess.CalledProcessError as e:
+            expected_message = "bad custom alloc"
+            self.assertTrue(expected_message in e.output.decode('ascii'))
+            error = True
+        self.assertTrue(error)
+
+    def test_pluggable_allocator_with_exception_on_free(self):
+        # Since we can't swap an already initialized allocator, we fork a new process for these tests
+        malloc = """
+   int err = cudaMalloc(ptr, size);
+   return err;
+"""
+        free = """
+   throw std::runtime_error("bad custom free");
+   return 0;
+"""
+        error = False
+        try:
+            rc = subprocess.check_output(
+                [sys.executable, '-c', self._template.format(malloc=malloc, free=free, name="malloc_except")],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
+        except subprocess.CalledProcessError as e:
+            expected_message = "bad custom free"
+            print(e.output.decode)
+            self.assertTrue(expected_message in e.output.decode('ascii'))
+            error = True
+        self.assertTrue(error)
 
 instantiate_parametrized_tests(TestCuda)
 

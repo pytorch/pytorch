@@ -88,6 +88,7 @@ void* CUDAPluggableAllocator::malloc(
     size_t size,
     int device,
     cudaStream_t stream) {
+  check_last_error();
   void* r = nullptr;
   int error = alloc_fn_(&r, size, device, stream);
   TORCH_CHECK(
@@ -144,13 +145,25 @@ void CUDAPluggableAllocator::raw_delete(void* ptr) {
     stream = metadata.stream;
     allocation_metadata_.erase(ptr);
   }
-  std::cout<<"Calling free"<<std::endl;
-  int error = free_fn_(ptr, size, device_idx, stream);
-  if (error) {
-    // Error messages when a free fails are not displayed in `TORCH_CHECK`
-    // and the process just dies with SIGABRT
-    std::cerr<< "Memory free failed with error " << error << "\n";
-    TORCH_CHECK(false);
+  // This function may not be able to propagate the exception to python.
+  // We store it and rethrow it on the next memory allocation to avoid
+  // a `SIGABRT` without any error message
+  try {
+      int error = free_fn_(ptr, size, device_idx, stream);
+  } catch (...) {
+      const std::lock_guard<std::mutex> lock(allocator_mutex_);
+      last_error_ = std::current_exception();
+  }
+}
+
+void CUDAPluggableAllocator::check_last_error() {
+  if (last_error_) {
+    const std::lock_guard<std::mutex> lock(allocator_mutex_);
+    if (last_error_) {
+        auto to_throw = last_error_;
+        last_error_ = nullptr;
+        std::rethrow_exception(to_throw);
+    }
   }
 }
 
