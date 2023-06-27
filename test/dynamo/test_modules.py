@@ -1895,7 +1895,17 @@ def decorateForModules(decorator, module_classes, device_type=None, dtypes=None)
         return fn
     return wrapped
 
-class TestTemp(torch._dynamo.test_case.TestCase):
+class TestDynamoInlineNNModules(torch._dynamo.test_case.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        torch._dynamo.config.inline_nn_modules = True
+
+    @classmethod
+    def tearDownClass(cls):
+        torch._dynamo.config.inline_nn_modules = False
+        super().tearDownClass()
+
     @modules(module_db, allowed_dtypes=(torch.float,))
     @decorateForModules(unittest.expectedFailure, dynamo_inlining_module_failures)
     def test_dynamo_inline_module(self, device, dtype, training, module_info):
@@ -1946,7 +1956,7 @@ class TestTemp(torch._dynamo.test_case.TestCase):
             res = opt_fn1(*args, **kwargs)
             self.assertEqual(ref, res)
 
-instantiate_device_type_tests(TestTemp, globals(), only_for=("cpu",))
+instantiate_device_type_tests(TestDynamoInlineNNModules, globals(), only_for=("cpu",))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

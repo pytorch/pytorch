@@ -326,6 +326,8 @@ class UserMethodVariable(UserFunctionVariable):
                 # inlining or if the error is in `fake_tensor_exceptions`.
                 return super().call_function(tx, args, kwargs)
             except Unsupported as e:
+                if torch._dynamo.config.disable_inline_nn_modules_fallback:
+                    raise
                 if isinstance(e.__cause__, fake_tensor_exceptions):
                     # We would've raised below anyway, but catch explicitly
                     raise
