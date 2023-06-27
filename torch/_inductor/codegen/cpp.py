@@ -1533,7 +1533,6 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             )
             self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
 
-
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
@@ -1570,13 +1569,9 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
             self.reduction_suffix.writeline(
                 f"{acc} = {reduction_combine(reduction_type, acc, next_value)};"
             )
-            tmpvar = self.cse.generate(
-                self.reduction_suffix, reduction_project(reduction_type, acc)
-            )
+            tmpvar = acc
         else:
-            tmpvar = self.cse.generate(
-                self.reduction_suffix, reduction_project(reduction_type, acc_vec)
-            )
+            tmpvar = acc_vec
 
         result = self.cse.generate(
             self.reduction_suffix, reduction_project(reduction_type, tmpvar)
@@ -1618,7 +1613,6 @@ initializer(omp_priv={{{reduction_init_vec(reduction_type, dtype)}}})
                         f"Unsupported reduction type {reduction_type} from {dtype} to {out_dtype}"
                     )
             self.reduction_suffix.writelines(store_lines)
-
 
 
 class CppTile2DKernel(CppVecKernel):
