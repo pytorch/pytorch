@@ -475,18 +475,7 @@ def reordering_to_mimic_autograd_engine(gm):
     for node in list(gm.graph.nodes)[order[first_node_in_bwd]:]:
         insert_node_in_graph(node)
 
-    # Build the output node
-    new_outputs = []
-    output_node = [node for node in gm.graph.nodes if node.op == "output"][0]
-    for output in output_node.args[0]:
-        if isinstance(output, torch.fx.node.Node):
-            if output not in env:
-                print("output gradient dependent only on fwd", output)
-            new_outputs.append(insert_node_in_graph(output))
-        else:
-            new_outputs.append(output)
-
-    new_graph.output(new_outputs)
+    # The output node is already built by the traversal.
     new_gm = torch.fx.GraphModule(gm, new_graph)
     return new_gm
 

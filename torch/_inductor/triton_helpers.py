@@ -166,3 +166,20 @@ def randint64(seed, offset, low, high):
     result = result % size.to(tl.uint64)
     result = result.to(tl.int64) + low
     return result
+
+
+if TRITON_HAS_REDUCE:
+
+    @triton.jit
+    def _any_combine(a, b):
+        return a | b
+
+    @triton.jit
+    def any(a, dim):
+        return tl.reduce(a, dim, _any_combine)
+
+else:
+
+    @triton.jit
+    def any(a, dim):
+        return tl.max(a, dim)
