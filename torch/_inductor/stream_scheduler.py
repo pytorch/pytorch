@@ -101,28 +101,7 @@ class SSGraph:
         self.build_graph(nodes)
         self.stream_scheduling()
 
-    def has_cycle(self):
-        visited = set()
-        path = set()
-
-        def visit(vertex):
-            if vertex in visited:
-                return False
-            visited.add(vertex)
-            path.add(vertex)
-            for neighbor in self.name_mapping[vertex.name].successors.values():
-                if neighbor in path or visit(neighbor):
-                    # add debug info
-                    print("Cycle detected: ", vertex.name, " -> ", neighbor.name)
-                    return True
-            path.remove(vertex)
-            return False
-
-        return any(visit(v) for v in self.ssnodes)
-
-
     def build_graph(self, nodes):
-
         output_node = SSNode(None)
         output_node.name = "OUTPUT"
         self.name_mapping["OUTPUT"] = output_node
@@ -133,7 +112,7 @@ class SSGraph:
             if new_ssnode.is_fused:
                 for snode in new_ssnode.snode_names:
                     self.name_mapping[snode] = new_ssnode
-
+        
         # clean the freed buffers
         for snode in self.ssnodes:
             for user in snode.original_user_names:
@@ -147,21 +126,13 @@ class SSGraph:
                 user_ssnode = self.name_mapping[user]
                 user_ssnode.successors[ssnode.get_name()] = ssnode
                 ssnode.predecessors[user_ssnode.get_name()] = user_ssnode
-        
         for ssnode in self.ssnodes:
             if ssnode.to_output_node:
                 output_node.predecessors[ssnode.get_name()] = ssnode
                 ssnode.successors[output_node.get_name()] = output_node
             update_successor_predecessor(ssnode, ssnode.original_user_names)
-
-        if self.has_cycle():
-            raise RuntimeError("Cycle detected in building graph")
-        else:
-            print("No cycle detected in building graph")
-
         tmp_queue = []
         self.reverse_level[output_node] = 0
-
         for predecessor in output_node.predecessors.values():
             # only append the node that has only one successor OUTPUT
             if len(predecessor.successors) == 1:
@@ -264,7 +235,7 @@ class SSGraph:
     def print_graph(self):
         import datetime
         current_time = datetime.datetime.now().strftime("%Y%m%d%H%M")
-        reset_log_path = temporary_log_path(f'/home/users/yhao24/p9_inductor/pytorch/torch_compile_debug/tmp/stream_alexnet_{current_time}.log')
+        reset_log_path = temporary_log_path(f'/tmp/yhao/stream_alexnet_{current_time}.log')
 
         log.info("=====findhao debug=====")
         for node in self.ssnodes:
@@ -315,8 +286,9 @@ class SSGraph:
 
 
 def stream_schedule(snodes):
-    pass
     ssgraph = SSGraph(snodes)
-    ssgraph.print_graph()
+    import os
+    if os.getenv("TORCHINDUCTOR_STREAM_PRINT_GRAPH", "0") == "1":
+        ssgraph.print_graph()
     V.graph.stream_graph = ssgraph
     return ssgraph
