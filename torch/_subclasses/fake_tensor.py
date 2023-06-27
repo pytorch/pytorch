@@ -15,7 +15,6 @@ import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import (
-    check,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
@@ -1112,7 +1111,7 @@ class FakeTensor(torch.Tensor):
 # different operators. While this will keep all freshly allocated
 # tensors alive during `FakeTensorMode`, there will no be no
 # new allocations of Tensors which have non-meta storage so
-# memory should not significantly incraese.
+# memory should not significantly increase.
 
 
 class FakeTensorMode(TorchDispatchMode):
@@ -1488,14 +1487,14 @@ class FakeTensorMode(TorchDispatchMode):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
 
-            if common_device is None:
+            if isinstance(e, torch.Tensor) and common_device is None:
                 (
                     common_device,
                     has_scalar_only_inputs,
                 ) = FakeTensor._find_common_device(func, args, kwargs)
 
             if isinstance(e, FakeTensor):
-                check(
+                torch._check(
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )

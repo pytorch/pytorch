@@ -51,9 +51,15 @@ def boxed_nop(fx_g, example_inputs):
 
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
-aot_eager = aot_autograd(fw_compiler=boxed_nop)
+aot_eager = aot_autograd(
+    fw_compiler=boxed_nop, partition_fn=min_cut_rematerialization_partition
+)
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
+aot_eager_default_partitioner = aot_autograd(fw_compiler=boxed_nop)
+register_backend(
+    name="aot_eager_default_partitioner", compiler_fn=aot_eager_default_partitioner
+)
 
 # Uses TorchInductor AOT Autograd decomps and partitioner to isolate aot vs
 # inductor problems.

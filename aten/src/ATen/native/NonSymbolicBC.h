@@ -3,8 +3,7 @@
 #include <c10/util/irange.h>
 #include <ATen/core/IListRef.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 // This file contains non-symbolic signatures for ops that we have sym-intified the signature of.
 // However, in certain cases (such as static runtime), we call the native versions of the ops directly.
 // In those cases, we will duplicate the signature here with non-symbolic ints, and also duplicate the C++ implementation.
@@ -24,4 +23,4 @@ TORCH_API at::Tensor trace_backward(const at::Tensor & grad, at::IntArrayRef siz
 TORCH_API at::Tensor index_select_backward(const at::Tensor & grad, at::IntArrayRef self_sizes, int64_t dim, const at::Tensor & index);
 TORCH_API at::Tensor select(const at::Tensor& self, int64_t dim, int64_t index);
 TORCH_API std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim);
-}}
+} // namespace at::native

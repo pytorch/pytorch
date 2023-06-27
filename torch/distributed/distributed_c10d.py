@@ -1672,6 +1672,7 @@ def _coalescing_manager(
         # Currently supported:
         # - coalesced `all_reduce`
         # - coalesced `all_gather_into_tensor`
+        # - coalesced `reduce_scatter_tensor`
         op0 = op_list[0].op
         if op0 == all_reduce:
             tensors = []
@@ -1687,6 +1688,15 @@ def _coalescing_manager(
                 inputs.append(op.tensor)
                 outputs.append(op.dst_tensor)
             work = group.allgather_into_tensor_coalesced(outputs, inputs)
+        elif op0 == reduce_scatter_tensor:
+            inputs = []
+            outputs = []
+            for op in op_list:
+                inputs.append(op.tensor)
+                outputs.append(op.dst_tensor)
+                opts = ReduceScatterOptions()
+                opts.reduceOp = op_list[0].redop
+            work = group.reduce_scatter_tensor_coalesced(outputs, inputs, opts)
         else:
             raise AssertionError(
                 f"Coalescing manager does not support fast-path coalescing of {op0}, "
@@ -3306,11 +3316,19 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
     opts = ReduceScatterOptions()
     opts.reduceOp = op
 
-    if group is None:
-        default_pg = _get_default_group()
-        work = default_pg._reduce_scatter_base(output, input, opts)
-    else:
-        work = group._reduce_scatter_base(output, input, opts)
+    group = group or _get_default_group()
+
+    # Check if we are in coalescing context
+    # If we are, do not issue single operation, just append a collective representation
+    if group in _world.pg_coalesce_state.keys():
+        coll = _CollOp(reduce_scatter_tensor, input, output, op, None)
+        _world.pg_coalesce_state[group].append(coll)
+        if async_op:
+            return _IllegalWork()
+        else:
+            return None
+
+    work = group._reduce_scatter_base(output, input, opts)
 
     if async_op:
         return work
