@@ -481,6 +481,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             assert getattr(cell, name, name) == name
             assert name not in result
             if isinstance(cell, InlinedClosureVariable):
+                # InlinedClosureVariable's are created from LOAD_CLOSURE's from
+                # InliningInstructionTranslators when the variable name is not found in closure_cells.
+                # They should remain outside of closure_cells, so that our callee (the
+                # InliningInstructionTranslator that traces `func`) handles
+                # the cell correctly - that is, the cell's contents are treated as if they
+                # are local variables, like in UserFunctionVariable's bind_args for freevars.
                 result[name] = parent.symbolic_locals[name]
             else:
                 closure_cells[name] = self.closure.items[idx]
