@@ -313,6 +313,37 @@
     deprecated: false
     tags: []
 
+- id: FXE0013
+  name: op-level-debugging
+  short_description:
+    text: Report any op level validation failure in warnings.
+  full_description:
+    text: "Report any op level validation failure in warnings.."
+    markdown: |
+      This warning indicates that in op level debugging, the selected symbolic functions are failed
+      to match torch ops results when we use generated real tensors from fake tensors. It is worth
+      noting that the symbolic functions are not necessarily wrong, as the validation is non-deteministic,
+      and it's for reference.
+
+      They could be caused by the following reasons:
+
+      PyTorch operators:
+      - IndexError: Unsupported input args of randomnized dim/indices(INT64).
+      - RuntimeError: Unsupported input args for torch op are generated.
+
+      torchlib operators:
+      - ValueError: args/kwargs do not match the signature of the symbolic function.
+      - RuntimeError: Unsupported input args for torchlib op are generated.
+      - AssertionError: The symbolic function is potentially wrong.
+
+  message_strings:
+    default:
+      text: "FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
 - id: DIAGSYS0001
   name: arg-format-too-verbose
   short_description:

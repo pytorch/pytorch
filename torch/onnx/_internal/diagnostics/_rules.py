@@ -414,6 +414,26 @@ class _UnsupportedFxNodeAnalysis(infra.Rule):
         )
 
 
+class _OpLevelDebugging(infra.Rule):
+    """Report any op level validation failure in warnings."""
+
+    def format_message(self, node, symbolic_fn) -> str:  # type: ignore[override]
+        """Returns the formatted default message of this Rule.
+
+        Message template: 'FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation.'
+        """
+        return self.message_default_template.format(node=node, symbolic_fn=symbolic_fn)
+
+    def format(  # type: ignore[override]
+        self, level: infra.Level, node, symbolic_fn
+    ) -> Tuple[infra.Rule, infra.Level, str]:
+        """Returns a tuple of (Rule, Level, message) for this Rule.
+
+        Message template: 'FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation.'
+        """
+        return self, level, self.format_message(node=node, symbolic_fn=symbolic_fn)
+
+
 class _ArgFormatTooVerbose(infra.Rule):
     """The formatted str for argument to display is too verbose."""
 
@@ -843,6 +863,31 @@ class _POERules(infra.RuleCollection):
         init=False,
     )
     """Result from FX graph analysis to reveal unsupported FX nodes."""
+
+    op_level_debugging: _OpLevelDebugging = dataclasses.field(
+        default=_OpLevelDebugging.from_sarif(
+            **{
+                "id": "FXE0013",
+                "name": "op-level-debugging",
+                "short_description": {
+                    "text": "Report any op level validation failure in warnings."
+                },
+                "full_description": {
+                    "text": "Report any op level validation failure in warnings..",
+                    "markdown": "This warning indicates that in op level debugging, the selected symbolic functions are failed\nto match torch ops results when we use generated real tensors from fake tensors. It is worth\nnoting that the symbolic functions are not necessarily wrong, as the validation is non-deteministic,\nand it's for reference.\n\nThey could be caused by the following reasons:\n\nPyTorch operators:\n- IndexError: Unsupported input args of randomnized dim/indices(INT64).\n- RuntimeError: Unsupported input args for torch op are generated.\n\ntorchlib operators:\n- ValueError: args/kwargs do not match the signature of the symbolic function.\n- RuntimeError: Unsupported input args for torchlib op are generated.\n- AssertionError: The symbolic function is potentially wrong.\n",
+                },
+                "message_strings": {
+                    "default": {
+                        "text": "FX node: {node} and its onnx function: {symbolic_fn} fails on op level validation."
+                    }
+                },
+                "help_uri": None,
+                "properties": {"deprecated": False, "tags": []},
+            }
+        ),
+        init=False,
+    )
+    """Report any op level validation failure in warnings."""
 
     arg_format_too_verbose: _ArgFormatTooVerbose = dataclasses.field(
         default=_ArgFormatTooVerbose.from_sarif(
