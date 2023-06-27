@@ -1518,7 +1518,6 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
         inner_fn=inner_fn,
         ranges=[*size],
     )
-    result.realize()
     return result
 
 
