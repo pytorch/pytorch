@@ -260,7 +260,9 @@ def _init_ignored_module_states(
         _check_ignored_states(ignored_states_list, True)
     else:
         ignored_states_list = []
-        _check_ignored_states(list(ignored_modules), False)
+        _check_ignored_states(
+            list(ignored_modules) if ignored_modules is not None else [], False
+        )
     if len(ignored_states_list) > 0:
         if isinstance(ignored_states_list[0], nn.Parameter):
             ignored_parameters = ignored_states_list
