@@ -8,6 +8,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/sum.h>
 #endif
 
@@ -396,6 +397,20 @@ static void histogramdd_linear_kernel(const Tensor& self,
   }
 }
 
+static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
+                                                    const int64_t N,
+                                                    std::vector<double>& leftmost_edges,
+                                                    std::vector<double>& rightmost_edges) {
+  Tensor min, max;
+  std::tie(min, max) = at::aminmax(input, 0);
+
+  for (const auto i : c10::irange(N)) {
+    leftmost_edges[i] = min[i].item().to<double>();
+    rightmost_edges[i] = max[i].item().to<double>();
+  }
+}
+
 REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel);
 REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel);
+REGISTER_DISPATCH(histogram_select_outer_bin_edges_stub, &histogram_select_outer_bin_edges_kernel);
 } // namespace at::native
