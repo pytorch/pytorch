@@ -22,6 +22,9 @@ from torch.utils import _pytree
 
 
 @_beartype.beartype
+@diagnostics.diagnose_call(
+    diagnostics.rules.op_level_debugging, level=diagnostics.levels.WARNING
+)
 def validate_op_between_ort_torch(
     diagnostic_context: diagnostics.DiagnosticContext,
     node: torch.fx.Node,
