@@ -20,6 +20,16 @@ def _fake_map(f, x, *args):
         zs.append(f(xp, *args))
     return _stack_pytree(zs)
 
+def _fake_scan(f, init, x, *args):
+    from functorch.experimental._map import _stack_pytree, _unstack_pytree
+    x_pytrees = _unstack_pytree(x)
+    zs = []
+    carry = init
+    for xp in x_pytrees:
+        carry, out = f(carry, xp, *args)
+        zs.append(out)
+    return carry, _stack_pytree(zs)
+
 
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
@@ -127,12 +137,15 @@ class TestControlFlow(TestCase):
         xs = torch.ones(3, 2, 2, requires_grad=True)
         y = torch.ones(2, requires_grad=True)
         res = control_flow.map(f, xs, y)
+        print("************************")
+        print(res)
         expected_res = _fake_map(f, xs, y)
         grad_out = torch.ones_like(res)
         grads = torch.autograd.grad(res, (xs, y), grad_out)
         expected_grads = torch.autograd.grad(expected_res, (xs, y), grad_out)
         self.assertEqual(expected_res, res)
         self.assertEqual(expected_grads, grads)
+        self.assertTrue(False)
 
     def test_map_autograd_simple_partial_grad(self):
         def f(x, y):
@@ -189,15 +202,32 @@ class TestControlFlow(TestCase):
     
     def test_scan_simple(self):
         def f(carry, x):
-            return carry, x
+            return carry+1, x+carry
 
-        init = torch.tensor(10)
+        init = torch.tensor([1.0, 2.0])
         x = torch.rand(10, 2)
+        print(x)
         carry_out, ys = control_flow.scan(f, init, x)
         print(carry_out)
         print(ys)
         self.assertTrue(False)
 
+    def test_scan_autograd_simple(self):
+        def f(carry, x):
+            return carry+1, x+carry
+
+        init = torch.tensor([1.0, 2.0], requires_grad=True)
+        xs = torch.rand(10, 2, requires_grad=True)
+        carry_res, res = control_flow.scan(f, init, xs)
+        expected_carry_res, expected_res = _fake_scan(f, init, xs)
+        print(res)
+        print(expected_res)
+        self.assertEqual(carry_res, expected_carry_res)
+        self.assertEqual(res, expected_res)
+        grad_out = torch.ones_like(res)
+        grads = torch.autograd.grad(res, (init, xs), grad_out)
+        expected_grads = torch.autograd.grad(expected_res, (init, xs), grad_out)
+        self.assertTrue(False)
 
 class TestControlFlowTraced(TestCase):
     def test_cond_traced_not_nested(self):
