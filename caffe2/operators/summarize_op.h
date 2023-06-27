@@ -37,7 +37,7 @@ class SummarizeOp final : public Operator<Context> {
           log_file_->rdstate());
     }
   }
-  ~SummarizeOp() {
+  ~SummarizeOp() override {
     if (to_file_)
       log_file_->close();
   }

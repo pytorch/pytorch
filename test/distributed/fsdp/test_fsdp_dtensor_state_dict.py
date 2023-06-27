@@ -11,7 +11,11 @@ from torch.distributed.fsdp.api import (
     ShardedStateDictConfig,
     StateDictType,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -88,7 +92,8 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
 class TestDtensorShardedModelStateDict(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_dtensor_sharded_model_state_dict(self):
+    @parametrize("offload_to_cpu", [True, False])
+    def test_dtensor_sharded_model_state_dict(self, offload_to_cpu):
         model = FSDP(TestDummyModel().cuda())
         model(model.get_input()).sum().backward()
 
@@ -97,7 +102,7 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
             StateDictType.SHARDED_STATE_DICT,
             state_dict_config=ShardedStateDictConfig(
                 use_dtensor=True,
-                offload_to_cpu=False,
+                offload_to_cpu=offload_to_cpu,
             ),
         )
         dtensor_sd = model.state_dict()
@@ -107,7 +112,7 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
             StateDictType.SHARDED_STATE_DICT,
             state_dict_config=ShardedStateDictConfig(
                 use_dtensor=False,
-                offload_to_cpu=False,
+                offload_to_cpu=offload_to_cpu,
             ),
         )
         sharded_tensor_sd = model.state_dict()
@@ -125,5 +130,6 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
                 self.assertEqual(v1.to_local().device, v2.local_tensor().device)
 
 
+instantiate_parametrized_tests(TestDtensorShardedModelStateDict)
 if __name__ == "__main__":
     run_tests()
