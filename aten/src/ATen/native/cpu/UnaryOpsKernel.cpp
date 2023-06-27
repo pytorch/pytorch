@@ -730,7 +730,7 @@ static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
 
 // Kernel macros with empty bodies that dispatch to a nullptr, so that their
 // AVX2 kernels would be used instead. In the future, if AVX512 performance
-// becomes better than AVX2 even for memory-bound ops (perhaps due to higher 
+// becomes better than AVX2 even for memory-bound ops (perhaps due to higher
 // memory bandwidth, then the "real" counterparts of these kernels can be used).
 
 #define IMPLEMENT_NULLPTR_FLOAT_KERNEL(op)                                          \
