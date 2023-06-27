@@ -244,7 +244,7 @@ class TorchVariable(VariableTracker):
         if self.value in config.constant_functions:
             assert not args and not kwargs
             return ConstantVariable(config.constant_functions[self.value], **options)
-        elif self.value is torch._functorch.eager_transforms.grad_impl:
+        elif self.value is torch._functorch.eager_transforms.grad_and_value_impl:
             op = TorchHigherOrderOperatorVariable(
                 self.value,
                 source=self.source,
@@ -1285,10 +1285,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             )
             r = body_r.as_proxy().node.meta["example_value"]
             example_value = r
-        elif self.value is torch._functorch.eager_transforms.grad_impl:
+        elif self.value is torch._functorch.eager_transforms.grad_and_value_impl:
             # TODO: Support `fn` with kwargs.
             if not torch._dynamo.config.capture_func_transforms:
-                unimplemented("torch.func.grad capture is disabled")
+                unimplemented("torch.func capture is disabled")
             # [NOTE] Here we are (roughly) modelling the following
             #
             #   grad_fn = torch.func.grad(fn, argnums=.., has_aux=..)
@@ -1354,7 +1354,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             # Model `grad_fn = grad(fn, *grad_args, **grad_kwargs)`
             grad_fn = tx.output.create_proxy(
                 "call_function",
-                torch.func.grad,
+                torch.func.grad_and_value,
                 args=tuple(grad_proxy_args),
                 kwargs={},
                 name="grad_proxy",
@@ -1388,6 +1388,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                     for idx in argnums.value
                 )
 
+            output = body_r.as_proxy().node.meta["example_value"]
+
             if has_aux.value:
                 # case : has_aux = True
                 # NOTE: Currently speculate subgraph allows body_r to be
@@ -1397,7 +1399,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
                 # (output, some_tensor)
                 body_r_proxy = body_r.as_proxy()
                 aux = body_r_proxy[1].node.meta["example_value"]
-                example_value = (example_value, aux)
+                example_value = example_value, (output, aux)
+            else:
+                example_value = (example_value, output)
 
             fx_proxy = wrap_fx_proxy(
                 tx=tx, proxy=grad_output, example_value=example_value
@@ -1405,17 +1409,22 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
             # Call contiguous on all the computed grads.
             if not has_aux.value:
+                grads = fx_proxy.call_method(
+                    tx, "__getitem__", (ConstantVariable(0),), {}
+                )
+                output = fx_proxy.call_method(
+                    tx, "__getitem__", (ConstantVariable(1),), {}
+                )
                 if isinstance(argnums.value, int):
-                    return fx_proxy.call_method(tx, "contiguous", (), {})
+                    return TupleVariable([grads.call_method(tx, "contiguous", (), {}), output])
                 else:
-                    grads = fx_proxy
                     items = []
                     for idx in range(len(argnums.value)):
                         proxy = grads.call_method(
                             tx, "__getitem__", (ConstantVariable(idx),), {}
                         ).call_method(tx, "contiguous", (), {})
                         items.append(proxy)
-                    return TupleVariable(items)
+                    return TupleVariable([TupleVariable(items), output])
             else:  # case: has_aux.value = True
                 # fx_proxy -> Tuple(grads, aux)
                 grads = fx_proxy.call_method(

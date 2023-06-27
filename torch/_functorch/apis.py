@@ -3,7 +3,7 @@
 #       Currently, we can't allow Dynamo to see `eager_transforms.py` as that break a lot of thing
 #       and there isn't a mechanism to selectively expose only some functions (eg. grad) from a file
 #       to Dynamo.
-from torch._functorch.eager_transforms import grad_impl, exposed_in, Callable, argnums_t
+from torch._functorch.eager_transforms import grad_and_value_impl, exposed_in, Callable, argnums_t, doesnt_support_saved_tensors_hooks
 import functools
 
 @exposed_in("torch.func")
@@ -103,5 +103,46 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        return grad_impl(func, argnums, has_aux, args, kwargs)
+        results = grad_and_value(func, argnums, has_aux)(*args, **kwargs)
+        if has_aux:
+            grad, (_, aux) = results
+            return grad, aux
+        grad, _ = results
+        return grad
+
+    return wrapper
+
+@exposed_in("torch.func")
+def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
+    """
+    Returns a function to compute a tuple of the gradient and primal, or
+    forward, computation.
+
+    Args:
+        func (Callable): A Python function that takes one or more arguments.
+            Must return a single-element Tensor. If specified ``has_aux``
+            equals ``True``, function can return a tuple of single-element
+            Tensor and other auxiliary objects: ``(output, aux)``.
+        argnums (int or Tuple[int]): Specifies arguments to compute gradients
+            with respect to. ``argnums`` can be single integer or tuple of
+            integers. Default: 0.
+        has_aux (bool): Flag indicating that ``func`` returns a tensor and
+            other auxiliary objects: ``(output, aux)``. Default: False.
+
+    Returns:
+        Function to compute a tuple of gradients with respect to its inputs
+        and the forward computation. By default, the output of the function is
+        a tuple of the gradient tensor(s) with respect to the first argument
+        and the primal computation. If specified ``has_aux`` equals
+        ``True``, tuple of gradients and tuple of the forward computation with
+        output auxiliary objects is returned. If ``argnums`` is a tuple of
+        integers, a tuple of a tuple of the output gradients with respect to
+        each ``argnums`` value and the forward computation is returned.
+
+    See :func:`grad` for examples
+    """
+    @doesnt_support_saved_tensors_hooks
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return grad_and_value_impl(func, argnums, has_aux, args, kwargs)
     return wrapper
