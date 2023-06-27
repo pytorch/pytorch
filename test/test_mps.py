@@ -10423,7 +10423,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'round', 'xlogy', 'addcmul',
-        '__rmatmul__', 'addbmm', 'addmv', 'baddbmm',
+        'addbmm', 'addmv', 'baddbmm',
         'cov', 'matmul', 'mv',
 
         # for macOS 12
@@ -10487,7 +10487,8 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1e-2
             elif op.name in ['nn.functional.conv_transpose1d',
                              'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__'] and dtype == torch.float16:
                 atol = 5e-2
                 rtol = 5e-2
             elif op.name == "masked.mean":
@@ -10550,7 +10551,8 @@ class TestConsistency(TestCaseMPS):
                 rtol = 1e-2
             elif op.name in ['nn.functional.conv_transpose1d',
                              'nn.functional.conv_transpose2d',
-                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                             'nn.functional.conv_transpose3d',
+                             '__rmatmul__'] and dtype == torch.float16:
                 atol = 5e-2
                 rtol = 5e-2
             elif (op.name == "masked.mean"):

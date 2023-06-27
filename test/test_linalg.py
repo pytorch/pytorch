@@ -5765,7 +5765,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @slowTest
     @onlyNativeDeviceTypes
     # bfloat16 doesn't have sufficient precision to pass this test
-    @dtypes(torch.float32, torch.float64, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
+    @dtypes(torch.half, torch.float32, torch.float64, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
     @dtypesIfCUDA(torch.float32, torch.float64, torch.cfloat, torch.cdouble)
     @tf32_on_and_off(0.01)
     def test_mm(self, device, dtype):
@@ -5858,10 +5858,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             elif (dtype == torch.bfloat16):
                 genf = genf_bfloat
             elif (dtype == torch.half):
-                genf = genf_float
+                genf = genf_Half
             else:
                 genf = genf_float
-            print(dtype)
 
             _test_mm(n, m, p, dtype, genf)
 
