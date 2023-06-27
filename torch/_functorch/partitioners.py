@@ -749,7 +749,7 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    AGGRESSIVE_RECOMPUTATION = False
+    AGGRESSIVE_RECOMPUTATION = config.partitioner_aggressive_fusion
 
     def is_materialized_backwards(node):
         cur_nodes = {node}

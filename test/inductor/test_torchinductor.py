@@ -5469,6 +5469,28 @@ class CommonTemplate:
             torch._inductor.metrics.generated_kernel_count, expected_kernel
         )
 
+    @config.patch(search_autotune_cache=False)
+    @torch._functorch.config.patch(partitioner_aggressive_fusion=True)
+    def test_dropout4(self):
+        m = torch.nn.Dropout(0.2)
+
+        @torch._dynamo.optimize_assert("inductor")
+        def run(x):
+            return m(x)
+
+        inp = torch.randn([8, 32], device=self.device, requires_grad=True)
+        result, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(inp))
+        zero_out = (result == 0).sum().item()
+        grad_zero = (inp.grad == 0).sum().item()
+        self.assertEqual(zero_out, grad_zero)
+
+        self.assertEqual(fw_code.count("tl.rand"), 1)
+        self.assertEqual(bw_code.count("tl.rand"), 1)
+
+        # seed generation
+        self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
+        self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
+
     def test_randint_kernel_count(self):
         @torch._dynamo.optimize_assert("inductor")
         def fn1():
