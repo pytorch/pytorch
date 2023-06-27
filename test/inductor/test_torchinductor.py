@@ -6273,6 +6273,7 @@ class CommonTemplate:
         opt_fn = torch._dynamo.optimize("inductor")(fn)
         same(fn(x), opt_fn(x))
 
+    @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
         from torch._inductor.codegen.common import boolean_ops
@@ -6481,10 +6482,12 @@ class CommonTemplate:
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
 
+        # The first two values should be the same, attention output
+        # and logsumexp since dropout is not being set
         def fn(q, k, v, compute_log_sumexp):
             return aten._scaled_dot_product_efficient_attention(
                 q, k, v, compute_log_sumexp
-            )
+            )[:2]
 
         self.common(
             fn,

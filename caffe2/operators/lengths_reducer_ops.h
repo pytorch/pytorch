@@ -32,7 +32,7 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
         !(USE_WEIGHT & USE_MEAN), "Cannot both specify weight and mean.");
   }
 
-  ~CPUSparseLengthsReductionOp() {}
+  ~CPUSparseLengthsReductionOp() override {}
 
   // Currently, we support float and at::Half inputs for input data type, and
   // int32_t and int64_t for the index type.
@@ -287,7 +287,7 @@ class TTSparseLengthsSumOp final : public Operator<Context> {
     }
   }
 
-  ~TTSparseLengthsSumOp() {}
+  ~TTSparseLengthsSumOp() override {}
 
   void Ind2Sub(int64_t* out_factor_index, const int64_t* indices, int len) {
     // TODO: vectorization
@@ -492,7 +492,7 @@ class TTSparseLengthsSumGradientOp final : public Operator<Context> {
       : Operator<Context>(std::forward<Args>(args)...) {}
   bool RunOnDevice() override;
 
-  ~TTSparseLengthsSumGradientOp() {}
+  ~TTSparseLengthsSumGradientOp() override {}
 };
 
 // implement the gradient op for TTLengthSumGradient op
